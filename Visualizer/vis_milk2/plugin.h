@@ -305,7 +305,10 @@ public:
   void OpenMilkwaveRemote();
   void SetAudioDeviceDisplayName(const wchar_t* displayName, bool isRenderDevice);
   void SetAMDFlag();
-  
+  int  GetPresetCount() override;
+  int  GetCurrentPresetIndex() override;
+  const wchar_t* GetPresetName(int idx) override;
+
   void SaveShaderBytecodeToFile(ID3DXBuffer* pShaderByteCode, uint32_t checksum, char* prefix);
   ID3DXBuffer* LoadShaderBytecodeFromFile(uint32_t checksum, char* prefix);
 
@@ -647,6 +650,10 @@ public:
   DX12Texture m_dx12VS[2];                    // double-buffered visualizer canvas
   DX12Texture m_dx12Blur[NUM_BLUR_TEX];       // blur pyramid (6 levels)
   DX12Texture m_dx12Title[NUM_SUPERTEXTS];    // title overlays
+  ComPtr<ID3D12Resource> m_dx12TitleUploadBuf; // shared upload buffer for title textures
+  HDC         m_titleDC = nullptr;             // GDI memory DC for title text rendering
+  HBITMAP     m_titleDIB = nullptr;            // DIB section for title text
+  BYTE*       m_titleDIBBits = nullptr;        // pixel data pointer
 
   // DX12 preset PSOs (Phase 5)
   ComPtr<ID3D12PipelineState> m_dx12WarpPSO;         // current preset warp

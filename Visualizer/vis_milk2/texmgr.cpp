@@ -32,6 +32,9 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "support.h"
 #include "plugin.h"
 #include "utility.h"
+#include "dxcontext.h"
+#include <wincodec.h>
+#include <vector>
 
 texmgr::texmgr() {}
 
@@ -56,11 +59,17 @@ void texmgr::Init(LPDIRECT3DDEVICE9 lpDD) {
 
   for (int i = 0; i < NUM_TEX; i++) {
     m_tex[i].pSurface = NULL;
+    m_tex[i].dx12Surface.Reset();
+    m_tex[i].dx12UploadBuf.Reset();
     m_tex[i].szFileName[0] = 0;
     m_tex[i].m_codehandle = NULL;
     m_tex[i].m_szExpr[0] = 0;
     m_tex[i].tex_eel_ctx = NSEEL_VM_alloc();
   }
+}
+
+void texmgr::InitDX12(DXContext* lpDX) {
+  m_lpDX12 = lpDX;
 }
 
 int texmgr::LoadTex(wchar_t* szFilename, int iSlot, char* szInitCode, char* szCode, float time, int frame, unsigned int ck) {
@@ -71,8 +80,10 @@ int texmgr::LoadTex(wchar_t* szFilename, int iSlot, char* szInitCode, char* szCo
   bool bTextureInstanced = false;
   {
     for (int x = 0; x < NUM_TEX; x++)
-      if (m_tex[x].pSurface && _wcsicmp(m_tex[x].szFileName, szFilename) == 0) {
+      if (m_tex[x].dx12Surface.IsValid() && _wcsicmp(m_tex[x].szFileName, szFilename) == 0) {
         m_tex[iSlot].pSurface = m_tex[x].pSurface;
+        m_tex[iSlot].dx12Surface = m_tex[x].dx12Surface;
+        m_tex[iSlot].dx12UploadBuf = m_tex[x].dx12UploadBuf;
         m_tex[iSlot].img_w = m_tex[x].img_w;
         m_tex[iSlot].img_h = m_tex[x].img_h;
         wcscpy(m_tex[iSlot].szFileName, szFilename);
@@ -89,36 +100,145 @@ int texmgr::LoadTex(wchar_t* szFilename, int iSlot, char* szInitCode, char* szCo
 
     wcscpy(m_tex[iSlot].szFileName, szFilename);
 
-    D3DXIMAGE_INFO info;
-    HRESULT hr = D3DXCreateTextureFromFileExW(
-      m_lpDD,
-      szFilename,
-      D3DX_DEFAULT,
-      D3DX_DEFAULT,
-      D3DX_DEFAULT, // create a mip chain
-      0,
-      D3DFMT_UNKNOWN,
-      D3DPOOL_DEFAULT,
-      D3DX_DEFAULT,
-      D3DX_DEFAULT,
-      0xFF000000 | ck,
-      &info,
-      NULL,
-      &m_tex[iSlot].pSurface
-    );
+    if (!m_lpDX12 || !m_lpDX12->m_device || !m_lpDX12->m_commandList)
+      return TEXMGR_ERR_BADFILE;
 
-    if (hr != D3D_OK) {
-      switch (hr) {
-      case E_OUTOFMEMORY:
-      case D3DERR_OUTOFVIDEOMEMORY:
-        return TEXMGR_ERR_OUTOFMEM;
-      default:
-        return TEXMGR_ERR_BADFILE;
-      }
-    }
+    auto* dev = m_lpDX12->m_device.Get();
+    auto* cmdList = m_lpDX12->m_commandList.Get();
 
-    m_tex[iSlot].img_w = info.Width;
-    m_tex[iSlot].img_h = info.Height;
+    // Load image via WIC
+    IWICImagingFactory* pWIC = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                                  IID_PPV_ARGS(&pWIC));
+    if (FAILED(hr) || !pWIC)
+      return TEXMGR_ERR_BADFILE;
+
+    IWICBitmapDecoder* pDecoder = nullptr;
+    hr = pWIC->CreateDecoderFromFilename(szFilename, nullptr, GENERIC_READ,
+                                          WICDecodeMetadataCacheOnLoad, &pDecoder);
+    if (FAILED(hr) || !pDecoder) { pWIC->Release(); return TEXMGR_ERR_BADFILE; }
+
+    IWICBitmapFrameDecode* pFrame = nullptr;
+    hr = pDecoder->GetFrame(0, &pFrame);
+    if (FAILED(hr) || !pFrame) { pDecoder->Release(); pWIC->Release(); return TEXMGR_ERR_BADFILE; }
+
+    UINT imgW = 0, imgH = 0;
+    pFrame->GetSize(&imgW, &imgH);
+
+    // Convert to 32-bit BGRA
+    IWICFormatConverter* pConverter = nullptr;
+    pWIC->CreateFormatConverter(&pConverter);
+    if (!pConverter) { pFrame->Release(); pDecoder->Release(); pWIC->Release(); return TEXMGR_ERR_BADFILE; }
+
+    pConverter->Initialize(pFrame, GUID_WICPixelFormat32bppBGRA,
+                           WICBitmapDitherTypeNone, nullptr, 0.0,
+                           WICBitmapPaletteTypeCustom);
+
+    UINT srcRowPitch = imgW * 4;
+    UINT totalBytes = srcRowPitch * imgH;
+    std::vector<BYTE> pixels(totalBytes);
+    pConverter->CopyPixels(nullptr, srcRowPitch, totalBytes, pixels.data());
+
+    pConverter->Release();
+    pFrame->Release();
+    pDecoder->Release();
+    pWIC->Release();
+
+    // Create DX12 texture
+    D3D12_RESOURCE_DESC texDesc = {};
+    texDesc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    texDesc.Width            = imgW;
+    texDesc.Height           = imgH;
+    texDesc.DepthOrArraySize = 1;
+    texDesc.MipLevels        = 1;
+    texDesc.Format           = DXGI_FORMAT_B8G8R8A8_UNORM;
+    texDesc.SampleDesc.Count = 1;
+    texDesc.Flags            = D3D12_RESOURCE_FLAG_NONE;
+
+    D3D12_HEAP_PROPERTIES heapProps = {};
+    heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    hr = dev->CreateCommittedResource(
+        &heapProps, D3D12_HEAP_FLAG_NONE, &texDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST,
+        nullptr, IID_PPV_ARGS(&m_tex[iSlot].dx12Surface.resource));
+    if (FAILED(hr)) return TEXMGR_ERR_OUTOFMEM;
+
+    m_tex[iSlot].dx12Surface.width  = imgW;
+    m_tex[iSlot].dx12Surface.height = imgH;
+    m_tex[iSlot].dx12Surface.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    m_tex[iSlot].dx12Surface.currentState = D3D12_RESOURCE_STATE_COPY_DEST;
+
+    // Create upload buffer with aligned row pitch
+    UINT rowPitch = (imgW * 4 + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1)
+                    & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
+    UINT64 uploadSize = (UINT64)rowPitch * imgH;
+
+    D3D12_HEAP_PROPERTIES uploadHeap = {};
+    uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+    D3D12_RESOURCE_DESC bufDesc = {};
+    bufDesc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+    bufDesc.Width            = uploadSize;
+    bufDesc.Height           = 1;
+    bufDesc.DepthOrArraySize = 1;
+    bufDesc.MipLevels        = 1;
+    bufDesc.SampleDesc.Count = 1;
+    bufDesc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    hr = dev->CreateCommittedResource(
+        &uploadHeap, D3D12_HEAP_FLAG_NONE, &bufDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr, IID_PPV_ARGS(&m_tex[iSlot].dx12UploadBuf));
+    if (FAILED(hr)) { m_tex[iSlot].dx12Surface.Reset(); return TEXMGR_ERR_OUTOFMEM; }
+
+    // Copy pixels to upload buffer (with row pitch alignment)
+    BYTE* mapped = nullptr;
+    m_tex[iSlot].dx12UploadBuf->Map(0, nullptr, (void**)&mapped);
+    for (UINT row = 0; row < imgH; row++)
+      memcpy(mapped + row * rowPitch, pixels.data() + row * srcRowPitch, srcRowPitch);
+    m_tex[iSlot].dx12UploadBuf->Unmap(0, nullptr);
+
+    // Issue GPU copy
+    D3D12_TEXTURE_COPY_LOCATION src = {};
+    src.pResource = m_tex[iSlot].dx12UploadBuf.Get();
+    src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    src.PlacedFootprint.Offset = 0;
+    src.PlacedFootprint.Footprint.Format   = DXGI_FORMAT_B8G8R8A8_UNORM;
+    src.PlacedFootprint.Footprint.Width    = imgW;
+    src.PlacedFootprint.Footprint.Height   = imgH;
+    src.PlacedFootprint.Footprint.Depth    = 1;
+    src.PlacedFootprint.Footprint.RowPitch = rowPitch;
+
+    D3D12_TEXTURE_COPY_LOCATION dst = {};
+    dst.pResource = m_tex[iSlot].dx12Surface.resource.Get();
+    dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dst.SubresourceIndex = 0;
+
+    cmdList->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+
+    // Transition to shader resource
+    m_lpDX12->TransitionResource(m_tex[iSlot].dx12Surface, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    // Create SRV
+    D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_lpDX12->AllocateSrvCpu();
+    m_tex[iSlot].dx12Surface.srvIndex = m_lpDX12->m_nextFreeSrvSlot;
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Format            = DXGI_FORMAT_B8G8R8A8_UNORM;
+    srvDesc.ViewDimension     = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MipLevels = 1;
+    dev->CreateShaderResourceView(m_tex[iSlot].dx12Surface.resource.Get(), &srvDesc, srvCpu);
+    m_lpDX12->AllocateSrvGpu();
+
+    // Create binding block for texture sampling
+    m_lpDX12->CreateBindingBlockForTexture(m_tex[iSlot].dx12Surface);
+
+    // Set sentinel so existing pSurface checks still work
+    m_tex[iSlot].pSurface = (LPDIRECT3DTEXTURE9)(intptr_t)1;
+    m_tex[iSlot].img_w = imgW;
+    m_tex[iSlot].img_h = imgH;
   }
 
   m_tex[iSlot].fStartTime = time;
@@ -145,8 +265,12 @@ void texmgr::KillTex(int iSlot) {
   if (iSlot < 0) return;
   if (iSlot >= NUM_TEX) return;
 
-  // Free old resources:
-  if (m_tex[iSlot].pSurface) {
+  // Free DX12 resources (ComPtr handles refcounting automatically)
+  m_tex[iSlot].dx12Surface.Reset();
+  m_tex[iSlot].dx12UploadBuf.Reset();
+
+  // Free old DX9 resources:
+  if (m_tex[iSlot].pSurface && m_tex[iSlot].pSurface != (LPDIRECT3DTEXTURE9)(intptr_t)1) {
     // first, make sure no other sprites reference this texture!
     int refcount = 0;
     for (int x = 0; x < NUM_TEX; x++)
@@ -155,8 +279,8 @@ void texmgr::KillTex(int iSlot) {
 
     if (refcount == 1)
       m_tex[iSlot].pSurface->Release();
-    m_tex[iSlot].pSurface = NULL;
   }
+  m_tex[iSlot].pSurface = NULL;
   m_tex[iSlot].szFileName[0] = 0;
 
   FreeCode(iSlot);

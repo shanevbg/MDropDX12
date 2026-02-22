@@ -144,6 +144,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <multimon.h>
 #include "AutoCharFn.h"
 #include <mmsystem.h>
+#include <wincodec.h>              // WIC for PNG screenshot save
 #pragma comment(lib,"winmm.lib")    // for timeGetTime
 #pragma comment(lib,"user32.lib")  // ensure GetSystemMetrics (user32) is linked
 
@@ -1363,8 +1364,135 @@ void CPluginShell::DrawAndDisplay(int redraw) {
 
     m_text.DrawNow();
 
+    // DX12 screenshot: copy back buffer to readback resource before EndFrame
+    ComPtr<ID3D12Resource> screenshotReadback;
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT screenshotLayout = {};
+    UINT screenshotWidth = 0, screenshotHeight = 0;
+    if (m_bScreenshotRequested) {
+      ID3D12Resource* pBackBuffer = m_lpDX->m_renderTargets[m_lpDX->m_frameIndex].Get();
+      D3D12_RESOURCE_DESC bbDesc = pBackBuffer->GetDesc();
+      screenshotWidth = (UINT)bbDesc.Width;
+      screenshotHeight = bbDesc.Height;
+
+      UINT64 totalBytes = 0;
+      m_lpDX->m_device->GetCopyableFootprints(&bbDesc, 0, 1, 0, &screenshotLayout, nullptr, nullptr, &totalBytes);
+
+      D3D12_HEAP_PROPERTIES readbackHeap = {};
+      readbackHeap.Type = D3D12_HEAP_TYPE_READBACK;
+      D3D12_RESOURCE_DESC bufDesc = {};
+      bufDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+      bufDesc.Width = totalBytes;
+      bufDesc.Height = 1;
+      bufDesc.DepthOrArraySize = 1;
+      bufDesc.MipLevels = 1;
+      bufDesc.SampleDesc.Count = 1;
+      bufDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+      HRESULT hr = m_lpDX->m_device->CreateCommittedResource(
+          &readbackHeap, D3D12_HEAP_FLAG_NONE,
+          &bufDesc, D3D12_RESOURCE_STATE_COPY_DEST,
+          nullptr, IID_PPV_ARGS(&screenshotReadback));
+
+      if (SUCCEEDED(hr)) {
+        // Transition back buffer RENDER_TARGET → COPY_SOURCE
+        D3D12_RESOURCE_BARRIER barrier = {};
+        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        barrier.Transition.pResource = pBackBuffer;
+        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        m_lpDX->m_commandList->ResourceBarrier(1, &barrier);
+
+        D3D12_TEXTURE_COPY_LOCATION dst = {};
+        dst.pResource = screenshotReadback.Get();
+        dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        dst.PlacedFootprint = screenshotLayout;
+
+        D3D12_TEXTURE_COPY_LOCATION src = {};
+        src.pResource = pBackBuffer;
+        src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        src.SubresourceIndex = 0;
+
+        m_lpDX->m_commandList->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+
+        // Transition back COPY_SOURCE → RENDER_TARGET (EndFrame will do RT → PRESENT)
+        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+        barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        m_lpDX->m_commandList->ResourceBarrier(1, &barrier);
+      } else {
+        screenshotReadback.Reset();
+        OutputDebugStringA("DX12: Failed to create screenshot readback buffer\n");
+      }
+    }
+
     // EndFrame: transitions back buffer to PRESENT, executes command list, calls Present()
     m_lpDX->EndFrame();
+
+    // Save screenshot after GPU completes the copy
+    if (m_bScreenshotRequested && screenshotReadback) {
+      m_bScreenshotRequested = false;
+      m_lpDX->WaitForGpu();
+
+      void* pData = nullptr;
+      D3D12_RANGE readRange = { 0, (SIZE_T)(screenshotLayout.Footprint.RowPitch * screenshotHeight) };
+      HRESULT hr = screenshotReadback->Map(0, &readRange, &pData);
+      if (SUCCEEDED(hr)) {
+        // Save as PNG via WIC
+        IWICImagingFactory* pFactory = nullptr;
+        hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                              IID_PPV_ARGS(&pFactory));
+        if (SUCCEEDED(hr)) {
+          IWICStream* pStream = nullptr;
+          hr = pFactory->CreateStream(&pStream);
+          if (SUCCEEDED(hr)) {
+            hr = pStream->InitializeFromFilename(m_screenshotPath, GENERIC_WRITE);
+            if (SUCCEEDED(hr)) {
+              IWICBitmapEncoder* pEncoder = nullptr;
+              hr = pFactory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &pEncoder);
+              if (SUCCEEDED(hr)) {
+                hr = pEncoder->Initialize(pStream, WICBitmapEncoderNoCache);
+                IWICBitmapFrameEncode* pFrame = nullptr;
+                if (SUCCEEDED(hr))
+                  hr = pEncoder->CreateNewFrame(&pFrame, nullptr);
+                if (SUCCEEDED(hr))
+                  hr = pFrame->Initialize(nullptr);
+                if (SUCCEEDED(hr))
+                  hr = pFrame->SetSize(screenshotWidth, screenshotHeight);
+                WICPixelFormatGUID pixelFormat = GUID_WICPixelFormat32bppRGBA;
+                if (SUCCEEDED(hr))
+                  hr = pFrame->SetPixelFormat(&pixelFormat);
+                if (SUCCEEDED(hr))
+                  hr = pFrame->WritePixels(screenshotHeight,
+                                           screenshotLayout.Footprint.RowPitch,
+                                           screenshotLayout.Footprint.RowPitch * screenshotHeight,
+                                           (BYTE*)pData);
+                if (SUCCEEDED(hr))
+                  hr = pFrame->Commit();
+                if (SUCCEEDED(hr))
+                  hr = pEncoder->Commit();
+                if (pFrame) pFrame->Release();
+                pEncoder->Release();
+              }
+            }
+            pStream->Release();
+          }
+          pFactory->Release();
+        }
+
+        D3D12_RANGE writeRange = { 0, 0 };
+        screenshotReadback->Unmap(0, &writeRange);
+
+        if (SUCCEEDED(hr)) {
+          OutputDebugStringW(L"[CaptureScreenshot] DX12 screenshot saved successfully\n");
+        } else {
+          wchar_t msg[128];
+          swprintf_s(msg, 128, L"[CaptureScreenshot] WIC save failed: 0x%08X\n", hr);
+          OutputDebugStringW(msg);
+        }
+      }
+    } else if (m_bScreenshotRequested) {
+      m_bScreenshotRequested = false;
+    }
   }
 
 }
@@ -1984,122 +2112,109 @@ void CPluginShell::RenderBuiltInTextMsgs() {
 }
 
 void CPluginShell::RenderPlaylist() {
-  // Phase 5 TODO: replace D3DX font playlist rendering with DirectXTK12 SpriteFont.
-  // For now playlist display is disabled until SpriteFont migration is complete.
-  if (m_show_playlist) {
-    int nSongs = 0;
-    if (nSongs <= 0) {
-      m_show_playlist = 0;
+  if (!m_show_playlist)
+    return;
+
+  int nPresets = GetPresetCount();
+  if (nPresets <= 0) {
+    m_show_playlist = 0;
+    return;
+  }
+
+  int fontH = GetFontHeight(PLAYLIST_FONT);
+  if (fontH <= 0)
+    return;
+
+  int playlist_vert_pixels = m_lower_left_corner_y - m_upper_left_corner_y;
+  int disp_lines = min(MAX_SONGS_PER_PAGE, (playlist_vert_pixels - PLAYLIST_INNER_MARGIN * 2) / fontH);
+  if (disp_lines <= 0)
+    return;
+
+  // apply PgUp/PgDn keypresses since last time
+  m_playlist_pos -= m_playlist_pageups * disp_lines;
+  m_playlist_pageups = 0;
+
+  if (m_playlist_pos < 0)
+    m_playlist_pos = 0;
+  if (m_playlist_pos >= nPresets)
+    m_playlist_pos = nPresets - 1;
+
+  int cur_page = m_playlist_pos / disp_lines;
+  int new_top_idx = cur_page * disp_lines;
+  int new_btm_idx = new_top_idx + disp_lines;
+
+  // update playlist cache when page changes
+  if (m_playlist_top_idx != new_top_idx ||
+    m_playlist_btm_idx != new_btm_idx) {
+    m_playlist_top_idx = new_top_idx;
+    m_playlist_btm_idx = new_btm_idx;
+    m_playlist_width_pixels = 0;
+
+    int max_w = min(m_right_edge - m_left_edge, m_lpDX->m_client_width - TEXT_MARGIN * 2 - PLAYLIST_INNER_MARGIN * 2);
+
+    for (int i = 0; i < disp_lines; i++) {
+      int j = new_top_idx + i;
+      if (j < nPresets) {
+        const wchar_t* name = GetPresetName(j);
+        // strip .milk extension for display
+        wchar_t display[256];
+        lstrcpynW(display, name, 240);
+        int len = (int)wcslen(display);
+        if (len > 5 && _wcsicmp(display + len - 5, L".milk") == 0)
+          display[len - 5] = 0;
+        swprintf(m_playlist[i], L"%d. %s ", j + 1, display);
+
+        // measure text width via DT_CALCRECT
+        RECT rc = { 0, 0, max_w, fontH };
+        int w = m_text.DrawTextW(GetFont(PLAYLIST_FONT), m_playlist[i], &rc,
+          DT_SINGLELINE | DT_NOPREFIX | DT_CALCRECT, 0xFFFFFFFF, false);
+        if (rc.right > 0)
+          m_playlist_width_pixels = max(m_playlist_width_pixels, (int)rc.right);
+      }
+      else {
+        m_playlist[i][0] = 0;
+      }
     }
-    else if (false) {
-      int playlist_vert_pixels = m_lower_left_corner_y - m_upper_left_corner_y;
-      int disp_lines = min(MAX_SONGS_PER_PAGE, (playlist_vert_pixels - PLAYLIST_INNER_MARGIN * 2) / GetFontHeight(PLAYLIST_FONT));
-      int total_pages = (nSongs) / disp_lines;
 
-      if (disp_lines <= 0)
-        return;
+    if (m_playlist_width_pixels == 0 || m_playlist_width_pixels > max_w)
+      m_playlist_width_pixels = max_w;
+  }
 
-      // apply PgUp/PgDn keypresses since last time
-      m_playlist_pos -= m_playlist_pageups * disp_lines;
-      m_playlist_pageups = 0;
+  int start = max(0, cur_page * disp_lines);
+  int end = min(nPresets, (cur_page + 1) * disp_lines);
 
-      if (m_playlist_pos < 0)
-        m_playlist_pos = 0;
-      if (m_playlist_pos >= nSongs)
-        m_playlist_pos = nSongs - 1;
+  // draw dark box behind the playlist
+  RECT r;
+  r.top = m_upper_left_corner_y;
+  r.left = m_left_edge;
+  r.right = m_left_edge + m_playlist_width_pixels + PLAYLIST_INNER_MARGIN * 2;
+  r.bottom = m_upper_left_corner_y + (end - start) * fontH + PLAYLIST_INNER_MARGIN * 2;
+  DrawDarkTranslucentBox(&r);
 
-      // NOTE: 'dwFlags' is used for both DDRAW and DX9
-      DWORD dwFlags = DT_SINGLELINE;// | DT_NOPREFIX | DT_WORD_ELLIPSIS;
-      DWORD color;
+  // draw playlist text via CTextManager
+  int now_playing = GetCurrentPresetIndex();
+  int y = m_upper_left_corner_y + PLAYLIST_INNER_MARGIN;
+  for (int i = start; i < end; i++) {
+    int lineIdx = i - new_top_idx;
+    if (lineIdx < 0 || lineIdx >= MAX_SONGS_PER_PAGE)
+      break;
 
-      int cur_page = (m_playlist_pos) / disp_lines;
-      int cur_line = (m_playlist_pos + disp_lines - 1) % disp_lines;
-      int new_top_idx = cur_page * disp_lines;
-      int new_btm_idx = new_top_idx + disp_lines;
-      wchar_t buf[1024] = { 0 };
+    SetRect(&r, m_left_edge + PLAYLIST_INNER_MARGIN, y,
+      m_left_edge + PLAYLIST_INNER_MARGIN + m_playlist_width_pixels, y + fontH);
 
-      // ask winamp for the song names, but DO IT BEFORE getting the DC,
-      // otherwise vaio will crash (~DDRAW port).
-      if (m_playlist_top_idx != new_top_idx ||
-        m_playlist_btm_idx != new_btm_idx) {
-        for (int i = 0; i < disp_lines; i++) {
-          int j = new_top_idx + i;
-          if (j < nSongs) {
-            // clip max len. of song name to 240 chars, to prevent overflows
-            //lstrcpynW(buf, (wchar_t*)SendMessage(m_hWndWinamp, WM_USER, j, IPC_GETPLAYLISTTITLEW), 240);
-            //wsprintfW(m_playlist[i], L"%d. %s ", j+1, buf);  // leave an extra space @ end, so italicized fonts don't get clipped
-          }
-        }
-      }
+    DWORD color;
+    if (i == m_playlist_pos && i == now_playing)
+      color = PLAYLIST_COLOR_BOTH;
+    else if (i == m_playlist_pos)
+      color = PLAYLIST_COLOR_HILITE_TRACK;
+    else if (i == now_playing)
+      color = PLAYLIST_COLOR_PLAYING_TRACK;
+    else
+      color = PLAYLIST_COLOR_NORMAL;
 
-      // update playlist cache, if necessary:
-      if (m_playlist_top_idx != new_top_idx ||
-        m_playlist_btm_idx != new_btm_idx) {
-        m_playlist_top_idx = new_top_idx;
-        m_playlist_btm_idx = new_btm_idx;
-        m_playlist_width_pixels = 0;
-
-        int max_w = min(m_right_edge - m_left_edge, m_lpDX->m_client_width - TEXT_MARGIN * 2 - PLAYLIST_INNER_MARGIN * 2);
-
-        for (int i = 0; i < disp_lines; i++) {
-          int j = new_top_idx + i;
-          if (j < nSongs) {
-            // clip max len. of song name to 240 chars, to prevent overflows
-            //strcpy(buf, (char*)SendMessage(m_hWndWinamp, WM_USER, j, 212));
-            //buf[240] = 0;
-            //sprintf(m_playlist[i], "%d. %s ", j+1, buf);  // leave an extra space @ end, so italicized fonts don't get clipped
-
-            // Phase 5 TODO: measure text width with SpriteFont
-            // m_d3dx_font[PLAYLIST_FONT]->DrawTextW(...) -> SpriteFont equivalent
-            int w = 0; // placeholder
-            if (w > 0)
-              m_playlist_width_pixels = max(m_playlist_width_pixels, w);
-          }
-          else {
-            m_playlist[i][0] = 0;
-          }
-        }
-
-        if (m_playlist_width_pixels == 0 ||
-          m_playlist_width_pixels > max_w)
-          m_playlist_width_pixels = max_w;
-      }
-
-      int start = max(0, (cur_page)*disp_lines);
-      int end = min(nSongs, (cur_page + 1) * disp_lines);
-
-      // draw dark box around where the playlist will go:
-
-      RECT r;
-      r.top = m_upper_left_corner_y;
-      r.left = m_left_edge;
-      r.right = m_left_edge + m_playlist_width_pixels + PLAYLIST_INNER_MARGIN * 2;
-      r.bottom = m_upper_left_corner_y + (end - start) * GetFontHeight(PLAYLIST_FONT) + PLAYLIST_INNER_MARGIN * 2;
-      DrawDarkTranslucentBox(&r);
-
-      //m_d3dx_font[PLAYLIST_FONT]->Begin();
-
-      // draw playlist text
-      const int now_playing = -1; // Winamp now_playing removed; Phase 5 TODO: wire up actual playback position
-      int y = m_upper_left_corner_y + PLAYLIST_INNER_MARGIN;
-      for (int i = start; i < end; i++) {
-        SetRect(&r, m_left_edge + PLAYLIST_INNER_MARGIN, y, m_left_edge + PLAYLIST_INNER_MARGIN + m_playlist_width_pixels, y + GetFontHeight(PLAYLIST_FONT));
-
-        if (m_lpDX->GetBitDepth() == 8)
-          color = (i == m_playlist_pos) ?
-          (i == now_playing ? 0xFFFFFFFF : 0xFFFFFFFF) :
-          (i == now_playing ? 0xFFFFFFFF : 0xFF707070);
-        else
-          color = (i == m_playlist_pos) ?
-          (i == now_playing ? PLAYLIST_COLOR_BOTH : PLAYLIST_COLOR_HILITE_TRACK) :
-          (i == now_playing ? PLAYLIST_COLOR_PLAYING_TRACK : PLAYLIST_COLOR_NORMAL);
-
-        // Phase 5 TODO: draw playlist entry with SpriteFont
-        y += GetFontHeight(PLAYLIST_FONT); // placeholder advance
-      }
-
-      //m_d3dx_font[PLAYLIST_FONT]->End();
-    }
+    m_text.DrawTextW(GetFont(PLAYLIST_FONT), m_playlist[lineIdx], &r,
+      DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS, color, false);
+    y += fontH;
   }
 }
 
@@ -2317,6 +2432,7 @@ LRESULT CPluginShell::PluginShellWindowProc(HWND hWnd, unsigned uMsg, WPARAM wPa
         return 0;
 
       case VK_END:
+        m_playlist_pos = max(0, GetPresetCount() - 1);
         return 0;
 
       case VK_PRIOR:
@@ -2358,7 +2474,9 @@ LRESULT CPluginShell::PluginShellWindowProc(HWND hWnd, unsigned uMsg, WPARAM wPa
       return 0;
 
     case VK_ESCAPE:
-      if (m_show_help)
+      if (m_show_playlist)
+        m_show_playlist = 0;
+      else if (m_show_help)
         ToggleHelp();
       return 0;
 

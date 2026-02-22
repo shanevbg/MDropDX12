@@ -228,264 +228,182 @@ bool CPlugin::OnResizeGraphicsWindow()
 }
 */
 
-bool CPlugin::RenderStringToTitleTexture(int supertextIndex)	// m_szSongMessage
+bool CPlugin::RenderStringToTitleTexture(int supertextIndex)
 {
-  wchar_t debugMsg[128];
-  swprintf(debugMsg, sizeof(debugMsg) / sizeof(debugMsg[0]), L"RenderStringToTitleTexture: supertextIndex=%d\n", supertextIndex);
-  OutputDebugStringW(debugMsg);
-
   int texIndex = supertextIndex;
-  int stage = 0;
 
-  if (!m_lpDDSTitle[texIndex])  // this *can* be NULL, if not much video mem!
+  if (!m_dx12Title[texIndex].IsValid())
     return false;
 
   if (m_supertexts[supertextIndex].szTextW[0] == 0)
     return false;
 
-  LPDIRECT3DDEVICE9 lpDevice = GetDevice();
-  if (!lpDevice)
+  if (!m_titleDC || !m_titleDIBBits || !m_dx12TitleUploadBuf || !m_lpDX)
     return false;
 
   wchar_t szTextToDraw[512];
+  swprintf(szTextToDraw, L" %s ", m_supertexts[supertextIndex].szTextW);
 
-  swprintf(szTextToDraw, L" %s ", m_supertexts[supertextIndex].szTextW);  //add a space @ end for italicized fonts; and at start, too, because it's centered!
-  OutputDebugStringW(szTextToDraw);
+  UINT tw = (UINT)m_nTitleTexSizeX;
+  UINT th = (UINT)m_nTitleTexSizeY;
 
-  // Remember the original backbuffer and zbuffer
-  LPDIRECT3DSURFACE9 pBackBuffer = NULL;//, pZBuffer=NULL;
-  lpDevice->GetRenderTarget(0, &pBackBuffer);
-  //lpDevice->GetDepthStencilSurface( &pZBuffer );
+  // Clear DIB to black
+  memset(m_titleDIBBits, 0, (size_t)tw * th * 4);
 
-  // set render target to m_lpDDSTitle
-  {
-    // lpDevice->SetTexture(0, NULL);
-    // lpDevice->SetTexture(stage, NULL);
+  // Set text color to white on transparent background
+  SetTextColor(m_titleDC, RGB(255, 255, 255));
+  SetBkMode(m_titleDC, TRANSPARENT);
 
-    IDirect3DSurface9* pNewTarget = NULL;
-    // if (m_lpDDSTitle->GetSurfaceLevel(0, &pNewTarget) != D3D_OK) {
-    if (m_lpDDSTitle[texIndex]->GetSurfaceLevel(0, &pNewTarget) != D3D_OK) {
-      SafeRelease(pBackBuffer);
-      //SafeRelease(pZBuffer);
-      return false;
-    }
-    // lpDevice->SetRenderTarget(0, pNewTarget);
-    lpDevice->SetRenderTarget(0, pNewTarget);
-    //lpDevice->SetDepthStencilSurface( NULL );
-    pNewTarget->Release();
-
-    // lpDevice->SetTexture(0, NULL);
-    lpDevice->SetTexture(stage, NULL);
-  }
-
-  // clear the texture to black
-  {
-    lpDevice->SetVertexShader(NULL);
-    lpDevice->SetFVF(WFVERTEX_FORMAT);
-
-    // lpDevice->SetTexture(0, NULL);
-    // lpDevice->SetTexture(stage, NULL);
-
-    lpDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
-
-    // set up a quad
-    WFVERTEX verts[4];
-    for (int i = 0; i < 4; i++) {
-      verts[i].x = (i % 2 == 0) ? -1.f : 1.f;
-      verts[i].y = (i / 2 == 0) ? -1.f : 1.f;
-      verts[i].z = 0;
-      verts[i].Diffuse = 0xFF000000;
-    }
-
-    lpDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, verts, sizeof(WFVERTEX));
-  }
-
-  /*// 1. clip title if too many chars
-if (m_supertext[supertextIndex].bIsSongTitle)
-{
-  // truncate song title if too long; don't clip custom messages, though!
-  int clip_chars = 32;
-      int user_title_size = GetFontHeight(SONGTITLE_FONT);
-
-      #define MIN_CHARS 8         // max clip_chars *for BIG FONTS*
-      #define MAX_CHARS 64        // max clip chars *for tiny fonts*
-      float t = (user_title_size-10)/(float)(128-10);
-      t = min(1,max(0,t));
-      clip_chars = (int)(MAX_CHARS - (MAX_CHARS-MIN_CHARS)*t);
-
-  if ((int)strlen(szTextToDraw) > clip_chars+3)
-    lstrcpy(&szTextToDraw[clip_chars], "...");
-}*/
-
-  bool ret = true;
-
-  // use 2 lines; must leave room for bottom of 'g' characters and such!
   RECT rect;
   rect.left = 0;
   rect.right = m_nTitleTexSizeX;
-  rect.top = m_nTitleTexSizeY * 1 / 21;  // otherwise, top of '%' could be cut off (1/21 seems safe)
-  rect.bottom = m_nTitleTexSizeY * 17 / 21;  // otherwise, bottom of 'g' could be cut off (18/21 seems safe, but we want some leeway)
+  rect.top = m_nTitleTexSizeY * 1 / 21;
+  rect.bottom = m_nTitleTexSizeY * 17 / 21;
+
+  bool ret = true;
 
   if (!m_supertexts[supertextIndex].bIsSongTitle) {
-    // custom msg -> pick font to use that will best fill the texture
-
-    HFONT gdi_font = NULL;
-    LPD3DXFONT d3dx_font = NULL;
-
+    // Custom message: binary search for best font size using GDI
     int lo = 0;
     int hi = sizeof(g_title_font_sizes) / sizeof(int) - 1;
 
-    // limit the size of the font used:
-
-    //int user_title_size = GetFontHeight(SONGTITLE_FONT);
-    //while (g_title_font_sizes[hi] > user_title_size*2 && hi>4)
-    //    hi--;
-
-    RECT temp;
-    while (1)//(lo < hi-1)
-    {
+    RECT temp = rect;
+    while (lo < hi - 1) {
       int mid = (lo + hi) / 2;
 
-      // create new gdi font at 'mid' size:
-      gdi_font = CreateFontW(g_title_font_sizes[mid], 0, 0, 0, m_supertexts[supertextIndex].bBold ? 900 : 400, m_supertexts[supertextIndex].bItal, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+      HFONT testFont = CreateFontW(g_title_font_sizes[mid], 0, 0, 0,
+        m_supertexts[supertextIndex].bBold ? 900 : 400,
+        m_supertexts[supertextIndex].bItal, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         m_fontinfo[SONGTITLE_FONT].bAntiAliased ? ANTIALIASED_QUALITY : DEFAULT_QUALITY,
         DEFAULT_PITCH, m_supertexts[supertextIndex].nFontFace);
-      if (gdi_font) {
-        // create new d3dx font at 'mid' size:
-        if (D3DXCreateFontW(
-          lpDevice,
-          g_title_font_sizes[mid],
-          0,
-          m_supertexts[supertextIndex].bBold ? 900 : 400,
-          1,
-          m_supertexts[supertextIndex].bItal,
-          DEFAULT_CHARSET,
-          OUT_DEFAULT_PRECIS,
-          ANTIALIASED_QUALITY,//m_fontinfo[SONGTITLE_FONT].bAntiAliased ? ANTIALIASED_QUALITY : DEFAULT_QUALITY,
-          DEFAULT_PITCH,
-          m_supertexts[supertextIndex].nFontFace,
-          &d3dx_font
-        ) == D3D_OK) {
-          if (lo == hi - 1)
-            break;      // DONE; but the 'lo'-size font is ready for use!
+      if (!testFont) { hi = mid; continue; }
 
-          // compute size of text if drawn w/font of THIS size:
-          temp = rect;
+      HGDIOBJ oldFont = SelectObject(m_titleDC, testFont);
+      temp = rect;
+      int h = ::DrawTextW(m_titleDC, szTextToDraw, -1, &temp, DT_SINGLELINE | DT_CALCRECT | DT_CENTER);
 
-          int h = d3dx_font->DrawTextW(NULL, szTextToDraw, -1, &temp, DT_SINGLELINE | DT_CALCRECT /*| DT_NOPREFIX*/, 0xFFFFFFFF);
+      if (temp.right - temp.left >= rect.right - rect.left || h > rect.bottom - rect.top)
+        hi = mid;
+      else
+        lo = mid;
 
-          // adjust & prepare to reiterate:
-          if (temp.right >= rect.right || h > rect.bottom - rect.top)
-            hi = mid;
-          else
-            lo = mid;
-
-          SafeRelease(d3dx_font);
-        }
-
-        DeleteObject(gdi_font); gdi_font = NULL;
-      }
+      SelectObject(m_titleDC, oldFont);
+      DeleteObject(testFont);
     }
 
-    if (gdi_font && d3dx_font) {
+    // Create final font at 'lo' size and draw
+    HFONT bestFont = CreateFontW(g_title_font_sizes[lo], 0, 0, 0,
+      m_supertexts[supertextIndex].bBold ? 900 : 400,
+      m_supertexts[supertextIndex].bItal, FALSE, FALSE,
+      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+      ANTIALIASED_QUALITY,
+      DEFAULT_PITCH, m_supertexts[supertextIndex].nFontFace);
+
+    if (bestFont) {
+      HGDIOBJ oldFont = SelectObject(m_titleDC, bestFont);
+
       int lineCount = 1;
-      for (const wchar_t* p = szTextToDraw; *p != L'\0'; ++p) {
-        if (*p == L'\n') {
-          ++lineCount;
-        }
+      for (const wchar_t* p = szTextToDraw; *p; ++p) {
+        if (*p == L'\n') ++lineCount;
       }
-      // do actual drawing + set m_supertext[supertextIndex].nFontSizeUsed; use 'lo' size
-      int h = d3dx_font->DrawTextW(NULL, szTextToDraw, -1, &temp, DT_SINGLELINE | DT_CALCRECT /*| DT_NOPREFIX*/ | DT_CENTER, 0xFFFFFFFF);
+
+      temp = rect;
+      int h = ::DrawTextW(m_titleDC, szTextToDraw, -1, &temp, DT_SINGLELINE | DT_CALCRECT | DT_CENTER);
 
       long offset = h / 2;
-      if (lineCount > 1) {
-        offset *= lineCount;
-      }
+      if (lineCount > 1) offset *= lineCount;
 
       temp.left = 0;
-      temp.right = m_nTitleTexSizeX;  // now allow text to go all the way over, since we're actually drawing!
+      temp.right = m_nTitleTexSizeX;
       temp.top = m_nTitleTexSizeY / 2 - offset;
       temp.bottom = m_nTitleTexSizeY / 2 + offset;
 
-      if (lineCount == 1) {
-        m_supertexts[supertextIndex].nFontSizeUsed = d3dx_font->DrawTextW(NULL, szTextToDraw, -1, &temp, DT_SINGLELINE /*| DT_NOPREFIX*/ | DT_CENTER, 0xFFFFFFFF);
-      }
-      else {
-        m_supertexts[supertextIndex].nFontSizeUsed = d3dx_font->DrawTextW(NULL, szTextToDraw, -1, &temp, DT_WORDBREAK /*| DT_NOPREFIX*/ | DT_CENTER, 0xFFFFFFFF);
-      }
+      DWORD flags = (lineCount == 1) ? (DT_SINGLELINE | DT_CENTER) : (DT_WORDBREAK | DT_CENTER);
+      m_supertexts[supertextIndex].nFontSizeUsed = ::DrawTextW(m_titleDC, szTextToDraw, -1, &temp, flags);
 
-      ret = true;
-    }
-    else {
+      SelectObject(m_titleDC, oldFont);
+      DeleteObject(bestFont);
+    } else {
       ret = false;
     }
-
-    // clean up font:
-    SafeRelease(d3dx_font);
-    if (gdi_font) DeleteObject(gdi_font); gdi_font = NULL;
   }
-  else // song title
-  {
+  else {
+    // Song title: use pre-created title font
     wchar_t* str = m_supertexts[supertextIndex].szTextW;
 
-    // clip the text manually...
-    // NOTE: DT_END_ELLIPSIS CAUSES NOTHING TO DRAW, IF YOU USE W/D3DX9!
-    int h;
-    int max_its = 6;
-    int it = 0;
-    while (it < max_its) {
-      it++;
+    if (m_gdi_title_font_doublesize) {
+      HGDIOBJ oldFont = SelectObject(m_titleDC, m_gdi_title_font_doublesize);
 
-      if (!str[0])
+      // Clip text if too wide
+      int h = 0;
+      for (int it = 0; it < 6; it++) {
+        if (!str[0]) break;
+        RECT temp = rect;
+        h = ::DrawTextW(m_titleDC, str, -1, &temp, DT_SINGLELINE | DT_CALCRECT);
+        if (temp.right - temp.left <= m_nTitleTexSizeX)
+          break;
+
+        int len = (int)wcslen(str);
+        float fPercentToKeep = 0.91f * m_nTitleTexSizeX / (float)(temp.right - temp.left);
+        if (len > 8)
+          lstrcpyW(&str[(int)(len * fPercentToKeep)], L"...");
         break;
+      }
 
-      RECT temp = rect;
-      h = m_d3dx_title_font_doublesize->DrawTextW(NULL, str, -1, &temp, DT_SINGLELINE | DT_CALCRECT /*| DT_NOPREFIX | DT_END_ELLIPSIS*/, 0xFFFFFFFF);
-      if (temp.right - temp.left <= m_nTitleTexSizeX)
-        break;
+      RECT temp;
+      temp.left = 0;
+      temp.right = m_nTitleTexSizeX;
+      temp.top = m_nTitleTexSizeY / 2 - h / 2;
+      temp.bottom = m_nTitleTexSizeY / 2 + h / 2;
 
-      // 11/01/2009 DO - disabled as it was causing to users 'random' titles against
-      // what is expected so we now just work on the ellipse at the end approach which
+      m_supertexts[supertextIndex].nFontSizeUsed = ::DrawTextW(m_titleDC, str, -1, &temp, DT_SINGLELINE | DT_CENTER);
 
-            // manually clip the text... chop segments off the front
-            /*wchar_t* p = wcsstr(str, L" - ");
-            if (p)
-            {
-                str = p+3;
-                continue;
-            }*/
-
-            // no more stuff to chop off the front; chop off the end w/ ...
-      int len = wcslen(str);
-      float fPercentToKeep = 0.91f * m_nTitleTexSizeX / (float)(temp.right - temp.left);
-      if (len > 8)
-        lstrcpyW(&str[(int)(len * fPercentToKeep)], L"...");
-      break;
+      SelectObject(m_titleDC, oldFont);
+    } else {
+      ret = false;
     }
-
-    // now actually draw it
-    RECT temp;
-    temp.left = 0;
-    temp.right = m_nTitleTexSizeX;  // now allow text to go all the way over, since we're actually drawing!
-    temp.top = m_nTitleTexSizeY / 2 - h / 2;
-    temp.bottom = m_nTitleTexSizeY / 2 + h / 2;
-
-    // NOTE: DT_END_ELLIPSIS CAUSES NOTHING TO DRAW, IF YOU USE W/D3DX9!
-    m_supertexts[supertextIndex].nFontSizeUsed = m_d3dx_title_font_doublesize->DrawTextW(NULL, str, -1, &temp, DT_SINGLELINE /*| DT_NOPREFIX | DT_END_ELLIPSIS*/ | DT_CENTER, 0xFFFFFFFF);
   }
 
-  // Change the rendertarget back to the original setup
-  // lpDevice->SetTexture(0, NULL);
-  // lpDevice->SetRenderTarget(0, pBackBuffer);
+  if (!ret) return false;
 
-  lpDevice->SetTexture(stage, NULL);
-  lpDevice->SetRenderTarget(0, pBackBuffer);
+  // Upload DIB to DX12 title texture
+  UINT rowPitch = (tw * 4 + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1)
+                  & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
 
-  //lpDevice->SetDepthStencilSurface( pZBuffer );
-  SafeRelease(pBackBuffer);
-  //SafeRelease(pZBuffer);
+  BYTE* uploadPtr = nullptr;
+  m_dx12TitleUploadBuf->Map(0, nullptr, (void**)&uploadPtr);
+  if (uploadPtr) {
+    for (UINT y = 0; y < th; y++) {
+      memcpy(uploadPtr + y * rowPitch, m_titleDIBBits + y * tw * 4, tw * 4);
+    }
+    m_dx12TitleUploadBuf->Unmap(0, nullptr);
+  }
 
-  return ret;
+  auto* cmdList = m_lpDX->m_commandList.Get();
+
+  m_lpDX->TransitionResource(m_dx12Title[texIndex], D3D12_RESOURCE_STATE_COPY_DEST);
+
+  D3D12_TEXTURE_COPY_LOCATION src = {};
+  src.pResource = m_dx12TitleUploadBuf.Get();
+  src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  src.PlacedFootprint.Offset = 0;
+  src.PlacedFootprint.Footprint.Format   = DXGI_FORMAT_B8G8R8A8_UNORM;
+  src.PlacedFootprint.Footprint.Width    = tw;
+  src.PlacedFootprint.Footprint.Height   = th;
+  src.PlacedFootprint.Footprint.Depth    = 1;
+  src.PlacedFootprint.Footprint.RowPitch = rowPitch;
+
+  D3D12_TEXTURE_COPY_LOCATION dst = {};
+  dst.pResource = m_dx12Title[texIndex].resource.Get();
+  dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  dst.SubresourceIndex = 0;
+
+  cmdList->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+
+  m_lpDX->TransitionResource(m_dx12Title[texIndex], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+  return true;
 }
 
 void CPlugin::LoadPerFrameEvallibVars(CState* pState) {
@@ -5769,45 +5687,18 @@ bool CPlugin::SetMilkdropRenderTarget(LPDIRECTDRAWSURFACE7 lpSurf, int w, int h,
 
 void CPlugin::DrawUserSprites()	// from system memory, to back buffer.
 {
-  LPDIRECT3DDEVICE9 lpDevice = GetDevice();
-  if (!lpDevice)
+  if (!m_lpDX || !m_lpDX->m_commandList)
     return;
 
-  lpDevice->SetTexture(0, NULL);
-  lpDevice->SetVertexShader(NULL);
-  lpDevice->SetFVF(SPRITEVERTEX_FORMAT);
+  auto* cmdList = m_lpDX->m_commandList.Get();
 
-  //lpDevice->SetRenderState(D3DRS_WRAP0, 0);
-  //lpDevice->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP);
-  //lpDevice->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_WRAP);
-  //lpDevice->SetSamplerState(0, D3DSAMP_ADDRESSW, D3DTADDRESS_WRAP);
-
-  // reset these to the standard safe mode:
-  lpDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
-  lpDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
-  lpDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TEXTURE);
-  lpDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-  lpDevice->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
-  lpDevice->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-
-  /*
-lpDevice->SetRenderState(D3DRS_SHADEMODE, D3DSHADE_GOURAUD); //D3DSHADE_GOURAUD
-lpDevice->SetRenderState(D3DRS_SPECULARENABLE, FALSE);
-lpDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
-if (m_D3DDevDesc.dpcTriCaps.dwRasterCaps & D3DPRASTERCAPS_DITHER)
-  lpDevice->SetRenderState(D3DRS_DITHERENABLE, TRUE);
-lpDevice->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
-lpDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
-lpDevice->SetRenderState(D3DRS_COLORVERTEX, TRUE);
-lpDevice->SetRenderState(D3DRS_FILLMODE, D3DFILL_SOLID);  // vs. wireframe
-lpDevice->SetRenderState(D3DRS_AMBIENT, D3DCOLOR_RGBA_01(1,1,1,1));
-lpDevice->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTFG_LINEAR );
-lpDevice->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTFN_LINEAR );
-lpDevice->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTFP_LINEAR );
-  */
+  // Set up DX12 rendering state
+  ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
+  cmdList->SetDescriptorHeaps(1, heaps);
+  cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
 
   for (int iSlot = 0; iSlot < NUM_TEX; iSlot++) {
-    if (m_texmgr.m_tex[iSlot].pSurface) {
+    if (m_texmgr.m_tex[iSlot].dx12Surface.IsValid()) {
       int k;
 
       // set values of input variables:
@@ -5832,29 +5723,11 @@ lpDevice->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTFP_LINEAR );
       bool bKillSprite = (*m_texmgr.m_tex[iSlot].var_done != 0.0);
       bool bBurnIn = (*m_texmgr.m_tex[iSlot].var_burn != 0.0);
 
-      // Remember the original backbuffer and zbuffer
-      LPDIRECT3DSURFACE9 pBackBuffer = NULL;//, pZBuffer=NULL;
-      lpDevice->GetRenderTarget(0, &pBackBuffer);
-      //lpDevice->GetDepthStencilSurface( &pZBuffer );
+      // TODO: DX12 burn-in (render to VS1) not yet implemented
 
-      if (/*bKillSprite &&*/ bBurnIn) {
-        // set up to render [from NULL] to VS1 (for burn-in).
-
-        lpDevice->SetTexture(0, NULL);
-
-        IDirect3DSurface9* pNewTarget = NULL;
-        if (m_lpVS[1]->GetSurfaceLevel(0, &pNewTarget) != D3D_OK)
-          return;
-        lpDevice->SetRenderTarget(0, pNewTarget);
-        //lpDevice->SetDepthStencilSurface( NULL );
-        pNewTarget->Release();
-
-        lpDevice->SetTexture(0, NULL);
-      }
-
-      // finally, use the results to draw the sprite.
-      if (lpDevice->SetTexture(0, m_texmgr.m_tex[iSlot].pSurface) != D3D_OK)
-        return;
+      // Bind sprite texture
+      D3D12_GPU_DESCRIPTOR_HANDLE srvHandle = m_lpDX->GetBindingBlockGpuHandle(m_texmgr.m_tex[iSlot].dx12Surface);
+      cmdList->SetGraphicsRootDescriptorTable(1, srvHandle);
 
       SPRITEVERTEX v3[4];
       ZeroMemory(v3, sizeof(SPRITEVERTEX) * 4);
@@ -5970,144 +5843,47 @@ lpDevice->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTFP_LINEAR );
         }
       }
 
-      // blendmodes                                      src alpha:        dest alpha:
-      // 0   blend      r,g,b=modulate     a=opacity     SRCALPHA          INVSRCALPHA
-      // 1   decal      r,g,b=modulate     a=modulate    D3DBLEND_ONE      D3DBLEND_ZERO
-      // 2   additive   r,g,b=modulate     a=modulate    D3DBLEND_ONE      D3DBLEND_ONE
-      // 3   srccolor   r,g,b=no effect    a=no effect   SRCCOLOR          INVSRCCOLOR
-      // 4   colorkey   r,g,b=modulate     a=no effect
-      // a = 0.5; // for testing
-      // printf("blendmode = %d : opacity = %f\n", blendmode, a);
-
-      // blendmode = 3; // for testing
+      // DX12: Select PSO based on blend mode and set vertex colors
+      DX12PsoId spritePso;
       switch (blendmode) {
-      case 0:
-      default:
-        // alpha blend
-
-        /*
-        Q. I am rendering with alpha blending and setting the alpha
-        of the diffuse vertex component to determine the opacity.
-        It works when there is no texture set, but as soon as I set
-        a texture the alpha that I set is no longer applied.  Why?
-
-        The problem originates in the texture blending stages, rather
-        than in the subsequent alpha blending.  Alpha can come from
-        several possible sources.  If this has not been specified,
-        then the alpha will be taken from the texture, if one is selected.
-        If no texture is selected, then the default will use the alpha
-        channel of the diffuse vertex component.
-
-        Explicitly specifying the diffuse vertex component as the source
-        for alpha will insure that the alpha is drawn from the alpha value
-        you set, whether a texture is selected or not:
-
-        pDevice->SetSamplerState(D3DSAMP_ALPHAOP,D3DTOP_SELECTARG1);
-        pDevice->SetSamplerState(D3DSAMP_ALPHAARG1,D3DTA_DIFFUSE);
-
-        If you later need to use the texture alpha as the source, set
-        D3DSAMP_ALPHAARG1 to D3DTA_TEXTURE.
-        */
-
-        lpDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-        lpDevice->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
-        lpDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-        lpDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-        lpDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-        for (k = 0; k < 4; k++) v3[k].Diffuse = D3DCOLOR_RGBA_01(r, g, b, a);
-        break;
       case 1:
-        // decal
-        lpDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
-        //lpDevice->SetRenderState(D3DRS_SRCBLEND,  D3DBLEND_ONE);
-        //lpDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ZERO);
+        // decal (no blend)
+        spritePso = PSO_TEXTURED_SPRITEVERTEX;
         for (k = 0; k < 4; k++) v3[k].Diffuse = D3DCOLOR_RGBA_01(r * a, g * a, b * a, 1);
         break;
       case 2:
-        // additive
-        lpDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-        lpDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
-        lpDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
+        // additive (One/One with pre-multiplied colors)
+        spritePso = PSO_ONEONE_SPRITEVERTEX;
         for (k = 0; k < 4; k++) v3[k].Diffuse = D3DCOLOR_RGBA_01(r * a, g * a, b * a, 1);
         break;
       case 3:
-        // srccolor
-        lpDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-        lpDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCCOLOR);
-        lpDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCCOLOR);
+        // srccolor — approximate with alpha blend
+        spritePso = PSO_ALPHABLEND_SPRITEVERTEX;
         for (k = 0; k < 4; k++) v3[k].Diffuse = D3DCOLOR_RGBA_01(1, 1, 1, 1);
         break;
+      case 0:
       case 4:
-        // color keyed texture: use the alpha value in the texture to
-        //  determine which texels get drawn.
-        /*lpDevice->SetRenderState(D3DRS_ALPHAREF, 0);
-        lpDevice->SetRenderState(D3DRS_ALPHAFUNC, D3DCMP_NOTEQUAL);
-        lpDevice->SetRenderState(D3DRS_ALPHATESTENABLE, TRUE);
-                */
-
-        lpDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
-        lpDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
-        lpDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TEXTURE);
-        lpDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
-        lpDevice->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
-        lpDevice->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_TEXTURE);
-        lpDevice->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-
-        // also, smoothly blend this in-between texels:
-        lpDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-        lpDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-        lpDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+      default:
+        // alpha blend (SrcAlpha/InvSrcAlpha)
+        spritePso = PSO_ALPHABLEND_SPRITEVERTEX;
         for (k = 0; k < 4; k++) v3[k].Diffuse = D3DCOLOR_RGBA_01(r, g, b, a);
         break;
       }
 
-      lpDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, (LPVOID)v3, sizeof(SPRITEVERTEX));
+      cmdList->SetPipelineState(m_lpDX->m_PSOs[spritePso].Get());
 
-      if (/*bKillSprite &&*/ bBurnIn)	// final render-to-VS1
-      {
-        // Change the rendertarget back to the original setup
-        lpDevice->SetTexture(0, NULL);
-        lpDevice->SetRenderTarget(0, pBackBuffer);
-        //lpDevice->SetDepthStencilSurface( pZBuffer );
-        lpDevice->SetTexture(0, m_texmgr.m_tex[iSlot].pSurface);
-
-        // undo aspect ratio changes (that were used to fit it to VS1):
-        {
-          float aspect = GetWidth() / (float)(GetHeight() * 4.0f / 3.0f);
-
-          if (!m_bScreenDependentRenderMode)
-            if (aspect < 1.0f)
-              for (k = 0; k < 4; k++) v3[k].x /= aspect;
-            else
-              for (k = 0; k < 4; k++) v3[k].y *= aspect;
-        }
-
-        lpDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, (LPVOID)v3, sizeof(SPRITEVERTEX));
-      }
-
-      SafeRelease(pBackBuffer);
-      //SafeRelease(pZBuffer);
+      // Convert tri-strip (4 verts) to tri-list (6 verts)
+      SPRITEVERTEX triVerts[6] = {
+        v3[0], v3[1], v3[2],
+        v3[2], v3[1], v3[3],
+      };
+      m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, triVerts, 6, sizeof(SPRITEVERTEX));
 
       if (bKillSprite) {
         KillSprite(iSlot);
       }
-
-      lpDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-      lpDevice->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
-      lpDevice->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
     }
   }
-
-  lpDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
-
-  // reset these to the standard safe mode:
-  lpDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
-  lpDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
-  lpDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TEXTURE);
-  lpDevice->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-  lpDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-  lpDevice->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
-  lpDevice->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
 }
 
 void CPlugin::UvToMathSpace(float u, float v, float* rad, float* ang) {
@@ -6789,23 +6565,22 @@ void CPlugin::ShowSongTitleAnim(int w, int h, float fProgress, int supertextInde
   OutputDebugStringW(debugMsg);
 
   int texIndex = supertextIndex;
-  int stage = 0;
-
-  if (!m_lpDDSTitle[texIndex])  // this *can* be NULL, if not much video mem!
+  if (!m_dx12Title[texIndex].IsValid())
     return;
 
-  LPDIRECT3DDEVICE9 lpDevice = GetDevice();
-  if (!lpDevice)
+  if (!m_lpDX || !m_lpDX->m_commandList)
     return;
 
-  lpDevice->SetTexture(stage, m_lpDDSTitle[texIndex]);
-  lpDevice->SetVertexShader(NULL);
-  lpDevice->SetFVF(SPRITEVERTEX_FORMAT);
+  auto* cmdList = m_lpDX->m_commandList.Get();
 
-  lpDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+  // Set up DX12 rendering state
+  ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
+  cmdList->SetDescriptorHeaps(1, heaps);
+  cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
 
-  lpDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
-  lpDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
+  // Bind title texture
+  D3D12_GPU_DESCRIPTOR_HANDLE titleSrvHandle = m_lpDX->GetBindingBlockGpuHandle(m_dx12Title[texIndex]);
+  cmdList->SetGraphicsRootDescriptorTable(1, titleSrvHandle);
 
   SPRITEVERTEX v3[128];
   ZeroMemory(v3, sizeof(SPRITEVERTEX) * 128);
@@ -6923,19 +6698,6 @@ void CPlugin::ShowSongTitleAnim(int w, int h, float fProgress, int supertextInde
     }
   }
 
-  WORD indices[7 * 15 * 6];
-  i = 0;
-  for (y = 0; y < 7; y++) {
-    for (x = 0; x < 15; x++) {
-      indices[i++] = y * 16 + x;
-      indices[i++] = y * 16 + x + 1;
-      indices[i++] = y * 16 + x + 16;
-      indices[i++] = y * 16 + x + 1;
-      indices[i++] = y * 16 + x + 16;
-      indices[i++] = y * 16 + x + 17;
-    }
-  }
-
   float aspect = w / (float)(h * 4.0f / 3.0f);
 
   // A kinda hacky solutionto make fX and fY work as expected, eg. so fY=0 always means
@@ -7050,26 +6812,18 @@ void CPlugin::ShowSongTitleAnim(int w, int h, float fProgress, int supertextInde
 
     D3DCOLOR boxCol = D3DCOLOR_ARGB(boxAlpha, boxColR, boxColG, boxColB);
 
-    SPRITEVERTEX box[4] = {
-      { minX, minY, 1.0f, boxCol, 0,0 }, { maxX, minY, 1.0f, boxCol, 1,0 },
-      { minX, maxY, 1.0f, boxCol, 0,1 }, { maxX, maxY, 1.0f, boxCol, 1,1 },
+    // DX12: Draw box as untextured alpha-blended triangles
+    WFVERTEX boxVerts[6] = {
+      { minX, minY, 1.0f, boxCol },
+      { maxX, minY, 1.0f, boxCol },
+      { minX, maxY, 1.0f, boxCol },
+      { minX, maxY, 1.0f, boxCol },
+      { maxX, minY, 1.0f, boxCol },
+      { maxX, maxY, 1.0f, boxCol },
     };
 
-    lpDevice->SetTexture(0, NULL);
-    lpDevice->SetFVF(SPRITEVERTEX_FORMAT);
-
-    lpDevice->SetRenderState(D3DRS_ZENABLE, FALSE);
-    lpDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-    lpDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-    lpDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-
-    lpDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, box, sizeof(SPRITEVERTEX));
-
-    // 4) Restore state
-    lpDevice->SetRenderState(D3DRS_ZENABLE, TRUE);
-    lpDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
-    lpDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
-    lpDevice->SetTexture(stage, m_lpDDSTitle[texIndex]);
+    cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_ALPHABLEND_WFVERTEX].Get());
+    m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, boxVerts, 6, sizeof(WFVERTEX));
   }
 
   // nudge down & right for shadow, up & left for solid text
@@ -7115,23 +6869,26 @@ void CPlugin::ShowSongTitleAnim(int w, int h, float fProgress, int supertextInde
       v3[i].y += offset_y;
     }
 
-    if (it == 0) {
-      lpDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ZERO);//SRCALPHA);
-      lpDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCCOLOR);
-    }
-    else {
-      lpDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);//SRCALPHA);
-      lpDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
+    // DX12: Select PSO for this pass
+    if (it == 0)
+      cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_DARKEN_SPRITEVERTEX].Get());
+    else
+      cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_ONEONE_SPRITEVERTEX].Get());
+
+    // Expand indexed mesh to non-indexed triangle list and draw
+    SPRITEVERTEX triVerts[7 * 15 * 6]; // 630 vertices (210 triangles)
+    int triIdx = 0;
+    for (int ty = 0; ty < 7; ty++) {
+      for (int tx = 0; tx < 15; tx++) {
+        triVerts[triIdx++] = v3[ty * 16 + tx];
+        triVerts[triIdx++] = v3[ty * 16 + tx + 1];
+        triVerts[triIdx++] = v3[ty * 16 + tx + 16];
+        triVerts[triIdx++] = v3[ty * 16 + tx + 1];
+        triVerts[triIdx++] = v3[ty * 16 + tx + 16];
+        triVerts[triIdx++] = v3[ty * 16 + tx + 17];
+      }
     }
 
-    HRESULT hr = lpDevice->DrawIndexedPrimitiveUP(D3DPT_TRIANGLELIST, 0, 128, 15 * 7 * 6 / 3, indices, D3DFMT_INDEX16, v3, sizeof(SPRITEVERTEX));
-    if (FAILED(hr)) {
-      wchar_t errMsg[256];
-      swprintf(errMsg, sizeof(errMsg) / sizeof(errMsg[0]), L"DrawIndexedPrimitiveUP failed\n");
-      OutputDebugStringW(errMsg);
-      return;
-    }
+    m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, triVerts, triIdx, sizeof(SPRITEVERTEX));
   }
-
-  lpDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
 }

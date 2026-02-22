@@ -173,6 +173,33 @@ bool DX12CreatePipelines(ID3D12Device* device, ID3D12RootSignature* rootSig,
     psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha  = D3D12_BLEND_ONE;
     psoDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
     hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_PREMULALPHA_SPRITEVERTEX]));
+    if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+    // PSO: Textured SPRITEVERTEX + One/One pure additive (title text pass)
+    psoDesc.BlendState.RenderTarget[0].SrcBlend       = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].DestBlend       = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha   = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha  = D3D12_BLEND_ONE;
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_ONEONE_SPRITEVERTEX]));
+    if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+    // PSO: Textured SPRITEVERTEX + Zero/InvSrcColor darken (title shadow pass)
+    psoDesc.BlendState.RenderTarget[0].SrcBlend       = D3D12_BLEND_ZERO;
+    psoDesc.BlendState.RenderTarget[0].DestBlend       = D3D12_BLEND_INV_SRC_COLOR;
+    psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha   = D3D12_BLEND_ZERO;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha  = D3D12_BLEND_ONE;
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_DARKEN_SPRITEVERTEX]));
+    if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+    // PSO: Textured SPRITEVERTEX + SrcAlpha/InvSrcAlpha (standard alpha blend, for sprites)
+    psoDesc.BlendState.RenderTarget[0].SrcBlend       = D3D12_BLEND_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].DestBlend       = D3D12_BLEND_INV_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].BlendOp         = D3D12_BLEND_OP_ADD;
+    psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha   = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha  = D3D12_BLEND_INV_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].BlendOpAlpha    = D3D12_BLEND_OP_ADD;
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_ALPHABLEND_SPRITEVERTEX]));
+    if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
 
     texVsBlob->Release();
     texPsBlob->Release();

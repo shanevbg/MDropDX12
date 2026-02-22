@@ -151,7 +151,11 @@ public:
   int          GetFontHeight(eFontIndex idx);
   CTextManager m_text;
   
-  wchar_t      m_szBaseDir[MAX_PATH]; 
+  wchar_t      m_szBaseDir[MAX_PATH];
+
+  // DX12 screenshot capture (Phase A)
+  bool         m_bScreenshotRequested = false;
+  wchar_t      m_screenshotPath[MAX_PATH] = {};
 
 protected:
 
@@ -204,6 +208,11 @@ protected:
   virtual LRESULT MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam) = 0;
   virtual void OnAltK() {}; // doesn't *have* to be implemented
   virtual void SetAMDFlag() = 0;
+  // Preset list accessors for RenderPlaylist() — override in CPlugin
+  virtual int  GetPresetCount() { return 0; }
+  virtual int  GetCurrentPresetIndex() { return -1; }
+  virtual const wchar_t* GetPresetName(int idx) { return L""; }
+  void TogglePlaylist() { m_show_playlist = !m_show_playlist; m_playlist_top_idx = -1; }
 
   int m_show_help;
 

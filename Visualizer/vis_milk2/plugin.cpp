@@ -2495,60 +2495,110 @@ int CPlugin::AllocateMyDX9Stuff() {
 
 // -----------------
 
-// reallocate the texture for font titles + custom msgs (m_lpDDSTitle)
+// Allocate DX12 title textures for song titles + custom messages
   {
     m_nTitleTexSizeX = max(m_nTexSizeX, m_nTexSizeY);
     m_nTitleTexSizeY = m_nTitleTexSizeX / 4;
 
-    // m_nTitleTexSizeX = max(m_nTexSizeX, m_nTexSizeY);
-    // m_nTitleTexSizeY = m_nTitleTexSizeX / 4;
+    UINT tw = (UINT)m_nTitleTexSizeX;
+    UINT th = (UINT)m_nTitleTexSizeY;
 
-    // int sizeX = m_nTitleTexSizeX;
-    // int sizeY = m_nTitleTexSizeY;
+    // Create GDI DC + DIB section for title text rendering
+    if (m_titleDC) { DeleteDC(m_titleDC); m_titleDC = nullptr; }
+    if (m_titleDIB) { DeleteObject(m_titleDIB); m_titleDIB = nullptr; }
+    m_titleDIBBits = nullptr;
 
-    //dumpmsg("Init: [re]allocating title surface");
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = tw;
+    bmi.bmiHeader.biHeight = -(int)th;  // top-down
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
 
-    // [DEPRECATED as of transition to dx9:]
-    // We could just create one title surface, but this is a problem because many
-    // systems can only call DrawText on DDSCAPS_OFFSCREENPLAIN surfaces, and can NOT
-    // draw text on a DDSCAPS_TEXTURE surface (it comes out garbled).
-    // So, we create one of each; we draw the text to the DDSCAPS_OFFSCREENPLAIN surface
-    // (m_lpDDSTitle[1]), then we blit that (once) to the DDSCAPS_TEXTURE surface
-    // (m_lpDDSTitle[0]), which can then be drawn onto the screen on polys.
-
-    HRESULT hr;
-    for (int i = 0; i < NUM_SUPERTEXTS; i++) {
-      m_nTitleTexSizeX = max(m_nTexSizeX, m_nTexSizeY);
-      m_nTitleTexSizeY = m_nTitleTexSizeX / 4;
-      do {
-        hr = D3DXCreateTexture(GetDevice(), m_nTitleTexSizeX, m_nTitleTexSizeY, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &m_lpDDSTitle[i]);
-        if (hr != D3D_OK) {
-          if (m_nTitleTexSizeY < m_nTitleTexSizeX) {
-            m_nTitleTexSizeY *= 2;
-          }
-          else {
-            m_nTitleTexSizeX /= 2;
-            m_nTitleTexSizeY /= 2;
-          }
-        }
-      } while (hr != D3D_OK && m_nTitleTexSizeX > 16);
-    }
-
-    if (hr != D3D_OK) {
-      //dumpmsg("Init: -WARNING-: Title texture could not be created!");
-      for (int i = 0; i < NUM_SUPERTEXTS; i++) {
-        m_lpDDSTitle[i] = NULL;
+    m_titleDC = CreateCompatibleDC(nullptr);
+    if (m_titleDC) {
+      m_titleDIB = CreateDIBSection(m_titleDC, &bmi, DIB_RGB_COLORS, (void**)&m_titleDIBBits, nullptr, 0);
+      if (m_titleDIB) {
+        SelectObject(m_titleDC, m_titleDIB);
+        SetBkMode(m_titleDC, TRANSPARENT);
       }
-      //SafeRelease(m_lpDDSTitle);
-      //return true;
     }
-    else {
-      //sprintf(buf, "Init: title texture size is %dx%d (ideal size was %dx%d)", m_nTitleTexSizeX, m_nTitleTexSizeY, m_nTexSize, m_nTexSize/4);
-      //dumpmsg(buf);
-      for (int i = 0; i < NUM_SUPERTEXTS; i++) {
-        if (m_supertexts[i].fStartTime != -1.0f) {
-          m_supertexts[i].bRedrawSuperText = true;
-        }
+
+    // Create DX12 textures + SRVs + binding blocks for each supertext slot
+    ID3D12Device* dev = GetDX12Device();
+    bool titleOK = (dev != nullptr && m_titleDC != nullptr && m_titleDIB != nullptr);
+    for (int i = 0; i < NUM_SUPERTEXTS; i++) {
+      m_lpDDSTitle[i] = NULL;  // DX9 textures no longer used
+      m_dx12Title[i].Reset();
+
+      if (!titleOK) continue;
+
+      D3D12_RESOURCE_DESC desc = {};
+      desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+      desc.Width            = tw;
+      desc.Height           = th;
+      desc.DepthOrArraySize = 1;
+      desc.MipLevels        = 1;
+      desc.Format           = DXGI_FORMAT_B8G8R8A8_UNORM;
+      desc.SampleDesc.Count = 1;
+
+      D3D12_HEAP_PROPERTIES heapProps = {};
+      heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+      HRESULT hr = dev->CreateCommittedResource(
+          &heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+          D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+          nullptr, IID_PPV_ARGS(&m_dx12Title[i].resource));
+      if (FAILED(hr)) { titleOK = false; continue; }
+
+      m_dx12Title[i].width  = tw;
+      m_dx12Title[i].height = th;
+      m_dx12Title[i].format = DXGI_FORMAT_B8G8R8A8_UNORM;
+      m_dx12Title[i].currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+
+      // Allocate SRV
+      D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_lpDX->AllocateSrvCpu();
+      m_dx12Title[i].srvIndex = m_lpDX->m_nextFreeSrvSlot;
+
+      D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+      srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+      srvDesc.Format            = DXGI_FORMAT_B8G8R8A8_UNORM;
+      srvDesc.ViewDimension     = D3D12_SRV_DIMENSION_TEXTURE2D;
+      srvDesc.Texture2D.MipLevels = 1;
+      dev->CreateShaderResourceView(m_dx12Title[i].resource.Get(), &srvDesc, srvCpu);
+      m_lpDX->AllocateSrvGpu();
+
+      m_lpDX->CreateBindingBlockForTexture(m_dx12Title[i]);
+    }
+
+    // Create shared upload buffer for title textures
+    if (titleOK) {
+      UINT rowPitch = (tw * 4 + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1)
+                      & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
+      UINT64 uploadSize = (UINT64)rowPitch * th;
+
+      D3D12_HEAP_PROPERTIES uploadHeap = {};
+      uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+      D3D12_RESOURCE_DESC bufDesc = {};
+      bufDesc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+      bufDesc.Width            = uploadSize;
+      bufDesc.Height           = 1;
+      bufDesc.DepthOrArraySize = 1;
+      bufDesc.MipLevels        = 1;
+      bufDesc.SampleDesc.Count = 1;
+      bufDesc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+      dev->CreateCommittedResource(
+          &uploadHeap, D3D12_HEAP_FLAG_NONE, &bufDesc,
+          D3D12_RESOURCE_STATE_GENERIC_READ,
+          nullptr, IID_PPV_ARGS(&m_dx12TitleUploadBuf));
+    }
+
+    for (int i = 0; i < NUM_SUPERTEXTS; i++) {
+      if (m_supertexts[i].fStartTime != -1.0f) {
+        m_supertexts[i].bRedrawSuperText = true;
       }
     }
   }
@@ -2588,6 +2638,7 @@ int CPlugin::AllocateMyDX9Stuff() {
     // -----------------
 
     m_texmgr.Init(GetDevice());
+    m_texmgr.InitDX12(m_lpDX);
   }
 
   //dumpmsg("Init: mesh allocation");
@@ -6634,8 +6685,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
 
     case VK_SCROLL:
       m_bPresetLockedByUser = GetKeyState(VK_SCROLL) & 1;
-      //SetScrollLock(m_bPresetLockedByUser);
-      //int set = m_bPresetLockedByUser ?
+      TogglePlaylist();
 
   // check ???
   //case VK_F6:	break;
@@ -11438,22 +11488,7 @@ void CPlugin::CaptureScreenshot() {
 }
 
 bool CPlugin::CaptureScreenshotWithFilename(wchar_t* outFilename, size_t outFilenameSize) {
-LPDIRECT3DDEVICE9 pDevice = GetDevice();  // Phase 1: DX12 migration; GetDevice() returns nullptr
-if (!pDevice) {
-  OutputDebugStringW(L"[CaptureScreenshot] ERROR: Device not available\n");
-  milkwave->LogInfo(L"CaptureScreenshot: Device not available");
-  return false;
-}
-
-  IDirect3DSurface9* pRenderTarget = nullptr;
-  HRESULT hr = pDevice->GetRenderTarget(0, &pRenderTarget);
-  if (FAILED(hr) || !pRenderTarget) {
-    wchar_t msg[256];
-    swprintf_s(msg, 256, L"CaptureScreenshot: Failed to get render target (HRESULT 0x%08X)", hr);
-    milkwave->LogInfo(msg);
-    return false;
-  }
-
+  // Build filename from current preset name
   wchar_t presetName[MAX_PATH] = L"unknown";
   if (m_szCurrentPresetFile[0]) {
     wchar_t* filenameOnly = wcsrchr(m_szCurrentPresetFile, L'\\');
@@ -11462,14 +11497,14 @@ if (!pDevice) {
     } else {
       filenameOnly = m_szCurrentPresetFile;
     }
-    
+
     wcsncpy_s(presetName, MAX_PATH, filenameOnly, _TRUNCATE);
-    
+
     wchar_t* ext = wcsrchr(presetName, L'.');
     if (ext) *ext = L'\0';
-    
+
     for (wchar_t* p = presetName; *p; p++) {
-      if (*p == L'/' || *p == L':' || *p == L'*' || 
+      if (*p == L'/' || *p == L':' || *p == L'*' ||
           *p == L'?' || *p == L'"' || *p == L'<' || *p == L'>' || *p == L'|') {
         *p = L'_';
       }
@@ -11478,59 +11513,25 @@ if (!pDevice) {
 
   wchar_t captureDir[MAX_PATH];
   swprintf_s(captureDir, MAX_PATH, L"%scapture\\", m_szBaseDir);
-  
-  wchar_t debugMsg[MAX_PATH + 50];
-  swprintf_s(debugMsg, MAX_PATH + 50, L"[CaptureScreenshot] BaseDir: %s\n", m_szBaseDir);
-  OutputDebugStringW(debugMsg);
-  swprintf_s(debugMsg, MAX_PATH + 50, L"[CaptureScreenshot] CaptureDir: %s\n", captureDir);
-  OutputDebugStringW(debugMsg);
-  
   CreateDirectoryW(captureDir, NULL);
 
   SYSTEMTIME st;
   GetLocalTime(&st);
-  
+
   wchar_t justFilename[MAX_PATH];
   swprintf_s(justFilename, MAX_PATH, L"%04d%02d%02d-%02d%02d%02d-%s.png",
     st.wYear, st.wMonth, st.wDay,
     st.wHour, st.wMinute, st.wSecond,
     presetName);
 
-  wchar_t fullPath[MAX_PATH];
-  swprintf_s(fullPath, MAX_PATH, L"%s%s", captureDir, justFilename);
+  // Store full path for deferred DX12 capture in DrawAndDisplay
+  swprintf_s(m_screenshotPath, MAX_PATH, L"%s%s", captureDir, justFilename);
+  m_bScreenshotRequested = true;
 
-  hr = D3DXSaveSurfaceToFileW(fullPath, D3DXIFF_PNG, pRenderTarget, NULL, NULL);
-  
-  wchar_t resultMsg[MAX_PATH + 100];
-  swprintf_s(resultMsg, MAX_PATH + 100, L"[CaptureScreenshot] D3DXSaveSurfaceToFileW result: 0x%08X\n", hr);
-  OutputDebugStringW(resultMsg);
-  
-  pRenderTarget->Release();
-
-  if (SUCCEEDED(hr)) {
-    wchar_t msg[512];
-    swprintf_s(msg, 512, L"Screenshot saved: %s", fullPath);
-    milkwave->LogInfo(msg);
-    
-    wchar_t successMsg[MAX_PATH + 50];
-    swprintf_s(successMsg, MAX_PATH + 50, L"[CaptureScreenshot] SUCCESS: %s\n", justFilename);
-    OutputDebugStringW(successMsg);
-    
-    if (outFilename && outFilenameSize > 0) {
-      wcsncpy_s(outFilename, outFilenameSize, justFilename, _TRUNCATE);
-    }
-    return true;
-  } else {
-    wchar_t msg[256];
-    swprintf_s(msg, 256, L"Failed to save screenshot: HRESULT 0x%08X", hr);
-    milkwave->LogInfo(msg);
-    
-    wchar_t errorMsg[100];
-    swprintf_s(errorMsg, 100, L"[CaptureScreenshot] FAILED: HRESULT 0x%08X\n", hr);
-    OutputDebugStringW(errorMsg);
-    
-    return false;
+  if (outFilename && outFilenameSize > 0) {
+    wcsncpy_s(outFilename, outFilenameSize, justFilename, _TRUNCATE);
   }
+  return true;
 }
 
 void CPlugin::SetWaveParamsFromMessage(std::wstring& message) {
@@ -12150,6 +12151,13 @@ void CPlugin::SetAMDFlag() {
   }
 }
 
+int CPlugin::GetPresetCount() { return m_nPresets; }
+int CPlugin::GetCurrentPresetIndex() { return m_nCurrentPreset; }
+const wchar_t* CPlugin::GetPresetName(int idx) {
+  if (idx >= 0 && idx < m_nPresets)
+    return m_presets[idx].szFilename.c_str();
+  return L"";
+}
 
 #include <fstream>
 

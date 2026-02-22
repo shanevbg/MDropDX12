@@ -18,6 +18,9 @@ enum DX12PsoId {
     PSO_ADDITIVE_WFVERTEX,          // Triangle + SrcAlpha/One (additive shapes, untextured)
     PSO_ADDITIVE_SPRITEVERTEX,      // Triangle + SrcAlpha/One (additive shapes, textured)
     PSO_PREMULALPHA_SPRITEVERTEX,   // Triangle + One/InvSrcAlpha (premultiplied alpha, textured)
+    PSO_ONEONE_SPRITEVERTEX,        // Triangle + One/One (pure additive, textured — title text)
+    PSO_DARKEN_SPRITEVERTEX,        // Triangle + Zero/InvSrcColor (darken/shadow, textured — title shadow)
+    PSO_ALPHABLEND_SPRITEVERTEX,    // Triangle + SrcAlpha/InvSrcAlpha (alpha blend, textured — sprites)
     PSO_COUNT
 };
 

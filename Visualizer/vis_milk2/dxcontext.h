@@ -49,7 +49,7 @@ using Microsoft::WRL::ComPtr;
 
 // Descriptor heap sizes
 #define DXC_MAX_RTV  32   // 2 back buffers + 2 VS + 6 blur + 10 title + spare
-#define DXC_MAX_SRV  256  // texture SRVs, CBVs, etc.
+#define DXC_MAX_SRV  1024 // texture SRVs + 16-slot binding blocks (each texture uses 17 slots)
 #define DXC_MAX_SAMPLERS 16
 
 #define SNAP_WINDOWED_MODE_BLOCKSIZE  32

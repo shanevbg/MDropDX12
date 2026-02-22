@@ -38,6 +38,9 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <d3d9.h>
 #include "../ns-eel2-shim/ns-eel.h"
 #include "md_defines.h"
+#include "dx12helpers.h"  // DX12Texture
+
+class DXContext;  // forward declaration
 
 #define TEXMGR_ERROR_MASK                 0x0F
 #define TEXMGR_ERR_SUCCESS                0
@@ -61,6 +64,8 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 typedef struct {
   LPDIRECT3DTEXTURE9     pSurface;
+  DX12Texture            dx12Surface;          // DX12 GPU texture
+  ComPtr<ID3D12Resource> dx12UploadBuf;        // upload buffer (kept alive until KillTex)
   int                    img_w, img_h;
   /*
 int                    tex_w, tex_h;
@@ -96,6 +101,7 @@ public:
 
   // members
   void Init(LPDIRECT3DDEVICE9 lpDD);           // DirectDraw object
+  void InitDX12(DXContext* lpDX);
   int  LoadTex(wchar_t* szFilename, int iSlot, char* szInitCode, char* szCode, float time, int frame, unsigned int ck);
   void KillTex(int iSlot);
   void Finish();
@@ -115,6 +121,7 @@ protected:
 
   // data
   LPDIRECT3DDEVICE9 m_lpDD;
+  DXContext*         m_lpDX12 = nullptr;
 };
 
 #endif
