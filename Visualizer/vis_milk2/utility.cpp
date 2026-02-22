@@ -196,15 +196,7 @@ int GetPentiumTimeRaw(unsigned __int64 *cpu_timestamp)
     // get high-precision time:
     __try
     {
-        unsigned __int64 *dest = (unsigned __int64 *)cpu_timestamp;
-        __asm
-        {
-            _emit 0xf        // these two bytes form the 'rdtsc' asm instruction,
-            _emit 0x31       //  available on Pentium I and later.
-            mov esi, dest
-            mov [esi  ], eax    // lower 32 bits of tsc
-            mov [esi+4], edx    // upper 32 bits of tsc
-        }
+        *cpu_timestamp = __rdtsc();
         return 1;
     }
     __except(EXCEPTION_EXECUTE_HANDLER)
@@ -229,16 +221,7 @@ double GetPentiumTimeAsDouble(unsigned __int64 frequency)
     // get high-precision time:
     __try
     {
-        unsigned __int64 high_perf_time;
-        unsigned __int64 *dest = &high_perf_time;
-        __asm
-        {
-            _emit 0xf        // these two bytes form the 'rdtsc' asm instruction,
-            _emit 0x31       //  available on Pentium I and later.
-            mov esi, dest
-            mov [esi  ], eax    // lower 32 bits of tsc
-            mov [esi+4], edx    // upper 32 bits of tsc
-        }
+        unsigned __int64 high_perf_time = __rdtsc();
         __int64 time_s     = (__int64)(high_perf_time / frequency);  // unsigned->sign conversion should be safe here
         __int64 time_fract = (__int64)(high_perf_time % frequency);  // unsigned->sign conversion should be safe here
         // note: here, we wrap the timer more frequently (once per week)
@@ -574,7 +557,7 @@ BOOL DoExplorerMenu(HWND hwnd, LPITEMIDLIST pidlMain, POINT point) {
 
         // restore old wndProc
         if (g_pOldWndProc) {
-          SetWindowLongPtr(hwnd, GWL_WNDPROC, (LONG_PTR)g_pOldWndProc);
+          SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)g_pOldWndProc);
         }
 
         //

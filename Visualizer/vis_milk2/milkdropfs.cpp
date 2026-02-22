@@ -93,14 +93,18 @@ static void MungeFPCW(WORD* pwOldCW) {
   if (pwOldCW) *pwOldCW = wSave;
   //  return ret;
 #else
-  _controlfp(_PC_24, _MCW_PC); // single precision
+#ifndef _WIN64
+  _controlfp(_PC_24, _MCW_PC); // single precision (x86 only; no-op on x64)
+#endif
   _controlfp(_RC_NEAR, _MCW_RC); // round to nearest mode
   _controlfp(_EM_ZERODIVIDE, _EM_ZERODIVIDE);  // disable divide-by-zero
 #endif
 }
 
 void RestoreFPCW(WORD wSave) {
+#ifndef _WIN64
   __asm fldcw wSave
+#endif
 }
 
 int GetNumToSpawn(float fTime, float fDeltaT, float fRate, float fRegularity, int iNumSpawnedSoFar) {

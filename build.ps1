@@ -1,13 +1,16 @@
 # build.ps1 — Invoke from any shell (Git Bash, cmd, Claude's Bash tool, etc.)
-# Usage:  powershell -ExecutionPolicy Bypass -File build.ps1 [Debug|Release] [Clean]
+# Usage:  powershell -ExecutionPolicy Bypass -File build.ps1 [Debug|Release] [Win32|x64] [Clean]
 #
 # Examples:
-#   powershell -ExecutionPolicy Bypass -File build.ps1            # Debug build
-#   powershell -ExecutionPolicy Bypass -File build.ps1 Release    # Release build
-#   powershell -ExecutionPolicy Bypass -File build.ps1 Debug Clean # Clean then build
+#   powershell -ExecutionPolicy Bypass -File build.ps1                  # Debug Win32 build
+#   powershell -ExecutionPolicy Bypass -File build.ps1 Release          # Release Win32 build
+#   powershell -ExecutionPolicy Bypass -File build.ps1 Debug x64        # Debug x64 build
+#   powershell -ExecutionPolicy Bypass -File build.ps1 Release x64      # Release x64 build
+#   powershell -ExecutionPolicy Bypass -File build.ps1 Debug Win32 Clean # Clean then build
 
 param(
     [string]$Configuration = "Debug",
+    [string]$Platform      = "Win32",  # "Win32" or "x64"
     [string]$Target        = "Build"   # "Build" or "Clean"
 )
 
@@ -33,9 +36,10 @@ if (-not $msbuild -or -not (Test-Path $msbuild)) {
     exit 1
 }
 
-Write-Host "MSBuild : $msbuild"
-Write-Host "Config  : $Configuration"
-Write-Host "Target  : $Target"
+Write-Host "MSBuild  : $msbuild"
+Write-Host "Config   : $Configuration"
+Write-Host "Platform : $Platform"
+Write-Host "Target   : $Target"
 Write-Host ""
 
 # ── 3. Run the build ───────────────────────────────────────────────────────────
@@ -44,7 +48,7 @@ $project = Join-Path $PSScriptRoot "Visualizer\vis_milk2\plugin.vcxproj"
 & $msbuild $project `
     /t:$Target `
     /p:Configuration=$Configuration `
-    /p:Platform=Win32 `
+    /p:Platform=$Platform `
     /p:PlatformToolset=v143 `
     /m `
     /nologo `

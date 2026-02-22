@@ -241,7 +241,7 @@ void CTextManager::DrawBox(LPRECT pRect, DWORD boxColor) {
     return;
 
   if ((m_nMsg[m_b] < MAX_MSGS) &&
-    (DWORD)((DWORD_PTR)m_next_msg_start_ptr - (DWORD_PTR)g_szMsgPool[m_b]) + 0 + 1 < MAX_MSG_CHARS) {
+    (size_t)((DWORD_PTR)m_next_msg_start_ptr - (DWORD_PTR)g_szMsgPool[m_b]) + 0 + 1 < MAX_MSG_CHARS) {
     *m_next_msg_start_ptr = 0;
 
     m_msg[m_b][m_nMsg[m_b]].msg   = m_next_msg_start_ptr;
@@ -286,7 +286,7 @@ int CTextManager::DrawTextW(void* pFont, wchar_t* szText, RECT* pRect, DWORD fla
   int len = (int)wcslen(szText);
 
   if ((m_nMsg[m_b] < MAX_MSGS) &&
-      (DWORD)((DWORD_PTR)m_next_msg_start_ptr - (DWORD_PTR)g_szMsgPool[m_b]) + len + 1 < MAX_MSG_CHARS) {
+      (size_t)((DWORD_PTR)m_next_msg_start_ptr - (DWORD_PTR)g_szMsgPool[m_b]) + len + 1 < MAX_MSG_CHARS) {
     wcscpy(m_next_msg_start_ptr, szText);
 
     td_string& entry = m_msg[m_b][m_nMsg[m_b]];

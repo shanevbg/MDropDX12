@@ -9886,7 +9886,7 @@ char* NextLine(char* p) {
 static unsigned int WINAPI __UpdatePresetList(void* lpVoid) {
   // NOTE - this is run in a separate thread!!!
 
-  DWORD flags = (DWORD)lpVoid;
+  DWORD flags = (DWORD)(uintptr_t)lpVoid;
   bool bForce = (flags & 1) ? true : false;
   bool bTryReselectCurrentPreset = (flags & 2) ? true : false;
 

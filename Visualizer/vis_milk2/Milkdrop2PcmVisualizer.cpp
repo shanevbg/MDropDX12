@@ -319,16 +319,16 @@ void ToggleStretch(HWND hwnd) {
     int top = GetSystemMetrics(SM_YVIRTUALSCREEN);
 
     if (!fullscreen) {
-      lastWindowStyle = GetWindowLong(hwnd, GWL_STYLE);
-      lastWindowStyleEx = GetWindowLongW(hwnd, GWL_EXSTYLE);
+      lastWindowStyle = GetWindowLongPtr(hwnd, GWL_STYLE);
+      lastWindowStyleEx = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
       lastWindowStyleEx &= ~WS_EX_TOPMOST;
       GetWindowRect(hwnd, &lastRect);
     }
 
     g_plugin.SetVariableBackBuffer(width, height);
     // DX12: swap chain resize is triggered by the WM_SIZE handler after SetWindowPos.
-    SetWindowLongW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
-    SetWindowLongW(hwnd, GWL_EXSTYLE, WS_EX_APPWINDOW);
+    SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, WS_EX_APPWINDOW);
     SetWindowPos(hwnd, HWND_NOTOPMOST, left, top, width, height, SWP_DRAWFRAME | SWP_FRAMECHANGED);
     SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
     DragAcceptFiles(hwnd, TRUE);
@@ -348,12 +348,12 @@ void ToggleStretch(HWND hwnd) {
     SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
     stretch = false;
 
-    SetWindowLongW(hwnd, GWL_STYLE, lastWindowStyle);
-    SetWindowLongW(hwnd, GWL_EXSTYLE, lastWindowStyleEx);
+    SetWindowLongPtrW(hwnd, GWL_STYLE, lastWindowStyle);
+    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, lastWindowStyleEx);
     SetWindowPos(hwnd, HWND_NOTOPMOST, lastRect.left, lastRect.top, width, height, SWP_DRAWFRAME | SWP_FRAMECHANGED);
     SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP_DRAWFRAME | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
     if (borderless) {
-      SetWindowLongW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+      SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
       SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, SWP_DRAWFRAME | SWP_FRAMECHANGED);
     }
   }
@@ -522,8 +522,8 @@ static void ToggleFullScreen(HWND hwnd) {
     ShowCursor(FALSE);
 
     if (!stretch) {
-      lastWindowStyle = GetWindowLong(hwnd, GWL_STYLE);
-      lastWindowStyleEx = GetWindowLongW(hwnd, GWL_EXSTYLE);
+      lastWindowStyle = GetWindowLongPtr(hwnd, GWL_STYLE);
+      lastWindowStyleEx = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
       lastWindowStyleEx &= ~WS_EX_TOPMOST;
       GetWindowRect(hwnd, &lastRect);
     }
@@ -538,8 +538,8 @@ static void ToggleFullScreen(HWND hwnd) {
     int width = info.rcMonitor.right - info.rcMonitor.left;
     int height = info.rcMonitor.bottom - info.rcMonitor.top;
 
-    SetWindowLongW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
-    SetWindowLongW(hwnd, GWL_EXSTYLE, WS_EX_APPWINDOW);
+    SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, WS_EX_APPWINDOW);
     SetWindowPos(hwnd, HWND_TOPMOST, info.rcMonitor.left, info.rcMonitor.top, width, height, SWP_DRAWFRAME | SWP_FRAMECHANGED);
 
     g_plugin.SetVariableBackBuffer(width, height);
@@ -562,12 +562,12 @@ static void ToggleFullScreen(HWND hwnd) {
     SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
     fullscreen = false;
 
-    SetWindowLongW(hwnd, GWL_STYLE, lastWindowStyle);
-    SetWindowLongW(hwnd, GWL_EXSTYLE, lastWindowStyleEx);
+    SetWindowLongPtrW(hwnd, GWL_STYLE, lastWindowStyle);
+    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, lastWindowStyleEx);
     SetWindowPos(hwnd, HWND_NOTOPMOST, lastRect.left, lastRect.top, width, height, SWP_DRAWFRAME | SWP_FRAMECHANGED);
     SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP_DRAWFRAME | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
     if (borderless) {
-      SetWindowLongW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+      SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
       SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, SWP_DRAWFRAME | SWP_FRAMECHANGED);
     }
   }
@@ -611,7 +611,7 @@ void ResetWindow(HWND hwnd) {
   SetWindowLongPtr(hwnd, GWL_EXSTYLE, exStyle);
 
   // Reset the window style to a standard overlapped window
-  SetWindowLongW(hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+  SetWindowLongPtrW(hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
 
   // Adjust the window size and position
   SetWindowPos(hwnd, HWND_NOTOPMOST, windowX, windowY, windowWidth, windowHeight, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOACTIVATE);
@@ -658,7 +658,7 @@ static void ToggleBorderlessWindow(HWND hwnd) {
     // Save the current window position and size
 
     // Set the window style to borderless
-    SetWindowLongW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+    SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
 
     // Reapply transparency only if it was present before
     if (wasTransparent) {
@@ -670,7 +670,7 @@ static void ToggleBorderlessWindow(HWND hwnd) {
   }
   else {
     // Restore the previous window style and position
-    SetWindowLongW(hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+    SetWindowLongPtrW(hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
 
     // Reapply transparency only if it was present before
     if (wasTransparent) {
