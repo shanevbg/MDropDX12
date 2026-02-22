@@ -33,6 +33,8 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <strsafe.h>
 #include <cassert>
 #include <cstdio>
+#include <wincodec.h>  // WIC for LoadTextureFromFile
+#include <vector>
 
 // Swap chain back-buffer pixel format
 static const DXGI_FORMAT k_BackBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -196,6 +198,24 @@ bool DXContext::Internal_Init(IDXGIFactory4* factory, HWND hwnd, int width, int 
     if (FAILED(hr)) return false;
     m_commandList->Close();
 
+    // 5b. Dedicated upload allocator + command list + fence for texture creation
+    hr = m_device->CreateCommandAllocator(
+        D3D12_COMMAND_LIST_TYPE_DIRECT,
+        IID_PPV_ARGS(&m_uploadAllocator));
+    if (FAILED(hr)) return false;
+
+    hr = m_device->CreateCommandList(
+        0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+        m_uploadAllocator.Get(), nullptr,
+        IID_PPV_ARGS(&m_uploadCommandList));
+    if (FAILED(hr)) return false;
+    m_uploadCommandList->Close();
+
+    hr = m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_uploadFence));
+    if (FAILED(hr)) return false;
+    m_uploadFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    if (!m_uploadFenceEvent) return false;
+
     // 6. Fence + event for CPU/GPU synchronisation
     {
         hr = m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence));
@@ -220,6 +240,9 @@ bool DXContext::Internal_Init(IDXGIFactory4* factory, HWND hwnd, int width, int 
 
     // 11. Per-frame binding block ranges (Phase 5)
     if (!AllocatePerFrameBindings()) return false;
+
+    // 11b. Per-frame blur binding block ranges
+    if (!AllocateBlurBindings()) return false;
 
     // 12. Populate monitor geometry
     UpdateMonitorWorkRect();
@@ -261,6 +284,10 @@ void DXContext::Internal_CleanUp()
     if (m_fenceEvent) {
         CloseHandle(m_fenceEvent);
         m_fenceEvent = nullptr;
+    }
+    if (m_uploadFenceEvent) {
+        CloseHandle(m_uploadFenceEvent);
+        m_uploadFenceEvent = nullptr;
     }
 }
 
@@ -941,6 +968,193 @@ bool DXContext::CreateNullTexture()
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// CreateTextureFromPixels — synchronous GPU upload from CPU pixel data
+// ---------------------------------------------------------------------------
+DX12Texture DXContext::CreateTextureFromPixels(const void* pixels, UINT width, UINT height,
+                                               UINT srcRowPitch, DXGI_FORMAT format)
+{
+    DX12Texture tex;
+    if (!pixels || width == 0 || height == 0) return tex;
+
+    // 1. Create the GPU texture resource
+    D3D12_RESOURCE_DESC texDesc = {};
+    texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    texDesc.Width = width;
+    texDesc.Height = height;
+    texDesc.DepthOrArraySize = 1;
+    texDesc.MipLevels = 1;
+    texDesc.Format = format;
+    texDesc.SampleDesc.Count = 1;
+    texDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+    D3D12_HEAP_PROPERTIES defaultHeap = {};
+    defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    HRESULT hr = m_device->CreateCommittedResource(
+        &defaultHeap, D3D12_HEAP_FLAG_NONE, &texDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+        IID_PPV_ARGS(&tex.resource));
+    if (FAILED(hr)) return tex;
+
+    // 2. Compute aligned row pitch (D3D12_TEXTURE_DATA_PITCH_ALIGNMENT = 256)
+    UINT bytesPerPixel = 4; // BGRA / RGBA
+    UINT alignedRowPitch = (width * bytesPerPixel + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1)
+                           & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
+    UINT uploadSize = alignedRowPitch * height;
+
+    // 3. Create upload buffer
+    D3D12_RESOURCE_DESC uploadDesc = {};
+    uploadDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    uploadDesc.Width = uploadSize;
+    uploadDesc.Height = 1;
+    uploadDesc.DepthOrArraySize = 1;
+    uploadDesc.MipLevels = 1;
+    uploadDesc.Format = DXGI_FORMAT_UNKNOWN;
+    uploadDesc.SampleDesc.Count = 1;
+    uploadDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    D3D12_HEAP_PROPERTIES uploadHeap = {};
+    uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+    ComPtr<ID3D12Resource> uploadBuf;
+    hr = m_device->CreateCommittedResource(
+        &uploadHeap, D3D12_HEAP_FLAG_NONE, &uploadDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+        IID_PPV_ARGS(&uploadBuf));
+    if (FAILED(hr)) { tex.resource.Reset(); return tex; }
+
+    // 4. Map and copy pixel rows with alignment padding
+    UINT8* mapped = nullptr;
+    uploadBuf->Map(0, nullptr, (void**)&mapped);
+    const UINT8* src = (const UINT8*)pixels;
+    UINT copyPitch = width * bytesPerPixel;
+    for (UINT y = 0; y < height; y++) {
+        memcpy(mapped + y * alignedRowPitch, src + y * srcRowPitch, copyPitch);
+    }
+    uploadBuf->Unmap(0, nullptr);
+
+    // 5. Record copy + barrier on the dedicated upload command list
+    m_uploadAllocator->Reset();
+    m_uploadCommandList->Reset(m_uploadAllocator.Get(), nullptr);
+
+    D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+    srcLoc.pResource = uploadBuf.Get();
+    srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    srcLoc.PlacedFootprint.Footprint.Format = format;
+    srcLoc.PlacedFootprint.Footprint.Width = width;
+    srcLoc.PlacedFootprint.Footprint.Height = height;
+    srcLoc.PlacedFootprint.Footprint.Depth = 1;
+    srcLoc.PlacedFootprint.Footprint.RowPitch = alignedRowPitch;
+
+    D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+    dstLoc.pResource = tex.resource.Get();
+    dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dstLoc.SubresourceIndex = 0;
+
+    m_uploadCommandList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = tex.resource.Get();
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    m_uploadCommandList->ResourceBarrier(1, &barrier);
+
+    m_uploadCommandList->Close();
+    ID3D12CommandList* lists[] = { m_uploadCommandList.Get() };
+    m_commandQueue->ExecuteCommandLists(1, lists);
+
+    // 6. Wait synchronously for the upload to finish (dedicated fence, 5s timeout)
+    m_uploadFenceValue++;
+    m_commandQueue->Signal(m_uploadFence.Get(), m_uploadFenceValue);
+    m_uploadFence->SetEventOnCompletion(m_uploadFenceValue, m_uploadFenceEvent);
+    DWORD waitResult = WaitForSingleObjectEx(m_uploadFenceEvent, 5000, FALSE);
+    if (waitResult == WAIT_TIMEOUT) {
+        DebugLogA("DX12: CreateTextureFromPixels TIMEOUT (5s) — possible GPU hang");
+        tex.resource.Reset();
+        return tex;
+    }
+
+    // 7. Create SRV descriptor
+    D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = AllocateSrvCpu();
+    tex.srvIndex = m_nextFreeSrvSlot;
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = format;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Texture2D.MipLevels = 1;
+    m_device->CreateShaderResourceView(tex.resource.Get(), &srvDesc, srvCpu);
+    AllocateSrvGpu(); // bump counter
+
+    tex.currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    tex.width = width;
+    tex.height = height;
+    tex.format = format;
+
+    return tex;
+}
+
+// ---------------------------------------------------------------------------
+// LoadTextureFromFile — WIC-based image loading to DX12 texture
+// ---------------------------------------------------------------------------
+DX12Texture DXContext::LoadTextureFromFile(const wchar_t* szFilename)
+{
+    DX12Texture tex;
+    if (!szFilename || !szFilename[0]) return tex;
+
+    HRESULT hr;
+
+    // 1. Create WIC factory
+    ComPtr<IWICImagingFactory> wicFactory;
+    hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                          IID_PPV_ARGS(&wicFactory));
+    if (FAILED(hr)) return tex;
+
+    // 2. Create decoder from file
+    ComPtr<IWICBitmapDecoder> decoder;
+    hr = wicFactory->CreateDecoderFromFilename(szFilename, nullptr,
+                                                GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder);
+    if (FAILED(hr)) return tex;
+
+    // 3. Get first frame
+    ComPtr<IWICBitmapFrameDecode> frame;
+    hr = decoder->GetFrame(0, &frame);
+    if (FAILED(hr)) return tex;
+
+    // 4. Convert to 32bpp BGRA
+    ComPtr<IWICFormatConverter> converter;
+    hr = wicFactory->CreateFormatConverter(&converter);
+    if (FAILED(hr)) return tex;
+
+    hr = converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppBGRA,
+                                WICBitmapDitherTypeNone, nullptr, 0.0,
+                                WICBitmapPaletteTypeCustom);
+    if (FAILED(hr)) return tex;
+
+    // 5. Get dimensions and copy pixels
+    UINT w, h;
+    converter->GetSize(&w, &h);
+
+    UINT rowPitch = w * 4;
+    std::vector<BYTE> pixels(rowPitch * h);
+    hr = converter->CopyPixels(nullptr, rowPitch, (UINT)pixels.size(), pixels.data());
+    if (FAILED(hr)) return tex;
+
+    // 6. Upload via CreateTextureFromPixels (BGRA matches DXGI_FORMAT_B8G8R8A8_UNORM)
+    tex = CreateTextureFromPixels(pixels.data(), w, h, rowPitch, DXGI_FORMAT_B8G8R8A8_UNORM);
+
+    if (tex.resource) {
+        char buf[512];
+        sprintf(buf, "DX12: LoadTextureFromFile: %dx%d srv=%u", w, h, tex.srvIndex);
+        DebugLogA(buf);
+    }
+
+    return tex;
+}
+
 void DXContext::CreateBindingBlockForTexture(DX12Texture& tex)
 {
     if (m_nullTexture.srvIndex == UINT_MAX || tex.srvIndex == UINT_MAX) return;
@@ -1027,12 +1241,9 @@ bool DXContext::AllocatePerFrameBindings()
     return true;
 }
 
-void DXContext::UpdatePerFrameBindings(const DX12Texture& warpSrc, UINT warpMainSlot,
-                                       const DX12Texture& compSrc, UINT compMainSlot)
+void DXContext::UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT compSrvSlots[16])
 {
     if (m_perFrameBindingBase == UINT_MAX) return;
-    if (warpMainSlot >= BINDING_BLOCK_SIZE) warpMainSlot = 0;
-    if (compMainSlot >= BINDING_BLOCK_SIZE) compMainSlot = 0;
 
     // Each frame gets 32 slots: [0..15] = warp, [16..31] = comp
     UINT frameBase = m_perFrameBindingBase + m_frameIndex * 2 * BINDING_BLOCK_SIZE;
@@ -1041,30 +1252,36 @@ void DXContext::UpdatePerFrameBindings(const DX12Texture& warpSrc, UINT warpMain
     nullSrc.ptr = m_srvHeap->GetCPUDescriptorHandleForHeapStart().ptr +
                   (SIZE_T)m_nullTexture.srvIndex * m_srvDescriptorSize;
 
-    D3D12_CPU_DESCRIPTOR_HANDLE warpTexSrc;
-    warpTexSrc.ptr = m_srvHeap->GetCPUDescriptorHandleForHeapStart().ptr +
-                     (SIZE_T)warpSrc.srvIndex * m_srvDescriptorSize;
+    D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
 
-    D3D12_CPU_DESCRIPTOR_HANDLE compTexSrc;
-    compTexSrc.ptr = m_srvHeap->GetCPUDescriptorHandleForHeapStart().ptr +
-                     (SIZE_T)compSrc.srvIndex * m_srvDescriptorSize;
-
-    // Warp binding block: warpSrc at warpMainSlot, null elsewhere
+    // Warp binding block
     for (UINT i = 0; i < BINDING_BLOCK_SIZE; i++) {
         D3D12_CPU_DESCRIPTOR_HANDLE dst;
-        dst.ptr = m_srvHeap->GetCPUDescriptorHandleForHeapStart().ptr +
-                  (SIZE_T)(frameBase + i) * m_srvDescriptorSize;
-        m_device->CopyDescriptorsSimple(1, dst, (i == warpMainSlot) ? warpTexSrc : nullSrc,
+        dst.ptr = heapStart.ptr + (SIZE_T)(frameBase + i) * m_srvDescriptorSize;
+
+        D3D12_CPU_DESCRIPTOR_HANDLE src;
+        if (warpSrvSlots[i] != UINT_MAX) {
+            src.ptr = heapStart.ptr + (SIZE_T)warpSrvSlots[i] * m_srvDescriptorSize;
+        } else {
+            src = nullSrc;
+        }
+        m_device->CopyDescriptorsSimple(1, dst, src,
                                          D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     }
 
-    // Comp binding block: compSrc at compMainSlot, null elsewhere
+    // Comp binding block
     UINT compBase = frameBase + BINDING_BLOCK_SIZE;
     for (UINT i = 0; i < BINDING_BLOCK_SIZE; i++) {
         D3D12_CPU_DESCRIPTOR_HANDLE dst;
-        dst.ptr = m_srvHeap->GetCPUDescriptorHandleForHeapStart().ptr +
-                  (SIZE_T)(compBase + i) * m_srvDescriptorSize;
-        m_device->CopyDescriptorsSimple(1, dst, (i == compMainSlot) ? compTexSrc : nullSrc,
+        dst.ptr = heapStart.ptr + (SIZE_T)(compBase + i) * m_srvDescriptorSize;
+
+        D3D12_CPU_DESCRIPTOR_HANDLE src;
+        if (compSrvSlots[i] != UINT_MAX) {
+            src.ptr = heapStart.ptr + (SIZE_T)compSrvSlots[i] * m_srvDescriptorSize;
+        } else {
+            src = nullSrc;
+        }
+        m_device->CopyDescriptorsSimple(1, dst, src,
                                          D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     }
 }
@@ -1081,6 +1298,63 @@ D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetWarpBindingGpuHandle()
 D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetCompBindingGpuHandle()
 {
     UINT slot = m_perFrameBindingBase + m_frameIndex * 2 * BINDING_BLOCK_SIZE + BINDING_BLOCK_SIZE;
+    D3D12_GPU_DESCRIPTOR_HANDLE h;
+    h.ptr = m_srvHeap->GetGPUDescriptorHandleForHeapStart().ptr +
+            (SIZE_T)slot * m_srvDescriptorSize;
+    return h;
+}
+
+// ---------------------------------------------------------------------------
+// Per-frame blur bindings
+// ---------------------------------------------------------------------------
+
+bool DXContext::AllocateBlurBindings()
+{
+    // Reserve 2 frames × MAX_BLUR_PASSES × 16 SRV descriptors
+    m_blurBindingBase = m_nextFreeSrvSlot;
+    m_nextFreeSrvSlot += DXC_FRAME_COUNT * MAX_BLUR_PASSES * BINDING_BLOCK_SIZE;
+    char buf[128];
+    sprintf(buf, "DX12: AllocateBlurBindings: base=%u (reserved %u slots)",
+            m_blurBindingBase, DXC_FRAME_COUNT * MAX_BLUR_PASSES * BINDING_BLOCK_SIZE);
+    DebugLogA(buf);
+    return true;
+}
+
+void DXContext::UpdateBlurPassBinding(UINT passIndex, UINT sourceSrvIndex)
+{
+    if (m_blurBindingBase == UINT_MAX || passIndex >= MAX_BLUR_PASSES) return;
+
+    // Each frame gets MAX_BLUR_PASSES × 16 slots
+    UINT blockBase = m_blurBindingBase +
+                     m_frameIndex * MAX_BLUR_PASSES * BINDING_BLOCK_SIZE +
+                     passIndex * BINDING_BLOCK_SIZE;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE nullSrc;
+    nullSrc.ptr = m_srvHeap->GetCPUDescriptorHandleForHeapStart().ptr +
+                  (SIZE_T)m_nullTexture.srvIndex * m_srvDescriptorSize;
+
+    for (UINT i = 0; i < BINDING_BLOCK_SIZE; i++) {
+        D3D12_CPU_DESCRIPTOR_HANDLE dst;
+        dst.ptr = m_srvHeap->GetCPUDescriptorHandleForHeapStart().ptr +
+                  (SIZE_T)(blockBase + i) * m_srvDescriptorSize;
+
+        if (i == 0 && sourceSrvIndex != UINT_MAX) {
+            // Slot 0 = source texture (sampler_main)
+            D3D12_CPU_DESCRIPTOR_HANDLE src;
+            src.ptr = m_srvHeap->GetCPUDescriptorHandleForHeapStart().ptr +
+                      (SIZE_T)sourceSrvIndex * m_srvDescriptorSize;
+            m_device->CopyDescriptorsSimple(1, dst, src, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        } else {
+            m_device->CopyDescriptorsSimple(1, dst, nullSrc, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        }
+    }
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetBlurPassBindingGpuHandle(UINT passIndex)
+{
+    UINT slot = m_blurBindingBase +
+                m_frameIndex * MAX_BLUR_PASSES * BINDING_BLOCK_SIZE +
+                passIndex * BINDING_BLOCK_SIZE;
     D3D12_GPU_DESCRIPTOR_HANDLE h;
     h.ptr = m_srvHeap->GetGPUDescriptorHandleForHeapStart().ptr +
             (SIZE_T)slot * m_srvDescriptorSize;

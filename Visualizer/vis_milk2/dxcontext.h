@@ -202,6 +202,19 @@ public:
   // CBV upload helper: suballocates from upload buffer with 256-byte alignment, returns GPU VA
   D3D12_GPU_VIRTUAL_ADDRESS UploadConstantBuffer(const void* data, UINT sizeBytes);
 
+  // Dedicated upload command allocator for texture creation (won't conflict with per-frame allocators)
+  ComPtr<ID3D12CommandAllocator>    m_uploadAllocator;
+  ComPtr<ID3D12GraphicsCommandList> m_uploadCommandList;
+  ComPtr<ID3D12Fence>              m_uploadFence;
+  UINT64                           m_uploadFenceValue = 0;
+  HANDLE                           m_uploadFenceEvent = nullptr;
+
+  // Create a DX12 texture from CPU pixel data (synchronous GPU upload)
+  DX12Texture CreateTextureFromPixels(const void* pixels, UINT width, UINT height,
+                                      UINT srcRowPitch, DXGI_FORMAT format);
+  // Load a texture from an image file via WIC
+  DX12Texture LoadTextureFromFile(const wchar_t* szFilename);
+
   // Null texture (1x1 black) for filling unused SRV slots
   DX12Texture m_nullTexture;
   bool CreateNullTexture();
@@ -226,10 +239,16 @@ public:
   // 2 frames × 2 passes (warp + comp) × 16 SRV descriptors = 64 total.
   UINT m_perFrameBindingBase = UINT_MAX;
   bool AllocatePerFrameBindings(); // call once at init, after CreateNullTexture
-  void UpdatePerFrameBindings(const DX12Texture& warpSrc, UINT warpMainSlot,
-                              const DX12Texture& compSrc, UINT compMainSlot);
+  void UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT compSrvSlots[16]);
   D3D12_GPU_DESCRIPTOR_HANDLE GetWarpBindingGpuHandle();
   D3D12_GPU_DESCRIPTOR_HANDLE GetCompBindingGpuHandle();
+
+  // Per-frame blur binding blocks: 2 frames × 6 blur passes × 16 SRV descriptors = 192 total.
+  static const UINT MAX_BLUR_PASSES = 6; // NUM_BLUR_TEX
+  UINT m_blurBindingBase = UINT_MAX;
+  bool AllocateBlurBindings();
+  void UpdateBlurPassBinding(UINT passIndex, UINT sourceSrvIndex);
+  D3D12_GPU_DESCRIPTOR_HANDLE GetBlurPassBindingGpuHandle(UINT passIndex);
 
   // Current frame index within [0, DXC_FRAME_COUNT)
   UINT  m_frameIndex;

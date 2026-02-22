@@ -5,6 +5,7 @@
 // Global VS bytecodes for preset PSO creation
 ID3DBlob* g_pWarpVSBlob = nullptr;
 ID3DBlob* g_pCompVSBlob = nullptr;
+ID3DBlob* g_pBlurVSBlob = nullptr;
 
 static bool CompileShaderFromString(const char* src, const char* entryPoint, const char* target,
                                      ID3DBlob** ppBlob, UINT flags = 0) {
@@ -213,6 +214,10 @@ bool DX12CreatePipelines(ID3D12Device* device, ID3D12RootSignature* rootSig,
     }
     if (!CompileShaderFromString(g_szCompVS, "main", "vs_5_0", &g_pCompVSBlob, D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY)) {
         OutputDebugStringA("DX12: Failed to compile comp VS\n");
+        return false;
+    }
+    if (!CompileShaderFromString(g_szBlurVS, "main", "vs_5_0", &g_pBlurVSBlob, D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY)) {
+        OutputDebugStringA("DX12: Failed to compile blur VS\n");
         return false;
     }
 

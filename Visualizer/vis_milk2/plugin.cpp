@@ -636,6 +636,9 @@ uint64_t LastSentMilkwaveMessage = 0;
 #include "../audio/log.h"
 #include "AMDDetection.h"
 #include <cstdint>
+#include <commctrl.h>  // Trackbar, tab, and list-view controls
+#include <set>
+#pragma comment(lib, "comctl32.lib")
 
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "propsys.lib")
@@ -744,6 +747,54 @@ static SettingDesc g_settingsDesc[] = {
 #define IDC_MW_BORDERLESS    2014
 #define IDC_MW_SPOUT         2015
 #define IDC_MW_CLOSE         2016
+
+// -- Visualization controls --
+#define IDC_MW_OPACITY          2020
+#define IDC_MW_OPACITY_LABEL    2021
+#define IDC_MW_TIME_FACTOR      2022
+#define IDC_MW_FRAME_FACTOR     2023
+#define IDC_MW_FPS_FACTOR       2024
+#define IDC_MW_VIS_INTENSITY    2025
+#define IDC_MW_VIS_SHIFT        2026
+#define IDC_MW_VIS_VERSION      2027
+#define IDC_MW_RENDER_QUALITY   2028
+#define IDC_MW_QUALITY_LABEL    2029
+#define IDC_MW_QUALITY_AUTO     2030
+
+// -- Color Shift controls --
+#define IDC_MW_COL_HUE          2031
+#define IDC_MW_COL_HUE_LABEL    2032
+#define IDC_MW_COL_SAT          2033
+#define IDC_MW_COL_SAT_LABEL    2034
+#define IDC_MW_COL_BRIGHT       2035
+#define IDC_MW_COL_BRIGHT_LABEL 2036
+#define IDC_MW_AUTO_HUE         2037
+#define IDC_MW_AUTO_HUE_SEC     2038
+
+// -- Spout Extended controls --
+#define IDC_MW_SPOUT_FIXED      2040
+#define IDC_MW_SPOUT_WIDTH      2041
+#define IDC_MW_SPOUT_HEIGHT     2042
+#define IDC_MW_TAB              2050
+#define IDC_MW_PRESET_LIST      2051
+#define IDC_MW_PRESET_PREV      2052
+#define IDC_MW_PRESET_NEXT      2053
+#define IDC_MW_PRESET_COPY      2054
+#define IDC_MW_COL_GAMMA        2055
+#define IDC_MW_COL_GAMMA_LABEL  2056
+#define IDC_MW_RESOURCES        2057   // "Resources..." button on General tab
+#define IDC_MW_RESET_VISUAL     2058   // Reset button on Visual tab
+#define IDC_MW_RESET_COLORS     2059   // Reset button on Colors tab
+#define IDC_RV_LISTVIEW         3001   // ListView in resource viewer
+#define IDC_RV_COPY_PATH        3002   // "Copy Path" button
+#define IDC_RV_REFRESH          3003   // "Refresh" button
+
+// Custom messages for thread-safe side effects (settings thread → render thread)
+#define WM_MW_SET_OPACITY       (WM_APP + 1)
+#define WM_MW_SET_ALWAYS_ON_TOP (WM_APP + 2)
+#define WM_MW_TOGGLE_SPOUT      (WM_APP + 3)
+#define WM_MW_RESET_BUFFERS     (WM_APP + 4)
+#define WM_MW_SPOUT_FIXEDSIZE   (WM_APP + 5)
 static const wchar_t* SETTINGS_WND_CLASS = L"MilkwaveSettingsWnd";
 static bool g_bSettingsWndClassRegistered = false;
 
@@ -2243,6 +2294,26 @@ int CPlugin::AllocateMyDX9Stuff() {
       MessageBoxW(GetPluginWindow(), buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
       return false;
     }
+
+    // DX12: Create blur PSOs from compiled blur shader bytecodes
+    if (m_lpDX && m_lpDX->m_device.Get() && m_lpDX->m_rootSignature.Get() && g_pBlurVSBlob) {
+      ID3D12Device* dev = m_lpDX->m_device.Get();
+      ID3D12RootSignature* rs = m_lpDX->m_rootSignature.Get();
+      DXGI_FORMAT fmt = DXGI_FORMAT_R8G8B8A8_UNORM;
+      for (int bi = 0; bi < 2; bi++) {
+        m_dx12BlurPSO[bi].Reset();
+        if (m_BlurShaders[bi].ps.bytecodeBlob) {
+          m_dx12BlurPSO[bi] = DX12CreatePresetPSO(
+            dev, rs, fmt, g_pBlurVSBlob,
+            m_BlurShaders[bi].ps.bytecodeBlob->GetBufferPointer(),
+            (UINT)m_BlurShaders[bi].ps.bytecodeBlob->GetBufferSize(),
+            g_MyVertexLayout, _countof(g_MyVertexLayout), false);
+          char dbg[128];
+          sprintf(dbg, "DX12: Blur PSO[%d] %s", bi, m_dx12BlurPSO[bi] ? "created" : "FAILED");
+          DebugLogA(dbg);
+        }
+      }
+    }
   }
 
   // create m_lpVS[2]
@@ -2910,8 +2981,58 @@ DWORD dwCubicInterpolate(DWORD y0, DWORD y1, DWORD y2, DWORD y3, float t) {
 
 bool CPlugin::AddNoiseTex(const wchar_t* szTexName, int size, int zoom_factor) {
   if (!GetDevice()) {
-    // DX12 migration: skip DX9 noise texture creation but still register
-    // size metadata so shaders can resolve texsize_noise_* constants.
+    // DX12 path: generate noise into CPU buffer, then upload via DX12
+    int RANGE = (zoom_factor > 1) ? 216 : 256;
+    std::vector<DWORD> pixels(size * size);
+    DWORD* dst = pixels.data();
+
+    for (int y = 0; y < size; y++) {
+      LARGE_INTEGER q;
+      QueryPerformanceCounter(&q);
+      srand(q.LowPart ^ q.HighPart ^ rand());
+      for (int x = 0; x < size; x++) {
+        dst[y * size + x] = (((DWORD)(rand() % RANGE) + RANGE / 2) << 24) |
+          (((DWORD)(rand() % RANGE) + RANGE / 2) << 16) |
+          (((DWORD)(rand() % RANGE) + RANGE / 2) << 8) |
+          (((DWORD)(rand() % RANGE) + RANGE / 2));
+      }
+      for (int x = 0; x < size; x++) {
+        int x1 = (rand() ^ q.LowPart) % size;
+        int x2 = (rand() ^ q.HighPart) % size;
+        DWORD temp = dst[y * size + x2];
+        dst[y * size + x2] = dst[y * size + x1];
+        dst[y * size + x1] = temp;
+      }
+    }
+
+    // cubic interpolation smoothing
+    if (zoom_factor > 1) {
+      for (int y = 0; y < size; y += zoom_factor)
+        for (int x = 0; x < size; x++)
+          if (x % zoom_factor) {
+            int base_x = (x / zoom_factor) * zoom_factor + size;
+            DWORD y0 = dst[y * size + ((base_x - zoom_factor) % size)];
+            DWORD y1 = dst[y * size + ((base_x) % size)];
+            DWORD y2 = dst[y * size + ((base_x + zoom_factor) % size)];
+            DWORD y3 = dst[y * size + ((base_x + zoom_factor * 2) % size)];
+            float t = (x % zoom_factor) / (float)zoom_factor;
+            dst[y * size + x] = dwCubicInterpolate(y0, y1, y2, y3, t);
+          }
+
+      for (int x = 0; x < size; x++)
+        for (int y = 0; y < size; y++)
+          if (y % zoom_factor) {
+            int base_y = (y / zoom_factor) * zoom_factor + size;
+            DWORD y0 = dst[((base_y - zoom_factor) % size) * size + x];
+            DWORD y1 = dst[((base_y) % size) * size + x];
+            DWORD y2 = dst[((base_y + zoom_factor) % size) * size + x];
+            DWORD y3 = dst[((base_y + zoom_factor * 2) % size) * size + x];
+            float t = (y % zoom_factor) / (float)zoom_factor;
+            dst[y * size + x] = dwCubicInterpolate(y0, y1, y2, y3, t);
+          }
+    }
+
+    // Upload to GPU — D3DFMT_A8R8G8B8 byte layout matches DXGI_FORMAT_B8G8R8A8_UNORM
     TexInfo x;
     lstrcpyW(x.texname, szTexName);
     x.texptr = NULL;
@@ -2920,7 +3041,10 @@ bool CPlugin::AddNoiseTex(const wchar_t* szTexName, int size, int zoom_factor) {
     x.d = 1;
     x.bEvictable = false;
     x.nAge = m_nPresetsLoadedTotal;
-    x.nSizeInBytes = 0;
+    x.nSizeInBytes = size * size * 4;
+    x.dx12Tex = m_lpDX->CreateTextureFromPixels(pixels.data(), size, size,
+                                                 size * sizeof(DWORD),
+                                                 DXGI_FORMAT_B8G8R8A8_UNORM);
     m_textures.push_back(x);
     return true;
   }
@@ -3258,6 +3382,7 @@ void CShaderParams::Clear() {
   // sampler stages for various PS texture bindings:
   for (int i = 0; i < sizeof(m_texture_bindings) / sizeof(m_texture_bindings[0]); i++) {
     m_texture_bindings[i].texptr = NULL;
+    m_texture_bindings[i].dx12SrvIndex = UINT_MAX;
     m_texcode[i] = TEX_DISK;
   }
 }
@@ -3594,110 +3719,128 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
           if (!wcscmp(g_plugin.m_textures[n].texname, szRootName)) {
             // found a match - texture was already loaded
             m_texture_bindings[cd.RegisterIndex].texptr = g_plugin.m_textures[n].texptr;
+            m_texture_bindings[cd.RegisterIndex].dx12SrvIndex = g_plugin.m_textures[n].dx12Tex.srvIndex;
             // also bump its age down to zero! (for cache mgmt)
             g_plugin.m_textures[n].nAge = g_plugin.m_nPresetsLoadedTotal;
             break;
           }
         }
         // if still not found, load it up / make a new texture
-        if (!m_texture_bindings[cd.RegisterIndex].texptr) {
-          // DX12 migration: skip DX9 texture loading when device is NULL.
-          // We can't create DX9 textures in DX12 mode — the sampler slot
-          // will just sample black at runtime.
-          if (!g_plugin.GetDevice()) {
-            continue;
-          }
-
+        if (!m_texture_bindings[cd.RegisterIndex].texptr &&
+            m_texture_bindings[cd.RegisterIndex].dx12SrvIndex == UINT_MAX) {
           TexInfo x;
           wcsncpy(x.texname, szRootName, 254);
           x.texptr = NULL;
-          //x.texsize_param = NULL;
 
-          // check if we need to evict anything from the cache,
-          // due to our own cache constraints...
-          while (1) {
-            int nTexturesCached = 0;
-            int nBytesCached = 0;
-            int N = g_plugin.m_textures.size();
-            for (int i = 0; i < N; i++)
-              if (g_plugin.m_textures[i].bEvictable && g_plugin.m_textures[i].texptr) {
-                nBytesCached += g_plugin.m_textures[i].nSizeInBytes;
-                nTexturesCached++;
-              }
-            if (nTexturesCached < g_plugin.m_nMaxImages &&
-              nBytesCached < g_plugin.m_nMaxBytes)
-              break;
-            // otherwise, evict now - and loop until we are within the constraints
-            if (!g_plugin.EvictSomeTexture())
-              break; // or if there was nothing to evict, just give up
-          }
-
-          //load the texture
-          wchar_t szFilename[MAX_PATH];
-          for (int z = 0; z < sizeof(texture_exts) / sizeof(texture_exts[0]); z++) {
-            swprintf(szFilename, L"%stextures\\%s.%s", g_plugin.m_szMilkdrop2Path, szRootName, texture_exts[z].c_str());
-            if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
-              // try again, but in presets dir
-              swprintf(szFilename, L"%s%s.%s", g_plugin.m_szPresetDir, szRootName, texture_exts[z].c_str());
-              if (GetFileAttributesW(szFilename) == 0xFFFFFFFF)
-                continue;
-            }
-            D3DXIMAGE_INFO desc;
-
-            // keep trying to load it - if it fails due to memory, evict something and try again.
-            while (1) {
-              HRESULT hr = D3DXCreateTextureFromFileExW(g_plugin.GetDevice(),
-                szFilename,
-                D3DX_DEFAULT_NONPOW2, // w
-                D3DX_DEFAULT_NONPOW2, // h
-                D3DX_DEFAULT,    // # mip levels to gen - all
-                0,  // usage flags
-                D3DFMT_UNKNOWN,
-                D3DPOOL_DEFAULT,
-                D3DX_DEFAULT,     //filter
-                D3DX_DEFAULT,     //mipfilter
-                0,                // color key
-                &desc,
-                NULL,             //palette
-                (IDirect3DTexture9**)&x.texptr
-              );
-              if (hr == D3DERR_OUTOFVIDEOMEMORY || hr == E_OUTOFMEMORY) {
-                // out of memory - try evicting something old and/or big
-                if (g_plugin.EvictSomeTexture())
+          if (!g_plugin.GetDevice()) {
+            // DX12 path: load via WIC
+            wchar_t szFilename[MAX_PATH];
+            bool found = false;
+            for (int z = 0; z < sizeof(texture_exts) / sizeof(texture_exts[0]); z++) {
+              swprintf(szFilename, L"%stextures\\%s.%s", g_plugin.m_szMilkdrop2Path, szRootName, texture_exts[z].c_str());
+              if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
+                swprintf(szFilename, L"%s%s.%s", g_plugin.m_szPresetDir, szRootName, texture_exts[z].c_str());
+                if (GetFileAttributesW(szFilename) == 0xFFFFFFFF)
                   continue;
               }
-
-              if (hr == D3D_OK) {
-                x.w = desc.Width;
-                x.h = desc.Height;
-                x.d = desc.Depth;
+              x.dx12Tex = g_plugin.m_lpDX->LoadTextureFromFile(szFilename);
+              if (x.dx12Tex.resource) {
+                x.w = x.dx12Tex.width;
+                x.h = x.dx12Tex.height;
+                x.d = 1;
                 x.bEvictable = true;
                 x.nAge = g_plugin.m_nPresetsLoadedTotal;
-                int nPixels = desc.Width * desc.Height * max(1, desc.Depth);
-                int BitsPerPixel = GetDX9TexFormatBitsPerPixel(desc.Format);
-                x.nSizeInBytes = nPixels * BitsPerPixel / 8 + 16384;  //plus some overhead
+                x.nSizeInBytes = x.w * x.h * 4 + 16384;
+                found = true;
+                break;
               }
-              break;
+              // WIC couldn't decode this format (e.g. .dds) — try next extension
             }
-          }
 
-          if (!x.texptr) {
-            wchar_t buf[2048], title[64];
-            swprintf(buf, wasabiApiLangString(IDS_COULD_NOT_LOAD_TEXTURE_X), szRootName, szExtsWithSlashes);
-            g_plugin.dumpmsg(buf);
-            if (bHardErrors)
-              MessageBoxW(g_plugin.GetPluginWindow(), buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
-            else {
-              g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
+            if (!found) {
+              wchar_t buf[2048], title[64];
+              swprintf(buf, wasabiApiLangString(IDS_COULD_NOT_LOAD_TEXTURE_X), szRootName, szExtsWithSlashes);
+              g_plugin.dumpmsg(buf);
+              if (bHardErrors)
+                MessageBoxW(g_plugin.GetPluginWindow(), buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
+              else
+                g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
+              continue;
             }
-            // Don't return early — continue so pass 2 can still bind
-            // float4 constants (time, fps, Q-vars, etc.). The missing
-            // texture slot will just sample black at runtime.
-            continue;
-          }
 
-          g_plugin.m_textures.push_back(x);
-          m_texture_bindings[cd.RegisterIndex].texptr = x.texptr;
+            g_plugin.m_textures.push_back(x);
+            m_texture_bindings[cd.RegisterIndex].dx12SrvIndex = x.dx12Tex.srvIndex;
+          } else {
+            // DX9 path: original D3DX texture loading
+
+            // check if we need to evict anything from the cache,
+            // due to our own cache constraints...
+            while (1) {
+              int nTexturesCached = 0;
+              int nBytesCached = 0;
+              int N = g_plugin.m_textures.size();
+              for (int i = 0; i < N; i++)
+                if (g_plugin.m_textures[i].bEvictable && g_plugin.m_textures[i].texptr) {
+                  nBytesCached += g_plugin.m_textures[i].nSizeInBytes;
+                  nTexturesCached++;
+                }
+              if (nTexturesCached < g_plugin.m_nMaxImages &&
+                nBytesCached < g_plugin.m_nMaxBytes)
+                break;
+              if (!g_plugin.EvictSomeTexture())
+                break;
+            }
+
+            //load the texture
+            wchar_t szFilename[MAX_PATH];
+            for (int z = 0; z < sizeof(texture_exts) / sizeof(texture_exts[0]); z++) {
+              swprintf(szFilename, L"%stextures\\%s.%s", g_plugin.m_szMilkdrop2Path, szRootName, texture_exts[z].c_str());
+              if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
+                swprintf(szFilename, L"%s%s.%s", g_plugin.m_szPresetDir, szRootName, texture_exts[z].c_str());
+                if (GetFileAttributesW(szFilename) == 0xFFFFFFFF)
+                  continue;
+              }
+              D3DXIMAGE_INFO desc;
+
+              while (1) {
+                HRESULT hr = D3DXCreateTextureFromFileExW(g_plugin.GetDevice(),
+                  szFilename,
+                  D3DX_DEFAULT_NONPOW2, D3DX_DEFAULT_NONPOW2,
+                  D3DX_DEFAULT, 0, D3DFMT_UNKNOWN, D3DPOOL_DEFAULT,
+                  D3DX_DEFAULT, D3DX_DEFAULT, 0, &desc, NULL,
+                  (IDirect3DTexture9**)&x.texptr);
+                if (hr == D3DERR_OUTOFVIDEOMEMORY || hr == E_OUTOFMEMORY) {
+                  if (g_plugin.EvictSomeTexture())
+                    continue;
+                }
+                if (hr == D3D_OK) {
+                  x.w = desc.Width;
+                  x.h = desc.Height;
+                  x.d = desc.Depth;
+                  x.bEvictable = true;
+                  x.nAge = g_plugin.m_nPresetsLoadedTotal;
+                  int nPixels = desc.Width * desc.Height * max(1, desc.Depth);
+                  int BitsPerPixel = GetDX9TexFormatBitsPerPixel(desc.Format);
+                  x.nSizeInBytes = nPixels * BitsPerPixel / 8 + 16384;
+                }
+                break;
+              }
+            }
+
+            if (!x.texptr) {
+              wchar_t buf[2048], title[64];
+              swprintf(buf, wasabiApiLangString(IDS_COULD_NOT_LOAD_TEXTURE_X), szRootName, szExtsWithSlashes);
+              g_plugin.dumpmsg(buf);
+              if (bHardErrors)
+                MessageBoxW(g_plugin.GetPluginWindow(), buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
+              else
+                g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
+              continue;
+            }
+
+            g_plugin.m_textures.push_back(x);
+            m_texture_bindings[cd.RegisterIndex].texptr = x.texptr;
+          }
         }
       }
     }
@@ -4354,6 +4497,8 @@ void CPlugin::CleanUpMyDX9Stuff(int final_cleanup) {
   m_BlurShaders[0].ps.Clear();
   m_BlurShaders[1].vs.Clear();
   m_BlurShaders[1].ps.Clear();
+  m_dx12BlurPSO[0].Reset();
+  m_dx12BlurPSO[1].Reset();
   /*
   SafeRelease( m_shaders.comp.ptr );
   SafeRelease( m_shaders.warp.ptr );
@@ -6300,6 +6445,23 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
   int rep;
 
   switch (uMsg) {
+  // Settings window thread-safe side effects
+  case WM_MW_SET_OPACITY:
+    SetOpacity(GetPluginWindow());
+    return 0;
+  case WM_MW_SET_ALWAYS_ON_TOP:
+    ToggleAlwaysOnTop(GetPluginWindow());
+    return 0;
+  case WM_MW_TOGGLE_SPOUT:
+    ToggleSpout();
+    return 0;
+  case WM_MW_RESET_BUFFERS:
+    ResetBufferAndFonts();
+    return 0;
+  case WM_MW_SPOUT_FIXEDSIZE:
+    SetSpoutFixedSize(false, true);
+    return 0;
+
   case WM_COPYDATA:
   {
     PCOPYDATASTRUCT pCopyData = (PCOPYDATASTRUCT)lParam;
@@ -6712,7 +6874,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
       }
       return 0;
     case VK_F8:
-      OpenMilkwaveRemote();
+      OpenSettingsWindow();
       return 0;
       // F9 is handled in Milkdrop2PcmVisualizer.cpp
     case VK_F10:
@@ -8721,24 +8883,25 @@ void CPlugin::OpenFolderPickerForPresetDir() {
 // Win32 Settings Window
 //----------------------------------------------------------------------
 
-static HWND CreateLabel(HWND hParent, const wchar_t* text, int x, int y, int w, int h, HFONT hFont) {
-  HWND hw = CreateWindowExW(0, L"STATIC", text, WS_CHILD | WS_VISIBLE | SS_LEFT,
+static HWND CreateLabel(HWND hParent, const wchar_t* text, int x, int y, int w, int h, HFONT hFont, bool visible = true) {
+  DWORD style = WS_CHILD | SS_LEFT | (visible ? WS_VISIBLE : 0);
+  HWND hw = CreateWindowExW(0, L"STATIC", text, style,
     x, y, w, h, hParent, NULL, GetModuleHandle(NULL), NULL);
   if (hw && hFont) SendMessage(hw, WM_SETFONT, (WPARAM)hFont, TRUE);
   return hw;
 }
 
-static HWND CreateEdit(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, DWORD extraStyle = 0) {
-  HWND hw = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", text,
-    WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | extraStyle,
+static HWND CreateEdit(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, DWORD extraStyle = 0, bool visible = true) {
+  DWORD style = WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL | extraStyle | (visible ? WS_VISIBLE : 0);
+  HWND hw = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", text, style,
     x, y, w, h, hParent, (HMENU)(INT_PTR)id, GetModuleHandle(NULL), NULL);
   if (hw && hFont) SendMessage(hw, WM_SETFONT, (WPARAM)hFont, TRUE);
   return hw;
 }
 
-static HWND CreateCheck(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool checked) {
-  HWND hw = CreateWindowExW(0, L"BUTTON", text,
-    WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+static HWND CreateCheck(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool checked, bool visible = true) {
+  DWORD style = WS_CHILD | WS_TABSTOP | BS_AUTOCHECKBOX | (visible ? WS_VISIBLE : 0);
+  HWND hw = CreateWindowExW(0, L"BUTTON", text, style,
     x, y, w, h, hParent, (HMENU)(INT_PTR)id, GetModuleHandle(NULL), NULL);
   if (hw) {
     if (hFont) SendMessage(hw, WM_SETFONT, (WPARAM)hFont, TRUE);
@@ -8747,11 +8910,23 @@ static HWND CreateCheck(HWND hParent, const wchar_t* text, int id, int x, int y,
   return hw;
 }
 
-static HWND CreateBtn(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont) {
-  HWND hw = CreateWindowExW(0, L"BUTTON", text,
-    WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+static HWND CreateBtn(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool visible = true) {
+  DWORD style = WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON | (visible ? WS_VISIBLE : 0);
+  HWND hw = CreateWindowExW(0, L"BUTTON", text, style,
     x, y, w, h, hParent, (HMENU)(INT_PTR)id, GetModuleHandle(NULL), NULL);
   if (hw && hFont) SendMessage(hw, WM_SETFONT, (WPARAM)hFont, TRUE);
+  return hw;
+}
+
+static HWND CreateSlider(HWND hParent, int id, int x, int y, int w, int h,
+                         int rangeMin, int rangeMax, int pos, bool visible = true) {
+  DWORD style = WS_CHILD | WS_TABSTOP | TBS_HORZ | TBS_NOTICKS | (visible ? WS_VISIBLE : 0);
+  HWND hw = CreateWindowExW(0, TRACKBAR_CLASSW, NULL, style,
+    x, y, w, h, hParent, (HMENU)(INT_PTR)id, GetModuleHandle(NULL), NULL);
+  if (hw) {
+    SendMessage(hw, TBM_SETRANGE, TRUE, MAKELPARAM(rangeMin, rangeMax));
+    SendMessage(hw, TBM_SETPOS, TRUE, pos);
+  }
   return hw;
 }
 
@@ -8760,18 +8935,97 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
 
   switch (uMsg) {
   case WM_CLOSE:
-    if (p) {
-      p->m_hSettingsWnd = NULL;
-      // Restore focus to the plugin window so keyboard shortcuts work
-      HWND hPlugin = p->GetPluginWindow();
-      if (hPlugin) SetFocus(hPlugin);
-    }
     DestroyWindow(hWnd);
     return 0;
 
   case WM_DESTROY:
-    if (p) p->m_hSettingsWnd = NULL;
+    if (p) {
+      p->m_hSettingsWnd = NULL;
+      p->m_hSettingsTab = NULL;
+      for (int i = 0; i < 4; i++) p->m_settingsPageCtrls[i].clear();
+      if (p->m_hSettingsFont) { DeleteObject(p->m_hSettingsFont); p->m_hSettingsFont = NULL; }
+      if (p->m_hSettingsFontBold) { DeleteObject(p->m_hSettingsFontBold); p->m_hSettingsFontBold = NULL; }
+    }
+    PostQuitMessage(0);  // exit the settings thread's message loop
     return 0;
+
+  case WM_NOTIFY:
+  {
+    NMHDR* pnm = (NMHDR*)lParam;
+    if (pnm->idFrom == IDC_MW_TAB && pnm->code == TCN_SELCHANGE) {
+      int sel = TabCtrl_GetCurSel(pnm->hwndFrom);
+      if (p) p->ShowSettingsPage(sel);
+    }
+    return 0;
+  }
+
+  case WM_SIZE:
+  {
+    if (wParam == SIZE_MINIMIZED) break;
+    if (p) p->LayoutSettingsControls();
+    return 0;
+  }
+
+  case WM_GETMINMAXINFO:
+  {
+    MINMAXINFO* mmi = (MINMAXINFO*)lParam;
+    mmi->ptMinTrackSize.x = 500;
+    mmi->ptMinTrackSize.y = 450;
+    return 0;
+  }
+
+  case WM_HSCROLL:
+  {
+    HWND hTrack = (HWND)lParam;
+    int id = GetDlgCtrlID(hTrack);
+    int pos = (int)SendMessage(hTrack, TBM_GETPOS, 0, 0);
+    if (!p) break;
+
+    switch (id) {
+    case IDC_MW_OPACITY: {
+      p->fOpacity = pos / 100.0f;
+      wchar_t buf[32]; swprintf(buf, 32, L"%d%%", pos);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_OPACITY_LABEL), buf);
+      HWND hw = p->GetPluginWindow();
+      if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
+      break;
+    }
+    case IDC_MW_RENDER_QUALITY: {
+      p->m_fRenderQuality = pos / 100.0f;
+      wchar_t buf[32]; swprintf(buf, 32, L"%.2f", p->m_fRenderQuality);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_QUALITY_LABEL), buf);
+      HWND hw = p->GetPluginWindow();
+      if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
+      break;
+    }
+    case IDC_MW_COL_HUE: {
+      p->m_ColShiftHue = (pos - 100) / 100.0f;
+      wchar_t buf[32]; swprintf(buf, 32, L"%.2f", p->m_ColShiftHue);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_HUE_LABEL), buf);
+      break;
+    }
+    case IDC_MW_COL_SAT: {
+      p->m_ColShiftSaturation = (pos - 100) / 100.0f;
+      wchar_t buf[32]; swprintf(buf, 32, L"%.2f", p->m_ColShiftSaturation);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_SAT_LABEL), buf);
+      break;
+    }
+    case IDC_MW_COL_BRIGHT: {
+      p->m_ColShiftBrightness = (pos - 100) / 100.0f;
+      wchar_t buf[32]; swprintf(buf, 32, L"%.2f", p->m_ColShiftBrightness);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_BRIGHT_LABEL), buf);
+      break;
+    }
+    case IDC_MW_COL_GAMMA: {
+      float gamma = pos / 10.0f;
+      p->m_pState->m_fGammaAdj = gamma;
+      wchar_t buf[32]; swprintf(buf, 32, L"%.1f", gamma);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_GAMMA_LABEL), buf);
+      break;
+    }
+    }
+    return 0;
+  }
 
   case WM_COMMAND:
   {
@@ -8783,8 +9037,127 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     // Browse button
     if (id == IDC_MW_BROWSE_DIR && code == BN_CLICKED) {
       p->OpenFolderPickerForPresetDir();
-      // Update the edit control with the new path
       SetWindowTextW(GetDlgItem(hWnd, IDC_MW_PRESET_DIR), p->m_szPresetDir);
+      // Repopulate preset listbox after directory change
+      HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
+      if (hList) {
+        SendMessage(hList, LB_RESETCONTENT, 0, 0);
+        for (int i = 0; i < p->m_nPresets; i++) {
+          if (p->m_presets[i].szFilename.empty()) continue;
+          SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
+        }
+        if (p->m_nCurrentPreset >= 0 && p->m_nCurrentPreset < p->m_nPresets)
+          SendMessage(hList, LB_SETCURSEL, p->m_nCurrentPreset, 0);
+      }
+      return 0;
+    }
+
+    // Preset listbox selection
+    if (id == IDC_MW_PRESET_LIST && code == LBN_SELCHANGE) {
+      int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
+      if (sel >= 0 && sel < p->m_nPresets) {
+        wchar_t szFile[MAX_PATH];
+        swprintf(szFile, MAX_PATH, L"%s%s", p->m_szPresetDir, p->m_presets[sel].szFilename.c_str());
+        p->LoadPreset(szFile, p->m_fBlendTimeUser);
+      }
+      return 0;
+    }
+
+    // Preset nav: prev
+    if (id == IDC_MW_PRESET_PREV && code == BN_CLICKED) {
+      p->PrevPreset(p->m_fBlendTimeUser);
+      HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
+      if (hList && p->m_nCurrentPreset >= 0)
+        SendMessage(hList, LB_SETCURSEL, p->m_nCurrentPreset, 0);
+      return 0;
+    }
+
+    // Preset nav: next
+    if (id == IDC_MW_PRESET_NEXT && code == BN_CLICKED) {
+      p->NextPreset(p->m_fBlendTimeUser);
+      HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
+      if (hList && p->m_nCurrentPreset >= 0)
+        SendMessage(hList, LB_SETCURSEL, p->m_nCurrentPreset, 0);
+      return 0;
+    }
+
+    // Preset nav: copy path to clipboard
+    if (id == IDC_MW_PRESET_COPY && code == BN_CLICKED) {
+      HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
+      int sel = hList ? (int)SendMessage(hList, LB_GETCURSEL, 0, 0) : -1;
+      if (sel >= 0 && sel < p->m_nPresets) {
+        wchar_t szFile[MAX_PATH];
+        swprintf(szFile, MAX_PATH, L"%s%s", p->m_szPresetDir, p->m_presets[sel].szFilename.c_str());
+        if (OpenClipboard(hWnd)) {
+          EmptyClipboard();
+          size_t len = (wcslen(szFile) + 1) * sizeof(wchar_t);
+          HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
+          if (hMem) {
+            memcpy(GlobalLock(hMem), szFile, len);
+            GlobalUnlock(hMem);
+            SetClipboardData(CF_UNICODETEXT, hMem);
+          }
+          CloseClipboard();
+        }
+      }
+      return 0;
+    }
+
+    if (id == IDC_MW_RESOURCES && code == BN_CLICKED) {
+      p->OpenResourceViewer();
+      return 0;
+    }
+
+    if (id == IDC_MW_RESET_VISUAL && code == BN_CLICKED) {
+      p->fOpacity = 1.0f;
+      p->m_fRenderQuality = 1.0f;
+      p->bQualityAuto = false;
+      p->m_timeFactor = 1.0f;
+      p->m_frameFactor = 1.0f;
+      p->m_fpsFactor = 1.0f;
+      p->m_VisIntensity = 1.0f;
+      p->m_VisShift = 0.0f;
+      p->m_VisVersion = 1.0f;
+      // Update sliders
+      SendMessage(GetDlgItem(hWnd, IDC_MW_OPACITY), TBM_SETPOS, TRUE, 100);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_OPACITY_LABEL), L"100%");
+      SendMessage(GetDlgItem(hWnd, IDC_MW_RENDER_QUALITY), TBM_SETPOS, TRUE, 100);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_QUALITY_LABEL), L"1.00");
+      // Update checkbox
+      SendMessage(GetDlgItem(hWnd, IDC_MW_QUALITY_AUTO), BM_SETCHECK, BST_UNCHECKED, 0);
+      // Update edit boxes
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_TIME_FACTOR), L"1.00");
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_FRAME_FACTOR), L"1.00");
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_FPS_FACTOR), L"1.00");
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_INTENSITY), L"1.00");
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_SHIFT), L"0.00");
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_VERSION), L"1");
+      // Apply side-effects
+      HWND hw = p->GetPluginWindow();
+      if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
+      if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
+      return 0;
+    }
+
+    if (id == IDC_MW_RESET_COLORS && code == BN_CLICKED) {
+      p->m_ColShiftHue = 0.0f;
+      p->m_ColShiftSaturation = 0.0f;
+      p->m_ColShiftBrightness = 0.0f;
+      if (p->m_pState) p->m_pState->m_fGammaAdj = 2.0f;
+      p->m_AutoHue = false;
+      p->m_AutoHueSeconds = 0.02f;
+      // Update sliders (H/S/B center=100, gamma 2.0 = pos 20)
+      SendMessage(GetDlgItem(hWnd, IDC_MW_COL_HUE), TBM_SETPOS, TRUE, 100);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_HUE_LABEL), L"0.00");
+      SendMessage(GetDlgItem(hWnd, IDC_MW_COL_SAT), TBM_SETPOS, TRUE, 100);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_SAT_LABEL), L"0.00");
+      SendMessage(GetDlgItem(hWnd, IDC_MW_COL_BRIGHT), TBM_SETPOS, TRUE, 100);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_BRIGHT_LABEL), L"0.00");
+      SendMessage(GetDlgItem(hWnd, IDC_MW_COL_GAMMA), TBM_SETPOS, TRUE, 20);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_GAMMA_LABEL), L"2.0");
+      // Update checkbox and edit
+      SendMessage(GetDlgItem(hWnd, IDC_MW_AUTO_HUE), BM_SETCHECK, BST_UNCHECKED, 0);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_AUTO_HUE_SEC), L"0.020");
       return 0;
     }
 
@@ -8797,7 +9170,6 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         SendMessageW(hCombo, CB_GETLBTEXT, sel, (LPARAM)deviceName);
 
         if (sel == 0) {
-          // "(Default)" selected — clear device name to use system default
           wcscpy_s(p->m_szAudioDevicePrevious, p->m_szAudioDevice);
           p->m_nAudioDevicePreviousType = p->m_nAudioDeviceActiveType;
           p->m_szAudioDevice[0] = L'\0';
@@ -8805,7 +9177,6 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
           p->SetAudioDeviceDisplayName(NULL, true);
         }
         else {
-          // Check if it's an input device (ends with " [Input]")
           bool isInput = false;
           wchar_t cleanName[MAX_PATH];
           lstrcpyW(cleanName, deviceName);
@@ -8816,21 +9187,16 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
             cleanName[len - suffixLen] = L'\0';
             isInput = true;
           }
-
           wcscpy_s(p->m_szAudioDevicePrevious, p->m_szAudioDevice);
           p->m_nAudioDevicePreviousType = p->m_nAudioDeviceActiveType;
           wcscpy_s(p->m_szAudioDevice, cleanName);
           p->m_nAudioDeviceRequestType = isInput ? 1 : 2;
           p->SetAudioDeviceDisplayName(cleanName, !isInput);
         }
-
-        // Save to INI
         WritePrivateProfileStringW(L"Milkwave", L"AudioDevice", p->m_szAudioDevice, p->GetConfigIniFile());
         wchar_t reqBuf[16];
         swprintf(reqBuf, 16, L"%d", p->m_nAudioDeviceRequestType);
         WritePrivateProfileStringW(L"Milkwave", L"AudioDeviceRequestType", reqBuf, p->GetConfigIniFile());
-
-        // Restart audio capture
         p->m_nAudioLoopState = 1;
         p->AddNotificationAudioDevice();
       }
@@ -8846,6 +9212,7 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     // Checkbox toggles — save immediately
     if (code == BN_CLICKED) {
       bool bChecked = (SendMessage((HWND)lParam, BM_GETCHECK, 0, 0) == BST_CHECKED);
+      HWND hw = p->GetPluginWindow();
       switch (id) {
       case IDC_MW_HARD_CUTS:
         p->m_bHardCutsDisabled = bChecked;
@@ -8874,15 +9241,27 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       case IDC_MW_ALWAYS_TOP:
         p->m_bAlwaysOnTop = bChecked;
         p->SaveSettingToINI(SET_ALWAYS_ON_TOP);
-        p->ToggleAlwaysOnTop(p->GetPluginWindow());
+        if (hw) PostMessage(hw, WM_MW_SET_ALWAYS_ON_TOP, 0, 0);
         return 0;
       case IDC_MW_BORDERLESS:
         p->m_WindowBorderless = bChecked;
         p->SaveSettingToINI(SET_BORDERLESS);
         return 0;
       case IDC_MW_SPOUT:
-        p->bSpoutOut = bChecked;
-        p->SaveSettingToINI(SET_SPOUT);
+        if (bChecked != p->bSpoutOut) {
+          if (hw) PostMessage(hw, WM_MW_TOGGLE_SPOUT, 0, 0);
+        }
+        return 0;
+      case IDC_MW_QUALITY_AUTO:
+        p->bQualityAuto = bChecked;
+        if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
+        return 0;
+      case IDC_MW_AUTO_HUE:
+        p->m_AutoHue = bChecked;
+        return 0;
+      case IDC_MW_SPOUT_FIXED:
+        p->bSpoutFixedSize = bChecked;
+        if (hw) PostMessage(hw, WM_MW_SPOUT_FIXEDSIZE, 0, 0);
         return 0;
       }
     }
@@ -8891,6 +9270,7 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     if (code == EN_KILLFOCUS) {
       wchar_t buf[64];
       GetWindowTextW((HWND)lParam, buf, 64);
+      HWND hw = p->GetPluginWindow();
       switch (id) {
       case IDC_MW_AUDIO_SENS:
         p->m_fAudioSensitivity = (float)_wtof(buf);
@@ -8911,41 +9291,48 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         if (p->m_fTimeBetweenPresets > 300) p->m_fTimeBetweenPresets = 300;
         p->SaveSettingToINI(SET_TIME_BETWEEN);
         return 0;
+      case IDC_MW_TIME_FACTOR:
+        p->m_timeFactor = (float)_wtof(buf);
+        return 0;
+      case IDC_MW_FRAME_FACTOR:
+        p->m_frameFactor = (float)_wtof(buf);
+        return 0;
+      case IDC_MW_FPS_FACTOR:
+        p->m_fpsFactor = (float)_wtof(buf);
+        return 0;
+      case IDC_MW_VIS_INTENSITY:
+        p->m_VisIntensity = (float)_wtof(buf);
+        return 0;
+      case IDC_MW_VIS_SHIFT:
+        p->m_VisShift = (float)_wtof(buf);
+        return 0;
+      case IDC_MW_VIS_VERSION:
+        p->m_VisVersion = (float)_wtof(buf);
+        return 0;
+      case IDC_MW_AUTO_HUE_SEC:
+        p->m_AutoHueSeconds = (float)_wtof(buf);
+        if (p->m_AutoHueSeconds < 0.001f) p->m_AutoHueSeconds = 0.001f;
+        return 0;
+      case IDC_MW_SPOUT_WIDTH:
+        p->nSpoutFixedWidth = _wtoi(buf);
+        if (p->nSpoutFixedWidth < 64) p->nSpoutFixedWidth = 64;
+        if (p->nSpoutFixedWidth > 7680) p->nSpoutFixedWidth = 7680;
+        if (hw) PostMessage(hw, WM_MW_SPOUT_FIXEDSIZE, 0, 0);
+        return 0;
+      case IDC_MW_SPOUT_HEIGHT:
+        p->nSpoutFixedHeight = _wtoi(buf);
+        if (p->nSpoutFixedHeight < 64) p->nSpoutFixedHeight = 64;
+        if (p->nSpoutFixedHeight > 4320) p->nSpoutFixedHeight = 4320;
+        if (hw) PostMessage(hw, WM_MW_SPOUT_FIXEDSIZE, 0, 0);
+        return 0;
       }
     }
     break;
   }
 
-  case WM_CTLCOLORSTATIC:
-  case WM_CTLCOLORBTN:
-  {
-    HDC hdc = (HDC)wParam;
-    SetBkColor(hdc, RGB(30, 30, 30));
-    SetTextColor(hdc, RGB(220, 220, 220));
-    static HBRUSH hBrush = CreateSolidBrush(RGB(30, 30, 30));
-    return (LRESULT)hBrush;
+  // Use default Windows theme colors for all controls
   }
-  case WM_CTLCOLOREDIT:
-  case WM_CTLCOLORLISTBOX:
-  {
-    HDC hdc = (HDC)wParam;
-    SetBkColor(hdc, RGB(50, 50, 50));
-    SetTextColor(hdc, RGB(240, 240, 240));
-    static HBRUSH hBrush = CreateSolidBrush(RGB(50, 50, 50));
-    return (LRESULT)hBrush;
-  }
-  case WM_ERASEBKGND:
-  {
-    HDC hdc = (HDC)wParam;
-    RECT rc;
-    GetClientRect(hWnd, &rc);
-    HBRUSH hBrush = CreateSolidBrush(RGB(30, 30, 30));
-    FillRect(hdc, &rc, hBrush);
-    DeleteObject(hBrush);
-    return 1;
-  }
-  }
-  return DefWindowProc(hWnd, uMsg, wParam, lParam);
+  return DefWindowProcW(hWnd, uMsg, wParam, lParam);
 }
 
 // Enumerate audio devices into a combo box. Returns the index of the current device, or -1.
@@ -9029,25 +9416,35 @@ void CPlugin::OpenSettingsWindow() {
     SetForegroundWindow(m_hSettingsWnd);
     return;
   }
+  if (m_bSettingsThreadRunning.load()) return;
 
-  // Register window class once
-  if (!g_bSettingsWndClassRegistered) {
-    WNDCLASSEXW wc = {};
-    wc.cbSize = sizeof(wc);
-    wc.lpfnWndProc = SettingsWndProc;
-    wc.hInstance = GetModuleHandle(NULL);
-    wc.lpszClassName = SETTINGS_WND_CLASS;
-    wc.hbrBackground = (HBRUSH)GetStockObject(NULL_BRUSH);
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-    if (RegisterClassExW(&wc))
-      g_bSettingsWndClassRegistered = true;
-    else
-      return;
-  }
+  // Join any previous thread
+  if (m_settingsThread.joinable())
+    m_settingsThread.join();
 
-  // Create window centered on screen
-  int wndW = 440, wndH = 580;
+  m_settingsThread = std::thread(&CPlugin::CreateSettingsWindowOnThread, this);
+}
+
+void CPlugin::CreateSettingsWindowOnThread() {
+  m_bSettingsThreadRunning.store(true);
+  CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+  // Register window class (idempotent)
+  WNDCLASSEXW wc = {};
+  wc.cbSize = sizeof(wc);
+  wc.lpfnWndProc = SettingsWndProc;
+  wc.hInstance = GetModuleHandle(NULL);
+  wc.lpszClassName = SETTINGS_WND_CLASS;
+  wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+  wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+  wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+  RegisterClassExW(&wc);
+
+  // Init common controls for trackbar and tab support
+  INITCOMMONCONTROLSEX icex = { sizeof(icex), ICC_BAR_CLASSES | ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES };
+  InitCommonControlsEx(&icex);
+
+  int wndW = 600, wndH = 550;
   int screenW = GetSystemMetrics(SM_CXSCREEN);
   int screenH = GetSystemMetrics(SM_CYSCREEN);
   int posX = (screenW - wndW) / 2;
@@ -9056,110 +9453,730 @@ void CPlugin::OpenSettingsWindow() {
   m_hSettingsWnd = CreateWindowExW(
     WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
     SETTINGS_WND_CLASS, L"Milkwave Settings",
-    WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+    WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
     posX, posY, wndW, wndH,
     NULL, NULL, GetModuleHandle(NULL), NULL);
 
-  if (!m_hSettingsWnd) return;
+  if (!m_hSettingsWnd) {
+    CoUninitialize();
+    m_bSettingsThreadRunning.store(false);
+    return;
+  }
 
   SetWindowLongPtr(m_hSettingsWnd, GWLP_USERDATA, (LONG_PTR)this);
-
-  // Create fonts for controls
-  HFONT hFont = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-
-  HFONT hFontBold = CreateFontW(-14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-
-  int x = 12, y = 10, lw = 120, rw = wndW - 36;
-  int lineH = 24, gap = 6;
-
-  // --- Preset Directory ---
-  CreateLabel(m_hSettingsWnd, L"Preset Directory:", x, y, rw, lineH, hFontBold);
-  y += lineH;
-  CreateEdit(m_hSettingsWnd, m_szPresetDir, IDC_MW_PRESET_DIR, x, y, rw - 70, lineH, hFont, ES_READONLY);
-  CreateBtn(m_hSettingsWnd, L"Browse", IDC_MW_BROWSE_DIR, x + rw - 65, y, 65, lineH, hFont);
-  y += lineH + gap + 4;
-
-  // --- Audio Device (combo box) ---
-  CreateLabel(m_hSettingsWnd, L"Audio Device:", x, y, rw, lineH, hFontBold);
-  y += lineH;
-  {
-    HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
-      WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
-      x, y, rw, 200, m_hSettingsWnd, (HMENU)(INT_PTR)IDC_MW_AUDIO_DEVICE, GetModuleHandle(NULL), NULL);
-    if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
-    EnumAudioDevicesIntoCombo(hCombo, m_szAudioDevice);
-  }
-  y += lineH + gap + 8;
-
-  // --- Numeric settings ---
-  CreateLabel(m_hSettingsWnd, L"Audio Sensitivity:", x, y, lw + 20, lineH, hFont);
-  { wchar_t buf[32]; swprintf(buf, 32, L"%.0f", m_fAudioSensitivity);
-    CreateEdit(m_hSettingsWnd, buf, IDC_MW_AUDIO_SENS, x + lw + 24, y, 60, lineH, hFont); }
-  y += lineH + gap;
-
-  CreateLabel(m_hSettingsWnd, L"Blend Time (s):", x, y, lw + 20, lineH, hFont);
-  { wchar_t buf[32]; swprintf(buf, 32, L"%.1f", m_fBlendTimeAuto);
-    CreateEdit(m_hSettingsWnd, buf, IDC_MW_BLEND_TIME, x + lw + 24, y, 60, lineH, hFont); }
-  y += lineH + gap;
-
-  CreateLabel(m_hSettingsWnd, L"Time Between (s):", x, y, lw + 20, lineH, hFont);
-  { wchar_t buf[32]; swprintf(buf, 32, L"%.0f", m_fTimeBetweenPresets);
-    CreateEdit(m_hSettingsWnd, buf, IDC_MW_TIME_BETWEEN, x + lw + 24, y, 60, lineH, hFont); }
-  y += lineH + gap + 8;
-
-  // --- Checkboxes ---
-  CreateCheck(m_hSettingsWnd, L"Hard Cuts Disabled",      IDC_MW_HARD_CUTS,    x, y, rw, lineH, hFont, m_bHardCutsDisabled); y += lineH + 2;
-  CreateCheck(m_hSettingsWnd, L"Preset Lock on Startup",  IDC_MW_PRESET_LOCK,  x, y, rw, lineH, hFont, m_bPresetLockOnAtStartup); y += lineH + 2;
-  CreateCheck(m_hSettingsWnd, L"Sequential Preset Order", IDC_MW_SEQ_ORDER,    x, y, rw, lineH, hFont, m_bSequentialPresetOrder); y += lineH + 2;
-  CreateCheck(m_hSettingsWnd, L"Song Title Animations",   IDC_MW_SONG_TITLE,   x, y, rw, lineH, hFont, m_bSongTitleAnims); y += lineH + 2;
-  CreateCheck(m_hSettingsWnd, L"Change Preset w/ Song",   IDC_MW_CHANGE_SONG,  x, y, rw, lineH, hFont, m_ChangePresetWithSong); y += lineH + 2;
-  CreateCheck(m_hSettingsWnd, L"Show FPS",                IDC_MW_SHOW_FPS,     x, y, rw, lineH, hFont, m_bShowFPS); y += lineH + 2;
-  CreateCheck(m_hSettingsWnd, L"Always On Top",           IDC_MW_ALWAYS_TOP,   x, y, rw, lineH, hFont, m_bAlwaysOnTop); y += lineH + 2;
-  CreateCheck(m_hSettingsWnd, L"Borderless Window",       IDC_MW_BORDERLESS,   x, y, rw, lineH, hFont, m_WindowBorderless); y += lineH + 2;
-  CreateCheck(m_hSettingsWnd, L"Spout Output",            IDC_MW_SPOUT,        x, y, rw, lineH, hFont, bSpoutOut); y += lineH + gap + 8;
-
-  // --- Close button ---
-  CreateBtn(m_hSettingsWnd, L"Close", IDC_MW_CLOSE, wndW / 2 - 50, y, 100, 30, hFontBold);
+  BuildSettingsControls();
 
   ShowWindow(m_hSettingsWnd, SW_SHOW);
   UpdateWindow(m_hSettingsWnd);
+
+  // Own message pump on this thread
+  MSG msg;
+  while (GetMessage(&msg, NULL, 0, 0)) {
+    if (!IsDialogMessage(m_hSettingsWnd, &msg)) {
+      TranslateMessage(&msg);
+      DispatchMessage(&msg);
+    }
+  }
+
+  m_hSettingsWnd = NULL;
+  CoUninitialize();
+  m_bSettingsThreadRunning.store(false);
+}
+
+void CPlugin::BuildSettingsControls() {
+  HWND hw = m_hSettingsWnd;
+  if (!hw) return;
+
+  // Clear previous page control lists
+  for (int i = 0; i < 4; i++) m_settingsPageCtrls[i].clear();
+
+  RECT rcWnd;
+  GetClientRect(hw, &rcWnd);
+  int clientW = rcWnd.right;
+  int clientH = rcWnd.bottom;
+
+  // Create fonts (cached for LayoutSettingsControls)
+  if (m_hSettingsFont) DeleteObject(m_hSettingsFont);
+  m_hSettingsFont = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  if (m_hSettingsFontBold) DeleteObject(m_hSettingsFontBold);
+  m_hSettingsFontBold = CreateFontW(-14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  HFONT hFont = m_hSettingsFont;
+  HFONT hFontBold = m_hSettingsFontBold;
+
+  // Create tab control
+  m_hSettingsTab = CreateWindowExW(0, WC_TABCONTROLW, NULL,
+    WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
+    0, 0, clientW, clientH, hw, (HMENU)(INT_PTR)IDC_MW_TAB,
+    GetModuleHandle(NULL), NULL);
+  SendMessage(m_hSettingsTab, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+  // Insert tab pages (use TCM_INSERTITEMW explicitly — project is _MBCS, not UNICODE)
+  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"Sound" };
+  for (int i = 0; i < 4; i++) {
+    TCITEMW ti = {};
+    ti.mask = TCIF_TEXT;
+    ti.pszText = (LPWSTR)tabNames[i];
+    SendMessageW(m_hSettingsTab, TCM_INSERTITEMW, i, (LPARAM)&ti);
+  }
+
+  // Get the display area below tab headers
+  RECT rcDisplay = { 0, 0, clientW, clientH };
+  TabCtrl_AdjustRect(m_hSettingsTab, FALSE, &rcDisplay);
+  int tabTop = rcDisplay.top;
+
+  int x = 16, lw = 140, lineH = 24, gap = 6;
+  int rw = clientW - 36;
+  int sliderW = rw - lw - 60;
+  wchar_t buf[64];
+  int y;
+
+  // Helper: track control for a page. All controls are children of hw (main window).
+  // Pages 1-3 are created hidden; ShowSettingsPage(0) is called at the end.
+  #define PAGE_CTRL(page, expr) do { HWND _h = (expr); if (_h) m_settingsPageCtrls[page].push_back(_h); } while(0)
+
+  // ====== PAGE 0: General ======
+  y = tabTop + 10;
+
+  // Preset directory + browse
+  PAGE_CTRL(0, CreateLabel(hw, L"Preset Directory:", x, y, rw, lineH, hFont));
+  y += lineH;
+  PAGE_CTRL(0, CreateEdit(hw, m_szPresetDir, IDC_MW_PRESET_DIR, x, y, rw - 70, lineH, hFont, ES_READONLY));
+  PAGE_CTRL(0, CreateBtn(hw, L"Browse", IDC_MW_BROWSE_DIR, x + rw - 65, y, 65, lineH, hFont));
+  y += lineH + gap;
+
+  // Preset listbox
+  {
+    int listH = 8 * lineH;  // ~192px
+    HWND hList = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", NULL,
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
+      x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_PRESET_LIST, GetModuleHandle(NULL), NULL);
+    if (hList && hFont) SendMessage(hList, WM_SETFONT, (WPARAM)hFont, TRUE);
+    // Populate with preset filenames
+    for (int i = 0; i < m_nPresets; i++) {
+      if (m_presets[i].szFilename.empty()) continue;
+      SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)m_presets[i].szFilename.c_str());
+    }
+    // Select current preset
+    if (m_nCurrentPreset >= 0 && m_nCurrentPreset < m_nPresets)
+      SendMessage(hList, LB_SETCURSEL, m_nCurrentPreset, 0);
+    PAGE_CTRL(0, hList);
+    y += listH + gap;
+  }
+
+  // Nav buttons: ◄  ►  ✂ (copy path)
+  {
+    int btnW = 40;
+    int btnGap = 6;
+    PAGE_CTRL(0, CreateBtn(hw, L"\x25C4", IDC_MW_PRESET_PREV, x, y, btnW, lineH + 4, hFont));
+    PAGE_CTRL(0, CreateBtn(hw, L"\x25BA", IDC_MW_PRESET_NEXT, x + btnW + btnGap, y, btnW, lineH + 4, hFont));
+    PAGE_CTRL(0, CreateBtn(hw, L"\x2702", IDC_MW_PRESET_COPY, x + 2 * (btnW + btnGap), y, btnW, lineH + 4, hFont));
+    y += lineH + 4 + gap + 4;
+  }
+
+  // Settings
+  PAGE_CTRL(0, CreateLabel(hw, L"Audio Sensitivity:", x, y, lw, lineH, hFont));
+  swprintf(buf, 64, L"%.0f", m_fAudioSensitivity);
+  PAGE_CTRL(0, CreateEdit(hw, buf, IDC_MW_AUDIO_SENS, x + lw + 4, y, 60, lineH, hFont));
+  y += lineH + gap;
+
+  PAGE_CTRL(0, CreateLabel(hw, L"Blend Time (s):", x, y, lw, lineH, hFont));
+  swprintf(buf, 64, L"%.1f", m_fBlendTimeAuto);
+  PAGE_CTRL(0, CreateEdit(hw, buf, IDC_MW_BLEND_TIME, x + lw + 4, y, 60, lineH, hFont));
+  y += lineH + gap;
+
+  PAGE_CTRL(0, CreateLabel(hw, L"Time Between (s):", x, y, lw, lineH, hFont));
+  swprintf(buf, 64, L"%.0f", m_fTimeBetweenPresets);
+  PAGE_CTRL(0, CreateEdit(hw, buf, IDC_MW_TIME_BETWEEN, x + lw + 4, y, 60, lineH, hFont));
+  y += lineH + gap + 4;
+
+  PAGE_CTRL(0, CreateCheck(hw, L"Hard Cuts Disabled",      IDC_MW_HARD_CUTS,    x, y, rw, lineH, hFont, m_bHardCutsDisabled)); y += lineH + 2;
+  PAGE_CTRL(0, CreateCheck(hw, L"Preset Lock on Startup",  IDC_MW_PRESET_LOCK,  x, y, rw, lineH, hFont, m_bPresetLockOnAtStartup)); y += lineH + 2;
+  PAGE_CTRL(0, CreateCheck(hw, L"Sequential Preset Order", IDC_MW_SEQ_ORDER,    x, y, rw, lineH, hFont, m_bSequentialPresetOrder)); y += lineH + 2;
+  PAGE_CTRL(0, CreateCheck(hw, L"Song Title Animations",   IDC_MW_SONG_TITLE,   x, y, rw, lineH, hFont, m_bSongTitleAnims)); y += lineH + 2;
+  PAGE_CTRL(0, CreateCheck(hw, L"Change Preset w/ Song",   IDC_MW_CHANGE_SONG,  x, y, rw, lineH, hFont, m_ChangePresetWithSong)); y += lineH + 2;
+  PAGE_CTRL(0, CreateCheck(hw, L"Show FPS",                IDC_MW_SHOW_FPS,     x, y, rw, lineH, hFont, m_bShowFPS)); y += lineH + 2;
+  PAGE_CTRL(0, CreateCheck(hw, L"Always On Top",           IDC_MW_ALWAYS_TOP,   x, y, rw, lineH, hFont, m_bAlwaysOnTop)); y += lineH + 2;
+  PAGE_CTRL(0, CreateCheck(hw, L"Borderless Window",       IDC_MW_BORDERLESS,   x, y, rw, lineH, hFont, m_WindowBorderless));
+  y += lineH + gap + 4;
+  PAGE_CTRL(0, CreateBtn(hw, L"Resources...", IDC_MW_RESOURCES, x, y, 120, lineH, hFont));
+
+  // ====== PAGE 1: Visual (created hidden) ======
+  y = tabTop + 10;
+
+  PAGE_CTRL(1, CreateLabel(hw, L"Opacity:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(1, CreateSlider(hw, IDC_MW_OPACITY, x + lw + 4, y, sliderW, lineH, 0, 100, (int)(fOpacity * 100), false));
+  swprintf(buf, 64, L"%d%%", (int)(fOpacity * 100));
+  {
+    HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
+      x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_OPACITY_LABEL, GetModuleHandle(NULL), NULL);
+    if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(1, hLbl);
+  }
+  y += lineH + gap;
+
+  PAGE_CTRL(1, CreateLabel(hw, L"Render Quality:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(1, CreateSlider(hw, IDC_MW_RENDER_QUALITY, x + lw + 4, y, sliderW, lineH, 0, 100, (int)(m_fRenderQuality * 100), false));
+  swprintf(buf, 64, L"%.2f", m_fRenderQuality);
+  {
+    HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
+      x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_QUALITY_LABEL, GetModuleHandle(NULL), NULL);
+    if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(1, hLbl);
+  }
+  y += lineH + gap;
+
+  PAGE_CTRL(1, CreateCheck(hw, L"Auto Quality", IDC_MW_QUALITY_AUTO, x, y, rw, lineH, hFont, bQualityAuto, false));
+  y += lineH + gap + 4;
+
+  PAGE_CTRL(1, CreateLabel(hw, L"Time Factor:", x, y, lw, lineH, hFont, false));
+  swprintf(buf, 64, L"%.2f", m_timeFactor);
+  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_TIME_FACTOR, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  y += lineH + gap;
+
+  PAGE_CTRL(1, CreateLabel(hw, L"Frame Factor:", x, y, lw, lineH, hFont, false));
+  swprintf(buf, 64, L"%.2f", m_frameFactor);
+  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_FRAME_FACTOR, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  y += lineH + gap;
+
+  PAGE_CTRL(1, CreateLabel(hw, L"FPS Factor:", x, y, lw, lineH, hFont, false));
+  swprintf(buf, 64, L"%.2f", m_fpsFactor);
+  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_FPS_FACTOR, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  y += lineH + gap;
+
+  PAGE_CTRL(1, CreateLabel(hw, L"Vis Intensity:", x, y, lw, lineH, hFont, false));
+  swprintf(buf, 64, L"%.2f", m_VisIntensity);
+  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_VIS_INTENSITY, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  y += lineH + gap;
+
+  PAGE_CTRL(1, CreateLabel(hw, L"Vis Shift:", x, y, lw, lineH, hFont, false));
+  swprintf(buf, 64, L"%.2f", m_VisShift);
+  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_VIS_SHIFT, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  y += lineH + gap;
+
+  PAGE_CTRL(1, CreateLabel(hw, L"Vis Version:", x, y, lw, lineH, hFont, false));
+  swprintf(buf, 64, L"%.0f", m_VisVersion);
+  PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_VIS_VERSION, x + lw + 4, y, 60, lineH, hFont, 0, false));
+  y += lineH + gap + 4;
+  PAGE_CTRL(1, CreateBtn(hw, L"Reset", IDC_MW_RESET_VISUAL, x, y, 80, lineH, hFont));
+
+  // ====== PAGE 2: Colors (created hidden) ======
+  y = tabTop + 10;
+
+  PAGE_CTRL(2, CreateLabel(hw, L"Hue:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(2, CreateSlider(hw, IDC_MW_COL_HUE, x + lw + 4, y, sliderW, lineH, 0, 200, (int)(m_ColShiftHue * 100) + 100, false));
+  swprintf(buf, 64, L"%.2f", m_ColShiftHue);
+  {
+    HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
+      x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_COL_HUE_LABEL, GetModuleHandle(NULL), NULL);
+    if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(2, hLbl);
+  }
+  y += lineH + gap;
+
+  PAGE_CTRL(2, CreateLabel(hw, L"Saturation:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(2, CreateSlider(hw, IDC_MW_COL_SAT, x + lw + 4, y, sliderW, lineH, 0, 200, (int)(m_ColShiftSaturation * 100) + 100, false));
+  swprintf(buf, 64, L"%.2f", m_ColShiftSaturation);
+  {
+    HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
+      x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_COL_SAT_LABEL, GetModuleHandle(NULL), NULL);
+    if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(2, hLbl);
+  }
+  y += lineH + gap;
+
+  PAGE_CTRL(2, CreateLabel(hw, L"Brightness:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(2, CreateSlider(hw, IDC_MW_COL_BRIGHT, x + lw + 4, y, sliderW, lineH, 0, 200, (int)(m_ColShiftBrightness * 100) + 100, false));
+  swprintf(buf, 64, L"%.2f", m_ColShiftBrightness);
+  {
+    HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
+      x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_COL_BRIGHT_LABEL, GetModuleHandle(NULL), NULL);
+    if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(2, hLbl);
+  }
+  y += lineH + gap;
+
+  PAGE_CTRL(2, CreateLabel(hw, L"Gamma:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(2, CreateSlider(hw, IDC_MW_COL_GAMMA, x + lw + 4, y, sliderW, lineH, 0, 80, (int)(m_pState->m_fGammaAdj.eval(-1) * 10), false));
+  swprintf(buf, 64, L"%.1f", m_pState->m_fGammaAdj.eval(-1));
+  {
+    HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
+      x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_COL_GAMMA_LABEL, GetModuleHandle(NULL), NULL);
+    if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(2, hLbl);
+  }
+  y += lineH + gap + 4;
+
+  PAGE_CTRL(2, CreateCheck(hw, L"Auto Hue", IDC_MW_AUTO_HUE, x, y, rw / 2, lineH, hFont, m_AutoHue, false));
+  PAGE_CTRL(2, CreateLabel(hw, L"Seconds:", x + rw / 2, y, 60, lineH, hFont, false));
+  swprintf(buf, 64, L"%.3f", m_AutoHueSeconds);
+  PAGE_CTRL(2, CreateEdit(hw, buf, IDC_MW_AUTO_HUE_SEC, x + rw / 2 + 64, y, 70, lineH, hFont, 0, false));
+  y += lineH + gap + 4;
+  PAGE_CTRL(2, CreateBtn(hw, L"Reset", IDC_MW_RESET_COLORS, x, y, 80, lineH, hFont));
+
+  // ====== PAGE 3: Sound (created hidden) ======
+  y = tabTop + 10;
+
+  PAGE_CTRL(3, CreateCheck(hw, L"Spout Output",    IDC_MW_SPOUT,       x, y, rw, lineH, hFont, bSpoutOut, false));
+  y += lineH + 2;
+  PAGE_CTRL(3, CreateCheck(hw, L"Fixed Size",      IDC_MW_SPOUT_FIXED, x, y, rw, lineH, hFont, bSpoutFixedSize, false));
+  y += lineH + gap;
+
+  PAGE_CTRL(3, CreateLabel(hw, L"Width:", x, y, 50, lineH, hFont, false));
+  swprintf(buf, 64, L"%d", nSpoutFixedWidth);
+  PAGE_CTRL(3, CreateEdit(hw, buf, IDC_MW_SPOUT_WIDTH, x + 54, y, 70, lineH, hFont, 0, false));
+  PAGE_CTRL(3, CreateLabel(hw, L"Height:", x + 140, y, 50, lineH, hFont, false));
+  swprintf(buf, 64, L"%d", nSpoutFixedHeight);
+  PAGE_CTRL(3, CreateEdit(hw, buf, IDC_MW_SPOUT_HEIGHT, x + 194, y, 70, lineH, hFont, 0, false));
+  y += lineH + gap + 8;
+
+  // Audio Device (moved here from General tab)
+  PAGE_CTRL(3, CreateLabel(hw, L"Audio Device:", x, y, rw, lineH, hFont, false));
+  y += lineH;
+  {
+    HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
+      WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
+      x, y, rw, 200, hw, (HMENU)(INT_PTR)IDC_MW_AUDIO_DEVICE, GetModuleHandle(NULL), NULL);
+    if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    EnumAudioDevicesIntoCombo(hCombo, m_szAudioDevice);
+    PAGE_CTRL(3, hCombo);
+  }
+
+  #undef PAGE_CTRL
+
+  // Show only page 0 initially, hide all others
+  ShowSettingsPage(0);
+}
+
+void CPlugin::ShowSettingsPage(int page) {
+  for (int i = 0; i < 4; i++) {
+    int cmd = (i == page) ? SW_SHOW : SW_HIDE;
+    for (HWND h : m_settingsPageCtrls[i])
+      ShowWindow(h, cmd);
+  }
+  m_nSettingsActivePage = page;
+}
+
+void CPlugin::LayoutSettingsControls() {
+  if (!m_hSettingsWnd || !m_hSettingsTab) return;
+
+  RECT rc;
+  GetClientRect(m_hSettingsWnd, &rc);
+  MoveWindow(m_hSettingsTab, 0, 0, rc.right, rc.bottom, TRUE);
+
+  // Get the content area inside the tab control
+  RECT rcDisplay = { 0, 0, rc.right, rc.bottom };
+  TabCtrl_AdjustRect(m_hSettingsTab, FALSE, &rcDisplay);
+  int rw = rc.right - 36;  // 16px left + 20px right margin
+  int lw = 140;
+  int newSliderW = rw - lw - 60;
+  if (newSliderW < 80) newSliderW = 80;
+
+  // Stretch preset dir edit + reposition Browse button
+  HWND hDir = GetDlgItem(m_hSettingsWnd, IDC_MW_PRESET_DIR);
+  if (hDir) {
+    RECT r; GetWindowRect(hDir, &r);
+    MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+    MoveWindow(hDir, r.left, r.top, rw - 70, r.bottom - r.top, TRUE);
+    HWND hBrw = GetDlgItem(m_hSettingsWnd, IDC_MW_BROWSE_DIR);
+    if (hBrw) MoveWindow(hBrw, r.left + rw - 65, r.top, 65, r.bottom - r.top, TRUE);
+  }
+
+  // Stretch preset listbox
+  HWND hList = GetDlgItem(m_hSettingsWnd, IDC_MW_PRESET_LIST);
+  if (hList) {
+    RECT r; GetWindowRect(hList, &r);
+    MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+    MoveWindow(hList, r.left, r.top, rw, r.bottom - r.top, TRUE);
+  }
+
+  // Stretch audio combo
+  HWND hAudio = GetDlgItem(m_hSettingsWnd, IDC_MW_AUDIO_DEVICE);
+  if (hAudio) {
+    RECT r; GetWindowRect(hAudio, &r);
+    MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+    MoveWindow(hAudio, r.left, r.top, rw, 200, TRUE);
+  }
+
+  // Stretch sliders + reposition value labels
+  int sliderIDs[] = { IDC_MW_OPACITY, IDC_MW_RENDER_QUALITY, IDC_MW_COL_HUE, IDC_MW_COL_SAT, IDC_MW_COL_BRIGHT };
+  int labelIDs[] = { IDC_MW_OPACITY_LABEL, IDC_MW_QUALITY_LABEL, IDC_MW_COL_HUE_LABEL, IDC_MW_COL_SAT_LABEL, IDC_MW_COL_BRIGHT_LABEL };
+  for (int i = 0; i < 5; i++) {
+    HWND hSlider = GetDlgItem(m_hSettingsWnd, sliderIDs[i]);
+    HWND hLabel = GetDlgItem(m_hSettingsWnd, labelIDs[i]);
+    if (hSlider) {
+      RECT r; GetWindowRect(hSlider, &r);
+      MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+      MoveWindow(hSlider, r.left, r.top, newSliderW, r.bottom - r.top, TRUE);
+      if (hLabel) MoveWindow(hLabel, r.left + newSliderW + 4, r.top, 50, r.bottom - r.top, TRUE);
+    }
+  }
+
+  InvalidateRect(m_hSettingsWnd, NULL, TRUE);
 }
 
 void CPlugin::CloseSettingsWindow() {
   if (m_hSettingsWnd && IsWindow(m_hSettingsWnd)) {
-    DestroyWindow(m_hSettingsWnd);
-    m_hSettingsWnd = NULL;
-    // Restore focus to the plugin window
-    HWND hPlugin = GetPluginWindow();
-    if (hPlugin) SetFocus(hPlugin);
+    PostMessage(m_hSettingsWnd, WM_CLOSE, 0, 0);
   }
+  if (m_settingsThread.joinable())
+    m_settingsThread.join();
 }
 
-void CPlugin::PopulateSettingsControls() {
-  if (!m_hSettingsWnd || !IsWindow(m_hSettingsWnd)) return;
-  SetWindowTextW(GetDlgItem(m_hSettingsWnd, IDC_MW_PRESET_DIR), m_szPresetDir);
-  // Numeric fields
-  wchar_t buf[32];
-  swprintf(buf, 32, L"%.0f", m_fAudioSensitivity);
-  SetWindowTextW(GetDlgItem(m_hSettingsWnd, IDC_MW_AUDIO_SENS), buf);
-  swprintf(buf, 32, L"%.1f", m_fBlendTimeAuto);
-  SetWindowTextW(GetDlgItem(m_hSettingsWnd, IDC_MW_BLEND_TIME), buf);
-  swprintf(buf, 32, L"%.0f", m_fTimeBetweenPresets);
-  SetWindowTextW(GetDlgItem(m_hSettingsWnd, IDC_MW_TIME_BETWEEN), buf);
-  // Checkboxes
-  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_HARD_CUTS,   BM_SETCHECK, m_bHardCutsDisabled ? BST_CHECKED : BST_UNCHECKED, 0);
-  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_PRESET_LOCK, BM_SETCHECK, m_bPresetLockOnAtStartup ? BST_CHECKED : BST_UNCHECKED, 0);
-  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_SEQ_ORDER,   BM_SETCHECK, m_bSequentialPresetOrder ? BST_CHECKED : BST_UNCHECKED, 0);
-  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_SONG_TITLE,  BM_SETCHECK, m_bSongTitleAnims ? BST_CHECKED : BST_UNCHECKED, 0);
-  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_CHANGE_SONG, BM_SETCHECK, m_ChangePresetWithSong ? BST_CHECKED : BST_UNCHECKED, 0);
-  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_SHOW_FPS,    BM_SETCHECK, m_bShowFPS ? BST_CHECKED : BST_UNCHECKED, 0);
-  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_ALWAYS_TOP,  BM_SETCHECK, m_bAlwaysOnTop ? BST_CHECKED : BST_UNCHECKED, 0);
-  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_BORDERLESS,  BM_SETCHECK, m_WindowBorderless ? BST_CHECKED : BST_UNCHECKED, 0);
-  SendDlgItemMessage(m_hSettingsWnd, IDC_MW_SPOUT,       BM_SETCHECK, bSpoutOut ? BST_CHECKED : BST_UNCHECKED, 0);
+// ====== Resource Viewer ======
+
+static bool g_bResourceViewerClassRegistered = false;
+
+void CPlugin::OpenResourceViewer() {
+  if (m_hResourceWnd && IsWindow(m_hResourceWnd)) {
+    ShowWindow(m_hResourceWnd, SW_SHOW);
+    SetForegroundWindow(m_hResourceWnd);
+    PopulateResourceViewer();
+    return;
+  }
+
+  if (!g_bResourceViewerClassRegistered) {
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = ResourceViewerWndProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_3DFACE + 1);
+    wc.lpszClassName = L"MilkwaveResourceViewer";
+    RegisterClassExW(&wc);
+    g_bResourceViewerClassRegistered = true;
+  }
+
+  m_hResourceWnd = CreateWindowExW(
+    WS_EX_TOOLWINDOW,
+    L"MilkwaveResourceViewer",
+    L"Resource Viewer",
+    WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_VISIBLE,
+    CW_USEDEFAULT, CW_USEDEFAULT, 750, 420,
+    m_hSettingsWnd,
+    NULL,
+    GetModuleHandle(NULL),
+    NULL);
+
+  SetWindowLongPtrW(m_hResourceWnd, GWLP_USERDATA, (LONG_PTR)this);
+
+  m_hResourceList = CreateWindowExW(
+    0,
+    WC_LISTVIEWW,
+    L"",
+    WS_CHILD | WS_VISIBLE | WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
+    0, 0, 100, 100,
+    m_hResourceWnd,
+    (HMENU)(INT_PTR)IDC_RV_LISTVIEW,
+    GetModuleHandle(NULL),
+    NULL);
+
+  ListView_SetExtendedListViewStyle(m_hResourceList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+
+  // Add columns
+  LVCOLUMNW col = {};
+  col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
+  col.fmt = LVCFMT_CENTER;
+  col.cx = 32;
+  col.pszText = (LPWSTR)L"";
+  SendMessageW(m_hResourceList, LVM_INSERTCOLUMNW, 0, (LPARAM)&col);
+
+  col.fmt = LVCFMT_LEFT;
+  col.cx = 90;
+  col.pszText = (LPWSTR)L"Type";
+  SendMessageW(m_hResourceList, LVM_INSERTCOLUMNW, 1, (LPARAM)&col);
+
+  col.cx = 150;
+  col.pszText = (LPWSTR)L"Name";
+  SendMessageW(m_hResourceList, LVM_INSERTCOLUMNW, 2, (LPARAM)&col);
+
+  col.cx = 320;
+  col.pszText = (LPWSTR)L"Path";
+  SendMessageW(m_hResourceList, LVM_INSERTCOLUMNW, 3, (LPARAM)&col);
+
+  col.cx = 90;
+  col.pszText = (LPWSTR)L"Details";
+  SendMessageW(m_hResourceList, LVM_INSERTCOLUMNW, 4, (LPARAM)&col);
+
+  // Create buttons
+  CreateWindowExW(0, L"BUTTON", L"Copy Path", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+    0, 0, 90, 28, m_hResourceWnd, (HMENU)(INT_PTR)IDC_RV_COPY_PATH, GetModuleHandle(NULL), NULL);
+  CreateWindowExW(0, L"BUTTON", L"Refresh", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+    0, 0, 70, 28, m_hResourceWnd, (HMENU)(INT_PTR)IDC_RV_REFRESH, GetModuleHandle(NULL), NULL);
+
+  // Set font on ListView and buttons
+  if (m_hSettingsFont) {
+    SendMessage(m_hResourceList, WM_SETFONT, (WPARAM)m_hSettingsFont, TRUE);
+    SendMessage(GetDlgItem(m_hResourceWnd, IDC_RV_COPY_PATH), WM_SETFONT, (WPARAM)m_hSettingsFont, TRUE);
+    SendMessage(GetDlgItem(m_hResourceWnd, IDC_RV_REFRESH), WM_SETFONT, (WPARAM)m_hSettingsFont, TRUE);
+  }
+
+  LayoutResourceViewer();
+  PopulateResourceViewer();
+}
+
+LRESULT CALLBACK CPlugin::ResourceViewerWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+  CPlugin* p = (CPlugin*)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
+
+  switch (uMsg) {
+  case WM_CLOSE:
+    ShowWindow(hWnd, SW_HIDE);
+    return 0;
+
+  case WM_SIZE:
+    if (p) p->LayoutResourceViewer();
+    return 0;
+
+  case WM_GETMINMAXINFO: {
+    MINMAXINFO* mmi = (MINMAXINFO*)lParam;
+    mmi->ptMinTrackSize.x = 500;
+    mmi->ptMinTrackSize.y = 250;
+    return 0;
+  }
+
+  case WM_COMMAND: {
+    int id = LOWORD(wParam);
+    int code = HIWORD(wParam);
+    if (id == IDC_RV_COPY_PATH && code == BN_CLICKED && p && p->m_hResourceList) {
+      int sel = ListView_GetNextItem(p->m_hResourceList, -1, LVNI_SELECTED);
+      if (sel >= 0) {
+        wchar_t szPath[1024] = {};
+        LVITEMW item = {};
+        item.iItem = sel;
+        item.iSubItem = 3;  // Path column
+        item.mask = LVIF_TEXT;
+        item.pszText = szPath;
+        item.cchTextMax = 1024;
+        SendMessageW(p->m_hResourceList, LVM_GETITEMTEXTW, sel, (LPARAM)&item);
+        if (szPath[0] && OpenClipboard(hWnd)) {
+          EmptyClipboard();
+          size_t len = (wcslen(szPath) + 1) * sizeof(wchar_t);
+          HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
+          if (hMem) {
+            memcpy(GlobalLock(hMem), szPath, len);
+            GlobalUnlock(hMem);
+            SetClipboardData(CF_UNICODETEXT, hMem);
+          }
+          CloseClipboard();
+        }
+      }
+      return 0;
+    }
+    if (id == IDC_RV_REFRESH && code == BN_CLICKED && p) {
+      p->PopulateResourceViewer();
+      return 0;
+    }
+    break;
+  }
+  }
+
+  return DefWindowProcW(hWnd, uMsg, wParam, lParam);
+}
+
+void CPlugin::LayoutResourceViewer() {
+  if (!m_hResourceWnd || !m_hResourceList) return;
+  RECT rc;
+  GetClientRect(m_hResourceWnd, &rc);
+  int btnH = 28;
+  int margin = 6;
+  int listBottom = rc.bottom - btnH - margin * 2;
+
+  MoveWindow(m_hResourceList, 0, 0, rc.right, listBottom, TRUE);
+
+  HWND hCopy = GetDlgItem(m_hResourceWnd, IDC_RV_COPY_PATH);
+  HWND hRefresh = GetDlgItem(m_hResourceWnd, IDC_RV_REFRESH);
+  if (hCopy) MoveWindow(hCopy, rc.right - 90 - margin - 70 - margin, listBottom + margin, 90, btnH, TRUE);
+  if (hRefresh) MoveWindow(hRefresh, rc.right - 70 - margin, listBottom + margin, 70, btnH, TRUE);
+}
+
+static void RV_AddRow(HWND hList, int idx, const wchar_t* status, const wchar_t* type,
+                      const wchar_t* name, const wchar_t* path, const wchar_t* details) {
+  LVITEMW item = {};
+  item.mask = LVIF_TEXT;
+  item.iItem = idx;
+  item.iSubItem = 0;
+  item.pszText = (LPWSTR)status;
+  SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&item);
+
+  item.iSubItem = 1;
+  item.pszText = (LPWSTR)type;
+  SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&item);
+
+  item.iSubItem = 2;
+  item.pszText = (LPWSTR)name;
+  SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&item);
+
+  item.iSubItem = 3;
+  item.pszText = (LPWSTR)path;
+  SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&item);
+
+  item.iSubItem = 4;
+  item.pszText = (LPWSTR)details;
+  SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&item);
+}
+
+void CPlugin::PopulateResourceViewer() {
+  if (!m_hResourceList) return;
+
+  SendMessageW(m_hResourceList, LVM_DELETEALLITEMS, 0, 0);
+  int row = 0;
+  wchar_t szDetails[128];
+
+  // 1. Render Targets
+  for (int i = 0; i < 2; i++) {
+    wchar_t szName[32];
+    swprintf(szName, 32, L"VS[%d]", i);
+    bool valid = m_dx12VS[i].IsValid();
+    swprintf(szDetails, 128, L"%dx%d", m_dx12VS[i].width, m_dx12VS[i].height);
+    RV_AddRow(m_hResourceList, row++, valid ? L"\u2713" : L"\u2717",
+              L"Render Target", szName, L"(render target)", valid ? szDetails : L"");
+  }
+
+  // 2. Noise Textures (non-evictable)
+  for (int i = 0; i < (int)m_textures.size(); i++) {
+    if (m_textures[i].bEvictable) continue;
+    bool valid = (m_textures[i].dx12Tex.srvIndex != UINT_MAX) || (m_textures[i].texptr != NULL);
+    if (m_textures[i].d > 1)
+      swprintf(szDetails, 128, L"%dx%dx%d", m_textures[i].w, m_textures[i].h, m_textures[i].d);
+    else
+      swprintf(szDetails, 128, L"%dx%d", m_textures[i].w, m_textures[i].h);
+    RV_AddRow(m_hResourceList, row++, valid ? L"\u2713" : L"\u2717",
+              L"Noise", m_textures[i].texname, L"(procedural)", valid ? szDetails : L"");
+  }
+
+  // 3. Blur Targets
+  for (int i = 0; i < NUM_BLUR_TEX; i++) {
+    wchar_t szName[32];
+    swprintf(szName, 32, L"blur[%d]", i);
+    bool valid = m_dx12Blur[i].IsValid();
+    swprintf(szDetails, 128, L"%dx%d", m_nBlurTexW[i], m_nBlurTexH[i]);
+    RV_AddRow(m_hResourceList, row++, valid ? L"\u2713" : L"\u2717",
+              L"Blur Target", szName, L"(render target)", valid ? szDetails : L"");
+  }
+
+  // 4. Shaders
+  {
+    bool warpHasCode = m_pState && m_pState->m_nWarpPSVersion > 0 && m_pState->m_szWarpShadersText[0] != 0;
+    bool warpOk = m_shaders.warp.bytecodeBlob != NULL;
+    wchar_t szVer[32] = L"";
+    if (m_pState) swprintf(szVer, 32, L"ps_%d_0", m_pState->m_nWarpPSVersion);
+    RV_AddRow(m_hResourceList, row++, warpOk ? L"\u2713" : L"\u2717",
+              L"Warp Shader", L"warp", warpHasCode ? L"(custom)" : L"(default)", szVer);
+
+    bool compHasCode = m_pState && m_pState->m_nCompPSVersion > 0 && m_pState->m_szCompShadersText[0] != 0;
+    bool compOk = m_shaders.comp.bytecodeBlob != NULL;
+    szVer[0] = 0;
+    if (m_pState) swprintf(szVer, 32, L"ps_%d_0", m_pState->m_nCompPSVersion);
+    RV_AddRow(m_hResourceList, row++, compOk ? L"\u2713" : L"\u2717",
+              L"Comp Shader", L"comp", compHasCode ? L"(custom)" : L"(default)", szVer);
+  }
+
+  // 5. Custom Textures — reflect sampler names from both warp and comp shader CTs
+  {
+    std::set<std::wstring> addedNames;  // deduplicate across warp/comp
+    LPD3DXCONSTANTTABLE CTs[2] = { m_shaders.warp.CT, m_shaders.comp.CT };
+    const wchar_t* shaderLabel[2] = { L"warp", L"comp" };
+
+    for (int s = 0; s < 2; s++) {
+      LPD3DXCONSTANTTABLE pCT = CTs[s];
+      if (!pCT) continue;
+
+      D3DXCONSTANTTABLE_DESC desc;
+      pCT->GetDesc(&desc);
+
+      for (UINT ci = 0; ci < desc.Constants; ci++) {
+        D3DXHANDLE h = pCT->GetConstant(NULL, ci);
+        D3DXCONSTANT_DESC cd;
+        unsigned int count = 1;
+        pCT->GetConstantDesc(h, &cd, &count);
+
+        if (cd.RegisterSet != D3DXRS_SAMPLER) continue;
+
+        // Get sampler name and strip "sampler_" prefix
+        wchar_t szSamplerName[MAX_PATH];
+        lstrcpyW(szSamplerName, AutoWide(cd.Name));
+
+        wchar_t szRootName[MAX_PATH];
+        if (!strncmp(cd.Name, "sampler_", 8))
+          lstrcpyW(szRootName, AutoWide(&cd.Name[8]));
+        else
+          lstrcpyW(szRootName, AutoWide(cd.Name));
+
+        // Strip XY_ filter/wrap prefix
+        if (lstrlenW(szRootName) > 3 && szRootName[2] == L'_') {
+          wchar_t c0 = szRootName[0], c1 = szRootName[1];
+          if (c0 >= L'a' && c0 <= L'z') c0 -= L'a' - L'A';
+          if (c1 >= L'a' && c1 <= L'z') c1 -= L'a' - L'A';
+          bool isPrefix = (c0 == L'F' || c0 == L'P' || c0 == L'W' || c0 == L'C') &&
+                          (c1 == L'F' || c1 == L'P' || c1 == L'W' || c1 == L'C');
+          if (isPrefix) {
+            int j = 0;
+            while (szRootName[j + 3]) { szRootName[j] = szRootName[j + 3]; j++; }
+            szRootName[j] = 0;
+          }
+        }
+
+        // Skip built-in resources
+        if (!wcscmp(szRootName, L"main")) continue;
+        if (!wcscmp(szRootName, L"blur1") || !wcscmp(szRootName, L"blur2") || !wcscmp(szRootName, L"blur3")) continue;
+        if (!wcscmp(szRootName, L"blur4") || !wcscmp(szRootName, L"blur5") || !wcscmp(szRootName, L"blur6")) continue;
+        if (!wcsncmp(szRootName, L"noise_", 6) || !wcsncmp(szRootName, L"noisevol_", 9)) continue;
+
+        // Deduplicate
+        std::wstring key(szRootName);
+        if (addedNames.count(key)) continue;
+        addedNames.insert(key);
+
+        // Look up in m_textures
+        bool found = false;
+        int texIdx = -1;
+        for (int t = 0; t < (int)m_textures.size(); t++) {
+          if (!wcscmp(m_textures[t].texname, szRootName)) {
+            found = true;
+            texIdx = t;
+            break;
+          }
+        }
+
+        // Build full file path by searching the same way CacheParams does
+        wchar_t szFullPath[MAX_PATH * 2] = {};
+        {
+          bool pathFound = false;
+          for (int z = 0; z < 8; z++) {  // 8 extensions in texture_exts
+            wchar_t szTry[MAX_PATH];
+            swprintf(szTry, MAX_PATH, L"%stextures\\%s.%s", m_szMilkdrop2Path, szRootName, texture_exts[z].c_str());
+            if (GetFileAttributesW(szTry) != 0xFFFFFFFF) {
+              lstrcpyW(szFullPath, szTry);
+              pathFound = true;
+              break;
+            }
+            swprintf(szTry, MAX_PATH, L"%s%s.%s", m_szPresetDir, szRootName, texture_exts[z].c_str());
+            if (GetFileAttributesW(szTry) != 0xFFFFFFFF) {
+              lstrcpyW(szFullPath, szTry);
+              pathFound = true;
+              break;
+            }
+          }
+          if (!pathFound) {
+            // Show expected primary search path for missing textures
+            swprintf(szFullPath, MAX_PATH * 2, L"%stextures\\%s", m_szMilkdrop2Path, szRootName);
+          }
+        }
+
+        if (found) {
+          swprintf(szDetails, 128, L"%dx%d", m_textures[texIdx].w, m_textures[texIdx].h);
+          RV_AddRow(m_hResourceList, row++, L"\u2713", L"Custom Tex", szSamplerName, szFullPath, szDetails);
+        } else {
+          RV_AddRow(m_hResourceList, row++, L"\u2717", L"Custom Tex", szSamplerName, szFullPath, L"(missing)");
+        }
+      }
+    }
+  }
 }
 
 //----------------------------------------------------------------------
@@ -10593,6 +11610,10 @@ void CPlugin::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
 void CPlugin::OnFinishedLoadingPreset() {
   // note: only used this if you loaded the preset *intact* (or mostly intact)
 
+  // Clamp unreasonably low gamma to avoid black-screen presets
+  if (m_pState->m_fGammaAdj.eval(-1) < 0.5f)
+    m_pState->m_fGammaAdj = 1.0f;
+
   SetMenusForPresetVersion(m_pState->m_nWarpPSVersion, m_pState->m_nCompPSVersion);
   m_nPresetsLoadedTotal++; //only increment this on COMPLETION of the load.
 
@@ -10600,6 +11621,10 @@ void CPlugin::OnFinishedLoadingPreset() {
     m_nMashPreset[mash] = m_nCurrentPreset;
 
   SendPresetChangedInfoToMilkwaveRemote();
+
+  // Auto-refresh resource viewer if open
+  if (m_hResourceWnd && IsWindow(m_hResourceWnd) && IsWindowVisible(m_hResourceWnd))
+    PostMessage(m_hResourceWnd, WM_COMMAND, MAKEWPARAM(IDC_RV_REFRESH, BN_CLICKED), 0);
 }
 int CPlugin::SendMessageToMilkwaveRemote(const wchar_t* messageToSend) {
   return SendMessageToMilkwaveRemote(messageToSend, false);

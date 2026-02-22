@@ -873,6 +873,7 @@ void CPlugin::RenderFrame(int bRedraw) {
     // ──── DX12 rendering path ────
     if (!lpDevice && m_lpDX && m_lpDX->m_device) {
       DX12_RenderWarpAndComposite();
+      DrawUserSprites();
       std::swap(m_dx12VS[0], m_dx12VS[1]);
       return;
     }
@@ -1765,6 +1766,152 @@ void CPlugin::BlurPasses() {
 }
 
 // ---------------------------------------------------------------------------
+// DX12 blur passes: gaussian blur pyramid from VS0 into m_dx12Blur[0..5].
+// Each pair (0,1), (2,3), (4,5) is a horizontal + vertical pass at
+// progressively halved resolution.  Blur textures are sampled in comp
+// shaders via GetBlur1/2/3().
+// ---------------------------------------------------------------------------
+void CPlugin::DX12_BlurPasses()
+{
+#if (NUM_BLUR_TEX > 0)
+  if (!m_lpDX || !m_lpDX->m_device || !m_lpDX->m_commandList)
+    return;
+
+  int passes = min(NUM_BLUR_TEX, m_nHighestBlurTexUsedThisFrame * 2);
+  if (passes == 0)
+    return;
+
+  // Check blur PSOs are available
+  if (!m_dx12BlurPSO[0] || !m_dx12BlurPSO[1])
+    return;
+
+  auto* cmdList = m_lpDX->m_commandList.Get();
+
+  // Fullscreen quad vertices (MYVERTEX for input layout compatibility)
+  MYVERTEX v[4];
+  ZeroMemory(v, sizeof(v));
+  v[0].x = -1; v[0].y =  1; v[0].z = 0; v[0].Diffuse = 0xFFFFFFFF; v[0].tu = 0; v[0].tv = 0;
+  v[1].x =  1; v[1].y =  1; v[1].z = 0; v[1].Diffuse = 0xFFFFFFFF; v[1].tu = 1; v[1].tv = 0;
+  v[2].x = -1; v[2].y = -1; v[2].z = 0; v[2].Diffuse = 0xFFFFFFFF; v[2].tu = 0; v[2].tv = 1;
+  v[3].x =  1; v[3].y = -1; v[3].z = 0; v[3].Diffuse = 0xFFFFFFFF; v[3].tu = 1; v[3].tv = 1;
+
+  // Blur weights and min/max
+  const float w[8] = { 4.0f, 3.8f, 3.5f, 2.9f, 1.9f, 1.2f, 0.7f, 0.3f };
+  float edge_darken = (float)*m_pState->var_pf_blur1_edge_darken;
+  float blur_min[3], blur_max[3];
+  GetSafeBlurMinMax(m_pState, blur_min, blur_max);
+
+  // Progressive scale & bias
+  float fscale[3], fbias[3];
+  fscale[0] = 1.0f / (blur_max[0] - blur_min[0]);
+  fbias[0] = -blur_min[0] * fscale[0];
+  float temp_min = (blur_min[1] - blur_min[0]) / (blur_max[0] - blur_min[0]);
+  float temp_max = (blur_max[1] - blur_min[0]) / (blur_max[0] - blur_min[0]);
+  fscale[1] = 1.0f / (temp_max - temp_min);
+  fbias[1] = -temp_min * fscale[1];
+  temp_min = (blur_min[2] - blur_min[1]) / (blur_max[1] - blur_min[1]);
+  temp_max = (blur_max[2] - blur_min[1]) / (blur_max[1] - blur_min[1]);
+  fscale[2] = 1.0f / (temp_max - temp_min);
+  fbias[2] = -temp_min * fscale[2];
+
+  // Ensure descriptor heaps are set
+  ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
+  cmdList->SetDescriptorHeaps(1, heaps);
+  cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
+
+  for (int i = 0; i < passes; i++) {
+    // Source: pass 0 reads VS[0], subsequent passes read blur[i-1]
+    DX12Texture& srcTex = (i == 0) ? m_dx12VS[0] : m_dx12Blur[i - 1];
+    DX12Texture& dstTex = m_dx12Blur[i];
+
+    // Transition resources
+    m_lpDX->TransitionResource(srcTex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    m_lpDX->TransitionResource(dstTex, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+    // Set render target and viewport
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lpDX->GetRtvCpuHandle(dstTex);
+    cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+    D3D12_VIEWPORT vp = { 0, 0, (float)dstTex.width, (float)dstTex.height, 0.f, 1.f };
+    D3D12_RECT scissor = { 0, 0, (LONG)dstTex.width, (LONG)dstTex.height };
+    cmdList->RSSetViewports(1, &vp);
+    cmdList->RSSetScissorRects(1, &scissor);
+
+    // Set blur PSO: even passes = horizontal (blur1), odd = vertical (blur2)
+    cmdList->SetPipelineState(m_dx12BlurPSO[i % 2].Get());
+
+    // Update blur binding block with source texture at t0
+    m_lpDX->UpdateBlurPassBinding(i, srcTex.srvIndex);
+    cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetBlurPassBindingGpuHandle(i));
+
+    // Set constants via the blur CT
+    LPD3DXCONSTANTTABLE pCT = m_BlurShaders[i % 2].ps.CT;
+    D3DXHANDLE* h = m_BlurShaders[i % 2].ps.params.const_handles;
+
+    int srcw = (i == 0) ? GetWidth() : m_nBlurTexW[i - 1];
+    int srch = (i == 0) ? GetHeight() : m_nBlurTexH[i - 1];
+    D3DXVECTOR4 srctexsize = D3DXVECTOR4((float)srcw, (float)srch, 1.0f / (float)srcw, 1.0f / (float)srch);
+
+    float fscale_now = fscale[i / 2];
+    float fbias_now = fbias[i / 2];
+
+    if (i % 2 == 0) {
+      // Horizontal pass (blur1_ps): _c0=srctexsize, _c1=weights, _c2=distances, _c3=scale/bias/w_div
+      const float w1 = w[0] + w[1];
+      const float w2 = w[2] + w[3];
+      const float w3 = w[4] + w[5];
+      const float w4 = w[6] + w[7];
+      const float d1 = 0 + 2 * w[1] / w1;
+      const float d2 = 2 + 2 * w[3] / w2;
+      const float d3 = 4 + 2 * w[5] / w3;
+      const float d4 = 6 + 2 * w[7] / w4;
+      const float w_div = 0.5f / (w1 + w2 + w3 + w4);
+
+      if (h[0]) pCT->SetVector(nullptr, h[0], &srctexsize);
+      if (h[1]) pCT->SetVector(nullptr, h[1], &D3DXVECTOR4(w1, w2, w3, w4));
+      if (h[2]) pCT->SetVector(nullptr, h[2], &D3DXVECTOR4(d1, d2, d3, d4));
+      if (h[3]) pCT->SetVector(nullptr, h[3], &D3DXVECTOR4(fscale_now, fbias_now, w_div, 0));
+    }
+    else {
+      // Vertical pass (blur2_ps): _c0=srctexsize, _c5=weights/distances, _c6=w_div/edge_darken
+      const float w1 = w[0] + w[1] + w[2] + w[3];
+      const float w2 = w[4] + w[5] + w[6] + w[7];
+      const float d1 = 0 + 2 * ((w[2] + w[3]) / w1);
+      const float d2 = 2 + 2 * ((w[6] + w[7]) / w2);
+      const float w_div = 1.0f / ((w1 + w2) * 2);
+
+      if (h[0]) pCT->SetVector(nullptr, h[0], &srctexsize);
+      if (h[5]) pCT->SetVector(nullptr, h[5], &D3DXVECTOR4(w1, w2, d1, d2));
+      if (h[6]) {
+        if (i == 1)
+          pCT->SetVector(nullptr, h[6], &D3DXVECTOR4(w_div, (1 - edge_darken), edge_darken, 5.0f));
+        else
+          pCT->SetVector(nullptr, h[6], &D3DXVECTOR4(w_div, 1.0f, 0.0f, 5.0f));
+      }
+    }
+
+    // Upload CBV from the blur CT shadow buffer
+    DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(pCT);
+    if (ct && ct->GetShadowSize() > 0) {
+      D3D12_GPU_VIRTUAL_ADDRESS cbAddr =
+          m_lpDX->UploadConstantBuffer(ct->GetShadowData(), ct->GetShadowSize());
+      if (cbAddr)
+        cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+    }
+
+    // Draw fullscreen quad
+    m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, v, 4, sizeof(MYVERTEX));
+  }
+
+  // Transition blur textures to SRV state for sampling in comp shader
+  for (int i = 0; i < passes; i++)
+    m_lpDX->TransitionResource(m_dx12Blur[i], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+  m_nHighestBlurTexUsedThisFrame = 0;
+#endif
+}
+
+// ---------------------------------------------------------------------------
 // DX12 rendering: warp pass (VS0 → VS1) + composite pass (VS1 → backbuffer)
 // Called from RenderFrame after CPU-side computation (per-frame equations,
 // per-vertex warp) has filled m_verts[] with final UVs.
@@ -1818,10 +1965,11 @@ void CPlugin::DX12_RenderWarpAndComposite()
     cmdList->SetDescriptorHeaps(1, heaps);
     cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
 
-    // Update per-frame binding blocks: put VS textures at the correct t-register
-    // for each shader's sampler_main. Safe because each frame writes to its own range.
-    m_lpDX->UpdatePerFrameBindings(m_dx12VS[0], m_warpMainTexSlot,
-                                    m_dx12VS[1], m_compMainTexSlot);
+    // Build full 16-slot binding arrays (VS + blur + noise + disk textures)
+    UINT warpSlots[16], compSlots[16];
+    BuildBindingSlots(&m_shaders.warp.params, m_dx12VS[0], warpSlots);
+    BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots);
+    m_lpDX->UpdatePerFrameBindings(warpSlots, compSlots);
 
     // Use preset warp PSO if available, else Phase 4 passthrough.
     // MD1 presets (nWarpPSVersion=0) have no custom shader — the simple
@@ -1883,10 +2031,35 @@ void CPlugin::DX12_RenderWarpAndComposite()
 
   }
 
+  // ── Blur passes: build blur pyramid from VS0 (just-warped frame) ──
+  // Must run after warp (which wrote VS1 from VS0) so that comp shaders
+  // can sample blur textures via GetBlur1/2/3().
+  // Pre-scan comp shader's blur texture usage so blur passes cover both
+  // warp and comp needs (ApplyShaderParams for comp runs AFTER blur passes).
+  {
+    CShaderParams* cp = &m_shaders.comp.params;
+    for (int i = 0; i < 16; i++) {
+      if (cp->m_texcode[i] >= TEX_BLUR1 && cp->m_texcode[i] <= TEX_BLUR_LAST)
+        m_nHighestBlurTexUsedThisFrame = max(m_nHighestBlurTexUsedThisFrame,
+            ((int)cp->m_texcode[i] - (int)TEX_BLUR1) + 1);
+    }
+  }
+  DX12_BlurPasses();
+
   // ── Inject content into VS1 (drawn after warp, before composite) ──
   // VS1 is still the render target from the warp pass above.
+  // Restore VS1 as render target (blur passes may have changed it).
   // Draw order matches original MilkDrop: shapes → custom waves → wave → sprites/borders
   {
+    m_lpDX->TransitionResource(m_dx12VS[1], D3D12_RESOURCE_STATE_RENDER_TARGET);
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lpDX->GetRtvCpuHandle(m_dx12VS[1]);
+    cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+    D3D12_VIEWPORT vp = { 0, 0, (float)m_nTexSizeX, (float)m_nTexSizeY, 0.f, 1.f };
+    D3D12_RECT scissor = { 0, 0, (LONG)m_nTexSizeX, (LONG)m_nTexSizeY };
+    cmdList->RSSetViewports(1, &vp);
+    cmdList->RSSetScissorRects(1, &scissor);
+
     DX12_DrawCustomShapes();
     DX12_DrawCustomWaves();
     DX12_DrawWave(mysound.fWave[0], mysound.fWave[1]);
@@ -5727,8 +5900,6 @@ void CPlugin::DrawUserSprites()	// from system memory, to back buffer.
       bool bKillSprite = (*m_texmgr.m_tex[iSlot].var_done != 0.0);
       bool bBurnIn = (*m_texmgr.m_tex[iSlot].var_burn != 0.0);
 
-      // TODO: DX12 burn-in (render to VS1) not yet implemented
-
       // Bind sprite texture
       D3D12_GPU_DESCRIPTOR_HANDLE srvHandle = m_lpDX->GetBindingBlockGpuHandle(m_texmgr.m_tex[iSlot].dx12Surface);
       cmdList->SetGraphicsRootDescriptorTable(1, srvHandle);
@@ -5883,6 +6054,33 @@ void CPlugin::DrawUserSprites()	// from system memory, to back buffer.
       };
       m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, triVerts, 6, sizeof(SPRITEVERTEX));
 
+      // Burn-in: also render to VS1 so the sprite persists in the feedback loop
+      if (bKillSprite && bBurnIn && m_dx12VS[1].resource) {
+        m_lpDX->TransitionResource(m_dx12VS[1], D3D12_RESOURCE_STATE_RENDER_TARGET);
+        D3D12_CPU_DESCRIPTOR_HANDLE vs1Rtv = m_lpDX->GetRtvCpuHandle(m_dx12VS[1]);
+        cmdList->OMSetRenderTargets(1, &vs1Rtv, FALSE, nullptr);
+
+        D3D12_VIEWPORT burnVp = { 0, 0, (float)m_nTexSizeX, (float)m_nTexSizeY, 0.f, 1.f };
+        D3D12_RECT burnScissor = { 0, 0, (LONG)m_nTexSizeX, (LONG)m_nTexSizeY };
+        cmdList->RSSetViewports(1, &burnVp);
+        cmdList->RSSetScissorRects(1, &burnScissor);
+
+        SPRITEVERTEX burnVerts[6] = { triVerts[0], triVerts[1], triVerts[2],
+                                      triVerts[3], triVerts[4], triVerts[5] };
+        m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, burnVerts, 6, sizeof(SPRITEVERTEX));
+
+        // Restore backbuffer as render target
+        D3D12_CPU_DESCRIPTOR_HANDLE bbRtv = m_lpDX->m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+        bbRtv.ptr += (SIZE_T)m_lpDX->m_frameIndex * m_lpDX->m_rtvDescriptorSize;
+        cmdList->OMSetRenderTargets(1, &bbRtv, FALSE, nullptr);
+
+        D3D12_VIEWPORT bbVp = { 0, 0,
+            (float)m_lpDX->m_client_width, (float)m_lpDX->m_client_height, 0.f, 1.f };
+        D3D12_RECT bbScissor = { 0, 0, m_lpDX->m_client_width, m_lpDX->m_client_height };
+        cmdList->RSSetViewports(1, &bbVp);
+        cmdList->RSSetScissorRects(1, &bbScissor);
+      }
+
       if (bKillSprite) {
         KillSprite(iSlot);
       }
@@ -5935,6 +6133,37 @@ void CPlugin::RestoreShaderParams() {
   //lpDevice->SetVertexDeclaration(NULL);  -directx debug runtime complains heavily about this
   lpDevice->SetPixelShader(NULL);
 
+}
+
+void CPlugin::BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16]) {
+  for (int i = 0; i < 16; i++) {
+    outSlots[i] = UINT_MAX;
+    switch (params->m_texcode[i]) {
+    case TEX_VS:
+      outSlots[i] = vsTex.srvIndex;
+      break;
+#if (NUM_BLUR_TEX >= 2)
+    case TEX_BLUR1:
+      if (m_dx12Blur[1].srvIndex != UINT_MAX) outSlots[i] = m_dx12Blur[1].srvIndex;
+      break;
+#endif
+#if (NUM_BLUR_TEX >= 4)
+    case TEX_BLUR2:
+      if (m_dx12Blur[3].srvIndex != UINT_MAX) outSlots[i] = m_dx12Blur[3].srvIndex;
+      break;
+#endif
+#if (NUM_BLUR_TEX >= 6)
+    case TEX_BLUR3:
+      if (m_dx12Blur[5].srvIndex != UINT_MAX) outSlots[i] = m_dx12Blur[5].srvIndex;
+      break;
+#endif
+    case TEX_DISK:
+      outSlots[i] = params->m_texture_bindings[i].dx12SrvIndex;
+      break;
+    default:
+      break;
+    }
+  }
 }
 
 void CPlugin::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CState* pState) {

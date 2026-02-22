@@ -42,6 +42,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "support.h"
 #include "texmgr.h"
 #include "state.h"
+#include "dx12helpers.h"  // DX12Texture
 #include <vector>
 #include <array>
 #include <thread>
@@ -187,6 +188,7 @@ typedef struct {
   bool               bEvictable;
   int                 nAge;   // only valid if bEvictable is true
   int                 nSizeInBytes;    // only valid if bEvictable is true
+  DX12Texture        dx12Tex;         // DX12 GPU resource + SRV
 } TexInfo;
 
 typedef struct {
@@ -199,6 +201,7 @@ typedef struct {
   LPDIRECT3DBASETEXTURE9 texptr;
   bool               bBilinear;
   bool               bWrap;
+  UINT               dx12SrvIndex = UINT_MAX; // DX12 SRV heap index (UINT_MAX = none)
 } SamplerInfo;
 
 typedef struct {
@@ -664,10 +667,12 @@ public:
   ComPtr<ID3D12PipelineState> m_dx12CompPSO;         // current preset comp
   ComPtr<ID3D12PipelineState> m_dx12FallbackWarpPSO; // default warp_ps.fx
   ComPtr<ID3D12PipelineState> m_dx12FallbackCompPSO; // default comp_ps.fx
+  ComPtr<ID3D12PipelineState> m_dx12BlurPSO[2];      // [0] = horiz (blur1), [1] = vert (blur2)
   UINT m_warpMainTexSlot = 0;                         // t-register for sampler_main in warp PS
   UINT m_compMainTexSlot = 0;                         // t-register for sampler_main in comp PS
   bool m_bDX12PSOsDirty = false;                      // deferred PSO creation flag
   void CreateDX12PresetPSOs();                        // creates PSOs from m_shaders bytecodes
+  void DX12_BlurPasses();                             // DX12 implementation of BlurPasses()
 
   int               m_nTitleTexSizeX, m_nTitleTexSizeY;
   UINT              m_adapterId;
@@ -796,12 +801,31 @@ public:
   void        AdjustSetting(int id, int direction);
   void        SaveSettingToINI(int id);
   void        OpenFolderPickerForPresetDir();
-  // Settings window (Win32 dialog)
+  // Settings window (Win32 dialog on dedicated thread)
   HWND        m_hSettingsWnd = NULL;
+  HWND        m_hSettingsTab = NULL;       // Tab control
+  int         m_nSettingsActivePage = 0;
+  std::vector<HWND> m_settingsPageCtrls[4]; // HWNDs per tab (General, Vis, Color, Spout)
+  HFONT       m_hSettingsFont = NULL;
+  HFONT       m_hSettingsFontBold = NULL;
+  std::thread m_settingsThread;
+  std::atomic<bool> m_bSettingsThreadRunning{false};
   void        OpenSettingsWindow();
   void        CloseSettingsWindow();
-  void        PopulateSettingsControls();
+  void        CreateSettingsWindowOnThread();
+  void        BuildSettingsControls();
+  void        ShowSettingsPage(int page);
+  void        LayoutSettingsControls();
   static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+
+  // Resource Viewer
+  HWND        m_hResourceWnd = NULL;
+  HWND        m_hResourceList = NULL;
+  static LRESULT CALLBACK ResourceViewerWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+  void        OpenResourceViewer();
+  void        PopulateResourceViewer();
+  void        LayoutResourceViewer();
+
   //void  ResetWindowSizeOnDisk();
   bool		LaunchSprite(int nSpriteNum, int nSlot);
   void		KillSprite(int iSlot);
@@ -813,6 +837,7 @@ public:
   void        UvToMathSpace(float u, float v, float* rad, float* ang);
   void        ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CState* pState);
   void        RestoreShaderParams();
+  void        BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16]);
   bool        AddNoiseTex(const wchar_t* szTexName, int size, int zoom_factor);
   bool        AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor);
 

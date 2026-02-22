@@ -150,9 +150,26 @@ static const char g_szCompVS[] =
     "    oRadAng  = rad_ang;\n"
     "}\n";
 
-// Pre-compiled warp/comp VS bytecodes (populated by DX12CreatePipelines)
+// Blur vertex shader: simple passthrough for fullscreen quad blur passes.
+// Takes MYVERTEX input (so we can reuse the same input layout), outputs only SV_POSITION + UV.
+static const char g_szBlurVS[] =
+    "void main(\n"
+    "    float3 pos     : POSITION,\n"
+    "    float4 col     : COLOR,\n"
+    "    float2 uv      : TEXCOORD0,\n"
+    "    float2 uv_orig : TEXCOORD1,\n"
+    "    float2 rad_ang : TEXCOORD2,\n"
+    "    out float2 oUv  : TEXCOORD0,\n"
+    "    out float4 oPos : SV_POSITION\n"
+    ") {\n"
+    "    oPos = float4(pos.xy, 1, 1);\n"
+    "    oUv  = uv;\n"
+    "}\n";
+
+// Pre-compiled warp/comp/blur VS bytecodes (populated by DX12CreatePipelines)
 extern ID3DBlob* g_pWarpVSBlob;
 extern ID3DBlob* g_pCompVSBlob;
+extern ID3DBlob* g_pBlurVSBlob;
 
 // Create all initial PSOs needed for first draw
 bool DX12CreatePipelines(ID3D12Device* device, ID3D12RootSignature* rootSig,
