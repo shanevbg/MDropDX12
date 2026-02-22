@@ -635,6 +635,7 @@ DX12Texture DXContext::CreateRenderTargetTexture(UINT width, UINT height, DXGI_F
 
     tex.width  = width;
     tex.height = height;
+    tex.depth  = 1;
     tex.format = format;
 
     // Allocate RTV descriptor
@@ -963,6 +964,7 @@ bool DXContext::CreateNullTexture()
     m_nullTexture.currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
     m_nullTexture.width = 1;
     m_nullTexture.height = 1;
+    m_nullTexture.depth = 1;
     m_nullTexture.format = DXGI_FORMAT_R8G8B8A8_UNORM;
 
     return true;
@@ -1092,6 +1094,146 @@ DX12Texture DXContext::CreateTextureFromPixels(const void* pixels, UINT width, U
     tex.currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
     tex.width = width;
     tex.height = height;
+    tex.depth = 1;
+    tex.format = format;
+
+    return tex;
+}
+
+// ---------------------------------------------------------------------------
+// CreateVolumeTextureFromPixels — synchronous GPU upload of 3D volume texture
+// ---------------------------------------------------------------------------
+DX12Texture DXContext::CreateVolumeTextureFromPixels(const void* pixels, UINT width, UINT height, UINT depth,
+                                                      UINT srcRowPitch, DXGI_FORMAT format)
+{
+    DX12Texture tex;
+    if (!pixels || width == 0 || height == 0 || depth == 0) return tex;
+
+    // 1. Create the GPU texture resource (TEXTURE3D)
+    D3D12_RESOURCE_DESC texDesc = {};
+    texDesc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
+    texDesc.Width            = width;
+    texDesc.Height           = height;
+    texDesc.DepthOrArraySize = (UINT16)depth;
+    texDesc.MipLevels        = 1;
+    texDesc.Format           = format;
+    texDesc.SampleDesc.Count = 1;
+    texDesc.Flags            = D3D12_RESOURCE_FLAG_NONE;
+
+    D3D12_HEAP_PROPERTIES defaultHeap = {};
+    defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    HRESULT hr = m_device->CreateCommittedResource(
+        &defaultHeap, D3D12_HEAP_FLAG_NONE, &texDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+        IID_PPV_ARGS(&tex.resource));
+    if (FAILED(hr)) return tex;
+
+    // 2. Compute aligned row pitch and slice pitch
+    UINT bytesPerPixel   = 4; // BGRA / RGBA
+    UINT alignedRowPitch = (width * bytesPerPixel + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1)
+                           & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
+    UINT slicePitch      = alignedRowPitch * height;
+    UINT64 uploadSize    = (UINT64)slicePitch * depth;
+
+    // 3. Create upload buffer
+    D3D12_RESOURCE_DESC uploadDesc = {};
+    uploadDesc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+    uploadDesc.Width            = uploadSize;
+    uploadDesc.Height           = 1;
+    uploadDesc.DepthOrArraySize = 1;
+    uploadDesc.MipLevels        = 1;
+    uploadDesc.Format           = DXGI_FORMAT_UNKNOWN;
+    uploadDesc.SampleDesc.Count = 1;
+    uploadDesc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    D3D12_HEAP_PROPERTIES uploadHeap = {};
+    uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+    ComPtr<ID3D12Resource> uploadBuf;
+    hr = m_device->CreateCommittedResource(
+        &uploadHeap, D3D12_HEAP_FLAG_NONE, &uploadDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+        IID_PPV_ARGS(&uploadBuf));
+    if (FAILED(hr)) { tex.resource.Reset(); return tex; }
+
+    // 4. Map and copy pixel data slice-by-slice, row-by-row with pitch alignment
+    UINT8* mapped = nullptr;
+    uploadBuf->Map(0, nullptr, (void**)&mapped);
+    const UINT8* src = (const UINT8*)pixels;
+    UINT copyPitch = width * bytesPerPixel;
+    UINT srcSlicePitch = srcRowPitch * height;
+    for (UINT z = 0; z < depth; z++) {
+        for (UINT y = 0; y < height; y++) {
+            memcpy(mapped + z * slicePitch + y * alignedRowPitch,
+                   src + z * srcSlicePitch + y * srcRowPitch,
+                   copyPitch);
+        }
+    }
+    uploadBuf->Unmap(0, nullptr);
+
+    // 5. Record copy + barrier on the dedicated upload command list
+    m_uploadAllocator->Reset();
+    m_uploadCommandList->Reset(m_uploadAllocator.Get(), nullptr);
+
+    D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+    srcLoc.pResource                               = uploadBuf.Get();
+    srcLoc.Type                                    = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    srcLoc.PlacedFootprint.Offset                  = 0;
+    srcLoc.PlacedFootprint.Footprint.Format        = format;
+    srcLoc.PlacedFootprint.Footprint.Width         = width;
+    srcLoc.PlacedFootprint.Footprint.Height        = height;
+    srcLoc.PlacedFootprint.Footprint.Depth         = depth;
+    srcLoc.PlacedFootprint.Footprint.RowPitch      = alignedRowPitch;
+
+    D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+    dstLoc.pResource        = tex.resource.Get();
+    dstLoc.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dstLoc.SubresourceIndex = 0;
+
+    m_uploadCommandList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource   = tex.resource.Get();
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+    barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    m_uploadCommandList->ResourceBarrier(1, &barrier);
+
+    m_uploadCommandList->Close();
+    ID3D12CommandList* lists[] = { m_uploadCommandList.Get() };
+    m_commandQueue->ExecuteCommandLists(1, lists);
+
+    // 6. Wait synchronously for the upload to finish (dedicated fence, 5s timeout)
+    m_uploadFenceValue++;
+    m_commandQueue->Signal(m_uploadFence.Get(), m_uploadFenceValue);
+    m_uploadFence->SetEventOnCompletion(m_uploadFenceValue, m_uploadFenceEvent);
+    DWORD waitResult = WaitForSingleObjectEx(m_uploadFenceEvent, 5000, FALSE);
+    if (waitResult == WAIT_TIMEOUT) {
+        DebugLogA("DX12: CreateVolumeTextureFromPixels TIMEOUT (5s) — possible GPU hang");
+        tex.resource.Reset();
+        return tex;
+    }
+
+    // 7. Create SRV descriptor (TEXTURE3D)
+    D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = AllocateSrvCpu();
+    tex.srvIndex = m_nextFreeSrvSlot;
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format                        = format;
+    srvDesc.ViewDimension                 = D3D12_SRV_DIMENSION_TEXTURE3D;
+    srvDesc.Shader4ComponentMapping       = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Texture3D.MipLevels           = 1;
+    srvDesc.Texture3D.MostDetailedMip     = 0;
+    srvDesc.Texture3D.ResourceMinLODClamp = 0.0f;
+    m_device->CreateShaderResourceView(tex.resource.Get(), &srvDesc, srvCpu);
+    AllocateSrvGpu(); // bump counter
+
+    tex.currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    tex.width  = width;
+    tex.height = height;
+    tex.depth  = depth;
     tex.format = format;
 
     return tex;

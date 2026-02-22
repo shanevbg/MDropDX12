@@ -3189,18 +3189,103 @@ bool CPlugin::AddNoiseTex(const wchar_t* szTexName, int size, int zoom_factor) {
 
 bool CPlugin::AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor) {
   if (!GetDevice()) {
-    // DX12 migration: skip DX9 volume texture creation but still register
-    // size metadata so shaders can resolve texsize_noisevol_* constants.
-    TexInfo x;
-    lstrcpyW(x.texname, szTexName);
-    x.texptr = NULL;
-    x.w = size;
-    x.h = size;
-    x.d = size;
-    x.bEvictable = false;
-    x.nAge = m_nPresetsLoadedTotal;
-    x.nSizeInBytes = 0;
-    m_textures.push_back(x);
+    // DX12 path: generate 3D noise into CPU buffer, then upload via DX12
+    int RANGE = (zoom_factor > 1) ? 216 : 256;
+    int dwords_per_line  = size;
+    int dwords_per_slice = size * size;
+    std::vector<DWORD> pixels(size * size * size);
+    DWORD* dst = pixels.data();
+
+    // Generate random noise
+    for (int z = 0; z < size; z++) {
+      for (int y = 0; y < size; y++) {
+        LARGE_INTEGER q;
+        QueryPerformanceCounter(&q);
+        srand(q.LowPart ^ q.HighPart ^ rand());
+        DWORD* line = dst + z * dwords_per_slice + y * dwords_per_line;
+        for (int x = 0; x < size; x++) {
+          line[x] = (((DWORD)(rand() % RANGE) + RANGE / 2) << 24) |
+                    (((DWORD)(rand() % RANGE) + RANGE / 2) << 16) |
+                    (((DWORD)(rand() % RANGE) + RANGE / 2) <<  8) |
+                    (((DWORD)(rand() % RANGE) + RANGE / 2));
+        }
+        // swap some pixels randomly, to improve 'randomness'
+        for (int x = 0; x < size; x++) {
+          int x1 = (rand() ^ q.LowPart)  % size;
+          int x2 = (rand() ^ q.HighPart) % size;
+          DWORD temp = line[x2];
+          line[x2] = line[x1];
+          line[x1] = temp;
+        }
+      }
+    }
+
+    // cubic interpolation smoothing (3-pass: X, Y, Z)
+    if (zoom_factor > 1) {
+      // Pass 1: cubic interp along X, on main grid lines only
+      for (int z = 0; z < size; z += zoom_factor)
+        for (int y = 0; y < size; y += zoom_factor)
+          for (int x = 0; x < size; x++)
+            if (x % zoom_factor) {
+              int base_x = (x / zoom_factor) * zoom_factor + size;
+              int base_y = z * dwords_per_slice + y * dwords_per_line;
+              DWORD y0 = dst[base_y + ((base_x - zoom_factor) % size)];
+              DWORD y1 = dst[base_y + ((base_x)               % size)];
+              DWORD y2 = dst[base_y + ((base_x + zoom_factor)     % size)];
+              DWORD y3 = dst[base_y + ((base_x + zoom_factor * 2) % size)];
+              float t = (x % zoom_factor) / (float)zoom_factor;
+              dst[z * dwords_per_slice + y * dwords_per_line + x] = dwCubicInterpolate(y0, y1, y2, y3, t);
+            }
+
+      // Pass 2: cubic interp along Y, on main slices
+      for (int z = 0; z < size; z += zoom_factor)
+        for (int x = 0; x < size; x++)
+          for (int y = 0; y < size; y++)
+            if (y % zoom_factor) {
+              int base_y = (y / zoom_factor) * zoom_factor + size;
+              int base_z = z * dwords_per_slice;
+              DWORD y0 = dst[((base_y - zoom_factor)     % size) * dwords_per_line + base_z + x];
+              DWORD y1 = dst[((base_y)                   % size) * dwords_per_line + base_z + x];
+              DWORD y2 = dst[((base_y + zoom_factor)     % size) * dwords_per_line + base_z + x];
+              DWORD y3 = dst[((base_y + zoom_factor * 2) % size) * dwords_per_line + base_z + x];
+              float t = (y % zoom_factor) / (float)zoom_factor;
+              dst[y * dwords_per_line + base_z + x] = dwCubicInterpolate(y0, y1, y2, y3, t);
+            }
+
+      // Pass 3: cubic interp along Z, everywhere
+      for (int x = 0; x < size; x++)
+        for (int y = 0; y < size; y++)
+          for (int z = 0; z < size; z++)
+            if (z % zoom_factor) {
+              int base_y = y * dwords_per_line;
+              int base_z = (z / zoom_factor) * zoom_factor + size;
+              DWORD y0 = dst[((base_z - zoom_factor)     % size) * dwords_per_slice + base_y + x];
+              DWORD y1 = dst[((base_z)                   % size) * dwords_per_slice + base_y + x];
+              DWORD y2 = dst[((base_z + zoom_factor)     % size) * dwords_per_slice + base_y + x];
+              DWORD y3 = dst[((base_z + zoom_factor * 2) % size) * dwords_per_slice + base_y + x];
+              float t = (z % zoom_factor) / (float)zoom_factor;
+              dst[z * dwords_per_slice + base_y + x] = dwCubicInterpolate(y0, y1, y2, y3, t);
+            }
+    }
+
+    // Upload to GPU — D3DFMT_A8R8G8B8 byte layout matches DXGI_FORMAT_B8G8R8A8_UNORM
+    TexInfo ti;
+    lstrcpyW(ti.texname, szTexName);
+    ti.texptr = NULL;
+    ti.w = size;
+    ti.h = size;
+    ti.d = size;
+    ti.bEvictable = false;
+    ti.nAge = m_nPresetsLoadedTotal;
+    ti.nSizeInBytes = size * size * size * 4;
+    ti.dx12Tex = m_lpDX->CreateVolumeTextureFromPixels(
+        pixels.data(), size, size, size,
+        size * sizeof(DWORD),
+        DXGI_FORMAT_B8G8R8A8_UNORM);
+    if (!ti.dx12Tex.IsValid()) {
+      dumpmsg(L"DX12: Could not create 3D noise volume texture");
+    }
+    m_textures.push_back(ti);
     return true;
   }
   // size = width & height & depth of the texture;

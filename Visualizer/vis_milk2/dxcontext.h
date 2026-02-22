@@ -212,6 +212,9 @@ public:
   // Create a DX12 texture from CPU pixel data (synchronous GPU upload)
   DX12Texture CreateTextureFromPixels(const void* pixels, UINT width, UINT height,
                                       UINT srcRowPitch, DXGI_FORMAT format);
+  // Create a DX12 3D volume texture from CPU pixel data (synchronous GPU upload)
+  DX12Texture CreateVolumeTextureFromPixels(const void* pixels, UINT width, UINT height, UINT depth,
+                                             UINT srcRowPitch, DXGI_FORMAT format);
   // Load a texture from an image file via WIC
   DX12Texture LoadTextureFromFile(const wchar_t* szFilename);
 

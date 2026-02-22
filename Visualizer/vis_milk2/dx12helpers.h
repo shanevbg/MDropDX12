@@ -22,11 +22,12 @@ struct DX12Texture {
     UINT bindingBlockStart = UINT_MAX;  // 16 contiguous SRV slots: [0]=this tex, [1-15]=null
     UINT width     = 0;
     UINT height    = 0;
+    UINT depth     = 0;          // 1 for 2D textures, >1 for 3D volume textures
     DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
     D3D12_RESOURCE_STATES currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 
     bool IsValid() const { return resource != nullptr; }
-    void Reset() { resource.Reset(); srvIndex = rtvIndex = bindingBlockStart = UINT_MAX; width = height = 0; format = DXGI_FORMAT_UNKNOWN; currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE; }
+    void Reset() { resource.Reset(); srvIndex = rtvIndex = bindingBlockStart = UINT_MAX; width = height = depth = 0; format = DXGI_FORMAT_UNKNOWN; currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE; }
 };
 
 #endif // DX12HELPERS_H
