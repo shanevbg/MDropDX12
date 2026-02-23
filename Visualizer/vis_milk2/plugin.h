@@ -861,6 +861,7 @@ public:
 
   // Fallback search paths (Files tab)
   std::vector<std::wstring> m_fallbackPaths;
+  wchar_t m_szRandomTexDir[MAX_PATH] = {};  // Dedicated random textures directory
   void  SaveFallbackPaths();
   void  LoadFallbackPaths();
 

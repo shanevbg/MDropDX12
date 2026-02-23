@@ -795,6 +795,10 @@ static SettingDesc g_settingsDesc[] = {
 #define IDC_MW_FILE_REMOVE      2065   // Remove button on Files tab
 #define IDC_MW_FILE_DESC        2066   // Description label on Files tab
 #define IDC_MW_DARK_THEME       2067   // Dark Theme checkbox on General tab
+#define IDC_MW_RANDTEX_LABEL    2070   // Random textures dir label
+#define IDC_MW_RANDTEX_EDIT     2071   // Random textures dir edit control
+#define IDC_MW_RANDTEX_BROWSE   2072   // Random textures dir Browse button
+#define IDC_MW_RANDTEX_CLEAR    2073   // Random textures dir Clear button
 #define IDC_RV_LISTVIEW         3001   // ListView in resource viewer
 #define IDC_RV_COPY_PATH        3002   // "Copy Path" button
 #define IDC_RV_REFRESH          3003   // "Refresh" button
@@ -3577,44 +3581,60 @@ bool PickRandomTexture(const wchar_t* prefix, wchar_t* szRetTextureFilename)  //
   //DWORD t = timeGetTime(); // in milliseconds
   //if (abs(t - texfiles_timestamp) > 2000)
   if (g_plugin.m_bNeedRescanTexturesDir) {
-    g_plugin.m_bNeedRescanTexturesDir = false;//texfiles_timestamp = t;
+    g_plugin.m_bNeedRescanTexturesDir = false;
     texfiles.clear();
 
-    wchar_t szMask[MAX_PATH];
-    swprintf(szMask, L"%stextures\\*.*", g_plugin.m_szMilkdrop2Path);
+    // Helper lambda: scan a directory for valid texture files (filename only, no path)
+    auto scanDir = [](const wchar_t* szDir, StringVec& out) {
+      wchar_t szMask[MAX_PATH];
+      swprintf(szMask, L"%s*.*", szDir);
+      WIN32_FIND_DATAW ffd = { 0 };
+      HANDLE hFind = FindFirstFileW(szMask, &ffd);
+      if (hFind == INVALID_HANDLE_VALUE) return;
+      do {
+        if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        wchar_t* ext = wcsrchr(ffd.cFileName, L'.');
+        if (!ext) continue;
+        for (int i = 0; i < sizeof(texture_exts) / sizeof(texture_exts[0]); i++)
+          if (!wcsicmp(texture_exts[i].c_str(), ext + 1)) {
+            out.push_back(ffd.cFileName);
+            break;
+          }
+      } while (FindNextFileW(hFind, &ffd));
+      FindClose(hFind);
+    };
 
-    WIN32_FIND_DATAW ffd = { 0 };
+    // 1) Dedicated random textures directory (highest priority)
+    if (g_plugin.m_szRandomTexDir[0])
+      scanDir(g_plugin.m_szRandomTexDir, texfiles);
 
-    HANDLE hFindFile = INVALID_HANDLE_VALUE;
-    if ((hFindFile = FindFirstFileW(szMask, &ffd)) == INVALID_HANDLE_VALUE)		// note: returns filename -without- path
-      return false;
+    // 2) Fallback paths (user's texture collection)
+    if (texfiles.empty()) {
+      for (auto& fbPath : g_plugin.m_fallbackPaths)
+        scanDir(fbPath.c_str(), texfiles);
+    }
 
-    // first, count valid texture files
-    do {
-      if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-        continue;
-
-      wchar_t* ext = wcsrchr(ffd.cFileName, L'.');
-      if (!ext)
-        continue;
-
-      for (int i = 0; i < sizeof(texture_exts) / sizeof(texture_exts[0]); i++)
-        if (!wcsicmp(texture_exts[i].c_str(), ext + 1)) {
-          // valid texture found - add it to the list.  ("heart.jpg", for example)
-          texfiles.push_back(ffd.cFileName);
-          continue;
-        }
-    } while (FindNextFileW(hFindFile, &ffd));
-    FindClose(hFindFile);
+    // 3) Built-in textures directory
+    if (texfiles.empty()) {
+      wchar_t szBuiltin[MAX_PATH];
+      swprintf(szBuiltin, L"%stextures\\", g_plugin.m_szMilkdrop2Path);
+      scanDir(szBuiltin, texfiles);
+    }
   }
 
   if (texfiles.size() == 0)
     return false;
 
+  // Use high-resolution timer for a well-distributed random pick
+  // (MSVC rand() is only 15-bit and srand() isn't called before preset loads)
+  LARGE_INTEGER qpc;
+  QueryPerformanceCounter(&qpc);
+  unsigned int rng = (unsigned int)(qpc.LowPart ^ (qpc.HighPart * 2654435761u));
+
   // then randomly pick one
   if (prefix == NULL || prefix[0] == 0) {
     // pick randomly from entire list
-    int i = rand() % texfiles.size();
+    int i = rng % texfiles.size();
     lstrcpyW(szRetTextureFilename, texfiles[i].c_str());
   }
   else {
@@ -3629,7 +3649,7 @@ bool PickRandomTexture(const wchar_t* prefix, wchar_t* szRetTextureFilename)  //
     if (N == 0)
       return false;
     // pick randomly from the subset
-    i = rand() % temp_list.size();
+    i = rng % temp_list.size();
     lstrcpyW(szRetTextureFilename, temp_list[i].c_str());
   }
   return true;
@@ -4245,6 +4265,114 @@ void CPlugin::CreateDX12PresetPSOs() {
   }
 }
 
+// Preprocessor: rename local variables that shadow HLSL built-in functions.
+// Many MilkDrop presets use patterns like `float2 pow = float2(pow(x,y)...)` which
+// fails in SM3.0+ because the local variable shadows the intrinsic. We rename the
+// variable (non-function-call occurrences) to `_mw_<name>` while leaving `<name>(` calls intact.
+static void FixShadowedBuiltins(char* szShaderText) {
+  static const char* builtins[] = {
+    "pow", "mul", "sin", "cos", "tan", "exp", "log", "dot",
+    "abs", "min", "max", "step", "lerp", "frac", "sqrt",
+    "floor", "ceil", "round", "sign", "clamp", "saturate",
+    "normalize", "length", "distance", "cross", "clip",
+  };
+  static const int nBuiltins = sizeof(builtins) / sizeof(builtins[0]);
+
+  auto isIdentChar = [](char c) -> bool {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+  };
+
+  // Type keywords that precede a variable declaration
+  auto isTypeKeyword = [](const char* p) -> bool {
+    // Check backwards from a position to see if a type keyword precedes it
+    // We check common HLSL types: float, float2, float3, float4, int, int2, int3, int4, half, etc.
+    static const char* types[] = {
+      "float4x4", "float4x3", "float3x3", "float3x4",
+      "float4", "float3", "float2", "float",
+      "half4", "half3", "half2", "half",
+      "int4", "int3", "int2", "int",
+      "uint4", "uint3", "uint2", "uint",
+      "double4", "double3", "double2", "double",
+    };
+    for (auto& t : types) {
+      int tlen = (int)strlen(t);
+      if (!strncmp(p, t, tlen) && !isalnum((unsigned char)p[tlen]) && p[tlen] != '_')
+        return true;
+    }
+    return false;
+  };
+
+  int srcLen = (int)strlen(szShaderText);
+  // Temp buffer: each rename adds 4 chars ("_mw_" prefix). 128KB source buffer has plenty of room.
+  char* tmp = (char*)malloc(srcLen + 32768);
+  if (!tmp) return;
+
+  for (int bi = 0; bi < nBuiltins; bi++) {
+    const char* name = builtins[bi];
+    int nameLen = (int)strlen(name);
+
+    // Phase 1: detect if this built-in is shadowed (declared as a variable)
+    bool shadowed = false;
+    for (const char* s = szShaderText; *s; s++) {
+      // Look for type keyword followed by whitespace then the built-in name
+      if (!isTypeKeyword(s)) continue;
+      // Skip past the type keyword
+      const char* afterType = s;
+      while (*afterType && (isIdentChar(*afterType))) afterType++;
+      // Must have whitespace after type
+      if (*afterType != ' ' && *afterType != '\t' && *afterType != '\n' && *afterType != '\r') continue;
+      while (*afterType == ' ' || *afterType == '\t' || *afterType == '\n' || *afterType == '\r') afterType++;
+      // Check if the identifier here is our built-in name
+      if (strncmp(afterType, name, nameLen) == 0 && !isIdentChar(afterType[nameLen])) {
+        // Check that it's not a function call (name followed by '(')
+        const char* afterName = afterType + nameLen;
+        while (*afterName == ' ' || *afterName == '\t') afterName++;
+        if (*afterName != '(') {
+          shadowed = true;
+          break;
+        }
+      }
+    }
+
+    if (!shadowed) continue;
+
+    // Phase 2: rename all non-function-call occurrences of this name
+    int wi = 0;
+    for (int i = 0; i < srcLen; ) {
+      // Check for word-boundary match of the built-in name
+      if (strncmp(&szShaderText[i], name, nameLen) == 0 &&
+          (i == 0 || !isIdentChar(szShaderText[i - 1])) &&
+          !isIdentChar(szShaderText[i + nameLen])) {
+        // Check if this is a function call: name followed by optional whitespace then '('
+        const char* after = &szShaderText[i + nameLen];
+        while (*after == ' ' || *after == '\t') after++;
+        if (*after == '(') {
+          // Function call — keep original name
+          memcpy(&tmp[wi], name, nameLen);
+          wi += nameLen;
+          i += nameLen;
+        } else {
+          // Variable reference — rename to _mw_<name>
+          memcpy(&tmp[wi], "_mw_", 4);
+          wi += 4;
+          memcpy(&tmp[wi], name, nameLen);
+          wi += nameLen;
+          i += nameLen;
+        }
+      } else {
+        tmp[wi++] = szShaderText[i++];
+      }
+    }
+    tmp[wi] = 0;
+
+    // Copy back
+    memcpy(szShaderText, tmp, wi + 1);
+    srcLen = wi;
+  }
+
+  free(tmp);
+}
+
 bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char* szProfile,
   LPD3DXCONSTANTTABLE* ppConstTable, void** ppShader, int shaderType, bool bHardErrors, bool compileOnly,
   LPD3DXBUFFER* ppBytecodeOut) {
@@ -4387,6 +4515,9 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
       return false;
     }
   }
+
+  // Fix variables that shadow HLSL built-in functions (e.g. float2 pow = ...)
+  FixShadowedBuiltins(szShaderText);
 
   // now really try to compile it.
 
@@ -9534,6 +9665,47 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       return 0;
     }
 
+    if (id == IDC_MW_RANDTEX_BROWSE && code == BN_CLICKED) {
+      IFileDialog* pfd = NULL;
+      HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd));
+      if (SUCCEEDED(hr)) {
+        DWORD opts;
+        pfd->GetOptions(&opts);
+        pfd->SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+        pfd->SetTitle(L"Select Random Textures Directory");
+        if (SUCCEEDED(pfd->Show(hWnd))) {
+          IShellItem* psi = NULL;
+          if (SUCCEEDED(pfd->GetResult(&psi))) {
+            PWSTR pszPath = NULL;
+            if (SUCCEEDED(psi->GetDisplayName(SIGDN_FILESYSPATH, &pszPath))) {
+              lstrcpynW(p->m_szRandomTexDir, pszPath, MAX_PATH);
+              // Ensure trailing backslash
+              int len = lstrlenW(p->m_szRandomTexDir);
+              if (len > 0 && p->m_szRandomTexDir[len - 1] != L'\\') {
+                p->m_szRandomTexDir[len] = L'\\';
+                p->m_szRandomTexDir[len + 1] = 0;
+              }
+              SetWindowTextW(GetDlgItem(hWnd, IDC_MW_RANDTEX_EDIT), p->m_szRandomTexDir);
+              p->SaveFallbackPaths();
+              p->m_bNeedRescanTexturesDir = true;
+              CoTaskMemFree(pszPath);
+            }
+            psi->Release();
+          }
+        }
+        pfd->Release();
+      }
+      return 0;
+    }
+
+    if (id == IDC_MW_RANDTEX_CLEAR && code == BN_CLICKED) {
+      p->m_szRandomTexDir[0] = 0;
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_RANDTEX_EDIT), L"");
+      p->SaveFallbackPaths();
+      p->m_bNeedRescanTexturesDir = true;
+      return 0;
+    }
+
     // Audio device combo box selection
     if (id == IDC_MW_AUDIO_DEVICE && code == CBN_SELCHANGE) {
       HWND hCombo = (HWND)lParam;
@@ -10351,6 +10523,28 @@ void CPlugin::BuildSettingsControls() {
     if (hDesc && hFont) SendMessage(hDesc, WM_SETFONT, (WPARAM)hFont, TRUE);
     PAGE_CTRL(4, hDesc);
   }
+  y += lineH * 2 + gap;
+
+  // Random Textures Directory
+  {
+    HWND hLbl = CreateWindowExW(0, L"STATIC", L"Random Textures Directory:",
+      WS_CHILD | SS_LEFT, x, y, rw, lineH, hw,
+      (HMENU)(INT_PTR)IDC_MW_RANDTEX_LABEL, GetModuleHandle(NULL), NULL);
+    if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(4, hLbl);
+  }
+  y += lineH + 2;
+  {
+    HWND hEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", m_szRandomTexDir,
+      WS_CHILD | ES_AUTOHSCROLL | ES_READONLY,
+      x, y, rw, lineH + 4, hw, (HMENU)(INT_PTR)IDC_MW_RANDTEX_EDIT,
+      GetModuleHandle(NULL), NULL);
+    if (hEdit && hFont) SendMessage(hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(4, hEdit);
+  }
+  y += lineH + 6;
+  PAGE_CTRL(4, CreateBtn(hw, L"Browse...", IDC_MW_RANDTEX_BROWSE, x, y, 80, lineH, hFont));
+  PAGE_CTRL(4, CreateBtn(hw, L"Clear", IDC_MW_RANDTEX_CLEAR, x + 84, y, 60, lineH, hFont));
 
   // ===== About tab (page 5) =====
   y = tabTop + 10;
@@ -10455,7 +10649,7 @@ void CPlugin::LayoutSettingsControls() {
     RECT r; GetWindowRect(hFileList, &r);
     MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
     int lineH = 24, gap = 6;
-    int reserveBelow = 4 + lineH + gap + lineH * 2;  // gap + buttons + gap + description
+    int reserveBelow = 4 + lineH + gap + lineH * 2 + gap + lineH + 2 + (lineH + 4) + 6 + lineH;  // buttons + desc + randtex label + edit + browse/clear
     int listBottom = rcDisplay.bottom - reserveBelow;
     if (listBottom < r.top + 40) listBottom = r.top + 40;
     MoveWindow(hFileList, r.left, r.top, rw, listBottom - r.top, TRUE);
@@ -10468,6 +10662,17 @@ void CPlugin::LayoutSettingsControls() {
 
     HWND hDesc = GetDlgItem(m_hSettingsWnd, IDC_MW_FILE_DESC);
     if (hDesc) MoveWindow(hDesc, r.left, btnY + lineH + gap, rw, lineH * 2, TRUE);
+
+    // Random textures directory controls - keep grouped tightly
+    int randY = btnY + lineH + gap + lineH * 2 + gap;
+    HWND hRandLabel = GetDlgItem(m_hSettingsWnd, IDC_MW_RANDTEX_LABEL);
+    HWND hRandEdit = GetDlgItem(m_hSettingsWnd, IDC_MW_RANDTEX_EDIT);
+    HWND hRandBrowse = GetDlgItem(m_hSettingsWnd, IDC_MW_RANDTEX_BROWSE);
+    HWND hRandClear = GetDlgItem(m_hSettingsWnd, IDC_MW_RANDTEX_CLEAR);
+    if (hRandLabel) MoveWindow(hRandLabel, r.left, randY, rw, lineH, TRUE);
+    if (hRandEdit) MoveWindow(hRandEdit, r.left, randY + lineH + 2, rw, lineH + 4, TRUE);
+    if (hRandBrowse) MoveWindow(hRandBrowse, r.left, randY + lineH + 2 + lineH + 6, 80, lineH, TRUE);
+    if (hRandClear) MoveWindow(hRandClear, r.left + 84, randY + lineH + 2 + lineH + 6, 60, lineH, TRUE);
   }
 
   InvalidateRect(m_hSettingsWnd, NULL, TRUE);
@@ -10653,6 +10858,9 @@ void CPlugin::SaveFallbackPaths() {
     swprintf(key, 32, L"Path%d", i);
     WritePrivateProfileStringW(L"FallbackPaths", key, NULL, pIni);
   }
+  // Random textures directory
+  WritePrivateProfileStringW(L"FallbackPaths", L"RandomTexDir",
+    m_szRandomTexDir[0] ? m_szRandomTexDir : NULL, pIni);
 }
 
 void CPlugin::LoadFallbackPaths() {
@@ -10666,6 +10874,8 @@ void CPlugin::LoadFallbackPaths() {
     if (val[0])
       m_fallbackPaths.push_back(val);
   }
+  // Random textures directory
+  GetPrivateProfileStringW(L"FallbackPaths", L"RandomTexDir", L"", m_szRandomTexDir, MAX_PATH, pIni);
 }
 
 // ====== Settings Fullscreen Awareness ======
@@ -10799,8 +11009,8 @@ void CPlugin::OpenResourceViewer() {
   SendMessageW(m_hResourceList, LVM_INSERTCOLUMNW, 4, (LPARAM)&col);
 
   // Create buttons (owner-draw for dark theme painting)
-  CreateWindowExW(0, L"BUTTON", L"Copy Path", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-    0, 0, 90, 28, m_hResourceWnd, (HMENU)(INT_PTR)IDC_RV_COPY_PATH, GetModuleHandle(NULL), NULL);
+  CreateWindowExW(0, L"BUTTON", L"\u2702", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+    0, 0, 36, 28, m_hResourceWnd, (HMENU)(INT_PTR)IDC_RV_COPY_PATH, GetModuleHandle(NULL), NULL);
   CreateWindowExW(0, L"BUTTON", L"Refresh", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
     0, 0, 70, 28, m_hResourceWnd, (HMENU)(INT_PTR)IDC_RV_REFRESH, GetModuleHandle(NULL), NULL);
 
@@ -10997,7 +11207,7 @@ void CPlugin::LayoutResourceViewer() {
 
   HWND hCopy = GetDlgItem(m_hResourceWnd, IDC_RV_COPY_PATH);
   HWND hRefresh = GetDlgItem(m_hResourceWnd, IDC_RV_REFRESH);
-  if (hCopy) MoveWindow(hCopy, rc.right - 90 - margin - 70 - margin, listBottom + margin, 90, btnH, TRUE);
+  if (hCopy) MoveWindow(hCopy, rc.right - 36 - margin - 70 - margin, listBottom + margin, 36, btnH, TRUE);
   if (hRefresh) MoveWindow(hRefresh, rc.right - 70 - margin, listBottom + margin, 70, btnH, TRUE);
 }
 
@@ -11195,27 +11405,39 @@ void CPlugin::PopulateResourceViewer() {
           }
         }
 
+        // For rand textures resolved via SRV index, use the actual loaded texture name
+        const wchar_t* szLookupName = (texIdx >= 0) ? m_textures[texIdx].texname : szRootName;
+
         // Build full file path by searching the same way CacheParams does
         wchar_t szFullPath[MAX_PATH * 2] = {};
         {
           bool pathFound = false;
           for (int z = 0; z < 8; z++) {  // 8 extensions in texture_exts
             wchar_t szTry[MAX_PATH];
-            swprintf(szTry, MAX_PATH, L"%stextures\\%s.%s", m_szMilkdrop2Path, szRootName, texture_exts[z].c_str());
+            swprintf(szTry, MAX_PATH, L"%stextures\\%s.%s", m_szMilkdrop2Path, szLookupName, texture_exts[z].c_str());
             if (GetFileAttributesW(szTry) != 0xFFFFFFFF) {
               lstrcpyW(szFullPath, szTry);
               pathFound = true;
               break;
             }
-            swprintf(szTry, MAX_PATH, L"%s%s.%s", m_szPresetDir, szRootName, texture_exts[z].c_str());
+            swprintf(szTry, MAX_PATH, L"%s%s.%s", m_szPresetDir, szLookupName, texture_exts[z].c_str());
             if (GetFileAttributesW(szTry) != 0xFFFFFFFF) {
               lstrcpyW(szFullPath, szTry);
               pathFound = true;
               break;
+            }
+            // Search random textures directory
+            if (m_szRandomTexDir[0]) {
+              swprintf(szTry, MAX_PATH, L"%s%s.%s", m_szRandomTexDir, szLookupName, texture_exts[z].c_str());
+              if (GetFileAttributesW(szTry) != 0xFFFFFFFF) {
+                lstrcpyW(szFullPath, szTry);
+                pathFound = true;
+                break;
+              }
             }
             // Search fallback paths
             for (auto& fbPath : m_fallbackPaths) {
-              swprintf(szTry, MAX_PATH, L"%s%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
+              swprintf(szTry, MAX_PATH, L"%s%s.%s", fbPath.c_str(), szLookupName, texture_exts[z].c_str());
               if (GetFileAttributesW(szTry) != 0xFFFFFFFF) {
                 lstrcpyW(szFullPath, szTry);
                 pathFound = true;
@@ -11226,7 +11448,7 @@ void CPlugin::PopulateResourceViewer() {
           }
           if (!pathFound) {
             // Show expected primary search path for missing textures
-            swprintf(szFullPath, MAX_PATH * 2, L"%stextures\\%s", m_szMilkdrop2Path, szRootName);
+            swprintf(szFullPath, MAX_PATH * 2, L"%stextures\\%s", m_szMilkdrop2Path, szLookupName);
           }
         }
 
