@@ -799,8 +799,24 @@ void CPlugin::RenderFrame(int bRedraw) {
           }
         }
 
-        // randomly spawn Custom Message, if time
-        if (m_fTimeBetweenRandomCustomMsgs > 0 &&
+        // Autoplay custom messages (managed via Messages tab)
+        if (m_bMsgAutoplay && m_nMsgAutoplayCount > 0 &&
+          m_fNextAutoMsgTime > 0 && GetTime() >= m_fNextAutoMsgTime &&
+          !m_supertexts[i].bRedrawSuperText &&
+          GetTime() >= m_supertexts[i].fStartTime + m_supertexts[i].fDuration + 1.0f / GetFps()) {
+          int msgIdx;
+          if (m_bMsgSequential) {
+            if (m_nNextSequentialMsg >= m_nMsgAutoplayCount)
+              m_nNextSequentialMsg = 0;
+            msgIdx = m_nMsgAutoplayOrder[m_nNextSequentialMsg++];
+          } else {
+            msgIdx = m_nMsgAutoplayOrder[rand() % m_nMsgAutoplayCount];
+          }
+          LaunchCustomMessage(msgIdx);
+          ScheduleNextAutoMessage();
+        }
+        // Legacy random spawn Custom Message (when autoplay off)
+        else if (!m_bMsgAutoplay && m_fTimeBetweenRandomCustomMsgs > 0 &&
           !m_supertexts[i].bRedrawSuperText &&
           GetTime() >= m_supertexts[i].fStartTime + m_supertexts[i].fDuration + 1.0f / GetFps()) {
           int n = GetNumToSpawn(GetTime(), fDeltaT, 1.0f / m_fTimeBetweenRandomCustomMsgs, 0.5f, m_nCustMsgsSpawned);

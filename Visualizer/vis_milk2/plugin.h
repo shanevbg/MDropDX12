@@ -805,7 +805,7 @@ public:
   HWND        m_hSettingsWnd = NULL;
   HWND        m_hSettingsTab = NULL;       // Tab control
   int         m_nSettingsActivePage = 0;
-  std::vector<HWND> m_settingsPageCtrls[6]; // HWNDs per tab (General, Visual, Colors, Sound, Files, About)
+  std::vector<HWND> m_settingsPageCtrls[7]; // HWNDs per tab (General, Visual, Colors, Sound, Files, Messages, About)
   HFONT       m_hSettingsFont = NULL;
   HFONT       m_hSettingsFontBold = NULL;
   int         m_nSettingsWndW = 600;
@@ -820,6 +820,15 @@ public:
   void        LayoutSettingsControls();
   void        EnsureSettingsVisible();
   static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+  // Messages tab
+  void        PopulateMsgListBox(HWND hList);
+  void        BuildMsgPlaybackOrder();
+  void        WriteCustomMessages();
+  void        SaveMsgAutoplaySettings();
+  void        LoadMsgAutoplaySettings();
+  void        ScheduleNextAutoMessage();
+  void        UpdateMsgPreview(HWND hSettingsWnd, int sel);
+  bool        ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew);
 
   // Settings window dark theme
   bool        m_bSettingsDarkTheme = true;   // Enable dark theme for settings window
@@ -864,6 +873,16 @@ public:
   wchar_t m_szRandomTexDir[MAX_PATH] = {};  // Dedicated random textures directory
   void  SaveFallbackPaths();
   void  LoadFallbackPaths();
+
+  // Message autoplay (Messages tab)
+  bool    m_bMsgAutoplay = false;
+  bool    m_bMsgSequential = false;           // true=sequential, false=random
+  float   m_fMsgAutoplayInterval = 30.0f;     // base seconds between messages
+  float   m_fMsgAutoplayJitter = 5.0f;        // +/- randomness (seconds)
+  float   m_fNextAutoMsgTime = -1.0f;         // scheduled time for next auto message
+  int     m_nNextSequentialMsg = 0;           // index into playback order
+  int     m_nMsgAutoplayOrder[MAX_CUSTOM_MESSAGES]; // playback order array
+  int     m_nMsgAutoplayCount = 0;            // active messages in order
 
   // Resource Viewer
   HWND        m_hResourceWnd = NULL;
