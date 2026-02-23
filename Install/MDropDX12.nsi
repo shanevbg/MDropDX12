@@ -1,12 +1,12 @@
-; Milkwave.nsi
+; MDropDX12.nsi
 ; NSIS installer script
 
 !include "MUI2.nsh"
 
 !define MUI_ABORTWARNING
 
-!define MUI_ICON "..\Resources\MilkwaveVisualizer.ico"
-!define MUI_UNICON "..\Resources\MilkwaveVisualizer.ico"
+!define MUI_ICON "..\Resources\MDropDX12Visualizer.ico"
+!define MUI_UNICON "..\Resources\MDropDX12Visualizer.ico"
 
 !define VERSION "3.5"
 !define VER_MAJOR 3
@@ -14,21 +14,21 @@
 
 !define RELDIR "..\Release\"
 
-!define REG_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Milkwave"
+!define REG_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\MDropDX12"
 
-Name "Milkwave ${VERSION}"
-OutFile "Milkwave-${VERSION}-Installer.exe"
-InstallDir "C:\Tools\Milkwave"
+Name "MDropDX12 ${VERSION}"
+OutFile "MDropDX12-${VERSION}-Installer.exe"
+InstallDir "C:\Tools\MDropDX12"
 
 RequestExecutionLevel user
 
 ; Page defines
 !define MUI_COMPONENTSPAGE_NODESC
 
-!define MUI_DIRECTORYPAGE_TEXT_TOP "Milkwave needs FULL WRITE ACCESS to its directory! Do NOT install into $\"Program Files$\" or a similar protected location."
+!define MUI_DIRECTORYPAGE_TEXT_TOP "MDropDX12 needs FULL WRITE ACCESS to its directory! Do NOT install into $\"Program Files$\" or a similar protected location."
 
-!define MUI_FINISHPAGE_RUN "$INSTDIR\MilkwaveRemote.exe"
-!define MUI_FINISHPAGE_RUN_TEXT "Run Milkwave now!"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\MDropDX12Remote.exe"
+!define MUI_FINISHPAGE_RUN_TEXT "Run MDropDX12 now!"
 
 !define MUI_FINISHPAGE_SHOWREADME "$INSTDIR\README.txt"
 !define MUI_FINISHPAGE_SHOWREADME_TEXT "Show README.txt"
@@ -48,7 +48,7 @@ RequestExecutionLevel user
 !insertmacro MUI_LANGUAGE "English"
 
 ; Installer Sections
-Section "Milkwave" SecMilkwave
+Section "MDropDX12" SecMDropDX12
   
   SectionIn RO ;Make it read-only
     
@@ -63,11 +63,11 @@ Section "Milkwave" SecMilkwave
   SetOutPath "$INSTDIR\resources\docs\"
   File /r "${RELDIR}resources\docs\*"
 
-  SetOutPath "$INSTDIR\resources\presets\Milkwave\"
-  File "${RELDIR}resources\presets\Milkwave\*"
+  SetOutPath "$INSTDIR\resources\presets\MDropDX12\"
+  File "${RELDIR}resources\presets\MDropDX12\*"
 
-  SetOutPath "$INSTDIR\resources\presets\Milkwave\Shader\"
-  File "${RELDIR}resources\presets\Milkwave\Shader\*"
+  SetOutPath "$INSTDIR\resources\presets\MDropDX12\Shader\"
+  File "${RELDIR}resources\presets\MDropDX12\Shader\*"
 
   SetOutPath "$INSTDIR\resources\sprites\"
   File /r "${RELDIR}resources\sprites\*"
@@ -76,10 +76,10 @@ Section "Milkwave" SecMilkwave
   File /r "${RELDIR}resources\textures\*"
   
   SetOutPath "$INSTDIR"
-  File "${RELDIR}MilkwaveRemote.dll"
-  File "${RELDIR}MilkwaveRemote.exe"
-  File "${RELDIR}MilkwaveRemote.runtimeconfig.json"
-  File "${RELDIR}MilkwaveVisualizer.exe"
+  File "${RELDIR}MDropDX12Remote.dll"
+  File "${RELDIR}MDropDX12Remote.exe"
+  File "${RELDIR}MDropDX12Remote.runtimeconfig.json"
+  File "${RELDIR}MDropDX12Visualizer.exe"
   File "${RELDIR}NAudio.Core.dll"
   File "${RELDIR}NAudio.Midi.dll"
   File "${RELDIR}NAudio.Wasapi.dll"
@@ -98,21 +98,21 @@ Section "Milkwave" SecMilkwave
   SetOutPath $INSTDIR
 
   ;Store installation folder
-  WriteRegStr HKCU "Software\Milkwave" "" $INSTDIR
+  WriteRegStr HKCU "Software\MDropDX12" "" $INSTDIR
 
   WriteRegStr HKCU "${REG_UNINST_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegStr HKCU "${REG_UNINST_KEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
   WriteRegStr HKCU "${REG_UNINST_KEY}" "InstallLocation" "$INSTDIR"
   
-  WriteRegStr HKCU "${REG_UNINST_KEY}" "DisplayName" "Milkwave Visualizer"
-  WriteRegStr HKCU "${REG_UNINST_KEY}" "DisplayIcon" "$INSTDIR\MilkwaveVisualizer.exe"
+  WriteRegStr HKCU "${REG_UNINST_KEY}" "DisplayName" "MDropDX12 Visualizer"
+  WriteRegStr HKCU "${REG_UNINST_KEY}" "DisplayIcon" "$INSTDIR\MDropDX12Visualizer.exe"
   
   WriteRegStr HKCU "${REG_UNINST_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegDWORD HKCU "${REG_UNINST_KEY}" "VersionMajor" "${VER_MAJOR}"
   WriteRegDWORD HKCU "${REG_UNINST_KEY}" "VersionMinor" "${VER_MINOR}"
 
   WriteRegStr HKCU "${REG_UNINST_KEY}" "Publisher" "IkeC and Contributors"
-  WriteRegStr HKCU "${REG_UNINST_KEY}" "URLInfoAbout" "https://github.com/IkeC/Milkwave"
+  WriteRegStr HKCU "${REG_UNINST_KEY}" "URLInfoAbout" "https://github.com/shanevbg/MDropDX12"
 
   WriteRegDWORD HKCU "${REG_UNINST_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${REG_UNINST_KEY}" "NoRepair" 1
@@ -148,14 +148,14 @@ SectionEnd
 
 Section "Start menu items"
   ;Create shortcuts
-  CreateShortcut "$SMPROGRAMS\Milkwave Remote.lnk" "$INSTDIR\MilkwaveRemote.exe"
-  CreateShortcut "$SMPROGRAMS\Milkwave Visualizer.lnk" "$INSTDIR\MilkwaveVisualizer.exe"
-  CreateShortcut "$SMPROGRAMS\Milkwave Uninstall.lnk" "$INSTDIR\Uninstall.exe"
+  CreateShortcut "$SMPROGRAMS\MDropDX12 Remote.lnk" "$INSTDIR\MDropDX12Remote.exe"
+  CreateShortcut "$SMPROGRAMS\MDropDX12 Visualizer.lnk" "$INSTDIR\MDropDX12Visualizer.exe"
+  CreateShortcut "$SMPROGRAMS\MDropDX12 Uninstall.lnk" "$INSTDIR\Uninstall.exe"
 SectionEnd
 
 Section "Desktop shortcuts"
-  CreateShortcut "$Desktop\Milkwave Remote.lnk" "$INSTDIR\MilkwaveRemote.exe"
-  CreateShortcut "$Desktop\Milkwave Visualizer.lnk" "$INSTDIR\MilkwaveVisualizer.exe"
+  CreateShortcut "$Desktop\MDropDX12 Remote.lnk" "$INSTDIR\MDropDX12Remote.exe"
+  CreateShortcut "$Desktop\MDropDX12 Visualizer.lnk" "$INSTDIR\MDropDX12Visualizer.exe"
 SectionEnd
 
 ; Uninstaller
@@ -165,10 +165,10 @@ Section Uninstall
   RMDir /r "$INSTDIR\backup"
   RMDir /r "$INSTDIR\log"
   
-  Delete "$INSTDIR\MilkwaveRemote.dll"
-  Delete "$INSTDIR\MilkwaveRemote.exe"
-  Delete "$INSTDIR\MilkwaveRemote.runtimeconfig.json"
-  Delete "$INSTDIR\MilkwaveVisualizer.exe"
+  Delete "$INSTDIR\MDropDX12Remote.dll"
+  Delete "$INSTDIR\MDropDX12Remote.exe"
+  Delete "$INSTDIR\MDropDX12Remote.runtimeconfig.json"
+  Delete "$INSTDIR\MDropDX12Visualizer.exe"
   Delete "$INSTDIR\NAudio.Core.dll"
   Delete "$INSTDIR\NAudio.Midi.dll"
   Delete "$INSTDIR\NAudio.Wasapi.dll"
@@ -186,12 +186,12 @@ Section Uninstall
   
   RMDir $INSTDIR
       
-  Delete "$SMPROGRAMS\Milkwave*.lnk"
-  Delete "$Desktop\Milkwave Remote.lnk"
-  Delete "$Desktop\Milkwave Visualizer.lnk"
+  Delete "$SMPROGRAMS\MDropDX12*.lnk"
+  Delete "$Desktop\MDropDX12 Remote.lnk"
+  Delete "$Desktop\MDropDX12 Visualizer.lnk"
   
   
   DeleteRegKey HKCU "${REG_UNINST_KEY}"
-  DeleteRegKey HKCU "Software\Milkwave"
+  DeleteRegKey HKCU "Software\MDropDX12"
   
 SectionEnd

@@ -14,7 +14,7 @@ F4                      Show/hide preset info
 F5                      Show/hide fps
 F6                      Show/hide rating
 F7                      Always on top
-F8 / R+M MOUSEBUTTON    Open Milkwave Remote
+F8 / R+M MOUSEBUTTON    Open MDropDX12 Remote
 F9                      Toggle clickthrough mode
 CTRL + F9               Toggle windowed fullscreen mode (cover screen except taskbar)
 CTRL + SHIFT + F9       Toggle watermark mode (windowed clickthrough fullscreen)

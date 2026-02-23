@@ -1,10 +1,10 @@
-#include "milkwave.h"
+#include "mdropdx12.h"
 #include <locale>
 #include <codecvt>
 
-Milkwave::Milkwave() {}
+MDropDX12::MDropDX12() {}
 
-void Milkwave::Init(wchar_t* exePath) {
+void MDropDX12::Init(wchar_t* exePath) {
   winrt::init_apartment(); // Initialize the WinRT runtime
   start_time = std::chrono::steady_clock::now();
 
@@ -19,7 +19,7 @@ void Milkwave::Init(wchar_t* exePath) {
   coverSpriteFilePath = spritesDir / "cover.png";
 }
 
-void Milkwave::PollMediaInfo() {
+void MDropDX12::PollMediaInfo() {
 
   if (!doPoll && !doPollExplicit) return;
 
@@ -70,7 +70,7 @@ void Milkwave::PollMediaInfo() {
   }
 }
 
-bool Milkwave::SaveThumbnailToFile(const winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties& properties) {
+bool MDropDX12::SaveThumbnailToFile(const winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties& properties) {
   try {
     // Retrieve the thumbnail
     auto thumbnailRef = properties.Thumbnail();
@@ -116,21 +116,21 @@ bool Milkwave::SaveThumbnailToFile(const winrt::Windows::Media::Control::GlobalS
   return false;
 }
 
-void Milkwave::LogDebug(std::wstring info) {
+void MDropDX12::LogDebug(std::wstring info) {
   if (logLevel < 3) return;
   LogInfo(info.c_str());
 }
 
-void Milkwave::LogDebug(const wchar_t* info) {
+void MDropDX12::LogDebug(const wchar_t* info) {
   if (logLevel < 3) return;
   LogInfo(info);
 }
 
-void Milkwave::LogInfo(std::wstring info) {
+void MDropDX12::LogInfo(std::wstring info) {
   LogInfo(info.c_str());
 }
 
-void Milkwave::LogInfo(const wchar_t* info) {
+void MDropDX12::LogInfo(const wchar_t* info) {
   if (logLevel < 2) return;
 
   // Ensure the "log" directory exists
@@ -171,7 +171,7 @@ void Milkwave::LogInfo(const wchar_t* info) {
   }
 }
 
-void Milkwave::LogException(const wchar_t* context, const std::exception& e, bool showMessage) {
+void MDropDX12::LogException(const wchar_t* context, const std::exception& e, bool showMessage) {
 
   if (logLevel < 1) return;
 
@@ -246,6 +246,6 @@ void Milkwave::LogException(const wchar_t* context, const std::exception& e, boo
     message += std::wstring(exceptionMessage.begin(), exceptionMessage.end());
     message += L"\n\nDetails have been written to the log directory. Please open an issue on GitHub if the problem persists.\n\nPress Ctrl+O in the Remote to restart Visualizer.";
 
-    MessageBoxW(NULL, message.c_str(), L"Milkwave Error", MB_OK | MB_ICONERROR);
+    MessageBoxW(NULL, message.c_str(), L"MDropDX12 Error", MB_OK | MB_ICONERROR);
   }
 }

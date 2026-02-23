@@ -31,11 +31,11 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
   case 'q':
     m_pState->m_fVideoEchoZoom /= 1.05f;
-    SendPresetWaveInfoToMilkwaveRemote();
+    SendPresetWaveInfoToMDropDX12Remote();
     return 0; // we processed (or absorbed) the key
   case 'Q':
     m_pState->m_fVideoEchoZoom *= 1.05f;
-    SendPresetWaveInfoToMilkwaveRemote();
+    SendPresetWaveInfoToMDropDX12Remote();
     return 0; // we processed (or absorbed) the key
     Order of function calls...
 
@@ -626,7 +626,7 @@ int beatcount;
 bool TranspaMode = false;
 int NumTotalPresetsLoaded = 0;
 bool AutoLockedPreset = false;
-uint64_t LastSentMilkwaveMessage = 0;
+uint64_t LastSentMDropDX12Message = 0;
 
 //For Sample Rate auto-detection
 #include <windows.h>
@@ -809,7 +809,7 @@ static SettingDesc g_settingsDesc[] = {
 #define WM_MW_TOGGLE_SPOUT      (WM_APP + 3)
 #define WM_MW_RESET_BUFFERS     (WM_APP + 4)
 #define WM_MW_SPOUT_FIXEDSIZE   (WM_APP + 5)
-static const wchar_t* SETTINGS_WND_CLASS = L"MilkwaveSettingsWnd";
+static const wchar_t* SETTINGS_WND_CLASS = L"MDropDX12SettingsWnd";
 static bool g_bSettingsWndClassRegistered = false;
 
 // from support.cpp:
@@ -1218,7 +1218,7 @@ void CPlugin::MyPreInitialize() {
   // EnableSpoutLog(); // Shows Spout logs on the console
     // OpenSpoutConsole(); // Empty console
 
-  sprintf(WinampSenderName, "Milkwave");
+  sprintf(WinampSenderName, "MDropDX12");
   bInitialized = false;
   bSpoutOut = true; // User on/off toggle
   bSpoutChanged = false; // set to write config on exit
@@ -1484,7 +1484,7 @@ void CPlugin::MyReadConfig() {
   m_fAudioSensitivity = (float)GetPrivateProfileIntW(L"Milkwave", L"AudioSensitivity", (int)m_fAudioSensitivity, pIni);
   if (m_fAudioSensitivity < 1.0f) m_fAudioSensitivity = 1.0f;
   if (m_fAudioSensitivity > 256.0f) m_fAudioSensitivity = 256.0f;
-  milkwave_audio_sensitivity = m_fAudioSensitivity;
+  mdropdx12_audio_sensitivity = m_fAudioSensitivity;
   m_bEnablePresetStartupSavingOnClose = GetPrivateProfileBoolW(L"Settings", L"bEnablePresetStartupSavingOnClose", m_bEnablePresetStartupSavingOnClose, pIni);
 
   m_bAutoLockPresetWhenNoMusic = GetPrivateProfileBoolW(L"Settings", L"bAutoLockPresetWhenNoMusic", m_bAutoLockPresetWhenNoMusic, pIni);
@@ -1570,7 +1570,7 @@ void CPlugin::MyReadConfig() {
 
   GetPrivateProfileStringW(L"Settings", L"szPresetStartup", m_szPresetStartup, m_szPresetStartup, sizeof(m_szPresetStartup), pIni);
 
-  // Milkwave
+  // MDropDX12:
   GetPrivateProfileStringW(L"Milkwave", L"AudioDevice", m_szAudioDevice, m_szAudioDevice, sizeof(m_szAudioDevice), pIni);
   m_nAudioDeviceRequestType = GetPrivateProfileIntW(L"Milkwave", L"AudioDeviceRequestType", m_nAudioDeviceRequestType, pIni);
   m_SongInfoPollingEnabled = GetPrivateProfileBoolW(L"Milkwave", L"SongInfoPollingEnabled", m_SongInfoPollingEnabled, pIni);
@@ -1748,7 +1748,7 @@ void CPlugin::MyWriteConfig() {
   WritePrivateProfileIntW(m_bShowPresetInfo, L"bShowPresetInfo", GetConfigIniFile(), L"Settings");
   WritePrivateProfileIntW(m_show_press_f1_msg, L"show_press_f1_msg", GetConfigIniFile(), L"Settings");
 
-  // Milkwave
+  // MDropDX12:
   WritePrivateProfileStringW(L"Milkwave", L"AudioDevice", m_szAudioDevice, pIni);
   WritePrivateProfileIntW(m_nAudioDeviceRequestType, L"AudioDeviceRequestType", pIni, L"Milkwave");
   WritePrivateProfileIntW((int)m_fAudioSensitivity, L"AudioSensitivity", pIni, L"Milkwave");
@@ -4616,7 +4616,7 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
         AddNotification(wideErrorMsg);
       }
       else {
-        if (MessageBoxA(GetPluginWindow(), "The shader could not be compiled.\n\nPlease install the Microsoft DirectX End-User Runtimes.\n\nOpen Download-Website now?", "Milkwave Visualizer", MB_YESNO | MB_SETFOREGROUND | MB_TOPMOST) == IDYES) {
+        if (MessageBoxA(GetPluginWindow(), "The shader could not be compiled.\n\nPlease install the Microsoft DirectX End-User Runtimes.\n\nOpen Download-Website now?", "MDropDX12 Visualizer", MB_YESNO | MB_SETFOREGROUND | MB_TOPMOST) == IDYES) {
           // open website in browser
           ShellExecuteA(NULL, "open", "https://www.microsoft.com/en-us/download/details.aspx?id=35", NULL, NULL, SW_SHOWNORMAL);
         }
@@ -5142,7 +5142,7 @@ void CPlugin::MyRenderFn(int redraw) {
         if (m_ColShiftHue >= 1.0f) {
           m_ColShiftHue = -1.0f;
         }
-        SendSettingsInfoToMilkwaveRemote();
+        SendSettingsInfoToMDropDX12Remote();
       }
     }
   }
@@ -6331,7 +6331,7 @@ void CPlugin::MyRenderUI(
     }
     else if (m_UI_mode == UI_SETTINGS) {
       // Settings screen header
-      MyTextOut(L"MILKWAVE SETTINGS  (F2 to close, UP/DOWN to navigate)", MTO_UPPER_LEFT, true);
+      MyTextOut(L"MDROPDX12 SETTINGS  (F2 to close, UP/DOWN to navigate)", MTO_UPPER_LEFT, true);
 
       wchar_t iniPath[MAX_PATH + 64];
       swprintf(iniPath, L"Config: %s", GetConfigIniFile());
@@ -6448,7 +6448,7 @@ void CPlugin::MyRenderUI(
             float age = t - m_errors[i].birthTime;
             if (!m_errors[i].bSentToRemote) {
               // send once
-              int res = SendMessageToMilkwaveRemote((L"STATUS=" + m_errors[i].msg).c_str());
+              int res = SendMessageToMDropDX12Remote((L"STATUS=" + m_errors[i].msg).c_str());
               m_errors[i].bSentToRemote = res != 0;
             }
             if (!m_errors[i].bSentToRemote || !m_HideNotificationsWhenRemoteActive) {
@@ -6578,7 +6578,7 @@ void CPlugin::SetOpacity(HWND hwnd) {
   swprintf(buf, 64, L"Opacity: %d%%", display); // Use %d for integers
   g_plugin.AddNotification(buf);
 
-  SendMessageToMilkwaveRemote((L"OPACITY=" + std::to_wstring(display)).c_str());
+  SendMessageToMDropDX12Remote((L"OPACITY=" + std::to_wstring(display)).c_str());
 }
 
 void ToggleWindowOpacity(HWND hwnd, bool bDown) {
@@ -7160,7 +7160,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
         if (fabsf(newQuality - m_fRenderQuality) > 0.0001f) {
           m_fRenderQuality = newQuality;
           ResetBufferAndFonts();
-          SendSettingsInfoToMilkwaveRemote();
+          SendSettingsInfoToMDropDX12Remote();
         }
         return 0;
       }
@@ -7181,7 +7181,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
             m_ColShiftHue = -1.0f;
           }
         }
-        SendSettingsInfoToMilkwaveRemote();
+        SendSettingsInfoToMDropDX12Remote();
         return 0;
       }
       break;
@@ -7712,7 +7712,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
         if (GetFocus() == GetPluginWindow()) {
           if (!IsBorderlessFullscreen(GetPluginWindow())) {
             bool isShiftPressed = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-            if (isShiftPressed || MessageBoxA(GetPluginWindow(), "Close Milkwave Visualizer?\n\n(You may also use SHIFT+ESC or RIGHT+LEFT MOUSE BUTTON\nto close without confirmation)", "Milkwave Visualizer", MB_YESNO | MB_TOPMOST) == IDYES) {
+            if (isShiftPressed || MessageBoxA(GetPluginWindow(), "Close MDropDX12 Visualizer?\n\n(You may also use SHIFT+ESC or RIGHT+LEFT MOUSE BUTTON\nto close without confirmation)", "MDropDX12 Visualizer", MB_YESNO | MB_TOPMOST) == IDYES) {
               PostMessage(hWnd, WM_CLOSE, 0, 0);
             }
             return 0;
@@ -8140,7 +8140,7 @@ int CPlugin::ToggleSpout() {
   }
 
   ResetBufferAndFonts();
-  SendSettingsInfoToMilkwaveRemote();
+  SendSettingsInfoToMDropDX12Remote();
   return 0;
 }
 
@@ -8180,7 +8180,7 @@ int CPlugin::SetSpoutFixedSize(bool toggleSwitch, bool showNotifications) {
     }
     ResetBufferAndFonts();
   }
-  SendSettingsInfoToMilkwaveRemote();
+  SendSettingsInfoToMDropDX12Remote();
   return 0;
 }
 
@@ -8256,7 +8256,7 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
       else {
         m_pState->m_fVideoEchoZoom *= 1.05f;
       }
-      SendPresetWaveInfoToMilkwaveRemote();
+      SendPresetWaveInfoToMDropDX12Remote();
     }
     else {
       const float multiplier = (wParam == 'q') ? 0.5f : 2.0f;
@@ -8264,7 +8264,7 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
       if (fabsf(newQuality - m_fRenderQuality) > 0.0001f) {
         m_fRenderQuality = newQuality;
         ResetBufferAndFonts();
-        SendSettingsInfoToMilkwaveRemote();
+        SendSettingsInfoToMDropDX12Remote();
       }
     }
     return 0; // we processed (or absorbed) the key
@@ -8272,31 +8272,31 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
   case 'w':
     m_pState->m_nWaveMode++;
     if (m_pState->m_nWaveMode >= NUM_WAVES) m_pState->m_nWaveMode = 0;
-    SendPresetWaveInfoToMilkwaveRemote();
+    SendPresetWaveInfoToMDropDX12Remote();
     return 0; // we processed (or absorbed) the key
   case 'W':
     m_pState->m_nWaveMode--;
     if (m_pState->m_nWaveMode < 0) m_pState->m_nWaveMode = NUM_WAVES - 1;
-    SendPresetWaveInfoToMilkwaveRemote();
+    SendPresetWaveInfoToMDropDX12Remote();
     return 0; // we processed (or absorbed) the key
   case 'e':
     m_pState->m_fWaveAlpha -= 0.1f;
     if (m_pState->m_fWaveAlpha.eval(-1) < 0.0f) m_pState->m_fWaveAlpha = 0.0f;
-    SendPresetWaveInfoToMilkwaveRemote();
+    SendPresetWaveInfoToMDropDX12Remote();
     return 0; // we processed (or absorbed) the key
   case 'E':
     m_pState->m_fWaveAlpha += 0.1f;
-    SendPresetWaveInfoToMilkwaveRemote();
+    SendPresetWaveInfoToMDropDX12Remote();
     //if (m_pState->m_fWaveAlpha.eval(-1) > 1.0f) m_pState->m_fWaveAlpha = 1.0f;
     return 0; // we processed (or absorbed) the key
 
   case 'I':
     m_pState->m_fZoom -= 0.01f;
-    SendPresetWaveInfoToMilkwaveRemote();
+    SendPresetWaveInfoToMDropDX12Remote();
     return 0; // we processed (or absorbed) the key
   case 'i':
     m_pState->m_fZoom += 0.01f;
-    SendPresetWaveInfoToMilkwaveRemote();
+    SendPresetWaveInfoToMDropDX12Remote();
     return 0; // we processed (or absorbed) the key
 
   case 'n':
@@ -8333,11 +8333,11 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
     return 0; // we processed (or absorbed) the key
   case 'o':
     m_pState->m_fWarpAmount /= 1.1f;
-    SendPresetWaveInfoToMilkwaveRemote();
+    SendPresetWaveInfoToMDropDX12Remote();
     return 0; // we processed (or absorbed) the key
   case 'O':
     m_pState->m_fWarpAmount *= 1.1f;
-    SendPresetWaveInfoToMilkwaveRemote();
+    SendPresetWaveInfoToMDropDX12Remote();
     return 0; // we processed (or absorbed) the key
   case '!':
     // randomize warp shader
@@ -8460,7 +8460,7 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
       swprintf(buf, 64, L"Brightness: %.2f", m_ColShiftBrightness);
       AddNotificationColored(buf, 1.5f, 0xFF00FFFF);
     }
-    SendSettingsInfoToMilkwaveRemote();
+    SendSettingsInfoToMDropDX12Remote();
     return 0;
   case 'B':
     m_ColShiftBrightness += 0.02f;
@@ -8470,7 +8470,7 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
       swprintf(buf, 64, L"Brightness: %.2f", m_ColShiftBrightness);
       AddNotificationColored(buf, 1.5f, 0xFF00FFFF);
     }
-    SendSettingsInfoToMilkwaveRemote();
+    SendSettingsInfoToMDropDX12Remote();
     return 0;
   case 'g':
     m_pState->m_fGammaAdj -= 0.1f;
@@ -8491,11 +8491,11 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
     return 0;
   case 'j':
     m_pState->m_fWaveScale *= 0.9f;
-    SendPresetWaveInfoToMilkwaveRemote();
+    SendPresetWaveInfoToMDropDX12Remote();
     return 0; // we processed (or absorbed) the key
   case 'J':
     m_pState->m_fWaveScale /= 0.9f;
-    SendPresetWaveInfoToMilkwaveRemote();
+    SendPresetWaveInfoToMDropDX12Remote();
     return 0; // we processed (or absorbed) the key
   case 'k':
   case 'K':
@@ -8505,18 +8505,18 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
 
     if (bShiftHeldDown) {
       m_nNumericInputMode = NUMERIC_INPUT_MODE_SPRITE_KILL;
-      SendMessageToMilkwaveRemote(L"STATUS=Sprite Mode set");
-      PostMessageToMilkwaveRemote(WM_USER_SPRITE_MODE);
+      SendMessageToMDropDX12Remote(L"STATUS=Sprite Mode set");
+      PostMessageToMDropDX12Remote(WM_USER_SPRITE_MODE);
     }
     else if (m_nNumericInputMode == NUMERIC_INPUT_MODE_SPRITE) {
       m_nNumericInputMode = NUMERIC_INPUT_MODE_CUST_MSG;
-      SendMessageToMilkwaveRemote(L"STATUS=Message Mode set");
-      PostMessageToMilkwaveRemote(WM_USER_MESSAGE_MODE);
+      SendMessageToMDropDX12Remote(L"STATUS=Message Mode set");
+      PostMessageToMDropDX12Remote(WM_USER_MESSAGE_MODE);
     }
     else {
       m_nNumericInputMode = NUMERIC_INPUT_MODE_SPRITE;
-      SendMessageToMilkwaveRemote(L"STATUS=Sprite Mode set");
-      PostMessageToMilkwaveRemote(WM_USER_SPRITE_MODE);
+      SendMessageToMDropDX12Remote(L"STATUS=Sprite Mode set");
+      PostMessageToMDropDX12Remote(WM_USER_SPRITE_MODE);
     }
 
     m_nNumericInputNum = 0;
@@ -8584,7 +8584,7 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
       swprintf(buf, L"Preset unlocked", tmp, 64);
       AddNotification(buf);
     }
-    SendSettingsInfoToMilkwaveRemote();
+    SendSettingsInfoToMDropDX12Remote();
     return 0;
 
   case 'l': // LOAD PRESET
@@ -8646,7 +8646,7 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
 
   if (wParam == 'y' || wParam == 'Y')	// 'y' or 'Y'
   {
-    // Milkwave: 'k' now toggles between sprite and message mode
+    // MDropDX12: 'k' now toggles between sprite and message mode
     return 0; // we processed (or absorbed) the key
   }
 
@@ -9021,7 +9021,7 @@ void CPlugin::AdjustSetting(int id, int direction) {
   if (*pFloat < s.fMin) *pFloat = s.fMin;
   if (*pFloat > s.fMax) *pFloat = s.fMax;
   if (id == SET_AUDIO_SENSITIVITY)
-    milkwave_audio_sensitivity = m_fAudioSensitivity;
+    mdropdx12_audio_sensitivity = m_fAudioSensitivity;
   SaveSettingToINI(id);
 }
 
@@ -9503,6 +9503,7 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     if (id == IDC_MW_PRESET_LIST && code == LBN_SELCHANGE) {
       int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
       if (sel >= 0 && sel < p->m_nPresets) {
+        p->m_nCurrentPreset = sel;
         wchar_t szFile[MAX_PATH];
         swprintf(szFile, MAX_PATH, L"%s%s", p->m_szPresetDir, p->m_presets[sel].szFilename.c_str());
         p->LoadPreset(szFile, p->m_fBlendTimeUser);
@@ -9839,7 +9840,7 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         p->m_fAudioSensitivity = (float)_wtof(buf);
         if (p->m_fAudioSensitivity < 1) p->m_fAudioSensitivity = 1;
         if (p->m_fAudioSensitivity > 256) p->m_fAudioSensitivity = 256;
-        milkwave_audio_sensitivity = p->m_fAudioSensitivity;
+        mdropdx12_audio_sensitivity = p->m_fAudioSensitivity;
         p->SaveSettingToINI(SET_AUDIO_SENSITIVITY);
         return 0;
       case IDC_MW_BLEND_TIME:
@@ -10144,7 +10145,7 @@ void CPlugin::CreateSettingsWindowOnThread() {
 
   m_hSettingsWnd = CreateWindowExW(
     WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
-    SETTINGS_WND_CLASS, L"Milkwave Settings",
+    SETTINGS_WND_CLASS, L"MDropDX12 Settings",
     WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
     posX, posY, wndW, wndH,
     NULL, NULL, GetModuleHandle(NULL), (LPVOID)this);
@@ -10549,7 +10550,7 @@ void CPlugin::BuildSettingsControls() {
   // ===== About tab (page 5) =====
   y = tabTop + 10;
 
-  PAGE_CTRL(5, CreateLabel(hw, L"Milkwave", x, y, rw, 24, hFontBold, false));
+  PAGE_CTRL(5, CreateLabel(hw, L"MDropDX12", x, y, rw, 24, hFontBold, false));
   y += 28;
 
   {
@@ -10952,14 +10953,14 @@ void CPlugin::OpenResourceViewer() {
     wc.hInstance = GetModuleHandle(NULL);
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = m_bSettingsDarkTheme ? CreateSolidBrush(m_colSettingsBg) : (HBRUSH)(COLOR_3DFACE + 1);
-    wc.lpszClassName = L"MilkwaveResourceViewer";
+    wc.lpszClassName = L"MDropDX12ResourceViewer";
     RegisterClassExW(&wc);
     g_bResourceViewerClassRegistered = true;
   }
 
   m_hResourceWnd = CreateWindowExW(
     WS_EX_TOOLWINDOW,
-    L"MilkwaveResourceViewer",
+    L"MDropDX12ResourceViewer",
     L"Resource Viewer",
     WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_VISIBLE,
     CW_USEDEFAULT, CW_USEDEFAULT, 750, 420,
@@ -11482,7 +11483,7 @@ void CPlugin::dumpmsg(wchar_t* s) {
 
 void CPlugin::PrevPreset(float fBlendTime) {
   if (m_RemotePresetLink) {
-    PostMessageToMilkwaveRemote(WM_USER_PREV_PRESET);
+    PostMessageToMDropDX12Remote(WM_USER_PREV_PRESET);
     return;
   }
 
@@ -11515,7 +11516,7 @@ void CPlugin::NextPreset(float fBlendTime)  // if not retracing our former steps
 
 void CPlugin::LoadRandomPreset(float fBlendTime) {
   if (m_RemotePresetLink) {
-    PostMessageToMilkwaveRemote(WM_USER_NEXT_PRESET);
+    PostMessageToMDropDX12Remote(WM_USER_NEXT_PRESET);
     return;
   }
 
@@ -12907,17 +12908,17 @@ void CPlugin::OnFinishedLoadingPreset() {
   for (int mash = 0; mash < MASH_SLOTS; mash++)
     m_nMashPreset[mash] = m_nCurrentPreset;
 
-  SendPresetChangedInfoToMilkwaveRemote();
+  SendPresetChangedInfoToMDropDX12Remote();
 
   // Auto-refresh resource viewer if open
   if (m_hResourceWnd && IsWindow(m_hResourceWnd) && IsWindowVisible(m_hResourceWnd))
     PostMessage(m_hResourceWnd, WM_COMMAND, MAKEWPARAM(IDC_RV_REFRESH, BN_CLICKED), 0);
 }
-int CPlugin::SendMessageToMilkwaveRemote(const wchar_t* messageToSend) {
-  return SendMessageToMilkwaveRemote(messageToSend, false);
+int CPlugin::SendMessageToMDropDX12Remote(const wchar_t* messageToSend) {
+  return SendMessageToMDropDX12Remote(messageToSend, false);
 }
 
-int CPlugin::SendMessageToMilkwaveRemote(const wchar_t* messageToSend, bool doForce) {
+int CPlugin::SendMessageToMDropDX12Remote(const wchar_t* messageToSend, bool doForce) {
   using namespace std::chrono;
   try {
     if (!messageToSend || !*messageToSend) {
@@ -12927,16 +12928,16 @@ int CPlugin::SendMessageToMilkwaveRemote(const wchar_t* messageToSend, bool doFo
 
     // Get current time since epoch in milliseconds
     uint64_t Now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-    if (!doForce && Now - LastSentMilkwaveMessage < 100) {
-      // Skipping message send to Milkwave Remote to avoid flooding
+    if (!doForce && Now - LastSentMDropDX12Message < 100) {
+      // Skipping message send to MDropDX12 Remote to avoid flooding
       return 0;
     }
-    LastSentMilkwaveMessage = Now;
+    LastSentMDropDX12Message = Now;
 
-    // Find the Milkwave Remote window
-    HWND hRemoteWnd = FindWindowW(NULL, L"Milkwave Remote");
+    // Find the MDropDX12 Remote window
+    HWND hRemoteWnd = FindWindowW(NULL, L"MDropDX12 Remote");
     if (!hRemoteWnd) {
-      wprintf(L"Milkwave Remote window not found.\n");
+      wprintf(L"MDropDX12 Remote window not found.\n");
       return 0;
     }
 
@@ -12949,11 +12950,11 @@ int CPlugin::SendMessageToMilkwaveRemote(const wchar_t* messageToSend, bool doFo
     if (IsWindow(hRemoteWnd)) {
       // Send the WM_COPYDATA message
       if (SendMessage(hRemoteWnd, WM_COPYDATA, (WPARAM)GetPluginWindow(), (LPARAM)&cds) != 0) {
-        wprintf(L"Failed to send WM_COPYDATA message to Milkwave Remote.\n");
+        wprintf(L"Failed to send WM_COPYDATA message to MDropDX12 Remote.\n");
         return 0;
       }
       else {
-        wprintf(L"WM_COPYDATA message sent successfully to Milkwave Remote.\n");
+        wprintf(L"WM_COPYDATA message sent successfully to MDropDX12 Remote.\n");
       }
     }
   } catch (...) {
@@ -12962,10 +12963,10 @@ int CPlugin::SendMessageToMilkwaveRemote(const wchar_t* messageToSend, bool doFo
   return 1;
 }
 
-void CPlugin::PostMessageToMilkwaveRemote(UINT msg) {
+void CPlugin::PostMessageToMDropDX12Remote(UINT msg) {
   try {
-    // Find the Milkwave Remote window
-    HWND hRemoteWnd = FindWindowW(NULL, L"Milkwave Remote");
+    // Find the MDropDX12 Remote window
+    HWND hRemoteWnd = FindWindowW(NULL, L"MDropDX12 Remote");
     if (!hRemoteWnd) {
       return;
     }
@@ -14401,12 +14402,12 @@ void CPlugin::LaunchMessage(wchar_t* sMessage) {
     if (params.find(L"l") != params.end() && params.find(L"r") != params.end()) {
       // Convert the std::wstring to a float using std::stof
       try {
-        milkwave_amp_left = std::stof(params[L"l"]);
-        milkwave_amp_right = std::stof(params[L"r"]);
+        mdropdx12_amp_left = std::stof(params[L"l"]);
+        mdropdx12_amp_right = std::stof(params[L"r"]);
       } catch (const std::exception& e) {
         // Handle the error if the conversion fails
-        milkwave_amp_left = 1.0f; // Default value
-        milkwave_amp_right = 1.0f; // Default value
+        mdropdx12_amp_left = 1.0f; // Default value
+        mdropdx12_amp_right = 1.0f; // Default value
       }
     }
   }
@@ -14497,14 +14498,14 @@ void CPlugin::LaunchMessage(wchar_t* sMessage) {
     int display = std::ceil(100 * fOpacity);
     wchar_t buf[1024];
     swprintf(buf, 64, L"Opacity: %d%%", display); // Use %d for integers
-    SendMessageToMilkwaveRemote((L"OPACITY=" + std::to_wstring(display)).c_str());
-    SendPresetChangedInfoToMilkwaveRemote();
-    SendSettingsInfoToMilkwaveRemote();
+    SendMessageToMDropDX12Remote((L"OPACITY=" + std::to_wstring(display)).c_str());
+    SendPresetChangedInfoToMDropDX12Remote();
+    SendSettingsInfoToMDropDX12Remote();
     if (m_nNumericInputMode == NUMERIC_INPUT_MODE_CUST_MSG) {
-      PostMessageToMilkwaveRemote(WM_USER_MESSAGE_MODE);
+      PostMessageToMDropDX12Remote(WM_USER_MESSAGE_MODE);
     }
     else {
-      PostMessageToMilkwaveRemote(WM_USER_SPRITE_MODE);
+      PostMessageToMDropDX12Remote(WM_USER_SPRITE_MODE);
     }
   }
   else if (wcsncmp(sMessage, L"LINK=", 5) == 0) {
@@ -14621,19 +14622,19 @@ void CPlugin::LaunchMessage(wchar_t* sMessage) {
   }
   else if (wcsncmp(sMessage, L"CAPTURE", 7) == 0) {
     OutputDebugStringW(L"[CAPTURE] Message received\n");
-    milkwave->LogInfo(L"CAPTURE message received, calling CaptureScreenshot()");
+    mdropdx12->LogInfo(L"CAPTURE message received, calling CaptureScreenshot()");
     CaptureScreenshot();
     OutputDebugStringW(L"[CAPTURE] CaptureScreenshot() returned\n");
   }
 }
 
-void CPlugin::SendPresetChangedInfoToMilkwaveRemote() {
+void CPlugin::SendPresetChangedInfoToMDropDX12Remote() {
   std::wstring msg = L"PRESET=" + std::wstring(m_szCurrentPresetFile);
-  SendMessageToMilkwaveRemote(msg.c_str(), true);
-  SendPresetWaveInfoToMilkwaveRemote();
+  SendMessageToMDropDX12Remote(msg.c_str(), true);
+  SendPresetWaveInfoToMDropDX12Remote();
 }
 
-void CPlugin::SendPresetWaveInfoToMilkwaveRemote() {
+void CPlugin::SendPresetWaveInfoToMDropDX12Remote() {
   std::wstring msg = L"WAVE|COLORR=" + std::to_wstring(static_cast<int>(std::ceil(g_plugin.m_pState->m_fWaveR.eval(-1) * 255)))
     + L"|COLORG=" + std::to_wstring(static_cast<int>(std::ceil(g_plugin.m_pState->m_fWaveG.eval(-1) * 255)))
     + L"|COLORB=" + std::to_wstring(static_cast<int>(std::ceil(g_plugin.m_pState->m_fWaveB.eval(-1) * 255)))
@@ -14655,10 +14656,10 @@ void CPlugin::SendPresetWaveInfoToMilkwaveRemote() {
     + L"|DOTTED=" + (g_plugin.m_pState->m_bWaveDots ? L"1" : L"0")
     + L"|THICK=" + (g_plugin.m_pState->m_bWaveThick ? L"1" : L"0")
     + L"|VOLALPHA=" + (g_plugin.m_pState->m_bModWaveAlphaByVolume ? L"1" : L"0");
-  SendMessageToMilkwaveRemote(msg.c_str(), true);
+  SendMessageToMDropDX12Remote(msg.c_str(), true);
 }
 
-void CPlugin::SendSettingsInfoToMilkwaveRemote() {
+void CPlugin::SendSettingsInfoToMDropDX12Remote() {
   std::wstring msg = L"SETTINGS|ACTIVE=" + std::wstring(bSpoutOut ? L"1" : L"0")
     + L"|FIXEDSIZE=" + std::wstring(bSpoutFixedSize ? L"1" : L"0")
     + L"|FIXEDWIDTH=" + std::to_wstring(nSpoutFixedWidth)
@@ -14667,7 +14668,7 @@ void CPlugin::SendSettingsInfoToMilkwaveRemote() {
     + L"|AUTO=" + std::wstring(bQualityAuto ? L"1" : L"0")
     + L"|HUE=" + std::to_wstring(m_ColShiftHue)
     + L"|LOCKED=" + std::wstring(m_bPresetLockedByUser ? L"1" : L"0");
-  SendMessageToMilkwaveRemote(msg.c_str(), true);
+  SendMessageToMDropDX12Remote(msg.c_str(), true);
 }
 
 void CPlugin::CaptureScreenshot() {
@@ -15256,15 +15257,15 @@ bool CPlugin::OpenSender(unsigned int width, unsigned int height) {
 
 } // end OpenSender
 
-void CPlugin::OpenMilkwaveRemote() {
-  HWND hwnd = FindWindowW(NULL, L"Milkwave Remote");
+void CPlugin::OpenMDropDX12Remote() {
+  HWND hwnd = FindWindowW(NULL, L"MDropDX12 Remote");
   if (hwnd) {
     // Bring the window to the front  
     SetForegroundWindow(hwnd);
     ShowWindow(hwnd, SW_RESTORE);
   }
   else {
-    // Start the program "MilkwaveRemote.exe"  
+    // Start the program "MDropDX12Remote.exe"  
     // Ensure STARTUPINFOW is used for CreateProcessW
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
@@ -15272,11 +15273,11 @@ void CPlugin::OpenMilkwaveRemote() {
     si.cb = sizeof(si);
     ZeroMemory(&pi, sizeof(pi));
 
-    if (!CreateProcessW(L"MilkwaveRemote.exe", NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-      g_plugin.AddError(L"Could not start Milkwave Remote", 3.0f, ERR_MISC, false);
+    if (!CreateProcessW(L"MDropDX12Remote.exe", NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+      g_plugin.AddError(L"Could not start MDropDX12 Remote", 3.0f, ERR_MISC, false);
     }
     else {
-      g_plugin.AddNotification(L"Starting Milkwave Remote");
+      g_plugin.AddNotification(L"Starting MDropDX12 Remote");
       CloseHandle(pi.hProcess);
       CloseHandle(pi.hThread);
     }
@@ -15455,7 +15456,7 @@ bool CPlugin::CheckForDirectX9c() {
 void CPlugin::ShowDirectXMissingMessage() {
   if (MessageBoxA(NULL,
     "Could not initialize DirectX 9.\n\nPlease install the DirectX End-User Legacy Runtimes.\n\nOpen Download-Website now?",
-    "Milkwave Visualizer", MB_YESNO | MB_SETFOREGROUND | MB_TOPMOST) == IDYES) {
+    "MDropDX12 Visualizer", MB_YESNO | MB_SETFOREGROUND | MB_TOPMOST) == IDYES) {
     // open website in browser
     ShellExecuteA(NULL, "open", "https://www.microsoft.com/en-us/download/details.aspx?id=35", NULL, NULL, SW_SHOWNORMAL);
   }

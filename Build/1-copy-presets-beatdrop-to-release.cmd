@@ -1,7 +1,7 @@
-:: copy updated presets to the Milkwave Release folder
+:: copy updated presets to the MDropDX12 Release folder
 
 set SRCDIR=resources\Milkdrop2\presets
-set DESTDIR=..\Milkwave\Release\resources\presets
+set DESTDIR=..\MDropDX12\Release\resources\presets
 
 cd ..\..\BeatDrop-Music-Visualizer
 git pull

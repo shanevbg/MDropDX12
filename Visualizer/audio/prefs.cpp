@@ -99,7 +99,7 @@ CPrefs::CPrefs(int argc, LPCWSTR argv[], HRESULT& hr, int nAudioDeviceRequesType
           m_bIsRenderDevice = true; // default is always a render device
         }
         else {
-          MessageBox(NULL, "Could not find any suitable audio devices!", "Milkwave Error", MB_OK | MB_ICONERROR);
+          MessageBox(NULL, "Could not find any suitable audio devices!", "MDropDX12 Error", MB_OK | MB_ICONERROR);
           return;
         }
 
@@ -145,7 +145,7 @@ CPrefs::CPrefs(int argc, LPCWSTR argv[], HRESULT& hr, int nAudioDeviceRequesType
     if (NULL == m_pMMDevice) {
       hr = get_default_device(&m_pMMDevice, &m_szAudioDeviceDisplayName);
       if (FAILED(hr)) {
-        MessageBox(NULL, "Could not find any suitable audio devices.", "Milkwave Error", MB_OK | MB_ICONERROR);
+        MessageBox(NULL, "Could not find any suitable audio devices.", "MDropDX12 Error", MB_OK | MB_ICONERROR);
         return;
       }
     }

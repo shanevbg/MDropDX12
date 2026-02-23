@@ -48,7 +48,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <thread>
 #include <atomic>
 #include "../ns-eel2-shim/ns-eel.h"
-#include "milkwave.h"
+#include "mdropdx12.h"
 
 //#include <core/sdk/IPlaybackService.h>
 
@@ -291,7 +291,7 @@ typedef std::vector<PresetInfo> PresetList;
 
 class CPlugin : public CPluginShell {
 public:
-  Milkwave* milkwave;
+  MDropDX12* mdropdx12;
   //====[ 1. members added to create this specific example plugin: ]================================================
 
 // =========================================================
@@ -306,7 +306,7 @@ public:
   // Phase 2 TODO: replace with DXGI swap chain desc / resize logic.
   D3DPRESENT_PARAMETERS d3dPp = {};
   bool OpenSender(unsigned int width, unsigned int height);
-  void OpenMilkwaveRemote();
+  void OpenMDropDX12Remote();
   void SetAudioDeviceDisplayName(const wchar_t* displayName, bool isRenderDevice);
   void SetAMDFlag();
   int  GetPresetCount() override;
@@ -557,9 +557,9 @@ public:
   void PrevPreset(float fBlendTime);
   void NextPreset(float fBlendTime);  // if not retracing our former steps, it will choose a random one.
   void OnFinishedLoadingPreset();
-  int SendMessageToMilkwaveRemote(const wchar_t* presetFile);
-  int SendMessageToMilkwaveRemote(const wchar_t* presetFile, bool doForce);
-  void PostMessageToMilkwaveRemote(UINT msg);
+  int SendMessageToMDropDX12Remote(const wchar_t* presetFile);
+  int SendMessageToMDropDX12Remote(const wchar_t* presetFile, bool doForce);
+  void PostMessageToMDropDX12Remote(UINT msg);
 
 #define WM_USER_NEXT_PRESET WM_USER + 100
 #define WM_USER_PREV_PRESET WM_USER + 101
@@ -765,9 +765,9 @@ public:
   void		ClearGraphicsWindow();	// for windowed mode only
   void		LaunchCustomMessage(int nMsgNum);
   void		LaunchMessage(wchar_t* sMessage);
-  void    SendPresetChangedInfoToMilkwaveRemote();
-  void    SendPresetWaveInfoToMilkwaveRemote();
-  void    SendSettingsInfoToMilkwaveRemote();
+  void    SendPresetChangedInfoToMDropDX12Remote();
+  void    SendPresetWaveInfoToMDropDX12Remote();
+  void    SendSettingsInfoToMDropDX12Remote();
   void    SetWaveParamsFromMessage(std::wstring& message);
   void		ReadCustomMessages();
   void		LaunchSongTitleAnim(int supertextIndex);

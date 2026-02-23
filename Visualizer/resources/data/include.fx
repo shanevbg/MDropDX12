@@ -17,7 +17,7 @@ float4 _c12; // .xyz = mip info for main image (.x=#across, .y=#down, .z=avg); .
 float4 _c13; //.xy = blur2_min,blur2_max; .zw = blur3_min, blur3_max.
 float4 _c14 = float4(0.5, 0.5, 0, 0); // mouse
 
-// Introduced by Milkwave
+// Introduced by MDropDX12
 float4 _c15 = float4(0, 0, 0, 0); // bass_smooth, mid_smooth, treb_smooth, vol_smooth
 float4 _c16 = float4(1, 0, 1, 0); // vis_intensity, vis_shift, vis_version
 float4 _c17 = float4(0, 0, 0, 0); // colshift_hue, colshift_saturation, colshift_brightness

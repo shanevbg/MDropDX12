@@ -1,7 +1,7 @@
 APPLICABLE LICENSES
 -------------------
 
-All Milkwave Remote source code is licensed under the 
+All MDropDX12 Remote source code is licensed under the 
 Attribution-NonCommercial 4.0 International License, 
 meaning you may not use the material for commercial purposes.
 

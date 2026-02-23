@@ -1,6 +1,6 @@
 /*
   dx12helpers.h
-  DX12 resource types and helper functions for the Milkwave DX9->DX12 migration.
+  DX12 resource types and helper functions for the MDropDX12 DX9->DX12 migration.
   Phase 2: provides DX12Texture struct and texture creation utilities.
 */
 

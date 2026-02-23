@@ -190,8 +190,8 @@ static BOOL CALLBACK GetWindowNames(HWND h, LPARAM l) {
     GetWindowTextA(h, search_window_name, MAX_PATH);
     if (search_window_name[0]) {
       // printf("GetWindowNames - %s (%x)\n", search_window_name, h);
-      // Does the search window name contain "Milkwave" ?
-      if (strstr(search_window_name, "Milkwave Visualizer") != NULL) {
+      // Does the search window name contain "MDropDX12" ?
+      if (strstr(search_window_name, "MDropDX12 Visualizer") != NULL) {
         // printf("Found BeatDrop (%d)\n", bdn);
         bdn++;
       }
@@ -445,7 +445,7 @@ int CPluginShell::InitVJStuff_DX9_REMOVED(RECT* pClientRect) {
     char temp[64];
     int nc = GetWindowTextA(m_hRenderWnd, temp, 64);
     // The return value is the number of characters
-    // Default is "Milkwave Visualizer" (20 chars)
+    // Default is "MDropDX12 Visualizer" (20 chars)
     // (see Milkdrop2PcmVisualzer.cpp)
     if (nc > 20) {
       // Get the _01 - _02 etc.. appended for multiple instances

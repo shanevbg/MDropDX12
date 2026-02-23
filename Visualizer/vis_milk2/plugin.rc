@@ -91,13 +91,13 @@ BLOCK "StringFileInfo"
 BEGIN
 BLOCK "040904b0"
 BEGIN
-VALUE "CompanyName", "Milkwave Developers"
-VALUE "FileDescription", "Milkwave Visualizer"
+VALUE "CompanyName", "MDropDX12 Developers"
+VALUE "FileDescription", "MDropDX12 Visualizer"
 VALUE "FileVersion", "3.4.0.0"
-VALUE "InternalName", "Milkwave"
+VALUE "InternalName", "MDropDX12"
 VALUE "LegalCopyright", ""
-VALUE "OriginalFilename", "MilkwaveVisualizer.exe"
-VALUE "ProductName", "Milkwave Visualizer"
+VALUE "OriginalFilename", "MDropDX12Visualizer.exe"
+VALUE "ProductName", "MDropDX12 Visualizer"
 VALUE "ProductVersion", "3.4.0.0"
 END
 END
@@ -143,7 +143,7 @@ IDS_LOAD_FROM_FILE      "Load from file:  [note: preset's wave scaling, as well 
 IDS_SAVE_TO_FILE        "Save to file:  [note: preset's wave scaling, as well as q1-q8, will not be exported]"
 IDS_ENTER_THE_NEW_STRING
 "Enter the new string; hit CTRL+ENTER to apply or ESC to cancel."
-IDS_MILKDROP_ERROR      "Milkwave Error"
+IDS_MILKDROP_ERROR      "MDropDX12 Error"
 END
 
 STRINGTABLE
@@ -977,7 +977,7 @@ IDS_USE_TOP_SCREEN_ONLY "use top screen only"
 IDS_USE_BOTTOM_SCREEN_ONLY "use bottom screen only"
 IDS_COULD_NOT_FIND_FILE_FOR_DESKTOP_MODE_X
 "Could not find the following file:\n\n     %s\n\n...which is required for this plug-in to work properly in Desktop Mode.\nPlease reinstall the plug-in."
-IDS_MILKDROP_ERROR_FILE_MISSING "Milkwave Error - File Missing"
+IDS_MILKDROP_ERROR_FILE_MISSING "MDropDX12 Error - File Missing"
 IDS_ERROR_CREATING_GDI_DESKTOP_FONT "Error creating GDI desktop font"
 IDS_ERROR_CREATING_DESKTOP_FONT "Error creating desktop font"
 END
@@ -1038,7 +1038,7 @@ IDS_TO_FREE_UP_VIDEO_MEMORY
 "To free up some video memory, try the following:\n\n1. Try closing all other applications that might be using video memory, especially:\n\n        * WINDOWS MEDIA PLAYER\n        * any video conferencing software, such as NETMEETING\n        * any DVD playback, TV tuner, or TV capture software\n        * any video editing software\n        * any software that uses Overlays, such as Drempels Desktop\n        * any audio dictation software, such as Dragon NaturallySpeaking\n        * any other 3D programs currently running\n\n2. Also try returning to the config panel (ALT+K) and selecting a display mode\n    that uses less video memory.  16-bit display modes use half as much memory\n    as 32-bit display modes, and lower-resolution display modes (such as 640 x 480)\n    use proportionally less video memory.\n\nAfter making these changes, please RESTART the Visualizer."
 IDS_TO_FREE_UP_VIDEO_MEMORY_2
 "To free up some video memory, try the following:\n\n1. Try closing all other applications that might be using video memory, especially:\n\n        * WINDOWS MEDIA PLAYER\n        * any video conferencing software, such as NETMEETING\n        * any DVD playback, TV tuner, or TV capture software\n        * any video editing software\n        * any software that uses Overlays, such as Drempels Desktop\n        * any audio dictation software, such as Dragon NaturallySpeaking\n        * any other 3D programs currently running\n\n2. Also try changing your Windows display mode to a lesser bit depth\n    (i.e. 16-bit color), or a smaller resolution.\n\nAfter making these changes, please RESTART the Visualizer."
-IDS_MILKDROP_SUGGESTION "Milkwave Suggestion"
+IDS_MILKDROP_SUGGESTION "MDropDX12 Suggestion"
 IDS_DIRECTX_MISSING_OR_CORRUPT "DirectX Missing or Corrupt"
 IDS_ERROR_THE_PLUGIN_IS_ALREADY_RUNNING
 "Error: the plug-in is already running."

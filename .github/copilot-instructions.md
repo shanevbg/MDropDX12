@@ -1,4 +1,4 @@
-﻿# GitHub Copilot Instructions for Milkwave Project
+﻿# GitHub Copilot Instructions for MDropDX12 Project
 
 ## Critical: Windows API Constants
 
@@ -11,7 +11,7 @@ This is a Windows API constant defined in `winuser.h`. Always use the correct sp
 ### C++ Code
 - **Standard**: C++17
 - **Platform**: Windows (Win32 API)
-- **Graphics**: DirectX 9 (DX9Ex)
+- **Graphics**: DirectX 12 (D3D11on12 for Direct2D text)
 - **Audio**: WASAPI loopback capture
 
 ### .NET Code  
@@ -21,8 +21,8 @@ This is a Windows API constant defined in `winuser.h`. Always use the correct sp
 ## Project Structure
 
 ### Visualizer (C++)
-- Main visualizer engine based on MilkDrop2
-- Uses DirectX 9Ex for rendering
+- Ground-up DirectX 12 rebuild of the MilkDrop2 visualizer engine
+- Uses DirectX 12 for rendering (D3D11on12 interop for Direct2D text)
 - Audio capture via WASAPI loopback
 - Spout integration for texture sharing
 
@@ -40,7 +40,7 @@ This is a Windows API constant defined in `winuser.h`. Always use the correct sp
 ### Error Handling
 - C++: Use try/catch for std::exception
 - SEH (Structured Exception Handling) is used for low-level exceptions
-- All logging goes through the Milkwave logging system
+- All logging goes through the MDropDX12 logging system
 
 ### Threading
 - Render thread: Main window and DirectX rendering
@@ -51,7 +51,7 @@ This is a Windows API constant defined in `winuser.h`. Always use the correct sp
 ## Naming Conventions
 
 ### C++ Code
-- Classes: `PascalCase` (e.g., `CPlugin`, `Milkwave`)
+- Classes: `PascalCase` (e.g., `CPlugin`, `MDropDX12`)
 - Member variables: `m_camelCase` (e.g., `m_WindowWidth`)
 - Functions: `PascalCase` (e.g., `StartRenderThread`)
 - Constants: `UPPER_CASE` (e.g., `SAMPLE_SIZE`)
@@ -61,9 +61,9 @@ This is a Windows API constant defined in `winuser.h`. Always use the correct sp
 
 ## Important Notes
 
-- The project uses **DX9Ex**, not standard DX9 - this is critical for performance
+- The project uses **DirectX 12** with D3D11on12 interop for Direct2D text rendering
 - All file paths use wide strings (`wchar_t`, `std::wstring`)
-- Logging is done through `milkwave.LogInfo()`, `milkwave.LogException()`, etc.
+- Logging is done through `mdropdx12.LogInfo()`, `mdropdx12.LogException()`, etc.
 - Always handle exceptions gracefully - the visualizer should never crash
 
 ## Build Configuration

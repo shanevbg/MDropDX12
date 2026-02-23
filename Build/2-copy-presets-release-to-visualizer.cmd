@@ -1,4 +1,4 @@
-:: copy presets and textures from the Milkwave Release folder to the Visualizer codebase
+:: copy presets and textures from the MDropDX12 Release folder to the Visualizer codebase
 
 set SRCDIR=..\Release\resources\presets
 set DESTDIR=..\Visualizer\resources\presets
@@ -9,8 +9,8 @@ robocopy %SRCDIR%\Butterchurn %DESTDIR%\Butterchurn
 robocopy %SRCDIR%\Incubo_ %DESTDIR%\Incubo_
 robocopy "%SRCDIR%\Incubo_ Picks" "%DESTDIR%\Incubo_ Picks"
 robocopy %SRCDIR%\Milkdrop2077 %DESTDIR%\Milkdrop2077
-robocopy %SRCDIR%\Milkwave %DESTDIR%\Milkwave
-robocopy %SRCDIR%\Milkwave\Shader %DESTDIR%\Milkwave\Shader
+robocopy %SRCDIR%\MDropDX12 %DESTDIR%\MDropDX12
+robocopy %SRCDIR%\MDropDX12\Shader %DESTDIR%\MDropDX12\Shader
 
 :: textures
 robocopy %SRCDIR%\..\textures %DESTDIR%\..\textures

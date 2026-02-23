@@ -23,11 +23,11 @@ using namespace winrt;
 using namespace winrt::Windows::Media::Control;
 using namespace std::chrono_literals;
 
-extern float milkwave_amp_left;
-extern float milkwave_amp_right;
-extern float milkwave_audio_sensitivity;
+extern float mdropdx12_amp_left;
+extern float mdropdx12_amp_right;
+extern float mdropdx12_audio_sensitivity;
 
-class Milkwave {
+class MDropDX12 {
 
 public:
   std::wstring currentArtist;
@@ -46,7 +46,7 @@ public:
   bool coverUpdated = false;
   int logLevel = 1; // 0 = Off, 1 = Error, 2 = Info
 
-  Milkwave();
+  MDropDX12();
   void Init(wchar_t* exePath);
   void LogInfo(const wchar_t* info);
   void LogInfo(std::wstring info);

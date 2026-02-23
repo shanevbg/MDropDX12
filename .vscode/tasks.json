@@ -47,7 +47,7 @@
       "command": "dotnet",
       "args": [
         "build",
-        "${workspaceFolder}\\Remote\\MilkwaveRemote.csproj",
+        "${workspaceFolder}\\Remote\\MDropDX12Remote.csproj",
         "/p:Configuration=Debug"
       ],
       "group": "build",
@@ -59,7 +59,7 @@
       "command": "dotnet",
       "args": [
         "build",
-        "${workspaceFolder}\\Remote\\MilkwaveRemote.csproj",
+        "${workspaceFolder}\\Remote\\MDropDX12Remote.csproj",
         "/p:Configuration=Release"
       ],
       "group": "build",
@@ -70,7 +70,7 @@
       "type": "shell",
       "command": "msbuild",
       "args": [
-        "${workspaceFolder}\\Milkwave.sln",
+        "${workspaceFolder}\\MDropDX12.sln",
         "/p:Configuration=Debug",
         "/p:Platform=Win32"
       ],
@@ -83,7 +83,7 @@
     {
       "label": "Build RELEASE",
       "type": "shell",
-      "command": "& { msbuild '${workspaceFolder}\\Milkwave.sln' /p:Configuration=Release /p:Platform=Win32; $buildExit = $LASTEXITCODE; if ($buildExit -ne 0) { exit $buildExit }; Push-Location -LiteralPath '${workspaceFolder}\\Build'; & '.\\release.cmd'; $releaseExit = $LASTEXITCODE; Pop-Location; if ($releaseExit -ne 0) { exit $releaseExit } }",
+      "command": "& { msbuild '${workspaceFolder}\\MDropDX12.sln' /p:Configuration=Release /p:Platform=Win32; $buildExit = $LASTEXITCODE; if ($buildExit -ne 0) { exit $buildExit }; Push-Location -LiteralPath '${workspaceFolder}\\Build'; & '.\\release.cmd'; $releaseExit = $LASTEXITCODE; Pop-Location; if ($releaseExit -ne 0) { exit $releaseExit } }",
       "group": "build",
       "problemMatcher": "$msCompile"
     },
@@ -99,7 +99,7 @@
       "type": "shell",
       "command": "msbuild",
       "args": [
-        "${workspaceFolder}\\Milkwave.sln",
+        "${workspaceFolder}\\MDropDX12.sln",
         "/t:Clean",
         "/p:Configuration=Debug",
         "/p:Platform=Win32"
@@ -112,7 +112,7 @@
       "command": "nuget",
       "args": [
         "restore",
-        "${workspaceFolder}\\Milkwave.sln"
+        "${workspaceFolder}\\MDropDX12.sln"
       ],
       "problemMatcher": []
     },

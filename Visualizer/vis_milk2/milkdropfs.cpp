@@ -519,7 +519,7 @@ void CPlugin::LoadPerFrameEvallibVars(CState* pState) {
   *pState->var_pf_blur3max = (double)pState->m_fBlur3Max.eval(GetTime());
   *pState->var_pf_blur1_edge_darken = (double)pState->m_fBlur1EdgeDarken.eval(GetTime());
 
-  // BMV/Milkwave
+  // BMV/MDropDX12
   *pState->var_pf_mousex = (double)m_mouseX;
   *pState->var_pf_mousey = (double)m_mouseY;
   *pState->var_pf_mousedown = m_mouseDown ? 1.0 : 0.0;
@@ -733,7 +733,7 @@ void CPlugin::RunPerFrameEquations(int code) {
     *m_pState->var_pf_blur3max = mix * (*m_pState->var_pf_blur3max) + mix2 * (*m_pOldState->var_pf_blur3max);
     *m_pState->var_pf_blur1_edge_darken = mix * (*m_pState->var_pf_blur1_edge_darken) + mix2 * (*m_pOldState->var_pf_blur1_edge_darken);
 
-    // BMV/Milkwave mouse variables
+    // BMV/MDropDX12 mouse variables
     *m_pState->var_pf_mousex = mix * (*m_pState->var_pf_mousex) + mix2 * (*m_pOldState->var_pf_mousex);
     *m_pState->var_pf_mousey = mix * (*m_pState->var_pf_mousey) + mix2 * (*m_pOldState->var_pf_mousey);
     *m_pState->var_pf_mousedown = (mix < m_fSnapPoint) ? *m_pOldState->var_pf_mousedown : *m_pState->var_pf_mousedown;
@@ -1200,7 +1200,7 @@ void CPlugin::RenderFrame(int bRedraw) {
       if (!bInitialized) {
         //	// Check if different to the current window size
         //	// to avoid resolution change on move or resize
-        //	HWND hw = FindWindowA("Direct3DWindowClass", "Milkwave");
+        //	HWND hw = FindWindowA("Direct3DWindowClass", "MDropDX12");
         //	RECT rc;
         //	GetClientRect(hw, &rc);
         //	if (desc.Width != (rc.right - rc.left) && desc.Height != (rc.bottom - rc.top)) {
@@ -6257,7 +6257,7 @@ void CPlugin::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CStat
   if (h[12]) pCT->SetVector(lpDevice, h[12], &D3DXVECTOR4(mip_x, mip_y, mip_avg, 0));
   if (h[13]) pCT->SetVector(lpDevice, h[13], &D3DXVECTOR4(blur_min[1], blur_max[1], blur_min[2], blur_max[2]));
   
-  // BMV/Milkwave
+  // BMV/MDropDX12
   if (h[14]) pCT->SetVector(lpDevice, h[14], &D3DXVECTOR4(m_mouseX, 
     m_mouseY != -1 ? -m_mouseY + 1 : -1, 
     m_mouseDown ? 1 : 0, 

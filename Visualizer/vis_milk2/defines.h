@@ -37,9 +37,9 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //   compiled to, go to Project Settings -> Link tab -> and change the
 //   'output file name'.  Don't forget to do it for both Debug AND
 //   Release builds!
-#define SHORTNAME        "Milkwave" // used as window caption for both MilkDrop and the config panel.  avoid numbers or punctuation; when 'integrate with winamp' option is enabled, these characters don't always work with all skins.
-#define LONGNAME         "Milkwave" // appears at bottom of config panel
-#define LONGNAMEW        L"Milkwave" // appears at bottom of config panel
+#define SHORTNAME        "MDropDX12" // used as window caption for both MilkDrop and the config panel.  avoid numbers or punctuation; when 'integrate with winamp' option is enabled, these characters don't always work with all skins.
+#define LONGNAME         "MDropDX12" // appears at bottom of config panel
+#define LONGNAMEW        L"MDropDX12" // appears at bottom of config panel
 
 // INT_VERSION is the major version #, multipled by 100 (ie. version 1.02
 // would be 102).  If the app goes to read in the INI file and sees that
@@ -100,7 +100,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // or applications that are running, so change this to something
 // that will probably be unique.  For example, if your plugin was
 // called Libido, then "LibidoClass" would probably be a safe bet.
-#define CLASSNAME       L"Milkwave"
+#define CLASSNAME       L"MDropDX12"
 
 // Here you can give names to the buttons (~tabs) along the top
 // of the config panel.  Each button, when clicked, will bring

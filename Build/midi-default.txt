@@ -3,8 +3,8 @@
 # Add/remove lines as you like.
 #
 # For a list of possible commands, refer to script-default.txt.
-# Please refer to the Milkwave manual for more details:
-# https://github.com/IkeC/Milkwave/blob/main/Manual.md#tab-midi 
+# Please refer to the MDropDX12 manual for more details:
+# https://github.com/shanevbg/MDropDX12/blob/main/Manual.md#tab-midi 
 #
 Hello from MIDI!
 PREV

@@ -1,7 +1,7 @@
 // loopback-capture.h
 
 // forward declarations
-class Milkwave;
+class MDropDX12;
 
 // call CreateThread on this function
 // feed it the address of a LoopbackCaptureThreadFunctionArguments
@@ -20,19 +20,19 @@ struct LoopbackCaptureThreadFunctionArguments {
   UINT32 nFrames;
   HRESULT hr;
 
-  // pointer to milkwave instance for logging from the capture thread
-  Milkwave* pMilkwave;
+  // pointer to mdropdx12 instance for logging from the capture thread
+  MDropDX12* pMDropDX12;
 };
 
 DWORD WINAPI LoopbackCaptureThreadFunction(LPVOID pContext);
 
-// Add declaration for LoopbackCapture with Milkwave* parameter
+// Add declaration for LoopbackCapture with MDropDX12* parameter
 HRESULT LoopbackCapture(
   IMMDevice* pMMDevice,
   bool bIsRenderDevice,
   HMMIO hFile,
   bool bInt16,
-  Milkwave* pMilkwave,
+  MDropDX12* pMDropDX12,
   HANDLE hStartedEvent,
   HANDLE hStopEvent,
   PUINT32 pnFrames

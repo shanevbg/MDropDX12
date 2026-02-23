@@ -1,7 +1,7 @@
 // loopback-capture.cpp
 
 #include "common.h"
-#include "..\vis_milk2\milkwave.h"
+#include "..\vis_milk2\mdropdx12.h"
 #include <string>
 #include <stdexcept>
 #include <vector>
@@ -14,7 +14,7 @@ HRESULT GetBufferWithRetry(
   BYTE** ppData,
   UINT32* pNumFramesToRead,
   DWORD* pFlags,
-  Milkwave* pMilkwave
+  MDropDX12* pMDropDX12
 );
 
 HRESULT LoopbackCapture(
@@ -22,7 +22,7 @@ HRESULT LoopbackCapture(
   bool bIsRenderDevice,
   HMMIO hFile,
   bool bInt16,
-  Milkwave* pMilkwave,
+  MDropDX12* pMDropDX12,
   HANDLE hStartedEvent,
   HANDLE hStopEvent,
   PUINT32 pnFrames
@@ -35,10 +35,10 @@ DWORD WINAPI LoopbackCaptureThreadFunction(LPVOID pContext) {
   LoopbackCaptureThreadFunctionArguments* pArgs =
     (LoopbackCaptureThreadFunctionArguments*)pContext;
 
-  // Log thread start if milkwave provided
-  if (pArgs && pArgs->pMilkwave) {
+  // Log thread start if mdropdx12 provided
+  if (pArgs && pArgs->pMDropDX12) {
     try {
-      pArgs->pMilkwave->LogInfo(L"LoopbackCaptureThreadFunction: thread starting");
+      pArgs->pMDropDX12->LogInfo(L"LoopbackCaptureThreadFunction: thread starting");
     } catch (...) {
       // ignore
     }
@@ -47,12 +47,12 @@ DWORD WINAPI LoopbackCaptureThreadFunction(LPVOID pContext) {
   pArgs->hr = CoInitialize(NULL);
   if (FAILED(pArgs->hr)) {
     ERR(L"CoInitialize failed: hr =0x%08x", pArgs->hr);
-    if (pArgs && pArgs->pMilkwave) {
-      // Also log to Milkwave if available
+    if (pArgs && pArgs->pMDropDX12) {
+      // Also log to MDropDX12 if available
       wchar_t buf[128];
       swprintf_s(buf, L"CoInitialize failed: hr =0x%08x", pArgs->hr);
       try {
-        pArgs->pMilkwave->LogInfo(buf);
+        pArgs->pMDropDX12->LogInfo(buf);
       } catch (...) {
         // ignore logging failures
       }
@@ -67,15 +67,15 @@ DWORD WINAPI LoopbackCaptureThreadFunction(LPVOID pContext) {
       pArgs->bIsRenderDevice,
       pArgs->hFile,
       pArgs->bInt16,
-      pArgs->pMilkwave,
+      pArgs->pMDropDX12,
       pArgs->hStartedEvent,
       pArgs->hStopEvent,
       &pArgs->nFrames
     );
   } catch (const std::exception& e) {
-    if (pArgs && pArgs->pMilkwave) {
+    if (pArgs && pArgs->pMDropDX12) {
       try {
-        pArgs->pMilkwave->LogException(L"LoopbackCaptureThreadFunction: exception", e, true);
+        pArgs->pMDropDX12->LogException(L"LoopbackCaptureThreadFunction: exception", e, true);
       } catch (...) {
         // ignore logging failures
       }
@@ -83,13 +83,13 @@ DWORD WINAPI LoopbackCaptureThreadFunction(LPVOID pContext) {
     pArgs->hr = E_FAIL;
   } catch (...) {
     // Attempt to capture more information about non-std exceptions
-    if (pArgs && pArgs->pMilkwave) {
+    if (pArgs && pArgs->pMDropDX12) {
       try {
         try {
           throw; // rethrow to identify
         } catch (const std::exception& e) {
           // This should be handled by the std::exception handler above, but handle defensively
-          pArgs->pMilkwave->LogException(L"LoopbackCaptureThreadFunction: rethrown std::exception", e, true);
+          pArgs->pMDropDX12->LogException(L"LoopbackCaptureThreadFunction: rethrown std::exception", e, true);
         } catch (const wchar_t* ws) {
           // convert wchar_t* to UTF-8
           std::string msg;
@@ -104,13 +104,13 @@ DWORD WINAPI LoopbackCaptureThreadFunction(LPVOID pContext) {
             msg = "(null)";
           }
           std::runtime_error re(msg);
-          pArgs->pMilkwave->LogException(L"LoopbackCaptureThreadFunction: non-std exception (wchar_t*)", re, true);
+          pArgs->pMDropDX12->LogException(L"LoopbackCaptureThreadFunction: non-std exception (wchar_t*)", re, true);
         } catch (const char* cs) {
           std::runtime_error re(cs ? cs : "(null)");
-          pArgs->pMilkwave->LogException(L"LoopbackCaptureThreadFunction: non-std exception (char*)", re, true);
+          pArgs->pMDropDX12->LogException(L"LoopbackCaptureThreadFunction: non-std exception (char*)", re, true);
         } catch (...) {
           std::runtime_error re("Unknown non-std exception");
-          pArgs->pMilkwave->LogException(L"LoopbackCaptureThreadFunction: unknown non-std exception", re, true);
+          pArgs->pMDropDX12->LogException(L"LoopbackCaptureThreadFunction: unknown non-std exception", re, true);
         }
       } catch (...) {
         // If logging itself throws, swallow to avoid termination
@@ -127,23 +127,23 @@ HRESULT LoopbackCapture(
   bool bIsRenderDevice,
   HMMIO hFile,
   bool bInt16,
-  Milkwave* pMilkwave,
+  MDropDX12* pMDropDX12,
   HANDLE hStartedEvent,
   HANDLE hStopEvent,
   PUINT32 pnFrames
 ) {
   HRESULT hr;
 
-  // Optionally log start of LoopbackCapture if milkwave provided
-  if (pMilkwave) {
+  // Optionally log start of LoopbackCapture if mdropdx12 provided
+  if (pMDropDX12) {
     try {
-      pMilkwave->LogInfo(L"LoopbackCapture: starting capture");
+      pMDropDX12->LogInfo(L"LoopbackCapture: starting capture");
     } catch (...) {
       // ignore logging failures
     }
   }
 
-  if (pMilkwave && pMMDevice) {
+  if (pMDropDX12 && pMMDevice) {
     try {
       LPWSTR deviceId = nullptr;
       HRESULT hrDeviceId = pMMDevice->GetId(&deviceId);
@@ -151,12 +151,12 @@ HRESULT LoopbackCapture(
         CoTaskMemFreeOnExit freeId(deviceId);
         wchar_t buf[512];
         swprintf_s(buf, L"LoopbackCapture: deviceId=%ls isRender=%ls", deviceId, bIsRenderDevice ? L"true" : L"false");
-        pMilkwave->LogDebug(buf);
+        pMDropDX12->LogDebug(buf);
       }
       else {
         wchar_t buf[256];
         swprintf_s(buf, L"LoopbackCapture: GetId failed hr=0x%08x", hrDeviceId);
-        pMilkwave->LogDebug(buf);
+        pMDropDX12->LogDebug(buf);
       }
     } catch (...) {
       // ignore logging failures
@@ -165,7 +165,7 @@ HRESULT LoopbackCapture(
 
   try {
     // activate an IAudioClient
-    if (pMilkwave) { try { pMilkwave->LogInfo(L"LoopbackCapture: calling IMMDevice::Activate"); } catch (...) {} }
+    if (pMDropDX12) { try { pMDropDX12->LogInfo(L"LoopbackCapture: calling IMMDevice::Activate"); } catch (...) {} }
     IAudioClient* pAudioClient;
     hr = pMMDevice->Activate(
       __uuidof(IAudioClient),
@@ -174,42 +174,42 @@ HRESULT LoopbackCapture(
     );
     if (FAILED(hr)) {
       ERR(L"IMMDevice::Activate(IAudioClient) failed: hr =0x%08x", hr);
-      if (pMilkwave) { try { wchar_t buf[256]; swprintf_s(buf, L"IMMDevice::Activate failed: hr =0x%08x", hr); pMilkwave->LogInfo(buf); } catch (...) {} }
+      if (pMDropDX12) { try { wchar_t buf[256]; swprintf_s(buf, L"IMMDevice::Activate failed: hr =0x%08x", hr); pMDropDX12->LogInfo(buf); } catch (...) {} }
       return hr;
     }
     ReleaseOnExit releaseAudioClient(pAudioClient);
 
     // get the default device periodicity
-    if (pMilkwave) { try { pMilkwave->LogInfo(L"LoopbackCapture: calling IAudioClient::GetDevicePeriod"); } catch (...) {} }
+    if (pMDropDX12) { try { pMDropDX12->LogInfo(L"LoopbackCapture: calling IAudioClient::GetDevicePeriod"); } catch (...) {} }
     REFERENCE_TIME hnsDefaultDevicePeriod;
     hr = pAudioClient->GetDevicePeriod(&hnsDefaultDevicePeriod, NULL);
     if (FAILED(hr)) {
       ERR(L"IAudioClient::GetDevicePeriod failed: hr =0x%08x", hr);
-      if (pMilkwave) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioClient::GetDevicePeriod failed: hr =0x%08x", hr); pMilkwave->LogInfo(buf); } catch (...) {} }
+      if (pMDropDX12) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioClient::GetDevicePeriod failed: hr =0x%08x", hr); pMDropDX12->LogInfo(buf); } catch (...) {} }
       return hr;
     }
 
-    if (pMilkwave) {
+    if (pMDropDX12) {
       try {
         double defaultPeriodMs = static_cast<double>(hnsDefaultDevicePeriod) / 10000.0;
         wchar_t buf[256];
         swprintf_s(buf, L"LoopbackCapture: default period %.3f ms", defaultPeriodMs);
-        pMilkwave->LogDebug(buf);
+        pMDropDX12->LogDebug(buf);
       } catch (...) {}
     }
 
     // get the default device format
-    if (pMilkwave) { try { pMilkwave->LogInfo(L"LoopbackCapture: calling IAudioClient::GetMixFormat"); } catch (...) {} }
+    if (pMDropDX12) { try { pMDropDX12->LogInfo(L"LoopbackCapture: calling IAudioClient::GetMixFormat"); } catch (...) {} }
     WAVEFORMATEX* pwfx;
     hr = pAudioClient->GetMixFormat(&pwfx);
     if (FAILED(hr)) {
       ERR(L"IAudioClient::GetMixFormat failed: hr =0x%08x", hr);
-      if (pMilkwave) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioClient::GetMixFormat failed: hr =0x%08x", hr); pMilkwave->LogInfo(buf); } catch (...) {} }
+      if (pMDropDX12) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioClient::GetMixFormat failed: hr =0x%08x", hr); pMDropDX12->LogInfo(buf); } catch (...) {} }
       return hr;
     }
     CoTaskMemFreeOnExit freeMixFormat(pwfx);
 
-    if (pMilkwave && pwfx) {
+    if (pMDropDX12 && pwfx) {
       try {
         wchar_t buf[256];
         swprintf_s(
@@ -221,7 +221,7 @@ HRESULT LoopbackCapture(
           pwfx->nBlockAlign,
           pwfx->nAvgBytesPerSec
         );
-        pMilkwave->LogDebug(buf);
+        pMDropDX12->LogDebug(buf);
       } catch (...) {}
     }
 
@@ -250,7 +250,7 @@ HRESULT LoopbackCapture(
         }
         else {
           ERR(L"%s", L"Don't know how to coerce mix format to int-16");
-          if (pMilkwave) { try { pMilkwave->LogInfo(L"Don't know how to coerce mix format to int-16"); } catch (...) {} }
+          if (pMDropDX12) { try { pMDropDX12->LogInfo(L"Don't know how to coerce mix format to int-16"); } catch (...) {} }
           return E_UNEXPECTED;
         }
       }
@@ -258,7 +258,7 @@ HRESULT LoopbackCapture(
 
       default:
         ERR(L"Don't know how to coerce WAVEFORMATEX with wFormatTag =0x%08x to int-16", pwfx->wFormatTag);
-        if (pMilkwave) { try { wchar_t buf[256]; swprintf_s(buf, L"Don't know how to coerce WAVEFORMATEX with wFormatTag =0x%08x to int-16", pwfx->wFormatTag); pMilkwave->LogInfo(buf); } catch (...) {} }
+        if (pMDropDX12) { try { wchar_t buf[256]; swprintf_s(buf, L"Don't know how to coerce WAVEFORMATEX with wFormatTag =0x%08x to int-16", pwfx->wFormatTag); pMDropDX12->LogInfo(buf); } catch (...) {} }
         return E_UNEXPECTED;
       }
     }
@@ -267,22 +267,22 @@ HRESULT LoopbackCapture(
     MMCKINFO ckData = { 0 };
 
     if (NULL != hFile) {
-      if (pMilkwave) { try { pMilkwave->LogInfo(L"LoopbackCapture: calling WriteWaveHeader"); } catch (...) {} }
+      if (pMDropDX12) { try { pMDropDX12->LogInfo(L"LoopbackCapture: calling WriteWaveHeader"); } catch (...) {} }
       hr = WriteWaveHeader(hFile, pwfx, &ckRIFF, &ckData);
       if (FAILED(hr)) {
         // WriteWaveHeader does its own logging
-        if (pMilkwave) { try { pMilkwave->LogInfo(L"WriteWaveHeader failed"); } catch (...) {} }
+        if (pMDropDX12) { try { pMDropDX12->LogInfo(L"WriteWaveHeader failed"); } catch (...) {} }
         return hr;
       }
     }
 
     // create a periodic waitable timer
-    if (pMilkwave) { try { pMilkwave->LogInfo(L"LoopbackCapture: creating waitable timer"); } catch (...) {} }
+    if (pMDropDX12) { try { pMDropDX12->LogInfo(L"LoopbackCapture: creating waitable timer"); } catch (...) {} }
     HANDLE hWakeUp = CreateWaitableTimer(NULL, FALSE, NULL);
     if (NULL == hWakeUp) {
       DWORD dwErr = GetLastError();
       ERR(L"CreateWaitableTimer failed: last error = %u", dwErr);
-      if (pMilkwave) { try { wchar_t buf[256]; swprintf_s(buf, L"CreateWaitableTimer failed: last error = %u", dwErr); pMilkwave->LogInfo(buf); } catch (...) {} }
+      if (pMDropDX12) { try { wchar_t buf[256]; swprintf_s(buf, L"CreateWaitableTimer failed: last error = %u", dwErr); pMDropDX12->LogInfo(buf); } catch (...) {} }
       return HRESULT_FROM_WIN32(dwErr);
     }
     CloseHandleOnExit closeWakeUp(hWakeUp);
@@ -295,7 +295,7 @@ HRESULT LoopbackCapture(
     // do not work together...
     // the "data ready" event never gets set
     // so we're going to do a timer-driven loop
-    if (pMilkwave) { try { pMilkwave->LogInfo(L"LoopbackCapture: calling IAudioClient::Initialize"); } catch (...) {} }
+    if (pMDropDX12) { try { pMDropDX12->LogInfo(L"LoopbackCapture: calling IAudioClient::Initialize"); } catch (...) {} }
     hr = pAudioClient->Initialize(
       AUDCLNT_SHAREMODE_SHARED,
       bIsRenderDevice ? AUDCLNT_STREAMFLAGS_LOOPBACK : 0,
@@ -304,11 +304,11 @@ HRESULT LoopbackCapture(
 
     if (FAILED(hr)) {
       ERR(L"IAudioClient::Initialize failed: hr =0x%08x", hr);
-      if (pMilkwave) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioClient::Initialize failed: hr =0x%08x", hr); pMilkwave->LogInfo(buf); } catch (...) {} }
+      if (pMDropDX12) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioClient::Initialize failed: hr =0x%08x", hr); pMDropDX12->LogInfo(buf); } catch (...) {} }
       return hr;
     }
 
-    if (pMilkwave) {
+    if (pMDropDX12) {
       try {
         wchar_t buf[256];
         swprintf_s(
@@ -317,12 +317,12 @@ HRESULT LoopbackCapture(
           bIsRenderDevice ? L"true" : L"false",
           bInt16 ? L"true" : L"false"
         );
-        pMilkwave->LogDebug(buf);
+        pMDropDX12->LogDebug(buf);
       } catch (...) {}
     }
 
     // activate an IAudioCaptureClient
-    if (pMilkwave) { try { pMilkwave->LogInfo(L"LoopbackCapture: calling IAudioClient::GetService for IAudioCaptureClient"); } catch (...) {} }
+    if (pMDropDX12) { try { pMDropDX12->LogInfo(L"LoopbackCapture: calling IAudioClient::GetService for IAudioCaptureClient"); } catch (...) {} }
     IAudioCaptureClient* pAudioCaptureClient;
     hr = pAudioClient->GetService(
       __uuidof(IAudioCaptureClient),
@@ -330,7 +330,7 @@ HRESULT LoopbackCapture(
     );
     if (FAILED(hr)) {
       ERR(L"IAudioClient::GetService(IAudioCaptureClient) failed: hr =0x%08x", hr);
-      if (pMilkwave) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioClient::GetService(IAudioCaptureClient) failed: hr =0x%08x", hr); pMilkwave->LogInfo(buf); } catch (...) {} }
+      if (pMDropDX12) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioClient::GetService(IAudioCaptureClient) failed: hr =0x%08x", hr); pMDropDX12->LogInfo(buf); } catch (...) {} }
       return hr;
     }
     ReleaseOnExit releaseAudioCaptureClient(pAudioCaptureClient);
@@ -339,7 +339,7 @@ HRESULT LoopbackCapture(
     LARGE_INTEGER liFirstFire;
     liFirstFire.QuadPart = -hnsDefaultDevicePeriod / 2; // negative means relative time
     LONG lTimeBetweenFires = (LONG)hnsDefaultDevicePeriod / 2 / (10 * 1000); // convert to milliseconds
-    if (pMilkwave) { try { pMilkwave->LogInfo(L"LoopbackCapture: calling SetWaitableTimer"); } catch (...) {} }
+    if (pMDropDX12) { try { pMDropDX12->LogInfo(L"LoopbackCapture: calling SetWaitableTimer"); } catch (...) {} }
     BOOL bOK = SetWaitableTimer(
       hWakeUp,
       &liFirstFire,
@@ -349,17 +349,17 @@ HRESULT LoopbackCapture(
     if (!bOK) {
       DWORD dwErr = GetLastError();
       ERR(L"SetWaitableTimer failed: last error = %u", dwErr);
-      if (pMilkwave) { try { wchar_t buf[256]; swprintf_s(buf, L"SetWaitableTimer failed: last error = %u", dwErr); pMilkwave->LogInfo(buf); } catch (...) {} }
+      if (pMDropDX12) { try { wchar_t buf[256]; swprintf_s(buf, L"SetWaitableTimer failed: last error = %u", dwErr); pMDropDX12->LogInfo(buf); } catch (...) {} }
       return HRESULT_FROM_WIN32(dwErr);
     }
     CancelWaitableTimerOnExit cancelWakeUp(hWakeUp);
 
     // call IAudioClient::Start
-    if (pMilkwave) { try { pMilkwave->LogInfo(L"LoopbackCapture: calling IAudioClient::Start"); } catch (...) {} }
+    if (pMDropDX12) { try { pMDropDX12->LogInfo(L"LoopbackCapture: calling IAudioClient::Start"); } catch (...) {} }
     hr = pAudioClient->Start();
     if (FAILED(hr)) {
       ERR(L"IAudioClient::Start failed: hr =0x%08x", hr);
-      if (pMilkwave) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioClient::Start failed: hr =0x%08x", hr); pMilkwave->LogInfo(buf); } catch (...) {} }
+      if (pMDropDX12) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioClient::Start failed: hr =0x%08x", hr); pMDropDX12->LogInfo(buf); } catch (...) {} }
       return hr;
     }
     AudioClientStopOnExit stopAudioClient(pAudioClient);
@@ -378,26 +378,26 @@ HRESULT LoopbackCapture(
     for (UINT32 nPasses = 0; !bDone; nPasses++) {
       // drain data while it is available
       UINT32 nNextPacketSize;
-      // if (pMilkwave) { try { pMilkwave->LogDebug(L"LoopbackCapture: entering packet drain loop / calling GetNextPacketSize"); } catch(...){} }
+      // if (pMDropDX12) { try { pMDropDX12->LogDebug(L"LoopbackCapture: entering packet drain loop / calling GetNextPacketSize"); } catch(...){} }
       for (
         hr = pAudioCaptureClient->GetNextPacketSize(&nNextPacketSize);
         SUCCEEDED(hr) && nNextPacketSize > 0;
         hr = pAudioCaptureClient->GetNextPacketSize(&nNextPacketSize)
         ) {
         // get the captured data
-        // if (pMilkwave) { try { pMilkwave->LogDebug(L"LoopbackCapture: calling IAudioCaptureClient::GetBuffer (with retry)"); } catch (...) {} }
+        // if (pMDropDX12) { try { pMDropDX12->LogDebug(L"LoopbackCapture: calling IAudioCaptureClient::GetBuffer (with retry)"); } catch (...) {} }
         BYTE* pData = nullptr;
         UINT32 nNumFramesToRead = 0;
         DWORD dwFlags = 0;
 
-        hr = GetBufferWithRetry(pAudioCaptureClient, &pData, &nNumFramesToRead, &dwFlags, pMilkwave);
+        hr = GetBufferWithRetry(pAudioCaptureClient, &pData, &nNumFramesToRead, &dwFlags, pMDropDX12);
 
         bErrorInAudioData = false;
 
         if (FAILED(hr)) {
           bErrorInAudioData = true;
           ERR(L"IAudioCaptureClient::GetBuffer failed on pass %u after %u frames: hr =0x%08x", nPasses, *pnFrames, hr);
-          if (pMilkwave) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioCaptureClient::GetBuffer failed on pass %u after %u frames: hr =0x%08x", nPasses, *pnFrames, hr); pMilkwave->LogInfo(buf); } catch (...) {} }
+          if (pMDropDX12) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioCaptureClient::GetBuffer failed on pass %u after %u frames: hr =0x%08x", nPasses, *pnFrames, hr); pMDropDX12->LogInfo(buf); } catch (...) {} }
           return hr;
         }
 
@@ -411,14 +411,14 @@ HRESULT LoopbackCapture(
         else if (0 != dwFlagsWithoutSilent) {
           bErrorInAudioData = true;
           LOG(L"IAudioCaptureClient::GetBuffer set flags to0x%08x on pass %u after %u frames", dwFlags, nPasses, *pnFrames);
-          if (pMilkwave) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioCaptureClient::GetBuffer set flags to0x%08x on pass %u after %u frames", dwFlags, nPasses, *pnFrames); pMilkwave->LogInfo(buf); } catch (...) {} }
+          if (pMDropDX12) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioCaptureClient::GetBuffer set flags to0x%08x on pass %u after %u frames", dwFlags, nPasses, *pnFrames); pMDropDX12->LogInfo(buf); } catch (...) {} }
           //return E_UNEXPECTED;
         }
 
         if (0 == nNumFramesToRead) {
           bErrorInAudioData = true;
           ERR(L"IAudioCaptureClient::GetBuffer said to read0 frames on pass %u after %u frames", nPasses, *pnFrames);
-          if (pMilkwave) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioCaptureClient::GetBuffer said to read0 frames on pass %u after %u frames", nPasses, *pnFrames); pMilkwave->LogInfo(buf); } catch (...) {} }
+          if (pMDropDX12) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioCaptureClient::GetBuffer said to read0 frames on pass %u after %u frames", nPasses, *pnFrames); pMDropDX12->LogInfo(buf); } catch (...) {} }
           //return E_UNEXPECTED;
         }
 
@@ -440,25 +440,25 @@ HRESULT LoopbackCapture(
 
           if (NULL != hFile) {
             // Writing the buffer captured to the output .wav file
-            if (pMilkwave) { try { pMilkwave->LogInfo(L"LoopbackCapture: writing buffer to file via mmioWrite"); } catch (...) {} }
+            if (pMDropDX12) { try { pMDropDX12->LogInfo(L"LoopbackCapture: writing buffer to file via mmioWrite"); } catch (...) {} }
             LONG lBytesToWrite = nNumFramesToRead * nBlockAlign;
             const BYTE* pDataForFile = bSilentBuffer ? pDataForVisualizer : pData;
 #pragma prefast(suppress: __WARNING_INCORRECT_ANNOTATION, "IAudioCaptureClient::GetBuffer SAL annotation implies a1-byte buffer")
             LONG lBytesWritten = mmioWrite(hFile, reinterpret_cast<PCHAR>(const_cast<BYTE*>(pDataForFile)), lBytesToWrite);
             if (lBytesToWrite != lBytesWritten) {
               ERR(L"mmioWrite wrote %u bytes on pass %u after %u frames: expected %u bytes", lBytesWritten, nPasses, *pnFrames, lBytesToWrite);
-              if (pMilkwave) { try { wchar_t buf[256]; swprintf_s(buf, L"mmioWrite wrote %u bytes on pass %u after %u frames: expected %u bytes", lBytesWritten, nPasses, *pnFrames, lBytesToWrite); pMilkwave->LogInfo(buf); } catch (...) {} }
+              if (pMDropDX12) { try { wchar_t buf[256]; swprintf_s(buf, L"mmioWrite wrote %u bytes on pass %u after %u frames: expected %u bytes", lBytesWritten, nPasses, *pnFrames, lBytesToWrite); pMDropDX12->LogInfo(buf); } catch (...) {} }
               return E_UNEXPECTED;
             }
           }
           *pnFrames += nNumFramesToRead;
         }
 
-        // if (pMilkwave) { try { pMilkwave->LogDebug(L"LoopbackCapture: calling IAudioCaptureClient::ReleaseBuffer"); } catch (...) {} }
+        // if (pMDropDX12) { try { pMDropDX12->LogDebug(L"LoopbackCapture: calling IAudioCaptureClient::ReleaseBuffer"); } catch (...) {} }
         hr = pAudioCaptureClient->ReleaseBuffer(nNumFramesToRead);
         if (FAILED(hr)) {
           ERR(L"IAudioCaptureClient::ReleaseBuffer failed on pass %u after %u frames: hr =0x%08x", nPasses, *pnFrames, hr);
-          if (pMilkwave) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioCaptureClient::ReleaseBuffer failed on pass %u after %u frames: hr =0x%08x", nPasses, *pnFrames, hr); pMilkwave->LogInfo(buf); } catch (...) {} }
+          if (pMDropDX12) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioCaptureClient::ReleaseBuffer failed on pass %u after %u frames: hr =0x%08x", nPasses, *pnFrames, hr); pMDropDX12->LogInfo(buf); } catch (...) {} }
           return hr;
         }
 
@@ -467,7 +467,7 @@ HRESULT LoopbackCapture(
 
       if (FAILED(hr)) {
         ERR(L"IAudioCaptureClient::GetNextPacketSize failed on pass %u after %u frames: hr =0x%08x", nPasses, *pnFrames, hr);
-        if (pMilkwave) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioCaptureClient::GetNextPacketSize failed on pass %u after %u frames: hr =0x%08x", nPasses, *pnFrames, hr); pMilkwave->LogInfo(buf); } catch (...) {} }
+        if (pMDropDX12) { try { wchar_t buf[256]; swprintf_s(buf, L"IAudioCaptureClient::GetNextPacketSize failed on pass %u after %u frames: hr =0x%08x", nPasses, *pnFrames, hr); pMDropDX12->LogInfo(buf); } catch (...) {} }
         return hr;
       }
 
@@ -484,17 +484,17 @@ HRESULT LoopbackCapture(
 
       if (WAIT_OBJECT_0 + 1 != dwWaitResult) {
         ERR(L"Unexpected WaitForMultipleObjects return value %u on pass %u after %u frames", dwWaitResult, nPasses, *pnFrames);
-        if (pMilkwave) { try { wchar_t buf[256]; swprintf_s(buf, L"Unexpected WaitForMultipleObjects return value %u on pass %u after %u frames", dwWaitResult, nPasses, *pnFrames); pMilkwave->LogInfo(buf); } catch (...) {} }
+        if (pMDropDX12) { try { wchar_t buf[256]; swprintf_s(buf, L"Unexpected WaitForMultipleObjects return value %u on pass %u after %u frames", dwWaitResult, nPasses, *pnFrames); pMDropDX12->LogInfo(buf); } catch (...) {} }
         return E_UNEXPECTED;
       }
     } // capture loop
 
     if (NULL != hFile) {
-      if (pMilkwave) { try { pMilkwave->LogInfo(L"LoopbackCapture: calling FinishWaveFile"); } catch (...) {} }
+      if (pMDropDX12) { try { pMDropDX12->LogInfo(L"LoopbackCapture: calling FinishWaveFile"); } catch (...) {} }
       hr = FinishWaveFile(hFile, &ckData, &ckRIFF);
       if (FAILED(hr)) {
-        if (pMilkwave) {
-          try { pMilkwave->LogInfo(L"FinishWaveFile failed"); } catch (...) {}
+        if (pMDropDX12) {
+          try { pMDropDX12->LogInfo(L"FinishWaveFile failed"); } catch (...) {}
         }
         return hr;
       }
@@ -503,16 +503,16 @@ HRESULT LoopbackCapture(
     return hr;
   } catch (const std::exception& e) {
     ERR(L"LoopbackCapture threw exception: %hs", e.what());
-    if (pMilkwave) {
-      try { pMilkwave->LogException(L"LoopbackCapture: exception", e, true); } catch (...) {}
+    if (pMDropDX12) {
+      try { pMDropDX12->LogException(L"LoopbackCapture: exception", e, true); } catch (...) {}
     }
     return E_FAIL;
   } catch (...) {
     ERR(L"LoopbackCapture threw unknown exception");
-    if (pMilkwave) {
+    if (pMDropDX12) {
       try {
         std::runtime_error re("Unknown non-std exception in LoopbackCapture");
-        pMilkwave->LogException(L"LoopbackCapture: unknown exception", re, true);
+        pMDropDX12->LogException(L"LoopbackCapture: unknown exception", re, true);
       } catch (...) {}
     }
     return E_FAIL;
@@ -526,7 +526,7 @@ HRESULT GetBufferWithRetry(
   BYTE** ppData,
   UINT32* pNumFramesToRead,
   DWORD* pFlags,
-  Milkwave* pMilkwave
+  MDropDX12* pMDropDX12
 ) {
   const int kMaxRetries = 5;
   int backoffMs = 100;
@@ -577,7 +577,7 @@ HRESULT GetBufferWithRetry(
     }
 
     // Log AFTER __try/__except to avoid mixing exception handling
-  if (pMilkwave) {
+  if (pMDropDX12) {
       wchar_t buf[256];
       if (hadSeh) {
         swprintf_s(buf, L"GetBufferWithRetry: attempt %d SEH exception 0x%08x (pAudioCaptureClient=%p, vtable=%p)", 
@@ -586,7 +586,7 @@ HRESULT GetBufferWithRetry(
         swprintf_s(buf, L"GetBufferWithRetry: attempt %d hr=0x%08x (pData=%p, frames=%u, flags=0x%08x)", 
  attempt + 1, hr, pDataResult, framesResult, flagsResult);
       }
-      pMilkwave->LogInfo(buf);
+      pMDropDX12->LogInfo(buf);
     }
 
     // Success case
@@ -597,19 +597,19 @@ HRESULT GetBufferWithRetry(
     // If last attempt, break and return failure
     if (attempt == kMaxRetries - 1) {
    ERR(L"GetBufferWithRetry: failed after %d attempts, hr=0x%08x", kMaxRetries, hr);
-   if (pMilkwave) {
+   if (pMDropDX12) {
  wchar_t buf[256];
         swprintf_s(buf, L"GetBufferWithRetry: FAILED after %d attempts, hr=0x%08x", kMaxRetries, hr);
-        pMilkwave->LogInfo(buf);
+        pMDropDX12->LogInfo(buf);
     }
   break;
     }
 
     // Backoff before retrying
- if (pMilkwave) {
+ if (pMDropDX12) {
       wchar_t buf[128];
       swprintf_s(buf, L"GetBufferWithRetry: attempt %d failed, backing off %d ms", attempt + 1, backoffMs);
-      pMilkwave->LogDebug(buf);
+      pMDropDX12->LogDebug(buf);
     }
     Sleep(backoffMs);
     backoffMs = backoffMs * 2;

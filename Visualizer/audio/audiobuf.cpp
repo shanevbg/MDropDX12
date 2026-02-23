@@ -11,9 +11,9 @@ bool pcmBufDrained = false; // Buffer drained by visualization thread and holds 
 signed int pcmLen = 0; // Actual number of samples the buffer holds. Can be less than SAMPLE_SIZE_LPB
 signed int pcmPos = 0; // Position to write new data
 
-float milkwave_amp_left = 1.0f;
-float milkwave_amp_right = 1.0f;
-float milkwave_audio_sensitivity = 1.0f;  // Pre-quantization gain applied to WASAPI float data
+float mdropdx12_amp_left = 1.0f;
+float mdropdx12_amp_right = 1.0f;
+float mdropdx12_audio_sensitivity = 1.0f;  // Pre-quantization gain applied to WASAPI float data
 
 void ResetAudioBuf() {
   std::unique_lock<std::mutex> lock(pcmLpbMutex);
@@ -54,7 +54,7 @@ void GetAudioBuf(unsigned char* pWaveL, unsigned char* pWaveR, int SamplesCount)
 }
 
 int8_t FltToInt(float flt) {
-  flt *= milkwave_audio_sensitivity;  // Apply gain before quantization
+  flt *= mdropdx12_audio_sensitivity;  // Apply gain before quantization
   if (flt >= 1.0f) {
     return +127; // 0x7f
   }
@@ -175,8 +175,8 @@ void SetAudioBuf(const BYTE* pData, const UINT32 nNumFramesToRead, const WAVEFOR
     
     // Store as unsigned 8-bit PCM centered at 128 (AnalyzeNewSound expects this format)
     // int8_t range [-128,+127] + 128 → unsigned char range [0,255] with silence at 128
-    int leftVal = (int)(sumLeft / downsampleRatio * milkwave_amp_left) + 128;
-    int rightVal = (int)(sumRight / downsampleRatio * milkwave_amp_right) + 128;
+    int leftVal = (int)(sumLeft / downsampleRatio * mdropdx12_amp_left) + 128;
+    int rightVal = (int)(sumRight / downsampleRatio * mdropdx12_amp_right) + 128;
     pcmLeftLpb[(pcmPos + n) % SAMPLE_SIZE_LPB] = (unsigned char)(leftVal < 0 ? 0 : (leftVal > 255 ? 255 : leftVal));
     pcmRightLpb[(pcmPos + n) % SAMPLE_SIZE_LPB] = (unsigned char)(rightVal < 0 ? 0 : (rightVal > 255 ? 255 : rightVal));
   }

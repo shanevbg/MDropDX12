@@ -97,7 +97,7 @@
     <ClCompile Include="Milkdrop2PcmVisualizer.cpp">
       <Filter>library\sources</Filter>
     </ClCompile>
-    <ClCompile Include="milkwave.cpp">
+    <ClCompile Include="mdropdx12.cpp">
       <Filter>library\sources</Filter>
     </ClCompile>
     <ClCompile Include="AMDDetection.cpp">
@@ -180,7 +180,7 @@
     <ClInclude Include="..\ns-eel2-shim\ns-eel.h">
       <Filter>library\ns-eel</Filter>
     </ClInclude>
-    <ClInclude Include="milkwave.h">
+    <ClInclude Include="mdropdx12.h">
       <Filter>library\headers</Filter>
     </ClInclude>
     <ClInclude Include="api.h">

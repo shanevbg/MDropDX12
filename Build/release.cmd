@@ -20,11 +20,11 @@ del /q %releasePath%\resources\buttons\btn-4*.png
 copy *.ini %releasePath%
 copy *.txt %releasePath%
 copy settings-remote.json %releasePath%
-copy %remoteBuildPath%\MilkwaveRemote.exe %releasePath%
-copy %remoteBuildPath%\MilkwaveRemote.dll %releasePath%
-copy %remoteBuildPath%\MilkwaveRemote.runtimeconfig.json %releasePath%
+copy %remoteBuildPath%\MDropDX12Remote.exe %releasePath%
+copy %remoteBuildPath%\MDropDX12Remote.dll %releasePath%
+copy %remoteBuildPath%\MDropDX12Remote.runtimeconfig.json %releasePath%
 copy %remoteBuildPath%\NAudio.Wasapi.dll %releasePath%
-copy %visualizerBuildPath%\MilkwaveVisualizer.exe %releasePath%
+copy %visualizerBuildPath%\MDropDX12Visualizer.exe %releasePath%
 
 copy %visualizerSourcePath%\resources\sprites\cover.png %releasePath%\resources\sprites\cover.png
 

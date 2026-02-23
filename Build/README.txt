@@ -1,9 +1,9 @@
-Milkwave - Advanced MilkDrop2 Visualizer with Remote Control
+MDropDX12 - Advanced MilkDrop2 Visualizer with Remote Control
 
-MilkwaveVisualizer.exe: 
+MDropDX12Visualizer.exe: 
 The Visualizer. You may run and use this independently without the Remote. You can press F8 (or Right+Middle Mouse Button) anytime to start the Remote.
 
-MilkwaveRemote.exe: 
+MDropDX12Remote.exe: 
 The program to remotely control the Visualizer. When you start this, Visualizer will be started automatically if it's not already running.
 
 settings.ini:
@@ -27,8 +27,8 @@ Messages definition file for the Visualizer. This is the standard MilkDrop way t
 precompile.txt:
 A list of presets that will be precompiled (once) when you start the Visualizer. Feel free to edit.
 
-For further information please visit the Milkwave page on GitHub: https://github.com/IkeC/Milkwave or click the "Help" link at the bottom of the Remote window.
+For further information please visit the MDropDX12 page on GitHub: https://github.com/shanevbg/MDropDX12 or click the "Help" link at the bottom of the Remote window.
 
-If you need help, please check if your question or problem is already answered on GitHub: https://github.com/IkeC/Milkwave/issues. If not, feel free to open a new issue there. You may also contact me on https://bit.ly/Ikes-Discord if you like.
+If you need help, please check if your question or problem is already answered on GitHub: https://github.com/shanevbg/MDropDX12/issues. If not, feel free to open a new issue there. You may also contact me on https://bit.ly/Ikes-Discord if you like.
 
 - IkeC

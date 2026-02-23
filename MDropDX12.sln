@@ -2,9 +2,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
 VisualStudioVersion = 18.0.11217.181
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "MilkwaveVisualizer", "Visualizer\vis_milk2\plugin.vcxproj", "{881FB534-7396-485A-ADC2-6FBEBED7A0F4}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "MDropDX12Visualizer", "Visualizer\vis_milk2\plugin.vcxproj", "{881FB534-7396-485A-ADC2-6FBEBED7A0F4}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MilkwaveRemote", "Remote\MilkwaveRemote.csproj", "{59EA3714-8B12-3D49-A5DD-54FD9B0BA628}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MDropDX12Remote", "Remote\MDropDX12Remote.csproj", "{59EA3714-8B12-3D49-A5DD-54FD9B0BA628}"
 	ProjectSection(ProjectDependencies) = postProject
 		{881FB534-7396-485A-ADC2-6FBEBED7A0F4} = {881FB534-7396-485A-ADC2-6FBEBED7A0F4}
 	EndProjectSection
@@ -28,7 +28,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		Build\sprites.ini = Build\sprites.ini
 	EndProjectSection
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MilkwaveRemoteTests", "RemoteTests\MilkwaveRemoteTests.csproj", "{79CA1E64-42BC-47B1-A247-4C10B7A3855E}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MDropDX12RemoteTests", "RemoteTests\MDropDX12RemoteTests.csproj", "{79CA1E64-42BC-47B1-A247-4C10B7A3855E}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

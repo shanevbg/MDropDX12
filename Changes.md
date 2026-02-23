@@ -1,18 +1,37 @@
 ## v3.5 (unreleased)
 
+* Visualizer: Ground-up DirectX 12 rebuild of the rendering engine (replaces DX9Ex entirely)
+* Visualizer: GPU-accelerated text rendering via D3D11on12 + Direct2D + DirectWrite
+  - Replaces GDI→DIB→upload pipeline, eliminating ~33MB/frame CPU bandwidth and stuttering
+* Visualizer: In-app Settings window (F2 / Ctrl+L) with dark theme
+  - 5-tab UI: General, Visual, Colors, Sound, Files
+  - Preset browser with sequential forward/back navigation
+  - Resource viewer showing all preset textures with load status, type, and paths
+  - Fallback texture search paths for external texture collections
+  - Dedicated Random Textures Directory setting
+  - User defaults with Save Safe / Safe Reset
+  - Gamma slider with auto-reset for low-gamma presets
+  - Reset buttons on Visual and Colors tabs
+* Visualizer: DX12 3D volume texture support for noisevol_lq/noisevol_hq
+* Visualizer: HLSL variable shadowing fix
+  - Auto-renames variables that shadow built-in functions (pow, sin, cos, etc.)
+  - Fixes many presets rendering black due to shader compilation errors
+* Visualizer: x64 build support
+* Visualizer: UI fonts changed to Segoe UI / Consolas (anti-aliased via DirectWrite)
+* Visualizer: Restored DX12 features: screenshot (Ctrl+X), song title animation, sprites, preset playlist overlay
+* Visualizer: B/b keys for brightness adjust
+* Visualizer: Removed direct media transport controls (play/pause/stop/next/prev/rewind/ff)
+  - Arrow keys, X, C, V, Z no longer send media commands
+  - Track info display (middle mouse) is unchanged
 * Remote: "Preset mode" for button panel
   - Right-click button to assign current preset (with screenshot capture)
   - Left-click to send preset to Visualizer
   - Middle-click to clear button
   - Press switch button (lower right) to switch modes
 * Remote: Toggle color/monochrome display for button images
-* Remote: Automatically change Hue over time (color cycyle)
+* Remote: Automatically change Hue over time (color cycle)
 * Remote: Set preset auto change time
-* Visualizer: Save screenshot (Ctrl+X)
-* Visualizer: Key bindings to alter Quality (Ctrl+Q) and Hue (Ctrl+H)
-* Visualizer: Removed direct media transport controls (play/pause/stop/next/prev/rewind/ff)
-  - Arrow keys, X, C, V, Z no longer send media commands
-  - Track info display (B, middle mouse) is unchanged
+* Remote: Key bindings to alter Quality (Ctrl+Q) and Hue (Ctrl+H)
 
 ## v3.4 (2025-11-22)
 
@@ -56,10 +75,10 @@
 
 ## v3.1 (2025-09-04)
 
-* 10 new shader-based presets in Milkwave/Shader directory
-* All 30 Milkwave shader presets now react to audio input
+* 10 new shader-based presets in MDropDX12/Shader directory
+* All 30 MDropDX12 shader presets now react to audio input
 * New "vis_intensity", "vis_shift" and "vis_version" preset variables
-* Adjust "Intensity", "Shift" and "Version" live from Remote for supported presets (eg. *Milkwaves shader presets)
+* Adjust "Intensity", "Shift" and "Version" live from Remote for supported presets (eg. *MDropDX12s shader presets)
 * Set default audio device using Ctrl+D (eg. after disconnecting Bluetooth headphones)
 * Draw a background box for text messages with custom transparency and color using box_* *message parameters
 * New message parameter "fadeout" (also for custom messages)
@@ -71,8 +90,8 @@
 ## v3.0.2 (2025-08-26)
 
 * Pretty code formatting for HLSL shader code in Shader tab
-* Shader-based "Heartfelt" preset added to Milkwave/Shader
-* Fix: Visualizer crashing when using "Link" button in Milkwave Remote "Preset" tab
+* Shader-based "Heartfelt" preset added to MDropDX12/Shader
+* Fix: Visualizer crashing when using "Link" button in MDropDX12 Remote "Preset" tab
 * Improved shader precompile notification and error messages
 
 ## v3.0.1 (2025-08-18)
@@ -83,7 +102,7 @@
 ## v3.0 (2025-08-17)
 
 * Shader Tab: Convert GLSL shader code to HLSL and send it to the Visualizer instantly
-* 20 new presets in Milkwave/Shader directory
+* 20 new presets in MDropDX12/Shader directory
 * Shader precompiling and caching (configurable)
 * New preset variables: bass_smooth, mid_smooth, treb_smooth, vol_smooth
 * AMD GPU detection and support for PSVersion=4 (by @OfficialIncubo)

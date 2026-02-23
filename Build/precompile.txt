@@ -6,14 +6,14 @@
 #
 # You can remove or empty the cache folder safely anytime. Use relative or 
 # absolute paths for the presets. The base directory for relative paths is 
-# the Milkwave directory. You can put an asterisk (*) as a wildcard to include 
+# the MDropDX12 directory. You can put an asterisk (*) as a wildcard to include 
 # all contents of a directory.
 #
 # A list of compiled files, along with compilation time per file in 
 # milliseconds, are written to cache\compiled.txt.
 #
-resources\presets\Milkwave\Shader\*
+resources\presets\MDropDX12\Shader\*
 resources\presets\Milkdrop2077\Martin - jewelry.milk
 resources\presets\Milkdrop2077\martin - stratospheric turbulences.milk
 resources\presets\Milkdrop2077\martin - stratospheric turbulences 2.milk
-resources\presets\Milkwave\totetmatt + Se7enSlasher - Tunnel Cable.milk
+resources\presets\MDropDX12\totetmatt + Se7enSlasher - Tunnel Cable.milk

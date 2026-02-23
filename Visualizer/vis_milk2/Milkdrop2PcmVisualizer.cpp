@@ -1,7 +1,7 @@
 //
 // =================================================================
 //
-// BeatDrop/Milkwave - A Milkdrop2 Music Visualizer
+// BeatDrop/MDropDX12 - A Milkdrop2 Music Visualizer
 //
 // Authors : Maxim Volskiy (https://github.com/mvsoft74/BeatDrop) et al.
 //
@@ -162,7 +162,7 @@ using Microsoft::WRL::ComPtr;
 //#include <core/sdk/IPlaybackRemote.h>
 
 #include "..\audio\common.h"
-#include "milkwave.h"
+#include "mdropdx12.h"
 #include <locale>
 #include <codecvt>
 #include "Milkdrop2PcmVisualizer.h"
@@ -176,7 +176,7 @@ namespace fs = std::filesystem;
 #define DEFAULT_HEIGHT 720;
 
 CPlugin g_plugin;
-Milkwave milkwave;
+MDropDX12 mdropdx12;
 HINSTANCE api_orig_hinstance = nullptr;
 _locale_t g_use_C_locale;
 char keyMappings[8];
@@ -232,8 +232,8 @@ BOOL CALLBACK GetWindowNames(HWND h, LPARAM l) {
   if (IsWindow(h) && IsWindowVisible(h)) {
     GetWindowTextA(h, search_window_name, MAX_PATH);
     if (search_window_name[0]) {
-      // Does the search window name contain "Milkwave Visualizer" ?
-      if (strstr(search_window_name, "Milkwave Visualizer") != NULL) {
+      // Does the search window name contain "MDropDX12 Visualizer" ?
+      if (strstr(search_window_name, "MDropDX12 Visualizer") != NULL) {
         nBeatDrops++;
       }
     }
@@ -257,7 +257,7 @@ void InitD3d(HWND hwnd, int width, int height) {
 
   hr = CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&pDXGIFactory));
   if (FAILED(hr)) {
-    milkwave.LogInfo(L"InitD3d: CreateDXGIFactory2 failed");
+    mdropdx12.LogInfo(L"InitD3d: CreateDXGIFactory2 failed");
     return;
   }
 
@@ -282,7 +282,7 @@ void InitD3d(HWND hwnd, int width, int height) {
 
   hr = D3D12CreateDevice(hardwareAdapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&pD3DDevice));
   if (FAILED(hr)) {
-    milkwave.LogInfo(L"InitD3d: D3D12CreateDevice failed");
+    mdropdx12.LogInfo(L"InitD3d: D3D12CreateDevice failed");
     return;
   }
 
@@ -291,7 +291,7 @@ void InitD3d(HWND hwnd, int width, int height) {
   queueDesc.Type  = D3D12_COMMAND_LIST_TYPE_DIRECT;
   hr = pD3DDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&pCommandQueue));
   if (FAILED(hr)) {
-    milkwave.LogInfo(L"InitD3d: CreateCommandQueue failed");
+    mdropdx12.LogInfo(L"InitD3d: CreateCommandQueue failed");
     return;
   }
 
@@ -388,7 +388,7 @@ static void ToggleClickThrough(HWND hWnd) {
     }
     clickthrough = !clickthrough;
   } catch (const std::exception& e) {
-    milkwave.LogException(L"ToggleClickThrough", e, true);
+    mdropdx12.LogException(L"ToggleClickThrough", e, true);
   }
 }
 
@@ -509,7 +509,7 @@ static void ToggleBorderlessFullscreen(HWND hWnd) {
       }
     }
   } catch (const std::exception& e) {
-    milkwave.LogException(L"ToggleBorderlessFullscreen", e, true);
+    mdropdx12.LogException(L"ToggleBorderlessFullscreen", e, true);
   }
 }
 
@@ -846,7 +846,7 @@ static void ShowAudioDeviceDialog(HWND hParent) {
   g_dialogSelectedIndex = -1;
 
   if (g_dialogDevices.empty()) {
-    MessageBoxW(hParent, L"No audio devices found.", L"Milkwave Audio", MB_OK | MB_ICONWARNING);
+    MessageBoxW(hParent, L"No audio devices found.", L"MDropDX12 Audio", MB_OK | MB_ICONWARNING);
     return;
   }
 
@@ -1144,7 +1144,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   else if (wParam == VK_C) {
     if (GetKeyState(VK_CONTROL) & 0x8000) { // Check if Ctrl is pressed
       g_plugin.m_DisplayCover = !g_plugin.m_DisplayCover;
-      milkwave.doSaveCover = g_plugin.m_DisplayCover;
+      mdropdx12.doSaveCover = g_plugin.m_DisplayCover;
       if (g_plugin.m_DisplayCover) {
         g_plugin.AddNotification(L"Cover Display enabled");
       }
@@ -1341,7 +1341,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   case WM_NCMBUTTONDOWN: // Middle mouse button clicked
     if (rightMouseButtonHeld) {
       // Right + Middle
-      g_plugin.OpenMilkwaveRemote();
+      g_plugin.OpenMDropDX12Remote();
     }
     break;
 
@@ -1402,13 +1402,13 @@ void RenderFrame() {
     memset(pcmRightIn, 128, SAMPLE_SIZE);
   }
 
-  milkwave.PollMediaInfo();
-  if (milkwave.coverUpdated) {
-    g_plugin.PostMessageToMilkwaveRemote(WM_USER_COVER_CHANGED);
-    milkwave.coverUpdated = false;
+  mdropdx12.PollMediaInfo();
+  if (mdropdx12.coverUpdated) {
+    g_plugin.PostMessageToMDropDX12Remote(WM_USER_COVER_CHANGED);
+    mdropdx12.coverUpdated = false;
   }
-  if (milkwave.updated) {
-    if (milkwave.isSongChange && !milkwave.doPollExplicit) {
+  if (mdropdx12.updated) {
+    if (mdropdx12.isSongChange && !mdropdx12.doPollExplicit) {
       if (g_plugin.m_ChangePresetWithSong) {
         g_plugin.NextPreset(g_plugin.m_fBlendTimeAuto);
       }
@@ -1417,11 +1417,11 @@ void RenderFrame() {
       }
     }
 
-    if (milkwave.doPollExplicit && g_plugin.m_DisplayCoverWhenPressingB) {
+    if (mdropdx12.doPollExplicit && g_plugin.m_DisplayCoverWhenPressingB) {
       g_plugin.LaunchSprite(0, -1);
     }
 
-    milkwave.doPollExplicit = false;
+    mdropdx12.doPollExplicit = false;
     wchar_t buf[512];
 
     // Convert wchar_t array to std::string
@@ -1449,26 +1449,26 @@ void RenderFrame() {
       std::transform(currentToken.begin(), currentToken.end(), currentToken.begin(), ::tolower);
 
       if (currentToken == "artist") {
-        if (milkwave.currentArtist.length() > 0) {
-          wcscpy(buf, milkwave.currentArtist.c_str());
+        if (mdropdx12.currentArtist.length() > 0) {
+          wcscpy(buf, mdropdx12.currentArtist.c_str());
           g_plugin.AddError(buf, g_plugin.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_1, false);
         }
       }
       else if (currentToken == "title") {
-        if (milkwave.currentTitle.length() > 0) {
-          wcscpy(buf, milkwave.currentTitle.c_str());
+        if (mdropdx12.currentTitle.length() > 0) {
+          wcscpy(buf, mdropdx12.currentTitle.c_str());
           g_plugin.AddError(buf, g_plugin.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_2, false);
         }
       }
       else if (currentToken == "album") {
-        if (milkwave.currentAlbum.length() > 0) {
-          wcscpy(buf, milkwave.currentAlbum.c_str());
+        if (mdropdx12.currentAlbum.length() > 0) {
+          wcscpy(buf, mdropdx12.currentAlbum.c_str());
           g_plugin.AddError(buf, g_plugin.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_3, false);
         }
       }
     }
 
-    milkwave.updated = false;
+    mdropdx12.updated = false;
   }
 
   g_plugin.PluginRender(
@@ -1544,10 +1544,10 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
 
   while (!freeTitleFound && nBeatDrops < 100) {
     if (nBeatDrops == 0) {
-      lstrcpyW(VisualizerWindowTitle, L"Milkwave Visualizer");
+      lstrcpyW(VisualizerWindowTitle, L"MDropDX12 Visualizer");
     }
     else {
-      swprintf_s(VisualizerWindowTitle, L"Milkwave Visualizer %d", nBeatDrops + 1);
+      swprintf_s(VisualizerWindowTitle, L"MDropDX12 Visualizer %d", nBeatDrops + 1);
     }
 
     // Check if a window with this title already exists
@@ -1563,7 +1563,7 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
     }
   }
 
-  milkwave.LogInfo(L"CreateWindowAndRun: Creating window");
+  mdropdx12.LogInfo(L"CreateWindowAndRun: Creating window");
 
   if (g_plugin.m_WindowX == 0 || g_plugin.m_WindowY == 0 || g_plugin.m_WindowWidth == 0 || g_plugin.m_WindowHeight == 0) {
     RECT workArea{};
@@ -1609,7 +1609,7 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
     0);
 
   if (!hwnd) {
-    milkwave.LogInfo(L"CreateWindowAndRun: No window handle!");
+    mdropdx12.LogInfo(L"CreateWindowAndRun: No window handle!");
     DWORD dwError = GetLastError();
     return 0;
   }
@@ -1639,7 +1639,7 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
     ShowWindow(hwnd, SW_SHOW);
   }
   else {
-    milkwave.LogInfo(L"CreateWindowAndRun: ShowWindow failed, window not created");
+    mdropdx12.LogInfo(L"CreateWindowAndRun: ShowWindow failed, window not created");
   }
 
   if (g_plugin.m_bAlwaysOnTop) {
@@ -1650,14 +1650,14 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   }
 
   // always ensure .Init is called after the window is created (ShowWindow above)
-  milkwave.Init(g_plugin.m_szBaseDir);
-  milkwave.doPoll = g_plugin.m_SongInfoPollingEnabled;
-  milkwave.doSaveCover = g_plugin.m_DisplayCover;
+  mdropdx12.Init(g_plugin.m_szBaseDir);
+  mdropdx12.doPoll = g_plugin.m_SongInfoPollingEnabled;
+  mdropdx12.doSaveCover = g_plugin.m_DisplayCover;
 
   unsigned int frame = 0;
 
 
-  // Milkwave: Moved to StartThreads()
+  // MDropDX12: Moved to StartThreads()
   // g_plugin.PluginPreInitialize(0, 0);
 
   // SPOUT
@@ -1677,10 +1677,10 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
     BackbufferHeight = g_plugin.nSpoutFixedHeight;
   }
 
-  milkwave.LogInfo(L"CreateWindowAndRun: InitD3d");
+  mdropdx12.LogInfo(L"CreateWindowAndRun: InitD3d");
   InitD3d(hwnd, BackbufferWidth, BackbufferHeight);
 
-  milkwave.LogInfo(L"CreateWindowAndRun: PluginInitialize");
+  mdropdx12.LogInfo(L"CreateWindowAndRun: PluginInitialize");
   g_plugin.PluginInitialize(
     pD3DDevice.Get(),
     pCommandQueue.Get(),
@@ -1712,7 +1712,7 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   msg.message = WM_NULL;
 
   try {
-    milkwave.LogInfo(L"CreateWindowAndRun: Message loop starting");
+    mdropdx12.LogInfo(L"CreateWindowAndRun: Message loop starting");
 
     PeekMessage(&msg, NULL, 0U, 0U, PM_NOREMOVE);
     while (WM_QUIT != msg.message) {
@@ -1731,19 +1731,19 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
           std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
           std::wstring emsg = converter.from_bytes(e.what());
           std::wstring logMsg = L"Exception in render loop: " + emsg;
-          milkwave.LogInfo(logMsg);
+          mdropdx12.LogInfo(logMsg);
         } catch (...) {
-          milkwave.LogInfo(L"Exception in render loop (failed to convert exception message)");
+          mdropdx12.LogInfo(L"Exception in render loop (failed to convert exception message)");
         }
       } catch (...) {
-        milkwave.LogInfo(L"Unknown non-standard exception in render loop");
+        mdropdx12.LogInfo(L"Unknown non-standard exception in render loop");
       }
       frame++;
     }
   } catch (const std::exception& e) {
-    milkwave.LogException(L"CreateWindowAndRun: Exception in main loop", e, true);
+    mdropdx12.LogException(L"CreateWindowAndRun: Exception in main loop", e, true);
   }
-  milkwave.LogInfo(L"CreateWindowAndRun: Message loop ended");
+  mdropdx12.LogInfo(L"CreateWindowAndRun: Message loop ended");
 
   g_plugin.MyWriteConfig();
   g_plugin.PluginQuit();
@@ -1850,7 +1850,7 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
         prefs.m_bIsRenderDevice ? L"true" : L"false",
         prefs.m_bInt16 ? L"true" : L"false"
       );
-      milkwave.LogDebug(configBuf);
+      mdropdx12.LogDebug(configBuf);
     }
 
     // create arguments for loopback capture thread
@@ -1863,16 +1863,16 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
     threadArgs.hStartedEvent = hStartedEvent;
     threadArgs.hStopEvent = hStopEvent;
     threadArgs.nFrames = 0;
-    threadArgs.pMilkwave = &milkwave; // provide milkwave instance for logging from the capture thread
+    threadArgs.pMDropDX12 = &mdropdx12; // provide MDropDX12 instance for logging from the capture thread
 
-    milkwave.LogInfo(L"StartAudioCaptureThread: CreateThread LoopbackCaptureThreadFunction");
+    mdropdx12.LogInfo(L"StartAudioCaptureThread: CreateThread LoopbackCaptureThreadFunction");
     hThreadLoopbackCapture = CreateThread(
       NULL, 0,
       LoopbackCaptureThreadFunction, &threadArgs,
       0, NULL
     );
     if (NULL == hThreadLoopbackCapture) {
-      milkwave.LogInfo(L"StartAudioCaptureThread: CreateThread failed");
+      mdropdx12.LogInfo(L"StartAudioCaptureThread: CreateThread failed");
       ERR(L"CreateThread failed: last error is %u", GetLastError());
       return -__LINE__;
     }
@@ -1887,13 +1887,13 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
     );
 
     if (WAIT_OBJECT_0 + 1 == dwWaitResult) {
-      milkwave.LogInfo(L"StartAudioCaptureThread: Thread aborted before starting to loopback capture: hr = 0x%08x");
+      mdropdx12.LogInfo(L"StartAudioCaptureThread: Thread aborted before starting to loopback capture: hr = 0x%08x");
       ERR(L"Thread aborted before starting to loopback capture: hr = 0x%08x", threadArgs.hr);
       return -__LINE__;
     }
 
     if (WAIT_OBJECT_0 != dwWaitResult) {
-      milkwave.LogInfo(L"StartAudioCaptureThread: Unexpected WaitForMultipleObjects return value");
+      mdropdx12.LogInfo(L"StartAudioCaptureThread: Unexpected WaitForMultipleObjects return value");
       ERR(L"Unexpected WaitForMultipleObjects return value %u", dwWaitResult);
       return -__LINE__;
     }
@@ -1948,13 +1948,13 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
 
     DWORD exitCode;
     if (!GetExitCodeThread(hThreadLoopbackCapture, &exitCode)) {
-      milkwave.LogInfo(L"StartAudioCaptureThread: GetExitCodeThread failed");
+      mdropdx12.LogInfo(L"StartAudioCaptureThread: GetExitCodeThread failed");
       ERR(L"GetExitCodeThread failed: last error is %u", GetLastError());
       return -__LINE__;
     }
 
     if (0 != exitCode) {
-      milkwave.LogInfo(L"StartAudioCaptureThread: Loopback capture thread exit code unexpected");
+      mdropdx12.LogInfo(L"StartAudioCaptureThread: Loopback capture thread exit code unexpected");
       ERR(L"Loopback capture thread exit code is %u; expected 0", exitCode);
       return -__LINE__;
     }
@@ -1982,7 +1982,7 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
         std::wstringstream ss;
         ss << L"STATUS=Device init \"" << g_plugin.m_szAudioDeviceDisplayName << "\" failed, reverting to \"" << g_plugin.m_szAudioDevicePrevious << "\"";
         statusMessage = ss.str();
-        g_plugin.SendMessageToMilkwaveRemote(statusMessage.data());
+        g_plugin.SendMessageToMDropDX12Remote(statusMessage.data());
         */
 
         // if result > 1, we probably encountered a disconnection error earlier (eg. Bluetooth headphone disconnection), 
@@ -1995,13 +1995,13 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
         }
 
         std::wstring statusMessage = L"DEVICE=" + std::wstring(g_plugin.m_szAudioDevice);
-        g_plugin.SendMessageToMilkwaveRemote(statusMessage.data());
+        g_plugin.SendMessageToMDropDX12Remote(statusMessage.data());
         g_plugin.AddNotificationAudioDevice();
         result = StartAudioCaptureThread(instance, ++nestingLevel);
       }
     }
   } catch (const std::exception& e) {
-    milkwave.LogException(L"StartAudioCaptureThread", e, true);
+    mdropdx12.LogException(L"StartAudioCaptureThread", e, true);
   }
   return 0;
 }
@@ -2018,14 +2018,14 @@ unsigned __stdcall DoSetup(void* param) {
 
     // Abort if compiled.txt already exists
     if (std::filesystem::exists(compiledListPath)) {
-      milkwave.LogInfo(L"Shader cache already exists, skipping precompilation");
+      mdropdx12.LogInfo(L"Shader cache already exists, skipping precompilation");
       return -1;
     }
 
     // Open precompile.txt
     std::ifstream file("precompile.txt");
     if (!file.is_open()) {
-      milkwave.LogInfo(L"Failed to open precompile.txt");
+      mdropdx12.LogInfo(L"Failed to open precompile.txt");
       return -1;
     }
 
@@ -2033,7 +2033,7 @@ unsigned __stdcall DoSetup(void* param) {
     try {
       std::filesystem::create_directory(cacheDir);
     } catch (const std::filesystem::filesystem_error& e) {
-      milkwave.LogException(L"Failed to create cache directory", e, false);
+      mdropdx12.LogException(L"Failed to create cache directory", e, false);
       return -1;
     }
 
@@ -2104,7 +2104,7 @@ unsigned __stdcall DoSetup(void* param) {
     wchar_t szMessage[256];
     wcsncpy_s(szMessage, message.c_str(), _TRUNCATE);
     g_plugin.AddNotification(szMessage, 5);
-    milkwave.LogInfo(message);
+    mdropdx12.LogInfo(message);
   }
   return 0;
 }
@@ -2149,46 +2149,46 @@ void StartSetupThread(HINSTANCE instance) {
 
 int StartThreads(HINSTANCE instance) {
   try {
-    // Milkwave: early init so we can read from settings
+    // MDropDX12: early init so we can read from settings
     g_plugin.PluginPreInitialize(0, 0);
 
     // early assignment so we can use logging
-    // milkwave.Init() may only be called after the window is created due to threading issues
-    milkwave.logLevel = g_plugin.m_LogLevel;
-    g_plugin.milkwave = &milkwave;
+    // mdropdx12.Init() may only be called after the window is created due to threading issues
+    mdropdx12.logLevel = g_plugin.m_LogLevel;
+    g_plugin.mdropdx12 = &mdropdx12;
 
-    milkwave.LogInfo(L"Milkwave initialized, LogLevel=" + std::to_wstring(milkwave.logLevel)
+    mdropdx12.LogInfo(L"MDropDX12 initialized, LogLevel=" + std::to_wstring(mdropdx12.logLevel)
       + L" BaseDir=" + g_plugin.m_szBaseDir);
 
     // DX12: no legacy DirectX 9 DLL checks needed.
 
-    milkwave.LogInfo(L"Starting render thread");
+    mdropdx12.LogInfo(L"Starting render thread");
     StartRenderThread(instance);
     // WaitForSingleObject(threadRender, INFINITE);
 
-    milkwave.LogInfo(L"Starting setup thread");
+    mdropdx12.LogInfo(L"Starting setup thread");
     StartSetupThread(instance);
 
     if (g_plugin.m_bEnableAudioCapture) {
-      milkwave.LogInfo(L"Starting audio capture thread");
+      mdropdx12.LogInfo(L"Starting audio capture thread");
       StartAudioCaptureThread(instance, 0);
     }
     else {
-      milkwave.LogInfo(L"Audio capture disabled in settings");
+      mdropdx12.LogInfo(L"Audio capture disabled in settings");
       while (true) {
         Sleep(1000);
       }
     }
 
   } catch (const std::exception& e) {
-    milkwave.LogException(L"StartThreads", e, true);
+    mdropdx12.LogException(L"StartThreads", e, true);
     return -1;
   }
 
   return 0;
 }
 
-void MilkwaveTerminateHandler() {
+void MDropDX12TerminateHandler() {
   try {
     // Re-throw the current exception to get its type/info
     std::exception_ptr exptr = std::current_exception();
@@ -2196,13 +2196,13 @@ void MilkwaveTerminateHandler() {
       try {
         std::rethrow_exception(exptr);
       } catch (const std::exception& e) {
-        milkwave.LogException(L"Unhandled exception (std::terminate)", e, true);
+        mdropdx12.LogException(L"Unhandled exception (std::terminate)", e, true);
       } catch (...) {
-        milkwave.LogInfo(L"Unhandled non-std::exception in std::terminate");
+        mdropdx12.LogInfo(L"Unhandled non-std::exception in std::terminate");
       }
     }
     else {
-      milkwave.LogInfo(L"std::terminate called with no active exception");
+      mdropdx12.LogInfo(L"std::terminate called with no active exception");
     }
   } catch (...) {
     // If logging itself throws, do nothing
@@ -2222,7 +2222,7 @@ void SeTranslatorFunction(unsigned int code, _EXCEPTION_POINTERS* ep) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine, int iCmdShow) {
-  std::set_terminate(MilkwaveTerminateHandler);
+  std::set_terminate(MDropDX12TerminateHandler);
   api_orig_hinstance = hInstance;
 
   // Install SEH -> C++ translator so SEH (e.g., access violations) become catchable std::exception
@@ -2267,9 +2267,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
   try {
     res = StartThreads(hInstance);
   } catch (const std::exception& e) {
-    milkwave.LogException(L"WinMain", e, true);
+    mdropdx12.LogException(L"WinMain", e, true);
   }
-  milkwave.LogInfo(L"WinMain ended, result=" + std::to_wstring(res));
+  mdropdx12.LogInfo(L"WinMain ended, result=" + std::to_wstring(res));
   return res;
 }
 
