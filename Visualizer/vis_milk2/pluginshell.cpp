@@ -612,20 +612,18 @@ int CPluginShell::AllocateDX9Stuff() {
   m_playlist_top_idx = -1;    // invalidating playlist cache forces recompute of playlist width
   //m_icon_list.clear();      // clear desktop mode icon list, so it has to read the bitmaps back in
 
-  if (!m_vj_mode) {
+  if (!m_vj_mode && m_bEnableD2DText) {
     if (!m_text.IsD2DReady()) {
-      // First init or recovery after failure — create D3D11On12/D2D from scratch
+      // First init — build font atlas textures for sprite-based text rendering
       m_text.Finish();
       m_text.Init(GetDX12Device(), nullptr, 1);
       if (m_lpDX) {
         if (m_lpDX->m_commandQueue)
-          m_lpDX->WaitForGpu();  // ensure GPU idle before D3D11On12 creation
+          m_lpDX->WaitForGpu();
         m_text.InitDX12(m_lpDX, m_font, NUM_BASIC_FONTS + NUM_EXTRA_FONTS, m_fontinfo);
       }
-    } else {
-      // Resize — D3D11On12 device persists, just re-wrap new back buffers
-      m_text.WrapBackBuffers();
     }
+    // Font atlases persist across resize — no re-wrapping needed
   }
 
   return ret;
@@ -641,11 +639,7 @@ void CPluginShell::CleanUpDX9Stuff(int final_cleanup) {
   // otherwise they might still have a hanging reference!
   if (!m_vj_mode) {
     if (final_cleanup) {
-      // Full shutdown: destroy D3D11On12/D2D/DirectWrite entirely
       CleanUpFonts();
-    } else {
-      // Resize: only release back buffer wraps, keep D3D11On12 device alive
-      m_text.ReleaseBackBufferResources();
     }
     // Release help overlay texture (will be re-created lazily on next F1)
     m_helpTexture.Reset();
@@ -749,12 +743,8 @@ void CPluginShell::OnUserResizeWindow() {
         }
         SetVariableBackBuffer(newW, newH);
         UpdateBackBufferTracking(newW, newH);
-        // Release D2D wrapped resources before swap chain resize
-        m_text.ReleaseBackBufferResources();
         // DX12: resize the swap chain instead of resetting the device
         m_lpDX->ResizeSwapChain(newW, newH);
-        // Re-wrap new back buffers for D2D
-        m_text.WrapBackBuffers();
       }
       //if (m_lpDX->m_REAL_client_width != new_REAL_client_w || m_lpDX->m_REAL_client_height != new_REAL_client_h) {
       if (!AllocateDX9Stuff()) {
@@ -1443,12 +1433,11 @@ void CPluginShell::DrawAndDisplay(int redraw) {
       }
     }
 
-    // Close + execute the DX12 command list (back buffer stays in RENDER_TARGET state)
-    m_lpDX->ExecuteCommandList();
-
-    // D2D text rendering via D3D11on12 — renders directly to back buffer,
-    // then transitions it from RENDER_TARGET → PRESENT on release.
+    // Render queued text via font atlas sprites (within DX12 command list)
     m_text.DrawNow();
+
+    // Close + execute the DX12 command list (transitions RT → PRESENT)
+    m_lpDX->ExecuteCommandList();
 
     // Present + advance to next frame
     m_lpDX->EndFrame();
@@ -2813,12 +2802,8 @@ void CPluginShell::ResetBufferAndFonts() {
   int newH = m_lpDX->m_client_height;
   SetVariableBackBuffer(newW, newH);
   UpdateBackBufferTracking(newW, newH);
-  // Release D2D wrapped resources before swap chain resize
-  m_text.ReleaseBackBufferResources();
   // DX12: resize swap chain instead of device reset
   m_lpDX->ResizeSwapChain(newW, newH);
-  // Re-wrap new back buffers for D2D
-  m_text.WrapBackBuffers();
 
   if (newW != 0 && newH != 0) {
     CleanUpFonts();

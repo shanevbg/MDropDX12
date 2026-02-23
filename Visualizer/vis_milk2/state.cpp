@@ -1532,6 +1532,11 @@ void CState::StripLinefeedCharsAndComments(char* src, char* dest) {
 }
 
 void CState::RecompileExpressions(int flags, int bReInit) {
+  if ((flags & RECOMPILE_PRESET_CODE) && m_szDesc[0]) {
+    char dbg[512];
+    sprintf(dbg, "EEL: Compiling preset: %ls\n", m_szDesc);
+    OutputDebugStringA(dbg);
+  }
   // before we get started, if we redo the init code for the preset, we have to redo
   // other things too, because q1-q8 could change.
   if ((flags & RECOMPILE_PRESET_CODE) && bReInit) {
@@ -1663,6 +1668,10 @@ void CState::RecompileExpressions(int flags, int bReInit) {
         NSEEL_CODEHANDLE	pf_codehandle_init;
 
         if (!(pf_codehandle_init = NSEEL_code_compile(m_pf_eel, buf))) {
+          const char* err = NSEEL_code_getcodeerror(m_pf_eel);
+          char dbg[512];
+          sprintf(dbg, "EEL: preset init compile FAILED: %s\n", err ? err : "(unknown)");
+          OutputDebugStringA(dbg);
           wchar_t buf[1024];
           swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_PRESET_INIT_CODE), m_szDesc);
           g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
@@ -1691,6 +1700,10 @@ void CState::RecompileExpressions(int flags, int bReInit) {
       StripLinefeedCharsAndComments(m_szPerFrameExpr, buf);
       if (buf[0]) {
         if (!(m_pf_codehandle = NSEEL_code_compile(m_pf_eel, buf))) {
+          const char* err = NSEEL_code_getcodeerror(m_pf_eel);
+          char dbg[512];
+          sprintf(dbg, "EEL: per-frame compile FAILED: %s\n", err ? err : "(unknown)");
+          OutputDebugStringA(dbg);
           wchar_t buf[1024];
           swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_PER_FRAME_CODE), m_szDesc);
           g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
@@ -1701,6 +1714,10 @@ void CState::RecompileExpressions(int flags, int bReInit) {
       StripLinefeedCharsAndComments(m_szPerPixelExpr, buf);
       if (buf[0]) {
         if (!(m_pp_codehandle = NSEEL_code_compile(m_pv_eel, buf))) {
+          const char* err = NSEEL_code_getcodeerror(m_pv_eel);
+          char dbg[512];
+          sprintf(dbg, "EEL: per-pixel compile FAILED: %s\n", err ? err : "(unknown)");
+          OutputDebugStringA(dbg);
           wchar_t buf[1024];
           swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_PER_VERTEX_CODE), m_szDesc);
           g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);

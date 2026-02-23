@@ -380,6 +380,9 @@ protected:
   void StuffParams(DXCONTEXT_PARAMS* pParams);
   void EnforceMaxFPS();
 
+  // Text overlay rendering — can be disabled via bEnableD2DText=0 in INI
+  bool      m_bEnableD2DText = true;
+
   // SEPARATE TEXT WINDOW (FOR VJ MODE)
   int 		m_vj_mode;
   int       m_hidden_textwnd;

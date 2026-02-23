@@ -27,47 +27,27 @@ IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISI
 OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-// CTextManager: D3D11on12 + Direct2D + DirectWrite text rendering.
-// Replaces GDI→DIB→DX12 pipeline with GPU-accelerated text.
+// CTextManager: GDI font atlas + DX12 sprite quad text rendering.
+// At startup, renders all printable characters to bitmap atlases using GDI,
+// then uploads them as DX12 textures. Each frame, builds SPRITEVERTEX quads
+// for queued text and draws with the existing DX12 pipeline.
 
 #include "textmgr.h"
 #include "dxcontext.h"
 #include "pluginshell.h"  // td_fontinfo
-#include "support.h"
+#include "support.h"      // SPRITEVERTEX, WFVERTEX
+#include "dx12pipeline.h" // PSO enums
 #include <cmath>
-
-#pragma comment(lib, "d3d11.lib")
-#pragma comment(lib, "d2d1.lib")
-#pragma comment(lib, "dwrite.lib")
+#include <vector>
 
 #define MAX_MSG_CHARS (65536*2)
-wchar_t g_szMsgPool[2][MAX_MSG_CHARS];
+static wchar_t g_szMsgPool[MAX_MSG_CHARS];
 
-// Convert D3DCOLOR (0xAARRGGBB) to D2D1_COLOR_F
-static D2D1_COLOR_F D3DColorToD2D(DWORD d3dColor) {
-  float a = ((d3dColor >> 24) & 0xFF) / 255.0f;
-  float r = ((d3dColor >> 16) & 0xFF) / 255.0f;
-  float g = ((d3dColor >>  8) & 0xFF) / 255.0f;
-  float b = ((d3dColor >>  0) & 0xFF) / 255.0f;
-  return D2D1::ColorF(r, g, b, a);
-}
-
-// Map GDI DT_ flags to DirectWrite alignment on a text format
-static void ApplyDWriteAlignment(IDWriteTextFormat* fmt, DWORD dtFlags) {
-  // Horizontal alignment
-  if (dtFlags & DT_CENTER)
-    fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-  else if (dtFlags & DT_RIGHT)
-    fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-  else
-    fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-
-  // Word wrapping
-  if (dtFlags & DT_SINGLELINE)
-    fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-  else
-    fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
-}
+// Atlas grid layout: 16 columns × 15 rows = 240 cells (covers 0x20-0xFF = 224 chars)
+static const int ATLAS_COLS = 16;
+static const int ATLAS_ROWS = 15;
+static const int ATLAS_FIRST_CHAR = 0x20;
+static const int ATLAS_LAST_CHAR  = 0xFF;
 
 CTextManager::CTextManager()
   : m_lpDevice(nullptr)
@@ -76,12 +56,10 @@ CTextManager::CTextManager()
   , m_lpDX(nullptr)
   , m_nFonts(0)
   , m_pFontInfo(nullptr)
-  , m_d2dReady(false)
+  , m_ready(false)
 {
-  m_b = 0;
-  m_nMsg[0] = 0;
-  m_nMsg[1] = 0;
-  m_next_msg_start_ptr = g_szMsgPool[m_b];
+  m_nMsg = 0;
+  m_next_msg_start_ptr = g_szMsgPool;
 }
 
 CTextManager::~CTextManager() {
@@ -93,10 +71,8 @@ void CTextManager::Init(ID3D12Device* lpDevice, void* lpTextSurface, int bAdditi
   m_lpTextSurface   = lpTextSurface;
   m_blit_additively = bAdditive;
 
-  m_b = 0;
-  m_nMsg[0] = 0;
-  m_nMsg[1] = 0;
-  m_next_msg_start_ptr = g_szMsgPool[m_b];
+  m_nMsg = 0;
+  m_next_msg_start_ptr = g_szMsgPool;
 }
 
 void CTextManager::Finish() {
@@ -115,240 +91,217 @@ void CTextManager::InitDX12(DXContext* lpDX, HFONT* pFonts, int nFonts, void* pF
   m_pFontInfo = pFontInfo;
 
   if (!lpDX) return;
-  InitD2D();
+
+  // Build a font atlas for each configured font
+  for (int i = 0; i < nFonts && i < MAX_TEXT_FONTS; i++) {
+    if (!BuildFontAtlas(i)) {
+      char buf[128];
+      sprintf(buf, "CTextManager: BuildFontAtlas(%d) failed\n", i);
+      OutputDebugStringA(buf);
+    }
+  }
+
+  m_ready = true;
+  OutputDebugStringA("CTextManager: Font atlas text rendering initialized\n");
 }
 
-bool CTextManager::InitD2D() {
-  if (!m_lpDX || !m_lpDX->m_device || !m_lpDX->m_commandQueue) return false;
+bool CTextManager::BuildFontAtlas(int fontIdx) {
+  if (!m_lpDX || !m_pFontInfo || fontIdx < 0 || fontIdx >= m_nFonts)
+    return false;
 
-  // 1. Create D3D11On12 device (shares DX12 device + command queue)
-  UINT d3d11Flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
-#ifdef _DEBUG
-  d3d11Flags |= D3D11_CREATE_DEVICE_DEBUG;
-#endif
+  td_fontinfo* fonts = (td_fontinfo*)m_pFontInfo;
+  td_fontinfo& fi = fonts[fontIdx];
 
-  IUnknown* cmdQueues[] = { m_lpDX->m_commandQueue.Get() };
-  ComPtr<ID3D11Device> d3d11Device;
-  HRESULT hr = D3D11On12CreateDevice(
-    m_lpDX->m_device.Get(),
-    d3d11Flags,
-    nullptr, 0,          // feature levels (default)
-    cmdQueues, 1,        // command queue
-    0,                   // node mask
-    &d3d11Device,
-    &m_d3d11Context,
-    nullptr);
-  if (FAILED(hr)) {
+  // 1. Create GDI font matching the configured settings
+  HFONT hFont = CreateFontW(
+    fi.nSize, 0, 0, 0,
+    fi.bBold ? FW_BOLD : FW_NORMAL,
+    fi.bItalic, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+    ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+    fi.szFace);
+  if (!hFont) return false;
+
+  // 2. Create memory DC and get font metrics
+  HDC memDC = CreateCompatibleDC(nullptr);
+  HGDIOBJ oldFont = SelectObject(memDC, hFont);
+
+  TEXTMETRICW tm;
+  GetTextMetricsW(memDC, &tm);
+
+  // Cell dimensions: enough for any character including overhang
+  int cellW = tm.tmMaxCharWidth + 4;  // +4 padding for ClearType/overhang
+  int cellH = tm.tmHeight;
+
+  int atlasW = ATLAS_COLS * cellW;
+  int atlasH = ATLAS_ROWS * cellH;
+
+  // Round up to multiple of 4 for DX12 texture alignment
+  atlasW = (atlasW + 3) & ~3;
+  atlasH = (atlasH + 3) & ~3;
+
+  // 3. Create 32-bit top-down DIB
+  BITMAPINFO bmi = {};
+  bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+  bmi.bmiHeader.biWidth       = atlasW;
+  bmi.bmiHeader.biHeight      = -atlasH; // top-down
+  bmi.bmiHeader.biPlanes      = 1;
+  bmi.bmiHeader.biBitCount    = 32;
+  bmi.bmiHeader.biCompression = BI_RGB;
+
+  void* dibBits = nullptr;
+  HBITMAP hBmp = CreateDIBSection(memDC, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
+  if (!hBmp || !dibBits) {
+    SelectObject(memDC, oldFont);
+    DeleteObject(hFont);
+    DeleteDC(memDC);
+    return false;
+  }
+  HGDIOBJ oldBmp = SelectObject(memDC, hBmp);
+
+  // Clear to black (CreateDIBSection zeros memory)
+  SetBkMode(memDC, TRANSPARENT);
+  SetTextColor(memDC, RGB(255, 255, 255));
+
+  // 4. Get ABC widths for each character
+  ABC abcWidths[256] = {};
+  if (!GetCharABCWidthsW(memDC, ATLAS_FIRST_CHAR, ATLAS_LAST_CHAR, &abcWidths[ATLAS_FIRST_CHAR])) {
+    // Fallback: use GetCharWidth32 for non-TrueType fonts
+    INT charWidths[256] = {};
+    GetCharWidth32W(memDC, ATLAS_FIRST_CHAR, ATLAS_LAST_CHAR, &charWidths[ATLAS_FIRST_CHAR]);
+    for (int c = ATLAS_FIRST_CHAR; c <= ATLAS_LAST_CHAR; c++) {
+      abcWidths[c].abcA = 0;
+      abcWidths[c].abcB = charWidths[c];
+      abcWidths[c].abcC = 0;
+    }
+  }
+
+  // 5. Render each character to the atlas grid
+  FontAtlas& atlas = m_atlases[fontIdx];
+  memset(atlas.glyphs, 0, sizeof(atlas.glyphs));
+  atlas.lineHeight = (float)tm.tmHeight;
+  atlas.ascent     = (float)tm.tmAscent;
+  atlas.cellWidth  = cellW;
+  atlas.cellHeight = cellH;
+
+  for (int c = ATLAS_FIRST_CHAR; c <= ATLAS_LAST_CHAR; c++) {
+    int idx = c - ATLAS_FIRST_CHAR;
+    int col = idx % ATLAS_COLS;
+    int row = idx / ATLAS_COLS;
+
+    int x = col * cellW;
+    int y = row * cellH;
+
+    // Render character at cell origin (GDI handles bearings)
+    wchar_t ch = (wchar_t)c;
+    TextOutW(memDC, x, y, &ch, 1);
+
+    // Calculate advance width
+    float advance = (float)(abcWidths[c].abcA + (int)abcWidths[c].abcB + abcWidths[c].abcC);
+    if (advance <= 0) advance = (float)cellW * 0.5f;
+
+    // Store glyph metrics with UV coordinates
+    GlyphInfo& g = atlas.glyphs[c];
+    g.u0       = (float)x / (float)atlasW;
+    g.v0       = (float)y / (float)atlasH;
+    g.u1       = (float)(x + cellW) / (float)atlasW;
+    g.v1       = (float)(y + cellH) / (float)atlasH;
+    g.advanceX = advance;
+    g.bearingX = (float)abcWidths[c].abcA;
+    g.glyphWidth  = (float)cellW;
+    g.glyphHeight = (float)cellH;
+  }
+
+  // Set up space character if not already valid
+  if (atlas.glyphs[' '].advanceX <= 0)
+    atlas.glyphs[' '].advanceX = (float)tm.tmAveCharWidth;
+
+  SelectObject(memDC, oldFont);
+  SelectObject(memDC, oldBmp);
+  DeleteObject(hFont);
+  DeleteDC(memDC);
+
+  // 6. Post-process: convert GDI grayscale to premultiplied alpha
+  // GDI renders white text (R=G=B=intensity, A=0) on black (all zeros).
+  // Convert to premultiplied alpha: BGRA(intensity, intensity, intensity, intensity)
+  BYTE* pixels = (BYTE*)dibBits;
+  for (int py = 0; py < atlasH; py++) {
+    for (int px = 0; px < atlasW; px++) {
+      int i = (py * atlasW + px) * 4;
+      BYTE b = pixels[i + 0];
+      BYTE g = pixels[i + 1];
+      BYTE r = pixels[i + 2];
+      BYTE intensity = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
+      pixels[i + 0] = intensity; // B (premultiplied)
+      pixels[i + 1] = intensity; // G (premultiplied)
+      pixels[i + 2] = intensity; // R (premultiplied)
+      pixels[i + 3] = intensity; // A = coverage
+    }
+  }
+
+  // 7. Upload atlas to DX12 texture
+  atlas.texture = m_lpDX->CreateTextureFromPixels(
+    dibBits, (UINT)atlasW, (UINT)atlasH,
+    (UINT)(atlasW * 4), DXGI_FORMAT_B8G8R8A8_UNORM);
+
+  DeleteObject(hBmp);
+
+  if (!atlas.texture.IsValid()) {
     char buf[128];
-    sprintf(buf, "CTextManager: D3D11On12CreateDevice FAILED hr=0x%08X\n", (unsigned)hr);
+    sprintf(buf, "CTextManager: CreateTextureFromPixels failed for font %d\n", fontIdx);
     OutputDebugStringA(buf);
     return false;
   }
 
-  hr = d3d11Device.As(&m_d3d11Device);
-  hr = d3d11Device.As(&m_d3d11On12Device);
-  if (!m_d3d11On12Device) {
-    OutputDebugStringA("CTextManager: QueryInterface ID3D11On12Device FAILED\n");
-    return false;
-  }
+  // 8. Create binding block (16 SRV slots: slot 0 = atlas, slots 1-15 = null)
+  m_lpDX->CreateBindingBlockForTexture(atlas.texture);
 
-  // 2. Create D2D factory
-  D2D1_FACTORY_OPTIONS d2dOpts = {};
-#ifdef _DEBUG
-  d2dOpts.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
-#endif
-  hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,
-    __uuidof(ID2D1Factory3), &d2dOpts,
-    reinterpret_cast<void**>(m_d2dFactory.GetAddressOf()));
-  if (FAILED(hr)) {
-    OutputDebugStringA("CTextManager: D2D1CreateFactory FAILED\n");
-    return false;
-  }
+  atlas.valid = true;
 
-  // 3. Create D2D device + context from DXGI device
-  ComPtr<IDXGIDevice> dxgiDevice;
-  m_d3d11Device.As(&dxgiDevice);
+  char buf[256];
+  sprintf(buf, "CTextManager: Font %d atlas built: %dx%d cells=%dx%d lineH=%.0f\n",
+    fontIdx, atlasW, atlasH, cellW, cellH, atlas.lineHeight);
+  OutputDebugStringA(buf);
 
-  ComPtr<ID2D1Device> d2dDevice;
-  hr = m_d2dFactory->CreateDevice(dxgiDevice.Get(), &d2dDevice);
-  if (FAILED(hr)) {
-    OutputDebugStringA("CTextManager: D2D CreateDevice FAILED\n");
-    return false;
-  }
-  d2dDevice.As(&m_d2dDevice);
-
-  ComPtr<ID2D1DeviceContext> d2dCtx;
-  hr = m_d2dDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &d2dCtx);
-  if (FAILED(hr)) {
-    OutputDebugStringA("CTextManager: D2D CreateDeviceContext FAILED\n");
-    return false;
-  }
-  d2dCtx.As(&m_d2dContext);
-
-  // 4. Create DirectWrite factory
-  hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
-    __uuidof(IDWriteFactory5),
-    reinterpret_cast<IUnknown**>(m_dwriteFactory.GetAddressOf()));
-  if (FAILED(hr)) {
-    // Try base factory version
-    hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
-      __uuidof(IDWriteFactory),
-      reinterpret_cast<IUnknown**>(m_dwriteFactory.GetAddressOf()));
-    if (FAILED(hr)) {
-      OutputDebugStringA("CTextManager: DWriteCreateFactory FAILED\n");
-      return false;
-    }
-  }
-
-  // 5. Create reusable brush
-  m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 1), &m_brush);
-
-  // 6. Create DirectWrite text formats from font info
-  CreateDWriteFormats();
-
-  // 7. Wrap back buffers for D2D rendering
-  WrapBackBuffers();
-
-  m_d2dReady = true;
-  OutputDebugStringA("CTextManager: D2D initialized successfully\n");
   return true;
 }
 
-void CTextManager::CreateDWriteFormats() {
-  if (!m_dwriteFactory || !m_pFontInfo) return;
-
-  td_fontinfo* fontInfo = (td_fontinfo*)m_pFontInfo;
-
-  for (int i = 0; i < m_nFonts && i < MAX_TEXT_FONTS; i++) {
-    float fontSize = (float)abs(fontInfo[i].nSize);
-    if (fontSize <= 0) fontSize = 16.0f;
-
-    DWRITE_FONT_WEIGHT weight = fontInfo[i].bBold
-      ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL;
-    DWRITE_FONT_STYLE style = fontInfo[i].bItalic
-      ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL;
-
-    HRESULT hr = m_dwriteFactory->CreateTextFormat(
-      fontInfo[i].szFace,
-      nullptr,
-      weight,
-      style,
-      DWRITE_FONT_STRETCH_NORMAL,
-      fontSize,
-      L"en-us",
-      &m_dwFormats[i]);
-
-    if (FAILED(hr)) {
-      char buf[256];
-      sprintf(buf, "CTextManager: CreateTextFormat failed for font %d hr=0x%08X\n", i, (unsigned)hr);
-      OutputDebugStringA(buf);
-    }
-  }
-}
-
-void CTextManager::WrapBackBuffers() {
-  ReleaseBackBufferResources();
-  if (!m_d3d11On12Device || !m_lpDX) return;
-
-  for (UINT i = 0; i < 2; i++) {
-    if (!m_lpDX->m_renderTargets[i]) continue;
-
-    D3D11_RESOURCE_FLAGS d3d11Flags = {};
-    d3d11Flags.BindFlags = D3D11_BIND_RENDER_TARGET;
-
-    HRESULT hr = m_d3d11On12Device->CreateWrappedResource(
-      m_lpDX->m_renderTargets[i].Get(),
-      &d3d11Flags,
-      D3D12_RESOURCE_STATE_RENDER_TARGET,  // state on acquire
-      D3D12_RESOURCE_STATE_PRESENT,        // state on release
-      IID_PPV_ARGS(&m_wrappedBackBuffers[i]));
-
-    if (FAILED(hr)) {
-      char buf[128];
-      sprintf(buf, "CTextManager: CreateWrappedResource[%u] FAILED hr=0x%08X\n", i, (unsigned)hr);
-      OutputDebugStringA(buf);
-      continue;
-    }
-
-    ComPtr<IDXGISurface> surface;
-    m_wrappedBackBuffers[i].As(&surface);
-    if (!surface) continue;
-
-    D2D1_BITMAP_PROPERTIES1 bmpProps = D2D1::BitmapProperties1(
-      D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-      D2D1::PixelFormat(DXGI_FORMAT_R8G8B8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
-    // Set DPI to 96 so DIPs = pixels (font sizes match CreateFontW pixel heights)
-    bmpProps.dpiX = 96.0f;
-    bmpProps.dpiY = 96.0f;
-
-    hr = m_d2dContext->CreateBitmapFromDxgiSurface(surface.Get(), &bmpProps,
-      &m_d2dRenderTargets[i]);
-    if (FAILED(hr)) {
-      char buf[128];
-      sprintf(buf, "CTextManager: CreateBitmapFromDxgiSurface[%u] FAILED hr=0x%08X\n", i, (unsigned)hr);
-      OutputDebugStringA(buf);
-    }
-  }
-}
-
-void CTextManager::ReleaseBackBufferResources() {
-  if (m_d2dContext) m_d2dContext->SetTarget(nullptr);
-  for (UINT i = 0; i < 2; i++) {
-    m_d2dRenderTargets[i].Reset();
-    m_wrappedBackBuffers[i].Reset();
-  }
-  if (m_d3d11Context) m_d3d11Context->Flush();
-}
-
-void CTextManager::CleanupD2D() {
-  m_d2dReady = false;
-  ReleaseBackBufferResources();
-  m_brush.Reset();
-  for (int i = 0; i < MAX_TEXT_FONTS; i++)
-    m_dwFormats[i].Reset();
-  m_dwriteFactory.Reset();
-  m_d2dContext.Reset();
-  m_d2dDevice.Reset();
-  m_d2dFactory.Reset();
-  m_d3d11On12Device.Reset();
-  m_d3d11Context.Reset();
-  m_d3d11Device.Reset();
-}
-
 void CTextManager::CleanupDX12() {
-  CleanupD2D();
+  m_ready = false;
+  for (int i = 0; i < MAX_TEXT_FONTS; i++) {
+    m_atlases[i].texture.Reset();
+    m_atlases[i].valid = false;
+  }
   m_lpDX = nullptr;
   m_nFonts = 0;
   m_pFontInfo = nullptr;
 }
 
 void CTextManager::OnResize(int newW, int newH) {
-  if (newW <= 0 || newH <= 0) return;
-  // Back buffers are about to be resized — release wrapped resources.
-  // Caller must call WrapBackBuffers() after ResizeSwapChain completes.
-  ReleaseBackBufferResources();
+  // Font atlases are independent of back buffer size — nothing to do.
+  (void)newW; (void)newH;
 }
 
 void CTextManager::ClearAll() {
-  m_nMsg[m_b] = 0;
-  m_next_msg_start_ptr = g_szMsgPool[m_b];
+  m_nMsg = 0;
+  m_next_msg_start_ptr = g_szMsgPool;
 }
 
 void CTextManager::DrawBox(LPRECT pRect, DWORD boxColor) {
   if (!pRect)
     return;
 
-  if ((m_nMsg[m_b] < MAX_MSGS) &&
-    (size_t)((DWORD_PTR)m_next_msg_start_ptr - (DWORD_PTR)g_szMsgPool[m_b]) + 0 + 1 < MAX_MSG_CHARS) {
+  if ((m_nMsg < MAX_MSGS) &&
+    (size_t)((DWORD_PTR)m_next_msg_start_ptr - (DWORD_PTR)g_szMsgPool) + 0 + 1 < MAX_MSG_CHARS) {
     *m_next_msg_start_ptr = 0;
 
-    m_msg[m_b][m_nMsg[m_b]].msg   = m_next_msg_start_ptr;
-    m_msg[m_b][m_nMsg[m_b]].pfont = nullptr;
-    m_msg[m_b][m_nMsg[m_b]].rect  = *pRect;
-    m_msg[m_b][m_nMsg[m_b]].flags = 0;
-    m_msg[m_b][m_nMsg[m_b]].color = 0xFFFFFFFF;
-    m_msg[m_b][m_nMsg[m_b]].bgColor = boxColor;
-    m_nMsg[m_b]++;
+    m_msg[m_nMsg].msg   = m_next_msg_start_ptr;
+    m_msg[m_nMsg].pfont = nullptr;
+    m_msg[m_nMsg].rect  = *pRect;
+    m_msg[m_nMsg].flags = 0;
+    m_msg[m_nMsg].color = 0xFFFFFFFF;
+    m_msg[m_nMsg].bgColor = boxColor;
+    m_nMsg++;
     m_next_msg_start_ptr += 1;
   }
 }
@@ -360,147 +313,295 @@ int CTextManager::DrawText(void* pFont, char* szText, RECT* pRect, DWORD flags, 
 int CTextManager::DrawTextW(void* pFont, wchar_t* szText, RECT* pRect, DWORD flags, DWORD color, bool bBox, DWORD boxColor) {
   if (!pRect) return 0;
 
-  // For DT_CALCRECT: measure text immediately via DirectWrite and return.
+  // For DT_CALCRECT: measure text immediately and return.
   if (flags & DT_CALCRECT) {
     int fontIdx = DecodeFontIndex(pFont);
-    return MeasureTextDW(fontIdx, szText, pRect, flags);
+    return MeasureText(fontIdx, szText, pRect, flags);
   }
 
   // Queue the text entry for rendering in DrawNow()
   if (!szText || !szText[0]) return 0;
   int len = (int)wcslen(szText);
 
-  if ((m_nMsg[m_b] < MAX_MSGS) &&
-      (size_t)((DWORD_PTR)m_next_msg_start_ptr - (DWORD_PTR)g_szMsgPool[m_b]) + len + 1 < MAX_MSG_CHARS) {
+  if ((m_nMsg < MAX_MSGS) &&
+      (size_t)((DWORD_PTR)m_next_msg_start_ptr - (DWORD_PTR)g_szMsgPool) + len + 1 < MAX_MSG_CHARS) {
     wcscpy(m_next_msg_start_ptr, szText);
 
-    td_string& entry = m_msg[m_b][m_nMsg[m_b]];
+    td_string& entry = m_msg[m_nMsg];
     entry.msg     = m_next_msg_start_ptr;
     entry.pfont   = pFont;
     entry.rect    = *pRect;
     entry.flags   = flags;
     entry.color   = color;
     entry.bgColor = boxColor;
-    m_nMsg[m_b]++;
+    m_nMsg++;
     m_next_msg_start_ptr += len + 1;
 
-    // If a dark box was requested, queue a box entry before this text
+    // If a dark box was requested, queue a box entry after this text
     if (bBox) {
       DrawBox(pRect, boxColor);
     }
   }
 
-  // Measure actual text height via DirectWrite so callers can advance layout.
+  // Measure actual text height so callers can advance layout.
   int fontIdx = DecodeFontIndex(pFont);
   RECT rc = *pRect;
-  return MeasureTextDW(fontIdx, szText, &rc, (flags | DT_CALCRECT) & ~DT_END_ELLIPSIS);
+  return MeasureText(fontIdx, szText, &rc, (flags | DT_CALCRECT) & ~DT_END_ELLIPSIS);
 }
 
-int CTextManager::MeasureTextDW(int fontIdx, const wchar_t* text, RECT* pRect, DWORD flags) {
-  if (!m_dwriteFactory || fontIdx < 0 || fontIdx >= m_nFonts || !m_dwFormats[fontIdx] || !pRect)
+float CTextManager::MeasureStringWidth(int fontIdx, const wchar_t* text, int len) {
+  if (!text || fontIdx < 0 || fontIdx >= m_nFonts || !m_atlases[fontIdx].valid)
     return 0;
 
-  float maxWidth = (float)(pRect->right - pRect->left);
-  if (maxWidth <= 0) maxWidth = 100000.f;
-  float maxHeight = (float)(pRect->bottom - pRect->top);
-  if (maxHeight <= 0) maxHeight = 100000.f;
+  if (len < 0) len = (int)wcslen(text);
 
+  const FontAtlas& atlas = m_atlases[fontIdx];
+  float width = 0;
+  for (int i = 0; i < len; i++) {
+    int c = (int)text[i];
+    if (c >= ATLAS_FIRST_CHAR && c <= ATLAS_LAST_CHAR)
+      width += atlas.glyphs[c].advanceX;
+    else if (c == '\t')
+      width += atlas.glyphs[' '].advanceX * 8; // tab = 8 spaces
+    else if (c > ATLAS_LAST_CHAR)
+      width += atlas.glyphs['?'].advanceX; // unknown Unicode → '?'
+    // skip control chars
+  }
+  return width;
+}
+
+int CTextManager::MeasureText(int fontIdx, const wchar_t* text, RECT* pRect, DWORD flags) {
+  if (!pRect || fontIdx < 0 || fontIdx >= m_nFonts || !m_atlases[fontIdx].valid)
+    return 0;
+
+  const FontAtlas& atlas = m_atlases[fontIdx];
   const wchar_t* str = text ? text : L"";
-  UINT32 strLen = (UINT32)wcslen(str);
+  int strLen = (int)wcslen(str);
 
-  IDWriteTextLayout* layoutRaw = nullptr;
-  HRESULT hr = m_dwriteFactory->CreateTextLayout(
-    str, strLen, m_dwFormats[fontIdx].Get(), maxWidth, maxHeight, &layoutRaw);
-  ComPtr<IDWriteTextLayout> layout;
-  layout.Attach(layoutRaw);
-  if (FAILED(hr) || !layout) return 0;
+  if (flags & DT_SINGLELINE) {
+    // Single line: width = sum of advances, height = lineHeight
+    float w = MeasureStringWidth(fontIdx, str, strLen);
+    pRect->right  = pRect->left + (LONG)ceilf(w);
+    pRect->bottom = pRect->top  + (LONG)ceilf(atlas.lineHeight);
+    return (int)ceilf(atlas.lineHeight);
+  }
 
-  // Apply word wrapping based on DT_ flags
-  if (flags & DT_SINGLELINE)
-    layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-  else
-    layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+  // Multi-line: split on '\n', find max width and total height
+  float maxWidth = 0;
+  float totalHeight = 0;
+  float maxLayoutWidth = (float)(pRect->right - pRect->left);
+  if (maxLayoutWidth <= 0) maxLayoutWidth = 100000.f;
 
-  DWRITE_TEXT_METRICS metrics;
-  layout->GetMetrics(&metrics);
+  const wchar_t* lineStart = str;
+  for (int i = 0; i <= strLen; i++) {
+    if (i == strLen || str[i] == '\n') {
+      int lineLen = (int)(str + i - lineStart);
+      float lineW = MeasureStringWidth(fontIdx, lineStart, lineLen);
 
-  pRect->right = pRect->left + (LONG)ceilf(metrics.widthIncludingTrailingWhitespace);
-  pRect->bottom = pRect->top + (LONG)ceilf(metrics.height);
+      // Word wrap: if line exceeds layout width, approximate wrapped height
+      if (lineW > maxLayoutWidth && maxLayoutWidth > 0) {
+        int numWraps = (int)ceilf(lineW / maxLayoutWidth);
+        totalHeight += atlas.lineHeight * numWraps;
+      } else {
+        totalHeight += atlas.lineHeight;
+      }
+      if (lineW > maxWidth) maxWidth = lineW;
+      lineStart = str + i + 1;
+    }
+  }
 
-  return (int)ceilf(metrics.height);
+  pRect->right  = pRect->left + (LONG)ceilf(maxWidth);
+  pRect->bottom = pRect->top  + (LONG)ceilf(totalHeight);
+  return (int)ceilf(totalHeight);
 }
 
 void CTextManager::DrawNow() {
-  int readBuf = 1 - m_b;
-  int nMsgs = m_nMsg[readBuf];
-
-  if (!m_d2dReady || !m_lpDX) {
-    m_b = 1 - m_b;
+  if (!m_ready || !m_lpDX || m_nMsg == 0) {
     ClearAll();
     return;
   }
 
-  UINT frameIdx = m_lpDX->m_frameIndex;
-  if (frameIdx >= 2 || !m_wrappedBackBuffers[frameIdx] || !m_d2dRenderTargets[frameIdx]) {
-    m_b = 1 - m_b;
-    ClearAll();
-    return;
-  }
+  auto* cmdList = m_lpDX->m_commandList.Get();
+  if (!cmdList) { ClearAll(); return; }
 
-  // Acquire the wrapped back buffer for D2D access
-  ID3D11Resource* resources[] = { m_wrappedBackBuffers[frameIdx].Get() };
-  m_d3d11On12Device->AcquireWrappedResources(resources, 1);
+  int cw = m_lpDX->m_client_width;
+  int ch = m_lpDX->m_client_height;
+  if (cw <= 0 || ch <= 0) { ClearAll(); return; }
 
-  if (nMsgs > 0) {
-    m_d2dContext->SetTarget(m_d2dRenderTargets[frameIdx].Get());
-    m_d2dContext->BeginDraw();
+  // Ensure root signature and descriptor heaps are set for built-in PSOs
+  ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
+  cmdList->SetDescriptorHeaps(1, heaps);
+  cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
 
-    for (int i = 0; i < nMsgs; i++) {
-      td_string& entry = m_msg[readBuf][i];
+  float invW = 1.0f / (float)cw;
+  float invH = 1.0f / (float)ch;
 
-      if (!entry.pfont) {
-        // Box entry (no font = filled rectangle)
-        D2D1_COLOR_F boxColor = D3DColorToD2D(entry.bgColor);
-        m_brush->SetColor(boxColor);
-        D2D1_RECT_F rect = {
-          (float)entry.rect.left,  (float)entry.rect.top,
-          (float)entry.rect.right, (float)entry.rect.bottom };
-        m_d2dContext->FillRectangle(rect, m_brush.Get());
-        continue;
-      }
-
-      // Text entry
-      int fontIdx = DecodeFontIndex(entry.pfont);
-      if (fontIdx < 0 || fontIdx >= m_nFonts || !m_dwFormats[fontIdx])
-        continue;
-
-      D2D1_COLOR_F color = D3DColorToD2D(entry.color);
-      m_brush->SetColor(color);
-
-      DWORD drawFlags = entry.flags & ~DT_CALCRECT;
-
-      D2D1_RECT_F rect = {
-        (float)entry.rect.left,  (float)entry.rect.top,
-        (float)entry.rect.right, (float)entry.rect.bottom };
-
-      // Map DT_ flags to DirectWrite alignment
-      ApplyDWriteAlignment(m_dwFormats[fontIdx].Get(), drawFlags);
-
-      D2D1_DRAW_TEXT_OPTIONS opts = D2D1_DRAW_TEXT_OPTIONS_CLIP;
-      m_d2dContext->DrawText(
-        entry.msg, (UINT32)wcslen(entry.msg),
-        m_dwFormats[fontIdx].Get(), rect, m_brush.Get(), opts);
+  // Pass 1: Draw all dark boxes (untextured, alpha-blended)
+  {
+    // Count boxes
+    int boxCount = 0;
+    for (int i = 0; i < m_nMsg; i++) {
+      if (!m_msg[i].pfont) boxCount++;
     }
 
-    m_d2dContext->EndDraw();
-    m_d2dContext->SetTarget(nullptr);
+    if (boxCount > 0) {
+      std::vector<WFVERTEX> boxVerts;
+      boxVerts.reserve(boxCount * 6);
+
+      for (int i = 0; i < m_nMsg; i++) {
+        if (m_msg[i].pfont) continue;
+
+        RECT& r = m_msg[i].rect;
+        DWORD col = m_msg[i].bgColor;
+
+        // Convert pixel rect to NDC (-1..+1)
+        float x0 = (float)r.left   * invW * 2.0f - 1.0f;
+        float x1 = (float)r.right  * invW * 2.0f - 1.0f;
+        float y0 = 1.0f - (float)r.top    * invH * 2.0f;
+        float y1 = 1.0f - (float)r.bottom * invH * 2.0f;
+
+        // Two triangles for the box quad
+        boxVerts.push_back({ x0, y0, 0, col });
+        boxVerts.push_back({ x1, y0, 0, col });
+        boxVerts.push_back({ x0, y1, 0, col });
+        boxVerts.push_back({ x0, y1, 0, col });
+        boxVerts.push_back({ x1, y0, 0, col });
+        boxVerts.push_back({ x1, y1, 0, col });
+      }
+
+      cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_ALPHABLEND_WFVERTEX].Get());
+      m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+                           boxVerts.data(), (UINT)boxVerts.size(), sizeof(WFVERTEX));
+    }
   }
 
-  // Release wrapped resource (transitions back buffer RT → PRESENT)
-  m_d3d11On12Device->ReleaseWrappedResources(resources, 1);
-  m_d3d11Context->Flush();
+  // Pass 2: Draw text, batched by font atlas
+  for (int fontIdx = 0; fontIdx < m_nFonts; fontIdx++) {
+    if (!m_atlases[fontIdx].valid) continue;
 
-  // Flip double buffer and clear for next frame
-  m_b = 1 - m_b;
+    // Check if any text uses this font
+    bool hasText = false;
+    for (int i = 0; i < m_nMsg; i++) {
+      if (!m_msg[i].pfont) continue;
+      if (DecodeFontIndex(m_msg[i].pfont) == fontIdx) { hasText = true; break; }
+    }
+    if (!hasText) continue;
+
+    FontAtlas& atlas = m_atlases[fontIdx];
+
+    // Bind atlas texture and set PSO (premultiplied alpha blend)
+    cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_PREMULALPHA_SPRITEVERTEX].Get());
+    cmdList->SetGraphicsRootDescriptorTable(1,
+      m_lpDX->GetBindingBlockGpuHandle(atlas.texture));
+
+    std::vector<SPRITEVERTEX> textVerts;
+    textVerts.reserve(2048);
+
+    for (int i = 0; i < m_nMsg; i++) {
+      if (!m_msg[i].pfont) continue;
+      if (DecodeFontIndex(m_msg[i].pfont) != fontIdx) continue;
+
+      td_string& entry = m_msg[i];
+      DWORD color = entry.color;
+      const wchar_t* text = entry.msg;
+      int textLen = (int)wcslen(text);
+      if (textLen == 0) continue;
+
+      float rectW = (float)(entry.rect.right - entry.rect.left);
+
+      // Calculate horizontal alignment offset
+      float textW = MeasureStringWidth(fontIdx, text, textLen);
+      float startX = (float)entry.rect.left;
+      if (entry.flags & DT_CENTER)
+        startX = entry.rect.left + (rectW - textW) * 0.5f;
+      else if (entry.flags & DT_RIGHT)
+        startX = (float)entry.rect.right - textW;
+
+      float penX = startX;
+      float penY = (float)entry.rect.top;
+      float clipRight = (float)entry.rect.right;
+
+      // Handle DT_END_ELLIPSIS: truncate and append "..." if text exceeds rect
+      int visibleChars = textLen;
+      bool useEllipsis = false;
+      if ((entry.flags & (DT_END_ELLIPSIS | DT_WORD_ELLIPSIS)) && textW > rectW && rectW > 0) {
+        float ellipsisW = MeasureStringWidth(fontIdx, L"...", 3);
+        float accum = 0;
+        visibleChars = 0;
+        for (int j = 0; j < textLen; j++) {
+          int c = (int)text[j];
+          float charW = 0;
+          if (c >= ATLAS_FIRST_CHAR && c <= ATLAS_LAST_CHAR)
+            charW = atlas.glyphs[c].advanceX;
+          else if (c > ATLAS_LAST_CHAR)
+            charW = atlas.glyphs['?'].advanceX;
+          if (accum + charW + ellipsisW > rectW) break;
+          accum += charW;
+          visibleChars++;
+        }
+        useEllipsis = true;
+      }
+
+      // Lambda to emit a character quad
+      auto emitChar = [&](int c) {
+        if (c < ATLAS_FIRST_CHAR || c > ATLAS_LAST_CHAR) {
+          if (c > ATLAS_LAST_CHAR) c = '?';
+          else return; // skip control chars
+        }
+        const GlyphInfo& g = atlas.glyphs[c];
+
+        // Character quad in pixel space
+        float x0px = penX;
+        float y0px = penY;
+        float x1px = penX + g.glyphWidth;
+        float y1px = penY + g.glyphHeight;
+
+        // Skip if entirely outside the clipping rect
+        if ((entry.flags & DT_SINGLELINE) && x0px >= clipRight) {
+          penX += g.advanceX;
+          return;
+        }
+
+        // Convert to NDC
+        float x0 = x0px * invW * 2.0f - 1.0f;
+        float x1 = x1px * invW * 2.0f - 1.0f;
+        float y0 = 1.0f - y0px * invH * 2.0f;
+        float y1 = 1.0f - y1px * invH * 2.0f;
+
+        textVerts.push_back({ x0, y0, 0, color, g.u0, g.v0 });
+        textVerts.push_back({ x1, y0, 0, color, g.u1, g.v0 });
+        textVerts.push_back({ x0, y1, 0, color, g.u0, g.v1 });
+        textVerts.push_back({ x0, y1, 0, color, g.u0, g.v1 });
+        textVerts.push_back({ x1, y0, 0, color, g.u1, g.v0 });
+        textVerts.push_back({ x1, y1, 0, color, g.u1, g.v1 });
+
+        penX += g.advanceX;
+      };
+
+      // Render visible characters
+      for (int j = 0; j < visibleChars; j++) {
+        int c = (int)text[j];
+        if (c == '\t') {
+          penX += atlas.glyphs[' '].advanceX * 8;
+          continue;
+        }
+        emitChar(c);
+      }
+
+      // Append ellipsis if truncated
+      if (useEllipsis) {
+        emitChar('.');
+        emitChar('.');
+        emitChar('.');
+      }
+    }
+
+    // Issue single batched draw for all text using this font
+    if (!textVerts.empty()) {
+      m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+                           textVerts.data(), (UINT)textVerts.size(), sizeof(SPRITEVERTEX));
+    }
+  }
+
   ClearAll();
 }

@@ -347,9 +347,17 @@ void DXContext::ExecuteCommandList()
 {
     if (!m_ready) return;
 
+    // Transition back buffer RENDER_TARGET → PRESENT before closing the command list.
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+    barrier.Transition.pResource   = m_renderTargets[m_frameIndex].Get();
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_PRESENT;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    m_commandList->ResourceBarrier(1, &barrier);
+
     // Close and execute the DX12 command list.
-    // Does NOT transition back buffer to PRESENT — D3D11on12 ReleaseWrappedResources
-    // handles RT→PRESENT when D2D text rendering is active.
     HRESULT hrClose = m_commandList->Close();
     if (FAILED(hrClose)) {
         char buf[256];
@@ -367,7 +375,7 @@ void DXContext::EndFrame()
     if (!m_ready) return;
 
     // Present (vsync = 1 sync interval)
-    // Back buffer is already in PRESENT state via D3D11on12 ReleaseWrappedResources.
+    // Back buffer was transitioned to PRESENT state in ExecuteCommandList().
     HRESULT hrPresent = m_swapChain->Present(1, 0);
     if (FAILED(hrPresent)) {
         char buf[256];
@@ -377,6 +385,9 @@ void DXContext::EndFrame()
             HRESULT reason = m_device->GetDeviceRemovedReason();
             sprintf(buf, "DX12: Device removed reason: 0x%08X", (unsigned)reason);
             DebugLogA(buf);
+            m_lastErr = hrPresent;
+            m_ready = 0;
+            return;
         }
     }
 

@@ -100,12 +100,9 @@ public:
   // Frame lifecycle — called by the render loop.
   // BeginFrame: transitions back buffer to render-target state, returns true on success.
   bool BeginFrame();
-  // ExecuteCommandList: closes and submits the DX12 command list (no present).
-  // Call this before D2D text rendering via D3D11on12, which needs DX12 work submitted.
-  // Does NOT transition back buffer to PRESENT — D3D11on12 ReleaseWrappedResources does that.
+  // ExecuteCommandList: transitions back buffer RT→PRESENT, closes and submits the command list.
   void ExecuteCommandList();
   // EndFrame: presents the swap chain and advances to the next frame.
-  // Call after D2D text rendering (which handles RT→PRESENT transition).
   void EndFrame();
 
   // CPU/GPU synchronisation helpers.
