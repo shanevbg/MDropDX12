@@ -139,6 +139,9 @@ protected:
 
   bool m_d2dReady;
 
+public:
+  bool IsD2DReady() const { return m_d2dReady; }
+private:
   bool InitD2D();
   void CleanupD2D();
   void CreateDWriteFormats();

@@ -166,72 +166,6 @@ int GetNumToSpawn(float fTime, float fDeltaT, float fRate, float fRegularity, in
   return (int)(fNumToSpawn + 0.49f);
 }
 
-bool CPlugin::OnResizeTextWindow() {
-  /*
-    if (!m_hTextWnd)
-    return false;
-
-  RECT rect;
-  GetClientRect(m_hTextWnd, &rect);
-
-  if (rect.right - rect.left != m_nTextWndWidth ||
-    rect.bottom - rect.top != m_nTextWndHeight)
-  {
-    m_nTextWndWidth = rect.right - rect.left;
-    m_nTextWndHeight = rect.bottom - rect.top;
-
-    // first, resize fonts if necessary
-    //if (!InitFont())
-      //return false;
-
-    // then resize the memory bitmap used for double buffering
-    if (m_memDC)
-    {
-      SelectObject(m_memDC, m_oldBM);	// delete our doublebuffer
-      DeleteObject(m_memDC);
-      DeleteObject(m_memBM);
-      m_memDC = NULL;
-      m_memBM = NULL;
-      m_oldBM = NULL;
-    }
-
-    HDC hdc = GetDC(m_hTextWnd);
-    if (!hdc) return false;
-
-    m_memDC = CreateCompatibleDC(hdc);
-    m_memBM = CreateCompatibleBitmap(hdc, rect.right - rect.left, rect.bottom - rect.top);
-    m_oldBM = (HBITMAP)SelectObject(m_memDC,m_memBM);
-
-    ReleaseDC(m_hTextWnd, hdc);
-
-    // save new window pos
-    WriteRealtimeConfig();
-  }*/
-
-  return true;
-}
-
-
-void CPlugin::ClearGraphicsWindow() {
-  // clear the window contents, to avoid a 1-pixel-thick border of noise that sometimes sticks around
-    /*
-  RECT rect;
-  GetClientRect(GetPluginWindow(), &rect);
-
-  HDC hdc = GetDC(GetPluginWindow());
-  FillRect(hdc, &rect, m_hBlackBrush);
-  ReleaseDC(GetPluginWindow(), hdc);
-    */
-}
-
-/*
-bool CPlugin::OnResizeGraphicsWindow()
-{
-    // NO LONGER NEEDED, SINCE PLUGIN SHELL CREATES A NEW DIRECTX
-    // OBJECT WHENEVER WINDOW IS RESIZED.
-}
-*/
-
 bool CPlugin::RenderStringToTitleTexture(int supertextIndex)
 {
   int texIndex = supertextIndex;
@@ -1161,24 +1095,6 @@ void CPlugin::RenderFrame(int bRedraw) {
   IDirect3DTexture9* pTemp = m_lpVS[0];
   m_lpVS[0] = m_lpVS[1];
   m_lpVS[1] = pTemp;
-
-  /*
-  // FIXME - remove EnforceMaxFPS() if never used
-  //EnforceMaxFPS(!(m_nLoadingPreset==1 || m_nLoadingPreset==2 || m_nLoadingPreset==4 || m_nLoadingPreset==5));  // this call just turns it on or off; doesn't do it now...
-  //EnforceMaxFPS(!(m_nLoadingPreset==2 || m_nLoadingPreset==5));  // this call just turns it on or off; doesn't do it now...
-
-  // FIXME - remove this stuff, and change 'm_last_raw_time' in pluginshell (and others) back to private.
-  static float fOldTime = 0;
-  float fNewTime = (float)((double)m_last_raw_time/(double)m_high_perf_timer_freq.QuadPart);
-  float dt = fNewTime-fOldTime;
-  if (m_nLoadingPreset != 0) {
-      char buf[256];
-      sprintf(buf, "m_nLoadingPreset==%d: dt=%d ms\n", m_nLoadingPreset, (int)(dt*1000) );
-      OutputDebugString(buf);
-  }
-  fOldTime = fNewTime;
-  */
-
 
   // =========================================================
   //
@@ -6843,10 +6759,6 @@ void CPlugin::ShowToUser_Shaders(int nPass, bool bAlphaBlend, bool bFlipAlpha, b
 void CPlugin::ShowSongTitleAnim(int w, int h, float fProgress, int supertextIndex) {
   int i, x, y;
 
-  wchar_t debugMsg[128];
-  swprintf(debugMsg, sizeof(debugMsg) / sizeof(debugMsg[0]), L"ShowSongTitleAnim: supertextIndex=%d w=%d h=%d fProgress=%.2f\n", supertextIndex, w, h, fProgress);
-  OutputDebugStringW(debugMsg);
-
   int texIndex = supertextIndex;
   if (!m_dx12Title[texIndex].IsValid())
     return;
@@ -7119,9 +7031,6 @@ void CPlugin::ShowSongTitleAnim(int w, int h, float fProgress, int supertextInde
   float offset_x = 0, offset_y = 0;
   float baseOffsetX = m_supertexts[supertextIndex].fShadowOffset / m_nTitleTexSizeX * (m_supertexts[supertextIndex].fFontSize / 40);
   float baseOffsetY = -m_supertexts[supertextIndex].fShadowOffset / m_nTitleTexSizeY * (m_supertexts[supertextIndex].fFontSize / 40);
-
-  swprintf(debugMsg, sizeof(debugMsg) / sizeof(debugMsg[0]), L"ShowSongTitleAnim: t=%.2f offset=%.2f\n", t, offset);
-  OutputDebugStringW(debugMsg);
 
   int start_it = 0;
   if (m_supertexts[supertextIndex].fBoxAlpha > 0) {

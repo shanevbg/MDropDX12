@@ -817,6 +817,7 @@ static SettingDesc g_settingsDesc[] = {
 #define IDC_MW_MSG_PASTE        2095
 #define IDC_MW_MSG_INTERVAL_LBL 2096
 #define IDC_MW_MSG_JITTER_LBL   2097
+#define IDC_MW_MSG_OPENINI      2098
 
 // Message Edit Dialog controls
 #define IDC_MSGEDIT_TEXT         2100
@@ -1305,7 +1306,7 @@ void CPlugin::MyPreInitialize() {
   //m_nFpsLimit			= -1;
   m_bEnableRating = true;
   //m_bInstaScan            = false;
-  m_bSongTitleAnims = true;
+  m_bSongTitleAnims = false;
   m_fSongTitleAnimDuration = 1.7f;
   m_fTimeBetweenRandomSongTitles = -1.0f;
   m_fTimeBetweenRandomCustomMsgs = -1.0f;
@@ -4487,16 +4488,23 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
   // (the include file was already stripped of comments)
   StripComments(&szShaderText[shaderStartPos]);
 
-  //note: only do this stuff if type is WARP or COMP shader... not for blur, etc!
-  //FIXME - hints on the inputs / output / samplers etc.
-  //   can go in the menu header, NOT the preset!  =)
-  //then update presets
-  //  -> be sure to update the presets on disk AND THE DEFAULT SHADERS (for loading MD1 presets)
-  //FIXME - then update auth. guide w/new examples,
-  //   and a list of the invisible inputs (and one output) to each shader!
-  //   warp: float2 uv, float2 uv_orig, rad, ang
-  //   comp: float2 uv, rad, ang, float3 hue_shader
-  // test all this string code in Debug mode - make sure nothing bad is happening
+  // Shader inputs/outputs (injected automatically, not visible in preset code):
+  //
+  // WARP shader:
+  //   Inputs:  float2 uv       - current texture coordinate
+  //            float2 uv_orig  - original (unwarped) texture coordinate
+  //            float  rad      - distance from center (0..~0.7)
+  //            float  ang      - angle from center (radians)
+  //   Samplers: sampler_main (t0), sampler_blur1..blur6, sampler_* (disk textures)
+  //   Output:  float3 ret      - warped UV (ret.xy = new uv, ret.z unused)
+  //
+  // COMP (composite) shader:
+  //   Inputs:  float2 uv       - screen texture coordinate
+  //            float  rad      - distance from center
+  //            float  ang      - angle from center
+  //            float3 hue_shader - preset hue color (from per-frame equations)
+  //   Samplers: sampler_main (t0), sampler_blur1..blur6, sampler_* (disk textures)
+  //   Output:  float3 ret      - final RGB color
 
   /*
   1. paste warp or comp #defines
@@ -9965,6 +9973,9 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         p->PopulateMsgListBox(GetDlgItem(hWnd, IDC_MW_MSG_LIST));
         SetWindowTextW(GetDlgItem(hWnd, IDC_MW_MSG_PREVIEW), L"");
         return 0;
+      case IDC_MW_MSG_OPENINI:
+        ShellExecuteW(hWnd, L"open", p->m_szMsgIniFile, NULL, NULL, SW_SHOWNORMAL);
+        return 0;
       case IDC_MW_MSG_PASTE: {
         if (!OpenClipboard(hWnd)) return 0;
         HANDLE hData = GetClipboardData(CF_UNICODETEXT);
@@ -10814,6 +10825,7 @@ void CPlugin::BuildSettingsControls() {
 
   PAGE_CTRL(5, CreateBtn(hw, L"Reload from File", IDC_MW_MSG_RELOAD, x, y, 130, lineH, hFont));
   PAGE_CTRL(5, CreateBtn(hw, L"Paste", IDC_MW_MSG_PASTE, x + 134, y, 55, lineH, hFont));
+  PAGE_CTRL(5, CreateBtn(hw, L"Open INI", IDC_MW_MSG_OPENINI, x + 193, y, 70, lineH, hFont));
   y += lineH + gap + 4;
 
   // Autoplay controls
@@ -11010,9 +11022,10 @@ void CPlugin::LayoutSettingsControls() {
     moveCtrl(IDC_MW_MSG_EDIT, bx, y, 40, lineH); bx += 40 + btnGap;
     moveCtrl(IDC_MW_MSG_DELETE, bx, y, 50, lineH);
     y += lineH + gap;
-    // Reload + Paste
+    // Reload + Paste + Open INI
     moveCtrl(IDC_MW_MSG_RELOAD, x, y, 130, lineH);
     moveCtrl(IDC_MW_MSG_PASTE, x + 134, y, 55, lineH);
+    moveCtrl(IDC_MW_MSG_OPENINI, x + 193, y, 70, lineH);
     y += lineH + gap + 4;
     // Checkboxes
     moveCtrl(IDC_MW_MSG_AUTOPLAY, x, y, rw, lineH);

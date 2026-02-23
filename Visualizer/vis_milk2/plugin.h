@@ -760,9 +760,6 @@ public:
   bool		ReversePropagatePoint(float fx, float fy, float* fx2, float* fy2);
   int 		HandleRegularKey(WPARAM wParam);
   void    SaveCurrentPresetToQuicksave(bool altDir);
-  bool		OnResizeGraphicsWindow();
-  bool		OnResizeTextWindow();
-  void		ClearGraphicsWindow();	// for windowed mode only
   void		LaunchCustomMessage(int nMsgNum);
   void		LaunchMessage(wchar_t* sMessage);
   void    SendPresetChangedInfoToMDropDX12Remote();

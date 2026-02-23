@@ -1408,7 +1408,9 @@ void RenderFrame() {
     mdropdx12.coverUpdated = false;
   }
   if (mdropdx12.updated) {
-    if (mdropdx12.isSongChange && !mdropdx12.doPollExplicit) {
+    bool wasExplicit = mdropdx12.doPollExplicit;
+
+    if (mdropdx12.isSongChange && !wasExplicit) {
       if (g_plugin.m_ChangePresetWithSong) {
         g_plugin.NextPreset(g_plugin.m_fBlendTimeAuto);
       }
@@ -1417,53 +1419,58 @@ void RenderFrame() {
       }
     }
 
-    if (mdropdx12.doPollExplicit && g_plugin.m_DisplayCoverWhenPressingB) {
+    if (wasExplicit && g_plugin.m_DisplayCoverWhenPressingB) {
       g_plugin.LaunchSprite(0, -1);
     }
 
     mdropdx12.doPollExplicit = false;
-    wchar_t buf[512];
 
-    // Convert wchar_t array to std::string
-    std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
-    std::string format = converter.to_bytes(g_plugin.m_SongInfoFormat);
-    std::istringstream stream(format);
-    std::vector<std::string> tokens;
-    std::string token;
+    // Only display song info on actual track change or explicit user request
+    // (skip initial detection on startup to avoid showing stale media titles)
+    if (mdropdx12.isSongChange || wasExplicit) {
+      wchar_t buf[512];
 
-    // Split the string into tokens
-    while (std::getline(stream, token, ';')) {
-      tokens.push_back(token);
-    }
+      // Convert wchar_t array to std::string
+      std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+      std::string format = converter.to_bytes(g_plugin.m_SongInfoFormat);
+      std::istringstream stream(format);
+      std::vector<std::string> tokens;
+      std::string token;
 
-    // remove existing song info display
-    g_plugin.ClearErrors(ERR_MSG_BOTTOM_EXTRA_1);
-    g_plugin.ClearErrors(ERR_MSG_BOTTOM_EXTRA_2);
-    g_plugin.ClearErrors(ERR_MSG_BOTTOM_EXTRA_3);
-
-    // Iterate over tokens in reverse order
-    for (auto it = tokens.rbegin(); it != tokens.rend(); ++it) {
-      std::string currentToken = *it;
-
-      // Convert token to lowercase for case-insensitive comparison
-      std::transform(currentToken.begin(), currentToken.end(), currentToken.begin(), ::tolower);
-
-      if (currentToken == "artist") {
-        if (mdropdx12.currentArtist.length() > 0) {
-          wcscpy(buf, mdropdx12.currentArtist.c_str());
-          g_plugin.AddError(buf, g_plugin.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_1, false);
-        }
+      // Split the string into tokens
+      while (std::getline(stream, token, ';')) {
+        tokens.push_back(token);
       }
-      else if (currentToken == "title") {
-        if (mdropdx12.currentTitle.length() > 0) {
-          wcscpy(buf, mdropdx12.currentTitle.c_str());
-          g_plugin.AddError(buf, g_plugin.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_2, false);
+
+      // remove existing song info display
+      g_plugin.ClearErrors(ERR_MSG_BOTTOM_EXTRA_1);
+      g_plugin.ClearErrors(ERR_MSG_BOTTOM_EXTRA_2);
+      g_plugin.ClearErrors(ERR_MSG_BOTTOM_EXTRA_3);
+
+      // Iterate over tokens in reverse order
+      for (auto it = tokens.rbegin(); it != tokens.rend(); ++it) {
+        std::string currentToken = *it;
+
+        // Convert token to lowercase for case-insensitive comparison
+        std::transform(currentToken.begin(), currentToken.end(), currentToken.begin(), ::tolower);
+
+        if (currentToken == "artist") {
+          if (mdropdx12.currentArtist.length() > 0) {
+            wcscpy(buf, mdropdx12.currentArtist.c_str());
+            g_plugin.AddError(buf, g_plugin.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_1, false);
+          }
         }
-      }
-      else if (currentToken == "album") {
-        if (mdropdx12.currentAlbum.length() > 0) {
-          wcscpy(buf, mdropdx12.currentAlbum.c_str());
-          g_plugin.AddError(buf, g_plugin.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_3, false);
+        else if (currentToken == "title") {
+          if (mdropdx12.currentTitle.length() > 0) {
+            wcscpy(buf, mdropdx12.currentTitle.c_str());
+            g_plugin.AddError(buf, g_plugin.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_2, false);
+          }
+        }
+        else if (currentToken == "album") {
+          if (mdropdx12.currentAlbum.length() > 0) {
+            wcscpy(buf, mdropdx12.currentAlbum.c_str());
+            g_plugin.AddError(buf, g_plugin.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_3, false);
+          }
         }
       }
     }

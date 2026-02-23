@@ -139,7 +139,9 @@ bool CTextManager::InitD2D() {
     &m_d3d11Context,
     nullptr);
   if (FAILED(hr)) {
-    OutputDebugStringA("CTextManager: D3D11On12CreateDevice FAILED\n");
+    char buf[128];
+    sprintf(buf, "CTextManager: D3D11On12CreateDevice FAILED hr=0x%08X\n", (unsigned)hr);
+    OutputDebugStringA(buf);
     return false;
   }
 

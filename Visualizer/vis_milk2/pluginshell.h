@@ -284,10 +284,8 @@ private:
   bool                m_bClearVJWindow;
 
   // PRIVATE - MORE TIMEKEEPING
-protected:
   double m_last_raw_time;
   LARGE_INTEGER m_high_perf_timer_freq;  // 0 if high-precision timer not available
-private:
   float  m_time_hist[TIME_HIST_SLOTS];		// cumulative
   int    m_time_hist_pos;
   LARGE_INTEGER m_prev_end_of_frame;

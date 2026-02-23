@@ -613,11 +613,19 @@ int CPluginShell::AllocateDX9Stuff() {
   //m_icon_list.clear();      // clear desktop mode icon list, so it has to read the bitmaps back in
 
   if (!m_vj_mode) {
-    m_text.Finish();
-    m_text.Init(GetDX12Device(), nullptr, 1);
-    // D2D text rendering via D3D11on12 + DirectWrite
-    if (m_lpDX)
-      m_text.InitDX12(m_lpDX, m_font, NUM_BASIC_FONTS + NUM_EXTRA_FONTS, m_fontinfo);
+    if (!m_text.IsD2DReady()) {
+      // First init or recovery after failure — create D3D11On12/D2D from scratch
+      m_text.Finish();
+      m_text.Init(GetDX12Device(), nullptr, 1);
+      if (m_lpDX) {
+        if (m_lpDX->m_commandQueue)
+          m_lpDX->WaitForGpu();  // ensure GPU idle before D3D11On12 creation
+        m_text.InitDX12(m_lpDX, m_font, NUM_BASIC_FONTS + NUM_EXTRA_FONTS, m_fontinfo);
+      }
+    } else {
+      // Resize — D3D11On12 device persists, just re-wrap new back buffers
+      m_text.WrapBackBuffers();
+    }
   }
 
   return ret;
@@ -632,7 +640,13 @@ void CPluginShell::CleanUpDX9Stuff(int final_cleanup) {
   // ALWAYS unbind the textures before releasing textures,
   // otherwise they might still have a hanging reference!
   if (!m_vj_mode) {
-    CleanUpFonts();
+    if (final_cleanup) {
+      // Full shutdown: destroy D3D11On12/D2D/DirectWrite entirely
+      CleanUpFonts();
+    } else {
+      // Resize: only release back buffer wraps, keep D3D11On12 device alive
+      m_text.ReleaseBackBufferResources();
+    }
     // Release help overlay texture (will be re-created lazily on next F1)
     m_helpTexture.Reset();
     m_helpUploadBuffer.Reset();
