@@ -9970,9 +9970,16 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         p->PopulateMsgListBox(GetDlgItem(hWnd, IDC_MW_MSG_LIST));
         SetWindowTextW(GetDlgItem(hWnd, IDC_MW_MSG_PREVIEW), L"");
         return 0;
-      case IDC_MW_MSG_OPENINI:
-        ShellExecuteW(hWnd, L"open", p->m_szMsgIniFile, NULL, NULL, SW_SHOWNORMAL);
+      case IDC_MW_MSG_OPENINI: {
+        // Temporarily drop TOPMOST so the editor window appears in front
+        SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+        HINSTANCE hr = ShellExecuteW(NULL, L"open", p->m_szMsgIniFile, NULL, NULL, SW_SHOWNORMAL);
+        if ((INT_PTR)hr <= 32)
+          ShellExecuteW(NULL, L"open", L"notepad.exe", p->m_szMsgIniFile, NULL, SW_SHOWNORMAL);
+        // Restore TOPMOST after a brief delay so editor gets focus first
+        SetTimer(hWnd, 9999, 500, NULL);
         return 0;
+      }
       case IDC_MW_MSG_PASTE: {
         if (!OpenClipboard(hWnd)) return 0;
         HANDLE hData = GetClipboardData(CF_UNICODETEXT);
@@ -10132,6 +10139,14 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     }
     break;
   }
+
+  case WM_TIMER:
+    if (wParam == 9999) {
+      KillTimer(hWnd, 9999);
+      SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+      return 0;
+    }
+    break;
 
   // Dark theme color handling for settings window controls
   case WM_CTLCOLOREDIT:

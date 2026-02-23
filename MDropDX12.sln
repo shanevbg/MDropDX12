@@ -30,6 +30,11 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MDropDX12RemoteTests", "RemoteTests\MDropDX12RemoteTests.csproj", "{79CA1E64-42BC-47B1-A247-4C10B7A3855E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MDropDX12MessageEditor", "MessageEditor\MDropDX12MessageEditor.csproj", "{A3B7C4D1-E5F6-4A8B-9C0D-1E2F3A4B5C6D}"
+	ProjectSection(ProjectDependencies) = postProject
+		{881FB534-7396-485A-ADC2-6FBEBED7A0F4} = {881FB534-7396-485A-ADC2-6FBEBED7A0F4}
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -48,6 +53,10 @@ Global
 		{79CA1E64-42BC-47B1-A247-4C10B7A3855E}.Debug|Win32.Build.0 = Debug|Any CPU
 		{79CA1E64-42BC-47B1-A247-4C10B7A3855E}.Release|Win32.ActiveCfg = Release|Any CPU
 		{79CA1E64-42BC-47B1-A247-4C10B7A3855E}.Release|Win32.Build.0 = Release|Any CPU
+		{A3B7C4D1-E5F6-4A8B-9C0D-1E2F3A4B5C6D}.Debug|Win32.ActiveCfg = Debug|Any CPU
+		{A3B7C4D1-E5F6-4A8B-9C0D-1E2F3A4B5C6D}.Debug|Win32.Build.0 = Debug|Any CPU
+		{A3B7C4D1-E5F6-4A8B-9C0D-1E2F3A4B5C6D}.Release|Win32.ActiveCfg = Release|Any CPU
+		{A3B7C4D1-E5F6-4A8B-9C0D-1E2F3A4B5C6D}.Release|Win32.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
