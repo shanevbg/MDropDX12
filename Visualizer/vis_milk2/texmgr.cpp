@@ -70,6 +70,31 @@ void texmgr::Init(LPDIRECT3DDEVICE9 lpDD) {
 
 void texmgr::InitDX12(DXContext* lpDX) {
   m_lpDX12 = lpDX;
+
+  // Pre-allocate 17 SRV slots per texture slot (1 SRV + 16 binding block) to avoid
+  // leaking descriptor heap slots on every preset texture load.
+  if (!lpDX || !lpDX->m_device) return;
+  m_srvRegionStart = lpDX->m_nextFreeSrvSlot;
+
+  for (int i = 0; i < NUM_TEX; i++) {
+    // Allocate 1 SRV slot (initialized to null)
+    D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = lpDX->AllocateSrvCpu();
+    m_tex[i].dx12Surface.srvIndex = lpDX->m_nextFreeSrvSlot;
+    lpDX->m_device->CopyDescriptorsSimple(1, srvCpu,
+        lpDX->GetSrvCpuHandleAt(lpDX->m_nullTexture.srvIndex),
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    lpDX->AllocateSrvGpu(); // bump
+
+    // Allocate 16 binding block slots (all initialized to null)
+    m_tex[i].dx12Surface.bindingBlockStart = lpDX->m_nextFreeSrvSlot;
+    for (UINT s = 0; s < DXContext::BINDING_BLOCK_SIZE; s++) {
+      D3D12_CPU_DESCRIPTOR_HANDLE dst = lpDX->AllocateSrvCpu();
+      lpDX->m_device->CopyDescriptorsSimple(1, dst,
+          lpDX->GetSrvCpuHandleAt(lpDX->m_nullTexture.srvIndex),
+          D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+      lpDX->AllocateSrvGpu(); // bump
+    }
+  }
 }
 
 int texmgr::LoadTex(wchar_t* szFilename, int iSlot, char* szInitCode, char* szCode, float time, int frame, unsigned int ck) {
@@ -82,12 +107,34 @@ int texmgr::LoadTex(wchar_t* szFilename, int iSlot, char* szInitCode, char* szCo
     for (int x = 0; x < NUM_TEX; x++)
       if (m_tex[x].dx12Surface.IsValid() && _wcsicmp(m_tex[x].szFileName, szFilename) == 0) {
         m_tex[iSlot].pSurface = m_tex[x].pSurface;
-        m_tex[iSlot].dx12Surface = m_tex[x].dx12Surface;
+        // Share the GPU resource (refcounted) but preserve this slot's pre-allocated SRV indices
+        m_tex[iSlot].dx12Surface.resource = m_tex[x].dx12Surface.resource;
+        m_tex[iSlot].dx12Surface.width    = m_tex[x].dx12Surface.width;
+        m_tex[iSlot].dx12Surface.height   = m_tex[x].dx12Surface.height;
+        m_tex[iSlot].dx12Surface.depth    = m_tex[x].dx12Surface.depth;
+        m_tex[iSlot].dx12Surface.format   = m_tex[x].dx12Surface.format;
+        m_tex[iSlot].dx12Surface.currentState = m_tex[x].dx12Surface.currentState;
+        // srvIndex and bindingBlockStart are preserved from pre-allocation
         m_tex[iSlot].dx12UploadBuf = m_tex[x].dx12UploadBuf;
         m_tex[iSlot].img_w = m_tex[x].img_w;
         m_tex[iSlot].img_h = m_tex[x].img_h;
         wcscpy(m_tex[iSlot].szFileName, szFilename);
         m_tex[iSlot].m_szExpr[0] = 0;
+
+        // Write a new SRV at this slot's pre-allocated descriptor and update its binding block
+        if (m_lpDX12 && m_tex[iSlot].dx12Surface.srvIndex != UINT_MAX) {
+          D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+          srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+          srvDesc.Format            = m_tex[x].dx12Surface.format;
+          srvDesc.ViewDimension     = D3D12_SRV_DIMENSION_TEXTURE2D;
+          srvDesc.Texture2D.MipLevels = 1;
+          m_lpDX12->m_device->CreateShaderResourceView(
+              m_tex[iSlot].dx12Surface.resource.Get(), &srvDesc,
+              m_lpDX12->GetSrvCpuHandleAt(m_tex[iSlot].dx12Surface.srvIndex));
+          m_lpDX12->UpdateBindingBlockTexture(
+              m_tex[iSlot].dx12Surface.bindingBlockStart,
+              m_tex[iSlot].dx12Surface.srvIndex);
+        }
 
         bTextureInstanced = true;
         break;
@@ -220,20 +267,21 @@ int texmgr::LoadTex(wchar_t* szFilename, int iSlot, char* szInitCode, char* szCo
     // Transition to shader resource
     m_lpDX12->TransitionResource(m_tex[iSlot].dx12Surface, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
-    // Create SRV
-    D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_lpDX12->AllocateSrvCpu();
-    m_tex[iSlot].dx12Surface.srvIndex = m_lpDX12->m_nextFreeSrvSlot;
+    // Write SRV at pre-allocated descriptor slot (no bump allocation)
+    {
+      D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+      srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+      srvDesc.Format            = DXGI_FORMAT_B8G8R8A8_UNORM;
+      srvDesc.ViewDimension     = D3D12_SRV_DIMENSION_TEXTURE2D;
+      srvDesc.Texture2D.MipLevels = 1;
+      dev->CreateShaderResourceView(m_tex[iSlot].dx12Surface.resource.Get(), &srvDesc,
+          m_lpDX12->GetSrvCpuHandleAt(m_tex[iSlot].dx12Surface.srvIndex));
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Format            = DXGI_FORMAT_B8G8R8A8_UNORM;
-    srvDesc.ViewDimension     = D3D12_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Texture2D.MipLevels = 1;
-    dev->CreateShaderResourceView(m_tex[iSlot].dx12Surface.resource.Get(), &srvDesc, srvCpu);
-    m_lpDX12->AllocateSrvGpu();
-
-    // Create binding block for texture sampling
-    m_lpDX12->CreateBindingBlockForTexture(m_tex[iSlot].dx12Surface);
+      // Update binding block in-place (slot 0 = texture, slots 1-15 = null)
+      m_lpDX12->UpdateBindingBlockTexture(
+          m_tex[iSlot].dx12Surface.bindingBlockStart,
+          m_tex[iSlot].dx12Surface.srvIndex);
+    }
 
     // Set sentinel so existing pSurface checks still work
     m_tex[iSlot].pSurface = (LPDIRECT3DTEXTURE9)(intptr_t)1;
@@ -265,13 +313,22 @@ void texmgr::KillTex(int iSlot) {
   if (iSlot < 0) return;
   if (iSlot >= NUM_TEX) return;
 
-  // Free DX12 resources (ComPtr handles refcounting automatically)
-  m_tex[iSlot].dx12Surface.Reset();
+  // Release GPU resource but preserve pre-allocated SRV indices
+  m_tex[iSlot].dx12Surface.ResetResource();
   m_tex[iSlot].dx12UploadBuf.Reset();
+
+  // Clear the pre-allocated SRV descriptor and binding block to null
+  if (m_lpDX12 && m_tex[iSlot].dx12Surface.srvIndex != UINT_MAX) {
+    m_lpDX12->m_device->CopyDescriptorsSimple(1,
+        m_lpDX12->GetSrvCpuHandleAt(m_tex[iSlot].dx12Surface.srvIndex),
+        m_lpDX12->GetSrvCpuHandleAt(m_lpDX12->m_nullTexture.srvIndex),
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    m_lpDX12->UpdateBindingBlockTexture(
+        m_tex[iSlot].dx12Surface.bindingBlockStart, UINT_MAX);
+  }
 
   // Free old DX9 resources:
   if (m_tex[iSlot].pSurface && m_tex[iSlot].pSurface != (LPDIRECT3DTEXTURE9)(intptr_t)1) {
-    // first, make sure no other sprites reference this texture!
     int refcount = 0;
     for (int x = 0; x < NUM_TEX; x++)
       if (m_tex[x].pSurface == m_tex[iSlot].pSurface)

@@ -245,6 +245,7 @@ int       CPluginShell::GetHeight() {
       return m_lpDX->m_client_height;
     }
   }
+  else return 0;
 }
 
 int       CPluginShell::GetCanvasMarginX() {

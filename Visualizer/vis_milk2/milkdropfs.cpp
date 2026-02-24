@@ -2692,8 +2692,8 @@ void CPlugin::DX12_DrawWave(float* fL, float* fR) {
         for (i = 0; i < nVerts; i++) {
           float rad = 0.7f + 0.7f * fR[i + sample_offset] + fWaveParam2;
           float ang = (i)*inv_nverts_minus_one * 6.28f + GetTime() * 0.2f;
-          ang == ang / 2;
-          rad == rad / 2;
+          ang = ang / 2;
+          rad = rad / 2;
           if (i < nVerts / rad) {
             float mix = i / (nVerts * 0.1f);
             mix = 0.7f - 0.7f * cosf(mix * 3.1416f);
@@ -5322,8 +5322,8 @@ if (hr != D3D_OK)
         for (i = 0; i < nVerts; i++) {
           float rad = 0.7f + 0.7f * fR[i + sample_offset] + fWaveParam2;
           float ang = (i)*inv_nverts_minus_one * 6.28f + GetTime() * 0.2f;
-          ang == ang / 2;
-          rad == rad / 2;
+          ang = ang / 2;
+          rad = rad / 2;
           if (i < nVerts / rad) {
             float mix = i / (nVerts * 0.1f);
             //mix = 0.7f - 0.7f * cosf(mix * 3.1416f) - sinf((GetTime()/10));

@@ -163,6 +163,8 @@ public:
   D3D12_CPU_DESCRIPTOR_HANDLE AllocateRtv();   // returns CPU handle, bumps m_nextFreeRtvSlot
   D3D12_CPU_DESCRIPTOR_HANDLE AllocateSrvCpu(); // returns CPU handle at m_nextFreeSrvSlot
   D3D12_GPU_DESCRIPTOR_HANDLE AllocateSrvGpu(); // returns GPU handle, bumps m_nextFreeSrvSlot
+  D3D12_CPU_DESCRIPTOR_HANDLE GetSrvCpuHandleAt(UINT srvIndex); // handle at specific index, no bump
+  void UpdateBindingBlockTexture(UINT blockStart, UINT texSrvIndex); // overwrite existing block in-place
 
   // Reset bump allocators to post-init baseline (call before re-creating dynamic textures)
   void ResetDynamicDescriptors();

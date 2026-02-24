@@ -28,6 +28,8 @@ struct DX12Texture {
 
     bool IsValid() const { return resource != nullptr; }
     void Reset() { resource.Reset(); srvIndex = rtvIndex = bindingBlockStart = UINT_MAX; width = height = depth = 0; format = DXGI_FORMAT_UNKNOWN; currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE; }
+    // Reset only the GPU resource, preserving pre-allocated descriptor indices (srvIndex, bindingBlockStart).
+    void ResetResource() { resource.Reset(); width = height = depth = 0; format = DXGI_FORMAT_UNKNOWN; currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE; }
 };
 
 #endif // DX12HELPERS_H

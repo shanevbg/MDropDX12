@@ -122,6 +122,7 @@ protected:
   // data
   LPDIRECT3DDEVICE9 m_lpDD;
   DXContext*         m_lpDX12 = nullptr;
+  UINT               m_srvRegionStart = UINT_MAX; // base of pre-allocated SRV region for NUM_TEX slots
 };
 
 #endif

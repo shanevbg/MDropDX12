@@ -585,7 +585,14 @@ D3D12_CPU_DESCRIPTOR_HANDLE DXContext::AllocateRtv()
 
 D3D12_CPU_DESCRIPTOR_HANDLE DXContext::AllocateSrvCpu()
 {
-    assert(m_nextFreeSrvSlot < DXC_MAX_SRV);
+    if (m_nextFreeSrvSlot >= DXC_MAX_SRV) {
+        OutputDebugStringA("ERROR: SRV heap overflow in AllocateSrvCpu!\n");
+        assert(false && "SRV heap overflow");
+        // Clamp to last valid slot to avoid out-of-bounds write
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
+        handle.ptr += (SIZE_T)(DXC_MAX_SRV - 1) * m_srvDescriptorSize;
+        return handle;
+    }
     D3D12_CPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
     handle.ptr += (SIZE_T)m_nextFreeSrvSlot * m_srvDescriptorSize;
     return handle;  // does NOT bump — caller must call AllocateSrvGpu to bump
@@ -593,7 +600,13 @@ D3D12_CPU_DESCRIPTOR_HANDLE DXContext::AllocateSrvCpu()
 
 D3D12_GPU_DESCRIPTOR_HANDLE DXContext::AllocateSrvGpu()
 {
-    assert(m_nextFreeSrvSlot < DXC_MAX_SRV);
+    if (m_nextFreeSrvSlot >= DXC_MAX_SRV) {
+        OutputDebugStringA("ERROR: SRV heap overflow in AllocateSrvGpu!\n");
+        assert(false && "SRV heap overflow");
+        D3D12_GPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetGPUDescriptorHandleForHeapStart();
+        handle.ptr += (SIZE_T)(DXC_MAX_SRV - 1) * m_srvDescriptorSize;
+        return handle;
+    }
     D3D12_GPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetGPUDescriptorHandleForHeapStart();
     handle.ptr += (SIZE_T)m_nextFreeSrvSlot * m_srvDescriptorSize;
     m_nextFreeSrvSlot++;
@@ -606,6 +619,39 @@ void DXContext::ResetDynamicDescriptors()
     // (VS, blur, etc.) can be re-created without leaking descriptor heap slots.
     m_nextFreeRtvSlot = m_rtvSlotBaseline;
     m_nextFreeSrvSlot = m_srvSlotBaseline;
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE DXContext::GetSrvCpuHandleAt(UINT srvIndex)
+{
+    assert(srvIndex < DXC_MAX_SRV);
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
+    handle.ptr += (SIZE_T)srvIndex * m_srvDescriptorSize;
+    return handle;
+}
+
+void DXContext::UpdateBindingBlockTexture(UINT blockStart, UINT texSrvIndex)
+{
+    if (blockStart == UINT_MAX) return;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
+
+    // Source handle for the texture (or null if UINT_MAX)
+    D3D12_CPU_DESCRIPTOR_HANDLE texSrc;
+    D3D12_CPU_DESCRIPTOR_HANDLE nullSrc;
+    nullSrc.ptr = heapStart.ptr + (SIZE_T)m_nullTexture.srvIndex * m_srvDescriptorSize;
+
+    if (texSrvIndex != UINT_MAX)
+        texSrc.ptr = heapStart.ptr + (SIZE_T)texSrvIndex * m_srvDescriptorSize;
+    else
+        texSrc = nullSrc;
+
+    // Overwrite all 16 slots: slot 0 = texture, slots 1-15 = null
+    for (UINT i = 0; i < BINDING_BLOCK_SIZE; i++) {
+        D3D12_CPU_DESCRIPTOR_HANDLE dst;
+        dst.ptr = heapStart.ptr + (SIZE_T)(blockStart + i) * m_srvDescriptorSize;
+        m_device->CopyDescriptorsSimple(1, dst, (i == 0) ? texSrc : nullSrc,
+                                         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    }
 }
 
 // ---------------------------------------------------------------------------

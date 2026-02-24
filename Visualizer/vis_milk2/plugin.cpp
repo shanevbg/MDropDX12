@@ -6715,8 +6715,8 @@ void LoadPresetFilesViaDragAndDrop(WPARAM wParam) {
   if (GetFilename.substr(GetFilename.find_last_of(".") + 1) == "milk") //from https://stackoverflow.com/a/51999
     g_plugin.LoadPreset(convertedFileName, 0.0f);
   else {
-    wchar_t buf[1024], tmp[128];
-    swprintf(buf, L"Error: Failed to load dropped preset file: %s", convertedFileName, tmp, 128);
+    wchar_t buf[1024];
+    swprintf(buf, L"Error: Failed to load dropped preset file: %s", convertedFileName);
     g_plugin.AddError(buf, 5.0f, ERR_NOTIFY, true);
   }
   DragFinish(hDrop);
@@ -8624,13 +8624,13 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
   case '~':
     m_bPresetLockedByUser = !m_bPresetLockedByUser;
     if (m_bPresetLockedByUser) {
-      wchar_t buf[1024], tmp[64];
-      swprintf(buf, L"Preset locked", tmp, 64);
+      wchar_t buf[64];
+      wcscpy(buf, L"Preset locked");
       AddNotification(buf);
     }
     else {
-      wchar_t buf[1024], tmp[64];
-      swprintf(buf, L"Preset unlocked", tmp, 64);
+      wchar_t buf[64];
+      wcscpy(buf, L"Preset unlocked");
       AddNotification(buf);
     }
     SendSettingsInfoToMDropDX12Remote();
