@@ -201,14 +201,21 @@ bool CTextManager::BuildFontAtlas(int fontIdx) {
     if (advance <= 0) advance = (float)cellW * 0.5f;
 
     // Store glyph metrics with UV coordinates
+    // Tighten glyphWidth to actual visible extent + 1px AA margin (not full cellW).
+    // Using full cellW causes last-character artifacts from neighboring atlas glyphs.
+    float visibleW = (float)(abcWidths[c].abcA + (int)abcWidths[c].abcB);
+    float tightW = max(visibleW, advance) + 1.0f;
+    if (tightW > (float)cellW) tightW = (float)cellW;
+    if (tightW < 1.0f) tightW = 1.0f;
+
     GlyphInfo& g = atlas.glyphs[c];
     g.u0       = (float)x / (float)atlasW;
     g.v0       = (float)y / (float)atlasH;
-    g.u1       = (float)(x + cellW) / (float)atlasW;
+    g.u1       = (float)(x + (int)ceilf(tightW)) / (float)atlasW;
     g.v1       = (float)(y + cellH) / (float)atlasH;
     g.advanceX = advance;
     g.bearingX = (float)abcWidths[c].abcA;
-    g.glyphWidth  = (float)cellW;
+    g.glyphWidth  = tightW;
     g.glyphHeight = (float)cellH;
   }
 
