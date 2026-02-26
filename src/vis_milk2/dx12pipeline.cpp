@@ -1,4 +1,5 @@
 #include "dx12pipeline.h"
+#include "utility.h"
 #include <d3dcompiler.h>
 #include <cstdio>
 
@@ -14,7 +15,7 @@ static bool CompileShaderFromString(const char* src, const char* entryPoint, con
                              entryPoint, target, flags, 0, ppBlob, &pErrors);
     if (FAILED(hr)) {
         if (pErrors) {
-            OutputDebugStringA((const char*)pErrors->GetBufferPointer());
+            DebugLogA((const char*)pErrors->GetBufferPointer());
             pErrors->Release();
         }
         return false;
@@ -209,15 +210,15 @@ bool DX12CreatePipelines(ID3D12Device* device, ID3D12RootSignature* rootSig,
     // Must use ENABLE_BACKWARDS_COMPATIBILITY to match the PS compiled by D3DXCompileShader shim,
     // otherwise VS/PS get different hardware register assignments for the same semantics.
     if (!CompileShaderFromString(g_szWarpVS, "main", "vs_5_0", &g_pWarpVSBlob, D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY)) {
-        OutputDebugStringA("DX12: Failed to compile warp VS\n");
+        DebugLogA("DX12: Failed to compile warp VS");
         return false;
     }
     if (!CompileShaderFromString(g_szCompVS, "main", "vs_5_0", &g_pCompVSBlob, D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY)) {
-        OutputDebugStringA("DX12: Failed to compile comp VS\n");
+        DebugLogA("DX12: Failed to compile comp VS");
         return false;
     }
     if (!CompileShaderFromString(g_szBlurVS, "main", "vs_5_0", &g_pBlurVSBlob, D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY)) {
-        OutputDebugStringA("DX12: Failed to compile blur VS\n");
+        DebugLogA("DX12: Failed to compile blur VS");
         return false;
     }
 
@@ -237,7 +238,7 @@ ComPtr<ID3D12PipelineState> DX12CreatePresetPSO(
     if (!device || !rootSig || !vsBlob || !psBytecode || psSize == 0)
         return nullptr;
 
-    // Reflect PS to find sampler_main texture slot
+    // Reflect PS to find sampler_main texture slot and log all bound resources
     if (pMainTexSlotOut) {
         ID3D12ShaderReflection* psRefl = nullptr;
         if (SUCCEEDED(D3DReflect(psBytecode, psSize, IID_PPV_ARGS(&psRefl)))) {
@@ -246,6 +247,22 @@ ComPtr<ID3D12PipelineState> DX12CreatePresetPSO(
             for (UINT i = 0; i < psd.BoundResources; i++) {
                 D3D12_SHADER_INPUT_BIND_DESC rbd;
                 psRefl->GetResourceBindingDesc(i, &rbd);
+
+                // Log all bound resources for diagnostics
+                {
+                    char dbg[256];
+                    const char* typeStr = "?";
+                    switch (rbd.Type) {
+                    case D3D_SIT_CBUFFER: typeStr = "CBuf"; break;
+                    case D3D_SIT_TEXTURE: typeStr = "Tex"; break;
+                    case D3D_SIT_SAMPLER: typeStr = "Samp"; break;
+                    default: typeStr = "Other"; break;
+                    }
+                    sprintf(dbg, "DIAG PSO Reflect[%u]: Name='%s' Type=%s BindPoint=%u BindCount=%u",
+                            i, rbd.Name ? rbd.Name : "(null)", typeStr, rbd.BindPoint, rbd.BindCount);
+                    DebugLogA(dbg);
+                }
+
                 if (*pMainTexSlotOut == UINT_MAX && rbd.Type == D3D_SIT_TEXTURE) {
                     const char* n = rbd.Name;
                     if (!strcmp(n, "sampler_main") || !strcmp(n, "sampler_fc_main") ||
@@ -296,7 +313,7 @@ ComPtr<ID3D12PipelineState> DX12CreatePresetPSO(
     if (FAILED(hr)) {
         char buf[80];
         sprintf_s(buf, "DX12: CreateGraphicsPipelineState FAILED hr=0x%08X\n", (unsigned)hr);
-        OutputDebugStringA(buf);
+        DebugLogA(buf);
         return nullptr;
     }
     return pso;

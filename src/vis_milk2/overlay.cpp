@@ -1,4 +1,5 @@
 #include "overlay.h"
+#include "utility.h"
 #include <cstdio>
 #include <algorithm>
 
@@ -308,7 +309,7 @@ void COverlayThread::ThreadFunc() {
         m_bAlive.store(false, std::memory_order_release);
         ReleaseDIB();
         DestroyOverlayWindow();
-        OutputDebugStringA("COverlayThread: SEH exception caught, overlay disabled\n");
+        DebugLogA("COverlayThread: SEH exception caught, overlay disabled");
     }
 }
 

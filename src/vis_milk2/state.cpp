@@ -1403,8 +1403,24 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
   if (ApplyFlags & STATE_WARP) {
     //m_szWarpShadersText[0] = 0;
     ReadCode(f, m_szWarpShadersText, "warp_");
-    if (!m_szWarpShadersText[0])
+    {
+      char dbg[512];
+      int textLen = strlen(m_szWarpShadersText);
+      char preview[201] = {0};
+      if (textLen > 0) {
+        strncpy(preview, m_szWarpShadersText, 200);
+        // Replace control chars for readability
+        for (int i = 0; i < 200 && preview[i]; i++)
+          if (preview[i] < 32 && preview[i] != 0) preview[i] = '|';
+      }
+      sprintf(dbg, "DIAG Import warp: ReadCode len=%d nWarpPSVersionInFile=%d text='%.200s'",
+              textLen, nWarpPSVersionInFile, preview);
+      DebugLogA(dbg);
+    }
+    if (!m_szWarpShadersText[0]) {
+      DebugLogA("DIAG Import warp: EMPTY - falling back to GenWarpPShaderText");
       g_plugin.GenWarpPShaderText(m_szWarpShadersText, m_fDecay.eval(-1), m_bTexWrap);
+    }
     m_nWarpPSVersion = nWarpPSVersionInFile;
   }
 
@@ -1412,8 +1428,23 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
   if (ApplyFlags & STATE_COMP) {
     //m_szCompShadersText[0] = 0;
     ReadCode(f, m_szCompShadersText, "comp_");
-    if (!m_szCompShadersText[0])
+    {
+      char dbg[512];
+      int textLen = strlen(m_szCompShadersText);
+      char preview[201] = {0};
+      if (textLen > 0) {
+        strncpy(preview, m_szCompShadersText, 200);
+        for (int i = 0; i < 200 && preview[i]; i++)
+          if (preview[i] < 32 && preview[i] != 0) preview[i] = '|';
+      }
+      sprintf(dbg, "DIAG Import comp: ReadCode len=%d nCompPSVersionInFile=%d text='%.200s'",
+              textLen, nCompPSVersionInFile, preview);
+      DebugLogA(dbg);
+    }
+    if (!m_szCompShadersText[0]) {
+      DebugLogA("DIAG Import comp: EMPTY - falling back to GenCompPShaderText");
       g_plugin.GenCompPShaderText(m_szCompShadersText, m_fGammaAdj.eval(-1), m_fVideoEchoAlpha.eval(-1), m_fVideoEchoZoom.eval(-1), m_nVideoEchoOrientation, m_fShader.eval(-1), m_bBrighten, m_bDarken, m_bSolarize, m_bInvert);
+    }
     m_nCompPSVersion = nCompPSVersionInFile;
   }
 
@@ -1536,8 +1567,8 @@ void CState::StripLinefeedCharsAndComments(char* src, char* dest) {
 void CState::RecompileExpressions(int flags, int bReInit) {
   if ((flags & RECOMPILE_PRESET_CODE) && m_szDesc[0]) {
     char dbg[512];
-    sprintf(dbg, "EEL: Compiling preset: %ls\n", m_szDesc);
-    OutputDebugStringA(dbg);
+    sprintf(dbg, "EEL: Compiling preset: %ls", m_szDesc);
+    DebugLogA(dbg);
   }
   // before we get started, if we redo the init code for the preset, we have to redo
   // other things too, because q1-q8 could change.
@@ -1672,8 +1703,8 @@ void CState::RecompileExpressions(int flags, int bReInit) {
         if (!(pf_codehandle_init = NSEEL_code_compile(m_pf_eel, buf))) {
           const char* err = NSEEL_code_getcodeerror(m_pf_eel);
           char dbg[512];
-          sprintf(dbg, "EEL: preset init compile FAILED: %s\n", err ? err : "(unknown)");
-          OutputDebugStringA(dbg);
+          sprintf(dbg, "EEL: preset init compile FAILED: %s", err ? err : "(unknown)");
+          DebugLogA(dbg);
           wchar_t buf[1024];
           swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_PRESET_INIT_CODE), m_szDesc);
           g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
@@ -1704,8 +1735,8 @@ void CState::RecompileExpressions(int flags, int bReInit) {
         if (!(m_pf_codehandle = NSEEL_code_compile(m_pf_eel, buf))) {
           const char* err = NSEEL_code_getcodeerror(m_pf_eel);
           char dbg[512];
-          sprintf(dbg, "EEL: per-frame compile FAILED: %s\n", err ? err : "(unknown)");
-          OutputDebugStringA(dbg);
+          sprintf(dbg, "EEL: per-frame compile FAILED: %s", err ? err : "(unknown)");
+          DebugLogA(dbg);
           wchar_t buf[1024];
           swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_PER_FRAME_CODE), m_szDesc);
           g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
@@ -1718,8 +1749,8 @@ void CState::RecompileExpressions(int flags, int bReInit) {
         if (!(m_pp_codehandle = NSEEL_code_compile(m_pv_eel, buf))) {
           const char* err = NSEEL_code_getcodeerror(m_pv_eel);
           char dbg[512];
-          sprintf(dbg, "EEL: per-pixel compile FAILED: %s\n", err ? err : "(unknown)");
-          OutputDebugStringA(dbg);
+          sprintf(dbg, "EEL: per-pixel compile FAILED: %s", err ? err : "(unknown)");
+          DebugLogA(dbg);
           wchar_t buf[1024];
           swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_PER_VERTEX_CODE), m_szDesc);
           g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);

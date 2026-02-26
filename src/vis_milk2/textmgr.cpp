@@ -37,6 +37,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "pluginshell.h"  // td_fontinfo
 #include "support.h"      // SPRITEVERTEX, WFVERTEX
 #include "dx12pipeline.h" // PSO enums
+#include "utility.h"
 #include <cmath>
 #include <vector>
 
@@ -97,12 +98,12 @@ void CTextManager::InitDX12(DXContext* lpDX, HFONT* pFonts, int nFonts, void* pF
     if (!BuildFontAtlas(i)) {
       char buf[128];
       sprintf(buf, "CTextManager: BuildFontAtlas(%d) failed\n", i);
-      OutputDebugStringA(buf);
+      DebugLogA(buf);
     }
   }
 
   m_ready = true;
-  OutputDebugStringA("CTextManager: Font atlas text rendering initialized\n");
+  DebugLogA("CTextManager: Font atlas text rendering initialized");
 }
 
 bool CTextManager::BuildFontAtlas(int fontIdx) {
@@ -258,8 +259,8 @@ bool CTextManager::BuildFontAtlas(int fontIdx) {
 
   if (!atlas.texture.IsValid()) {
     char buf[128];
-    sprintf(buf, "CTextManager: CreateTextureFromPixels failed for font %d\n", fontIdx);
-    OutputDebugStringA(buf);
+    sprintf(buf, "CTextManager: CreateTextureFromPixels failed for font %d", fontIdx);
+    DebugLogA(buf);
     return false;
   }
 
@@ -269,9 +270,9 @@ bool CTextManager::BuildFontAtlas(int fontIdx) {
   atlas.valid = true;
 
   char buf[256];
-  sprintf(buf, "CTextManager: Font %d atlas built: %dx%d cells=%dx%d lineH=%.0f\n",
+  sprintf(buf, "CTextManager: Font %d atlas built: %dx%d cells=%dx%d lineH=%.0f",
     fontIdx, atlasW, atlasH, cellW, cellH, atlas.lineHeight);
-  OutputDebugStringA(buf);
+  DebugLogA(buf);
 
   return true;
 }

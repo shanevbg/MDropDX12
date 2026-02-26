@@ -23,5 +23,9 @@ enc_temp_folder/
 
 # Runtime-generated files
 *.log
+settings.ini
+settings.ini.bak
+messages.ini
+messages.ini.bak
 src/settings.ini
 src/messages.ini

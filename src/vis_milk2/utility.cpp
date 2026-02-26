@@ -825,7 +825,14 @@ void DebugLogInit(const wchar_t* baseDir) {
 }
 
 void DebugLogW(const wchar_t* msg) {
-  if (!g_debugLogReady || !g_debugLogFile || !msg || !msg[0])
+  if (!msg || !msg[0])
+    return;
+
+  // Always send to debugger (DebugView / VS Output)
+  OutputDebugStringW(msg);
+
+  // Also write to log file if ready
+  if (!g_debugLogReady || !g_debugLogFile)
     return;
 
   SYSTEMTIME st;
@@ -843,7 +850,7 @@ void DebugLogW(const wchar_t* msg) {
 }
 
 void DebugLogA(const char* msg) {
-  if (!g_debugLogReady || !msg || !msg[0])
+  if (!msg || !msg[0])
     return;
   wchar_t buf[2048];
   MultiByteToWideChar(CP_ACP, 0, msg, -1, buf, 2048);

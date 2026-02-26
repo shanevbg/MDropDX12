@@ -2648,7 +2648,7 @@ int CPlugin::AllocateMyDX9Stuff() {
                               "main", "ps_5_0",
                               D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY, 0, &psBlob, &pErrors);
       if (FAILED(hr)) {
-        if (pErrors) { OutputDebugStringA((const char*)pErrors->GetBufferPointer()); pErrors->Release(); }
+        if (pErrors) { DebugLogA((const char*)pErrors->GetBufferPointer()); pErrors->Release(); }
         DebugLogA("DX12: Inject effect PSO: PS compile FAILED");
       } else {
         if (pErrors) pErrors->Release();
@@ -3653,7 +3653,7 @@ bool CPlugin::EvictSomeTexture() {
       }
     char buf[1024];
     sprintf(buf, "evicting at %d textures, %.1f MB\n", nEvictableFiles, nEvictableBytes * 0.000001f);
-    OutputDebugString(buf);
+    DebugLogA(buf);
   }
 #endif
 
@@ -4448,6 +4448,14 @@ void CPlugin::CreateDX12PresetPSOs() {
       false, &m_compMainTexSlot);
     if (m_compMainTexSlot == UINT_MAX) m_compMainTexSlot = 0;
   }
+
+  {
+    char dbg[256];
+    sprintf(dbg, "DX12: Preset warp PSO: %s (mainTexSlot=%u)", m_dx12WarpPSO ? "OK" : "FALLBACK", m_warpMainTexSlot);
+    DebugLogA(dbg);
+    sprintf(dbg, "DX12: Preset comp PSO: %s (mainTexSlot=%u)", m_dx12CompPSO ? "OK" : "FALLBACK", m_compMainTexSlot);
+    DebugLogA(dbg);
+  }
 }
 
 // Preprocessor: rename local variables that shadow HLSL built-in functions.
@@ -4590,6 +4598,21 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
   *ppShader = NULL;
   *ppConstTable = NULL;
 
+  // DIAG: log original shader text (before include.fx prepend)
+  {
+    char dbg[512];
+    int origLen = szOrigShaderText ? (int)strlen(szOrigShaderText) : 0;
+    char preview[301] = {0};
+    if (origLen > 0) {
+      strncpy(preview, szOrigShaderText, 300);
+      for (int i = 0; i < 300 && preview[i]; i++)
+        if (preview[i] < 32 && preview[i] != 0) preview[i] = '|';
+    }
+    sprintf(dbg, "DIAG LoadShader: type=%d(%s) origLen=%d text='%.300s'",
+            shaderType, szWhichShader, origLen, preview);
+    DebugLogA(dbg);
+  }
+
   char szShaderText[128000];
   char temp[128000];
   int writePos = 0;
@@ -4607,7 +4630,6 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
     lstrcpy(&szShaderText[writePos], szCompDefines);
     writePos += lstrlen(szCompDefines);
   }
-
   // paste in the shader itself - converting LCC's to 13+10's.
   // avoid lstrcpy b/c it might not handle the linefeed stuff...?
   int shaderStartPos = writePos;
@@ -4663,9 +4685,21 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
     // seek to 'shader_body' and replace it with spaces
     while (*p && strncmp(p, "shader_body", 11))
       p++;
-    if (p) {
+
+    // DIAG: log whether shader_body was found
+    {
+      char dbg[256];
+      sprintf(dbg, "DIAG shader_body search: type=%d found=%d offsetFromStart=%d",
+              shaderType, (*p != 0) ? 1 : 0, (int)(p - &szShaderText[shaderStartPos]));
+      DebugLogA(dbg);
+    }
+
+    if (*p) {
       for (int i = 0; i < 11; i++)
         *p++ = ' ';
+    }
+    else {
+      p = NULL; // shader_body not found — signal error
     }
 
     if (p) {
@@ -4710,6 +4744,15 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
 
   // Fix variables that shadow HLSL built-in functions (e.g. float2 pow = ...)
   FixShadowedBuiltins(szShaderText);
+
+  // Dump assembled shader text to file for diagnostics (written to m_szBaseDir)
+  if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
+    char dumpPath[MAX_PATH];
+    sprintf(dumpPath, "%lsdiag_%s_shader.txt", m_szBaseDir,
+            shaderType == SHADER_COMP ? "comp" : "warp");
+    FILE* f = fopen(dumpPath, "w");
+    if (f) { fputs(szShaderText, f); fclose(f); }
+  }
 
   // now really try to compile it.
 
@@ -5390,8 +5433,8 @@ void CPlugin::MyRenderFn(int redraw) {
 
 void CPlugin::RenderInjectEffect()
 {
-  // Post-process pass: applies per-preset effects (brighten/darken/solarize/invert)
-  // and the F11 inject effect on the composite back buffer.
+  // Post-process pass: applies the F11 inject effect and (for non-shader presets)
+  // per-preset brighten/darken/solarize/invert on the composite back buffer.
   // Copies the back buffer to an intermediate texture, then draws it back with an effect shader.
 
   // Build per-preset effect bitmask from per-frame equation outputs
@@ -5646,7 +5689,6 @@ void CPlugin::AddNotificationAudioDevice() {
 
 void CPlugin::AddError(wchar_t* szMsg, float fDuration, int category, bool bBold) {
   DebugLogW(szMsg);
-  OutputDebugStringW(szMsg);
   if (category == ERR_NOTIFY)
     ClearErrors(category);
 
@@ -5664,7 +5706,6 @@ void CPlugin::AddError(wchar_t* szMsg, float fDuration, int category, bool bBold
 
 void CPlugin::AddNotificationColored(wchar_t* szMsg, float time, DWORD color) {
   DebugLogW(szMsg);
-  OutputDebugStringW(szMsg);
   ClearErrors(ERR_NOTIFY);
 
   ErrorMsg x;
@@ -12435,14 +12476,6 @@ void CPlugin::PopulateResourceViewer() {
 
 void CPlugin::dumpmsg(wchar_t* s) {
   DebugLogW(s);
-#if _DEBUG
-  OutputDebugStringW(s);
-  if (s[0]) {
-    int len = lstrlenW(s);
-    if (s[len - 1] != L'\n')
-      OutputDebugStringW(L"\n");
-  }
-#endif
 }
 
 void CPlugin::PrevPreset(float fBlendTime) {
@@ -13882,7 +13915,6 @@ void CPlugin::LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime)
     name = name ? name + 1 : m_szCurrentPresetFile;
     char dbg[512];
     sprintf(dbg, "Render: Active preset: %ls", name);
-    OutputDebugStringA(dbg);
     DebugLogA(dbg);
   }
 
@@ -13955,9 +13987,7 @@ void CPlugin::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
 
     wchar_t fullPath[MAX_PATH];
     GetFullPathNameW(szPresetFilename, MAX_PATH, fullPath, NULL);
-    // Log the full path (to debugger or console)
-    OutputDebugStringW(fullPath);
-    OutputDebugStringW(L"\n");
+    DebugLogW(fullPath);
 
     wchar_t buf[1024];
     swprintf(buf, wasabiApiLangString(IDS_ERROR_PRESET_NOT_FOUND_X), fullPath);
@@ -14008,7 +14038,6 @@ void CPlugin::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
       name = name ? name + 1 : m_szCurrentPresetFile;
       char dbg[512];
       sprintf(dbg, "Render: Active preset: %ls", name);
-      OutputDebugStringA(dbg);
       DebugLogA(dbg);
     }
 
@@ -14111,7 +14140,6 @@ void CPlugin::OnFinishedLoadingPreset() {
       char dbg[512];
       sprintf(dbg, "GPU Warning: Preset has %d total shape instances (preset: %ls, res: %dx%d)",
               totalInstances, name, m_nTexSizeX, m_nTexSizeY);
-      OutputDebugStringA(dbg);
       DebugLogA(dbg);
     }
   }
@@ -14211,7 +14239,6 @@ void CPlugin::LoadPresetTick() {
       name = name ? name + 1 : m_szCurrentPresetFile;
       char dbg[512];
       sprintf(dbg, "Render: Active preset: %ls", name);
-      OutputDebugStringA(dbg);
       DebugLogA(dbg);
     }
 
@@ -16028,7 +16055,7 @@ void CPlugin::LaunchSongTitleAnim(int supertextIndex) {
 
   wchar_t debugMsg[128];
   swprintf(debugMsg, sizeof(debugMsg) / sizeof(debugMsg[0]), L"LaunchSongTitleAnim: supertextIndex=%d\n", supertextIndex);
-  OutputDebugStringW(debugMsg);
+  DebugLogW(debugMsg);
 
   if (supertextIndex == -1) {
     supertextIndex = GetNextFreeSupertextIndex();
@@ -16533,10 +16560,10 @@ void CPlugin::LaunchMessage(wchar_t* sMessage) {
     }
   }
   else if (wcsncmp(sMessage, L"CAPTURE", 7) == 0) {
-    OutputDebugStringW(L"[CAPTURE] Message received\n");
+    DebugLogW(L"[CAPTURE] Message received");
     mdropdx12->LogInfo(L"CAPTURE message received, calling CaptureScreenshot()");
     CaptureScreenshot();
-    OutputDebugStringW(L"[CAPTURE] CaptureScreenshot() returned\n");
+    DebugLogW(L"[CAPTURE] CaptureScreenshot() returned");
   }
 }
 
@@ -17108,9 +17135,11 @@ void CPlugin::GenCompPShaderText(char* szShaderText, float brightness, float ve_
     p += sprintf(p, "                tex2D(sampler_main, uv_echo).xyz, %c", LF);
     p += sprintf(p, "                %.2f %c", ve_alpha, LF);
     p += sprintf(p, "              ); //video echo%c", LF);
+    p += sprintf(p, "    ret *= %.2f; //gamma%c", brightness, LF);
   }
   else {
     p += sprintf(p, "    ret = tex2D(sampler_main, uv).xyz;%c", LF);
+    p += sprintf(p, "    ret *= %.2f; //gamma%c", brightness, LF);
   }
   if (hue_shader >= 1.0f)
     p += sprintf(p, "    ret *= hue_shader; //old hue shader effect%c", LF);

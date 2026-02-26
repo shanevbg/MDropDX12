@@ -92,7 +92,7 @@ DXContext::DXContext(
         char buf[256];
         sprintf(buf, "DX12: DXContext init: swap chain %dx%d, client %dx%d\n",
                 width, height, m_client_width, m_client_height);
-        OutputDebugStringA(buf);
+        DebugLogA(buf);
     }
 }
 
@@ -312,7 +312,7 @@ bool DXContext::BeginFrame()
         char buf[512];
         sprintf(buf, "DX12: BeginFrame check: swapchain=%ux%u, m_client=%dx%d, actual_client=%dx%d\n",
                 scDesc.Width, scDesc.Height, m_client_width, m_client_height, clientW, clientH);
-        OutputDebugStringA(buf);
+        DebugLogA(buf);
     }
 
     // Reset command allocator and command list for this frame
@@ -385,7 +385,6 @@ void DXContext::EndFrame()
             HRESULT reason = m_device->GetDeviceRemovedReason();
             sprintf(buf, "DX12: Device removed reason: 0x%08X (TDR — GPU timeout or driver crash)", (unsigned)reason);
             DebugLogA(buf);
-            OutputDebugStringA(buf);
             m_lastErr = hrPresent;
             m_ready = 0;
             return;
@@ -476,7 +475,7 @@ bool DXContext::ResizeSwapChain(int newWidth, int newHeight)
         char buf[256];
         sprintf(buf, "DX12: ResizeSwapChain: swap=%ux%u -> %dx%d\n",
                 scDesc.Width, scDesc.Height, newWidth, newHeight);
-        OutputDebugStringA(buf);
+        DebugLogA(buf);
     }
 
     // Flush GPU before resizing
@@ -587,7 +586,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE DXContext::AllocateRtv()
 D3D12_CPU_DESCRIPTOR_HANDLE DXContext::AllocateSrvCpu()
 {
     if (m_nextFreeSrvSlot >= DXC_MAX_SRV) {
-        OutputDebugStringA("ERROR: SRV heap overflow in AllocateSrvCpu!\n");
+        DebugLogA("ERROR: SRV heap overflow in AllocateSrvCpu!");
         assert(false && "SRV heap overflow");
         // Clamp to last valid slot to avoid out-of-bounds write
         D3D12_CPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
@@ -602,7 +601,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE DXContext::AllocateSrvCpu()
 D3D12_GPU_DESCRIPTOR_HANDLE DXContext::AllocateSrvGpu()
 {
     if (m_nextFreeSrvSlot >= DXC_MAX_SRV) {
-        OutputDebugStringA("ERROR: SRV heap overflow in AllocateSrvGpu!\n");
+        DebugLogA("ERROR: SRV heap overflow in AllocateSrvGpu!");
         assert(false && "SRV heap overflow");
         D3D12_GPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetGPUDescriptorHandleForHeapStart();
         handle.ptr += (SIZE_T)(DXC_MAX_SRV - 1) * m_srvDescriptorSize;
@@ -777,11 +776,24 @@ bool DXContext::CreateRootSignature()
     rootParams[1].DescriptorTable.pDescriptorRanges   = &srvRange;
     rootParams[1].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
-    // Static samplers — 16 slots (s0-s15) to cover all sampler registers preset shaders may use.
-    // The backwards-compat compiler auto-assigns sampler registers based on declaration order
-    // in include.fx. We use Wrap+Linear as the default mode for all slots since most MilkDrop
-    // textures expect it, and the sampler mode prefixes (FW_, FC_, PW_, PC_) are handled
-    // by binding the right texture to the right register, not by changing the sampler.
+    // Static samplers — 16 slots (s0-s15) matching explicit register assignments in include.fx.
+    // Each sampler's filter and addressing mode matches the DX9 naming convention:
+    //   s0  = sampler_main        (LINEAR + WRAP)   — default warp/comp main texture
+    //   s1  = sampler_fc_main     (LINEAR + CLAMP)  — filter + clamp
+    //   s2  = sampler_pc_main     (POINT  + CLAMP)  — point  + clamp
+    //   s3  = sampler_fw_main     (LINEAR + WRAP)   — filter + wrap
+    //   s4  = sampler_pw_main     (POINT  + WRAP)   — point  + wrap
+    //   s5  = sampler_noise_lq    (LINEAR + WRAP)   — noise textures tile
+    //   s6  = sampler_noise_lq_lite (LINEAR + WRAP)
+    //   s7  = sampler_noise_mq    (LINEAR + WRAP)
+    //   s8  = sampler_noise_hq    (LINEAR + WRAP)
+    //   s9  = sampler_noisevol_lq (LINEAR + WRAP)
+    //   s10 = sampler_noisevol_hq (LINEAR + WRAP)
+    //   s11 = (unused, LINEAR + WRAP default)
+    //   s12 = sampler_blur_src    (LINEAR + CLAMP)  — blur pass source
+    //   s13 = sampler_blur1       (LINEAR + CLAMP)  — blur output level 1
+    //   s14 = sampler_blur2       (LINEAR + CLAMP)  — blur output level 2
+    //   s15 = sampler_blur3       (LINEAR + CLAMP)  — blur output level 3
     D3D12_STATIC_SAMPLER_DESC staticSamplers[16] = {};
     for (int i = 0; i < 16; i++) {
         staticSamplers[i].Filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -791,6 +803,16 @@ bool DXContext::CreateRootSignature()
         staticSamplers[i].MaxLOD           = D3D12_FLOAT32_MAX;
         staticSamplers[i].ShaderRegister   = i;
         staticSamplers[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    }
+    // CLAMP samplers: s1 (fc_main), s2 (pc_main), s12-s15 (blur)
+    for (int i : {1, 2, 12, 13, 14, 15}) {
+        staticSamplers[i].AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        staticSamplers[i].AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        staticSamplers[i].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    }
+    // POINT filter samplers: s2 (pc_main), s4 (pw_main)
+    for (int i : {2, 4}) {
+        staticSamplers[i].Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
     }
 
     D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
@@ -805,7 +827,7 @@ bool DXContext::CreateRootSignature()
     HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
                                               &signature, &error);
     if (FAILED(hr)) {
-        if (error) OutputDebugStringA((const char*)error->GetBufferPointer());
+        if (error) DebugLogA((const char*)error->GetBufferPointer());
         return false;
     }
 
@@ -1608,7 +1630,10 @@ void DXContext::UpdateBlurPassBinding(UINT passIndex, UINT sourceSrvIndex)
                   (SIZE_T)(blockBase + i) * m_srvDescriptorSize;
 
         if (i == 0 && sourceSrvIndex != UINT_MAX) {
-            // Slot 0 = source texture (sampler_main)
+            // Slot 0 = source texture (t0).
+            // SM5.0 backwards compat assigns textures sequentially from t0 regardless
+            // of sampler register annotations. The blur shader's single texture always
+            // lands at t0. Sampler addressing (CLAMP at s12) is separate.
             D3D12_CPU_DESCRIPTOR_HANDLE src;
             src.ptr = m_srvHeap->GetCPUDescriptorHandleForHeapStart().ptr +
                       (SIZE_T)sourceSrvIndex * m_srvDescriptorSize;

@@ -1302,7 +1302,6 @@ int CPluginShell::PluginRender(unsigned char* pWaveL, unsigned char* pWaveR)//, 
     char dbg[512];
     sprintf(dbg, "TDR Recovery: Device lost detected (hr=0x%08X) — signaling recovery",
             (unsigned)m_lpDX->m_lastErr);
-    OutputDebugStringA(dbg);
     DebugLogA(dbg);
     m_bDeviceRecoveryPending = true;
     return false;  // signal caller to attempt recovery
@@ -1443,7 +1442,7 @@ void CPluginShell::DrawAndDisplay(int redraw) {
         m_lpDX->m_commandList->ResourceBarrier(1, &barrier);
       } else {
         screenshotReadback.Reset();
-        OutputDebugStringA("DX12: Failed to create screenshot readback buffer\n");
+        DebugLogA("DX12: Failed to create screenshot readback buffer");
       }
     }
 
@@ -1511,11 +1510,11 @@ void CPluginShell::DrawAndDisplay(int redraw) {
         screenshotReadback->Unmap(0, &writeRange);
 
         if (SUCCEEDED(hr)) {
-          OutputDebugStringW(L"[CaptureScreenshot] DX12 screenshot saved successfully\n");
+          DebugLogW(L"[CaptureScreenshot] DX12 screenshot saved successfully");
         } else {
           wchar_t msg[128];
           swprintf_s(msg, 128, L"[CaptureScreenshot] WIC save failed: 0x%08X\n", hr);
-          OutputDebugStringW(msg);
+          DebugLogW(msg);
         }
       }
     } else if (m_bScreenshotRequested) {

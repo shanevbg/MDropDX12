@@ -1024,7 +1024,7 @@ void CPlugin::RenderFrame(int bRedraw) {
 
         wchar_t debugMsg[128];
         swprintf(debugMsg, sizeof(debugMsg) / sizeof(debugMsg[0]), L"RenderFrame: fTimeAfterFullDuration=%.2f\n", fTimeAfterFullDuration);
-        OutputDebugStringW(debugMsg);
+        DebugLogW(debugMsg);
 
         if (fTimeAfterFullDuration >= m_supertexts[i].fBurnTime) {
           m_supertexts[i].fStartTime = -1.0f;	// 'off' state
@@ -1511,21 +1511,21 @@ void CPlugin::GetSafeBlurMinMax(CState* pState, float* blur_min, float* blur_max
   if (blur_max[0] - blur_min[0] < fMinDist) {
     float avg = (blur_min[0] + blur_max[0]) * 0.5f;
     blur_min[0] = avg - fMinDist * 0.5f;
-    blur_max[0] = avg - fMinDist * 0.5f;
+    blur_max[0] = avg + fMinDist * 0.5f;
   }
   blur_max[1] = min(blur_max[0], blur_max[1]);
   blur_min[1] = max(blur_min[0], blur_min[1]);
   if (blur_max[1] - blur_min[1] < fMinDist) {
     float avg = (blur_min[1] + blur_max[1]) * 0.5f;
     blur_min[1] = avg - fMinDist * 0.5f;
-    blur_max[1] = avg - fMinDist * 0.5f;
+    blur_max[1] = avg + fMinDist * 0.5f;
   }
   blur_max[2] = min(blur_max[1], blur_max[2]);
   blur_min[2] = max(blur_min[1], blur_min[2]);
   if (blur_max[2] - blur_min[2] < fMinDist) {
     float avg = (blur_min[2] + blur_max[2]) * 0.5f;
     blur_min[2] = avg - fMinDist * 0.5f;
-    blur_max[2] = avg - fMinDist * 0.5f;
+    blur_max[2] = avg + fMinDist * 0.5f;
   }
 }
 
@@ -1717,6 +1717,17 @@ void CPlugin::DX12_BlurPasses()
     return;
 
   int passes = min(NUM_BLUR_TEX, m_nHighestBlurTexUsedThisFrame * 2);
+
+  // Diagnostic: log blur pass info once per preset load
+  if (GetTime() - m_fPresetStartTime < 0.1f && GetTime() - m_fPresetStartTime >= 0.0f) {
+    char dbg[256];
+    sprintf(dbg, "DX12 BlurPasses: highest=%d, passes=%d, PSO[0]=%s, PSO[1]=%s, blur[1].srv=%u, blur[3].srv=%u",
+            m_nHighestBlurTexUsedThisFrame, passes,
+            m_dx12BlurPSO[0] ? "OK" : "NULL", m_dx12BlurPSO[1] ? "OK" : "NULL",
+            m_dx12Blur[1].srvIndex, m_dx12Blur[3].srvIndex);
+    DebugLogA(dbg);
+  }
+
   if (passes == 0)
     return;
 
@@ -1758,6 +1769,9 @@ void CPlugin::DX12_BlurPasses()
   cmdList->SetDescriptorHeaps(1, heaps);
   cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
 
+  // DIAG: log blur details once per preset load
+  bool blurDiag = (GetTime() - m_fPresetStartTime < 0.1f && GetTime() - m_fPresetStartTime >= 0.0f);
+
   for (int i = 0; i < passes; i++) {
     // Source: pass 0 reads VS[0], subsequent passes read blur[i-1]
     DX12Texture& srcTex = (i == 0) ? m_dx12VS[0] : m_dx12Blur[i - 1];
@@ -1779,7 +1793,7 @@ void CPlugin::DX12_BlurPasses()
     // Set blur PSO: even passes = horizontal (blur1), odd = vertical (blur2)
     cmdList->SetPipelineState(m_dx12BlurPSO[i % 2].Get());
 
-    // Update blur binding block with source texture at t0
+    // Update blur binding block with source texture at slot 12
     m_lpDX->UpdateBlurPassBinding(i, srcTex.srvIndex);
     cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetBlurPassBindingGpuHandle(i));
 
@@ -1793,6 +1807,20 @@ void CPlugin::DX12_BlurPasses()
 
     float fscale_now = fscale[i / 2];
     float fbias_now = fbias[i / 2];
+
+    if (blurDiag) {
+      char dbg[512];
+      sprintf(dbg, "DIAG BlurPass[%d]: src=%ux%u(srv=%u) dst=%ux%u(srv=%u,rtv=%u) "
+              "CT=%p h[0]=%p h[1]=%p h[2]=%p h[3]=%p h[5]=%p h[6]=%p "
+              "srcTexSize=(%.1f,%.1f,%.6f,%.6f) fscale=%.3f fbias=%.3f shadowSz=%u",
+              i, srcTex.width, srcTex.height, srcTex.srvIndex,
+              dstTex.width, dstTex.height, dstTex.srvIndex, dstTex.rtvIndex,
+              (void*)pCT, (void*)h[0], (void*)h[1], (void*)h[2], (void*)h[3], (void*)h[5], (void*)h[6],
+              srctexsize.x, srctexsize.y, srctexsize.z, srctexsize.w,
+              fscale_now, fbias_now,
+              pCT ? static_cast<DX12ConstantTable*>(pCT)->GetShadowSize() : 0);
+      DebugLogA(dbg);
+    }
 
     if (i % 2 == 0) {
       // Horizontal pass (blur1_ps): _c0=srctexsize, _c1=weights, _c2=distances, _c3=scale/bias/w_div
@@ -1860,15 +1888,6 @@ void CPlugin::DX12_RenderWarpAndComposite()
   if (!m_lpDX || !m_lpDX->m_device || !m_lpDX->m_commandList)
     return;
 
-  {
-    static int s_frameNum = 0;
-    char dbg[256];
-    sprintf(dbg, "DX12: RenderWarpAndComposite frame=%d warpPSO=%p compPSO=%p warpCT=%p compCT=%p",
-            s_frameNum++, (void*)m_dx12WarpPSO.Get(), (void*)m_dx12CompPSO.Get(),
-            (void*)m_shaders.warp.CT, (void*)m_shaders.comp.CT);
-    DebugLogA(dbg);
-  }
-
   auto* cmdList = m_lpDX->m_commandList.Get();
 
   // Deferred PSO creation: safe here because previous frame's command list
@@ -1914,10 +1933,59 @@ void CPlugin::DX12_RenderWarpAndComposite()
     cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
 
     // Build full 16-slot binding arrays (VS + blur + noise + disk textures)
+    // Warp reads VS[0] (previous frame's warp+shapes, after end-of-frame swap).
+    // Comp reads VS[1] (current frame's warp+shapes output), matching
+    // ShowToUser_NoShaders which also reads m_lpVS[1] (DX9 line 6529).
+    // DX9 ApplyShaderParams binds m_lpVS[0] for comp, but that's equivalent
+    // because DX9 does NOT swap until after comp — so m_lpVS[0] IS the warp
+    // input (previous frame), while m_lpVS[1] is the warp+shapes output.
+    // In DX12, VS[0] is ALSO the warp input. The comp shader needs the
+    // warp+shapes output = VS[1].
     UINT warpSlots[16], compSlots[16];
     BuildBindingSlots(&m_shaders.warp.params, m_dx12VS[0], warpSlots);
     BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots);
     m_lpDX->UpdatePerFrameBindings(warpSlots, compSlots);
+
+    // Diagnostic: log binding slots once per preset load (first 100ms)
+    if (GetTime() - m_fPresetStartTime < 0.1f && GetTime() - m_fPresetStartTime >= 0.0f) {
+      // Log comp shader's m_texcode and resulting binding slots
+      {
+        char dbg[512];
+        CShaderParams* cp = &m_shaders.comp.params;
+        sprintf(dbg, "DIAG CompBindings texcode: [%d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d]",
+                cp->m_texcode[0], cp->m_texcode[1], cp->m_texcode[2], cp->m_texcode[3],
+                cp->m_texcode[4], cp->m_texcode[5], cp->m_texcode[6], cp->m_texcode[7],
+                cp->m_texcode[8], cp->m_texcode[9], cp->m_texcode[10], cp->m_texcode[11],
+                cp->m_texcode[12], cp->m_texcode[13], cp->m_texcode[14], cp->m_texcode[15]);
+        DebugLogA(dbg);
+        sprintf(dbg, "DIAG CompBindings slots:   [%u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u]",
+                compSlots[0], compSlots[1], compSlots[2], compSlots[3],
+                compSlots[4], compSlots[5], compSlots[6], compSlots[7],
+                compSlots[8], compSlots[9], compSlots[10], compSlots[11],
+                compSlots[12], compSlots[13], compSlots[14], compSlots[15]);
+        DebugLogA(dbg);
+        sprintf(dbg, "DIAG CompBindings blur SRVs: blur[1].srv=%u blur[3].srv=%u blur[5].srv=%u VS[1].srv=%u",
+                m_dx12Blur[1].srvIndex, m_dx12Blur[3].srvIndex, m_dx12Blur[5].srvIndex, m_dx12VS[1].srvIndex);
+        DebugLogA(dbg);
+      }
+      // Log warp shader's m_texcode
+      {
+        char dbg[512];
+        CShaderParams* wp = &m_shaders.warp.params;
+        sprintf(dbg, "DIAG WarpBindings texcode: [%d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d]",
+                wp->m_texcode[0], wp->m_texcode[1], wp->m_texcode[2], wp->m_texcode[3],
+                wp->m_texcode[4], wp->m_texcode[5], wp->m_texcode[6], wp->m_texcode[7],
+                wp->m_texcode[8], wp->m_texcode[9], wp->m_texcode[10], wp->m_texcode[11],
+                wp->m_texcode[12], wp->m_texcode[13], wp->m_texcode[14], wp->m_texcode[15]);
+        DebugLogA(dbg);
+        sprintf(dbg, "DIAG WarpBindings slots:   [%u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u]",
+                warpSlots[0], warpSlots[1], warpSlots[2], warpSlots[3],
+                warpSlots[4], warpSlots[5], warpSlots[6], warpSlots[7],
+                warpSlots[8], warpSlots[9], warpSlots[10], warpSlots[11],
+                warpSlots[12], warpSlots[13], warpSlots[14], warpSlots[15]);
+        DebugLogA(dbg);
+      }
+    }
 
     // Use preset warp PSO if available, else Phase 4 passthrough.
     // MD1 presets (nWarpPSVersion=0) have no custom shader — the simple
@@ -1926,6 +1994,16 @@ void CPlugin::DX12_RenderWarpAndComposite()
       cmdList->SetPipelineState(m_dx12WarpPSO.Get());
     } else {
       cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+    }
+
+    // Diagnostic: log warp pass state once per preset load (first 100ms)
+    if (GetTime() - m_fPresetStartTime < 0.1f && GetTime() - m_fPresetStartTime >= 0.0f) {
+      char dbg[256];
+      sprintf(dbg, "DX12 Warp Draw: PSO=%s, warpCT=%s, decay=%.4f",
+              m_dx12WarpPSO ? "PRESET" : "FALLBACK",
+              (m_shaders.warp.CT != nullptr) ? "yes" : "no",
+              (float)(*m_pState->var_pf_decay));
+      DebugLogA(dbg);
     }
 
     // Bind warp shader constant buffer
@@ -2057,6 +2135,7 @@ void CPlugin::DX12_RenderWarpAndComposite()
     PShaderInfo* compSI = &m_shaders.comp;
     if (compSI->CT) {
       ApplyShaderParams(&compSI->params, compSI->CT, m_pState);
+
       DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(compSI->CT);
       if (ct->GetShadowSize() > 0) {
         D3D12_GPU_VIRTUAL_ADDRESS cbAddr =
@@ -3065,7 +3144,6 @@ void CPlugin::DX12_DrawCustomShapes() {
       sprintf(dbg, "GPU Protection: Skipping shapes — total instances %d exceeds threshold %d (preset: %ls)",
               totalInstances, m_nHeavyPresetMaxInstances,
               wcsrchr(m_szCurrentPresetFile, L'\\') ? wcsrchr(m_szCurrentPresetFile, L'\\') + 1 : m_szCurrentPresetFile);
-      OutputDebugStringA(dbg);
       DebugLogA(dbg);
       return;
     }
@@ -3088,6 +3166,10 @@ void CPlugin::DX12_DrawCustomShapes() {
       effectiveMaxInstances = m_nMaxShapeInstances;
   }
 
+  int diag_shapesDrawn = 0, diag_shapesVisible = 0;
+  float diag_firstVisibleAlpha = 0;
+  DWORD diag_firstVisibleColor = 0;
+
   int num_reps = (m_pState->m_bBlending) ? 2 : 1;
   for (int rep = 0; rep < num_reps; rep++) {
     CState* pState = (rep == 0) ? m_pState : m_pOldState;
@@ -3107,7 +3189,6 @@ void CPlugin::DX12_DrawCustomShapes() {
             sprintf(dbg, "GPU Protection: Capping shape[%d] instances from %d to %d (res=%dx%d, preset: %ls)",
                     i, instances, effectiveMaxInstances, m_nTexSizeX, m_nTexSizeY,
                     wcsrchr(m_szCurrentPresetFile, L'\\') ? wcsrchr(m_szCurrentPresetFile, L'\\') + 1 : m_szCurrentPresetFile);
-            OutputDebugStringA(dbg);
             DebugLogA(dbg);
           }
           instances = effectiveMaxInstances;
@@ -3143,6 +3224,18 @@ void CPlugin::DX12_DrawCustomShapes() {
             ((((int)(*pState->m_shape[i].var_pf_r * 255)) & 0xFF) << 16) |
             ((((int)(*pState->m_shape[i].var_pf_g * 255)) & 0xFF) << 8) |
             ((((int)(*pState->m_shape[i].var_pf_b * 255)) & 0xFF));
+
+          // Shape diagnostics: track draw count and visibility
+          diag_shapesDrawn++;
+          float shapeAlpha = (float)*pState->m_shape[i].var_pf_a * alpha_mult;
+          if (shapeAlpha > 0.001f) {
+            if (diag_shapesVisible == 0) {
+              diag_firstVisibleAlpha = shapeAlpha;
+              diag_firstVisibleColor = v[0].Diffuse;
+            }
+            diag_shapesVisible++;
+          }
+
           v[1].Diffuse =
             ((((int)(*pState->m_shape[i].var_pf_a2 * 255 * alpha_mult)) & 0xFF) << 24) |
             ((((int)(*pState->m_shape[i].var_pf_r2 * 255)) & 0xFF) << 16) |
@@ -3226,6 +3319,14 @@ void CPlugin::DX12_DrawCustomShapes() {
         }
       }
     }
+  }
+
+  // Diagnostic: log shape draw stats once per preset load (first 100ms)
+  if (GetTime() - m_fPresetStartTime < 0.1f && GetTime() - m_fPresetStartTime >= 0.0f) {
+    char dbg[512];
+    sprintf(dbg, "DX12 Shapes: drawn=%d visible=%d firstAlpha=%.3f firstColor=0x%08X",
+            diag_shapesDrawn, diag_shapesVisible, diag_firstVisibleAlpha, diag_firstVisibleColor);
+    DebugLogA(dbg);
   }
 }
 
