@@ -8225,7 +8225,6 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
           AdjustSetting(g_settingsDesc[m_nSettingsCurSel].id, 1);
         return 0;
       case VK_ESCAPE:
-      case VK_F2:
         m_UI_mode = UI_REGULAR;
         return 0;
       }
@@ -9775,9 +9774,10 @@ static void DrawOwnerCheckbox(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBg, 
   FillRect(hdc, &rc, hBrBg);
   DeleteObject(hBrBg);
 
-  // Draw checkbox indicator square (13x13, vertically centered)
-  int boxSize = 13;
-  int boxY = rc.top + (rc.bottom - rc.top - boxSize) / 2;
+  // Draw checkbox indicator square, scaled to control height
+  int ctrlH = rc.bottom - rc.top;
+  int boxSize = max(ctrlH / 2, 11);
+  int boxY = rc.top + (ctrlH - boxSize) / 2;
   RECT rcBox = { rc.left + 1, boxY, rc.left + 1 + boxSize, boxY + boxSize };
 
   if (bDark) {
@@ -9802,15 +9802,15 @@ static void DrawOwnerCheckbox(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBg, 
     return;
   }
 
-  // Draw checkmark in dark mode
+  // Draw checkmark in dark mode (scaled proportionally to boxSize)
   if (bChecked) {
-    HPEN hPen = CreatePen(PS_SOLID, 2, colText);
+    int pw = max(boxSize / 7, 1) + 1;
+    HPEN hPen = CreatePen(PS_SOLID, pw, colText);
     HPEN hOld = (HPEN)SelectObject(hdc, hPen);
-    // Draw a checkmark: short stroke down-right, then long stroke up-right
-    int cx = rcBox.left + 3, cy = rcBox.top + 6;
-    MoveToEx(hdc, cx, cy, NULL);
-    LineTo(hdc, cx + 2, cy + 3);
-    LineTo(hdc, cx + 8, cy - 3);
+    int pad = max(boxSize / 4, 2);
+    MoveToEx(hdc, rcBox.left + pad, rcBox.top + boxSize * 6 / 10, NULL);
+    LineTo(hdc, rcBox.left + boxSize * 4 / 10, rcBox.bottom - pad);
+    LineTo(hdc, rcBox.right - pad, rcBox.top + pad);
     SelectObject(hdc, hOld);
     DeleteObject(hPen);
   }
@@ -11210,7 +11210,9 @@ void CPlugin::BuildSettingsControls() {
   TabCtrl_AdjustRect(m_hSettingsTab, FALSE, &rcDisplay);
   int tabTop = rcDisplay.top;
 
-  int x = 16, lw = 160, lineH = 26, gap = 6;
+  int lineH = GetSettingsLineHeight();
+  int gap = 6, x = 16;
+  int lw = MulDiv(160, lineH, 26);
   int rw = clientW - 36;
   int sliderW = rw - lw - 60;
   wchar_t buf[64];
@@ -11251,14 +11253,14 @@ void CPlugin::BuildSettingsControls() {
 
   // Nav buttons: ◄  ►  ✂ (copy path)  |  ▲ Up  ▼ Into
   {
-    int btnW = 40;
+    int btnW = MulDiv(40, lineH, 26);
     int btnGap = 6;
     PAGE_CTRL(0, CreateBtn(hw, L"\x25C4", IDC_MW_PRESET_PREV, x, y, btnW, lineH + 4, hFont));
     PAGE_CTRL(0, CreateBtn(hw, L"\x25BA", IDC_MW_PRESET_NEXT, x + btnW + btnGap, y, btnW, lineH + 4, hFont));
     PAGE_CTRL(0, CreateBtn(hw, L"\x2702", IDC_MW_PRESET_COPY, x + 2 * (btnW + btnGap), y, btnW, lineH + 4, hFont));
     // Directory navigation: Up (parent) and Into (selected subfolder)
     int dirBtnX = x + 3 * (btnW + btnGap) + 10;
-    int dirBtnW = 55;
+    int dirBtnW = MulDiv(55, lineH, 26);
     PAGE_CTRL(0, CreateBtn(hw, L"\x25B2 Up", IDC_MW_PRESET_UP, dirBtnX, y, dirBtnW, lineH + 4, hFont));
     PAGE_CTRL(0, CreateBtn(hw, L"\x25BC Into", IDC_MW_PRESET_INTO, dirBtnX + dirBtnW + btnGap, y, dirBtnW, lineH + 4, hFont));
     y += lineH + 4 + gap + 4;
@@ -11290,14 +11292,22 @@ void CPlugin::BuildSettingsControls() {
   PAGE_CTRL(0, CreateCheck(hw, L"Borderless Window",       IDC_MW_BORDERLESS,   x, y, rw, lineH, hFont, m_WindowBorderless)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Dark Theme",              IDC_MW_DARK_THEME,   x, y, rw, lineH, hFont, m_bSettingsDarkTheme));
   y += lineH + gap + 4;
-  PAGE_CTRL(0, CreateBtn(hw, L"Resources...", IDC_MW_RESOURCES, x, y, 95, lineH, hFont));
-  PAGE_CTRL(0, CreateBtn(hw, L"Reset", IDC_MW_RESET_ALL, x + 99, y, 65, lineH, hFont));
-  PAGE_CTRL(0, CreateBtn(hw, L"Save Safe", IDC_MW_SAVE_DEFAULTS, x + 168, y, 80, lineH, hFont));
-  PAGE_CTRL(0, CreateBtn(hw, L"Safe Reset", IDC_MW_USER_RESET, x + 252, y, 80, lineH, hFont));
+  {
+    int bx = x, bg = 4;
+    int bw1 = MulDiv(95, lineH, 26), bw2 = MulDiv(65, lineH, 26), bw3 = MulDiv(80, lineH, 26);
+    PAGE_CTRL(0, CreateBtn(hw, L"Resources...", IDC_MW_RESOURCES, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
+    PAGE_CTRL(0, CreateBtn(hw, L"Reset", IDC_MW_RESET_ALL, bx, y, bw2, lineH, hFont)); bx += bw2 + bg;
+    PAGE_CTRL(0, CreateBtn(hw, L"Save Safe", IDC_MW_SAVE_DEFAULTS, bx, y, bw3, lineH, hFont)); bx += bw3 + bg;
+    PAGE_CTRL(0, CreateBtn(hw, L"Safe Reset", IDC_MW_USER_RESET, bx, y, bw3, lineH, hFont));
+  }
   y += lineH + gap;
-  PAGE_CTRL(0, CreateBtn(hw, L"Reset Window", IDC_MW_RESET_WINDOW, x, y, 100, lineH, hFont));
-  PAGE_CTRL(0, CreateBtn(hw, L"Font +", IDC_MW_FONT_PLUS, x + 104, y, 55, lineH, hFont));
-  PAGE_CTRL(0, CreateBtn(hw, L"Font \x2013", IDC_MW_FONT_MINUS, x + 163, y, 55, lineH, hFont));
+  {
+    int bx = x, bg = 4;
+    int bw1 = MulDiv(100, lineH, 26), bw2 = MulDiv(55, lineH, 26);
+    PAGE_CTRL(0, CreateBtn(hw, L"Reset Window", IDC_MW_RESET_WINDOW, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
+    PAGE_CTRL(0, CreateBtn(hw, L"Font +", IDC_MW_FONT_PLUS, bx, y, bw2, lineH, hFont)); bx += bw2 + bg;
+    PAGE_CTRL(0, CreateBtn(hw, L"Font \x2013", IDC_MW_FONT_MINUS, bx, y, bw2, lineH, hFont));
+  }
 
   // ====== PAGE 1: Visual (created hidden) ======
   y = tabTop + 10;
@@ -11356,7 +11366,7 @@ void CPlugin::BuildSettingsControls() {
   swprintf(buf, 64, L"%.0f", m_VisVersion);
   PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_VIS_VERSION, x + lw + 4, y, 60, lineH, hFont, 0, false));
   y += lineH + gap + 4;
-  PAGE_CTRL(1, CreateBtn(hw, L"Reset", IDC_MW_RESET_VISUAL, x, y, 80, lineH, hFont));
+  PAGE_CTRL(1, CreateBtn(hw, L"Reset", IDC_MW_RESET_VISUAL, x, y, MulDiv(80, lineH, 26), lineH, hFont));
   y += lineH + gap + 8;
 
   // -- GPU Protection section --
@@ -11385,7 +11395,7 @@ void CPlugin::BuildSettingsControls() {
   PAGE_CTRL(1, CreateEdit(hw, buf, IDC_MW_GPU_HEAVY_THRESHOLD, x + lw + 4, y, 60, lineH, hFont, 0, false));
   y += lineH + gap + 4;
 
-  PAGE_CTRL(1, CreateBtn(hw, L"Reload Preset", IDC_MW_GPU_RELOAD_PRESET, x, y, 110, lineH, hFont));
+  PAGE_CTRL(1, CreateBtn(hw, L"Reload Preset", IDC_MW_GPU_RELOAD_PRESET, x, y, MulDiv(110, lineH, 26), lineH, hFont));
 
   // ====== PAGE 2: Colors (created hidden) ======
   y = tabTop + 10;
@@ -11439,7 +11449,7 @@ void CPlugin::BuildSettingsControls() {
   swprintf(buf, 64, L"%.3f", m_AutoHueSeconds);
   PAGE_CTRL(2, CreateEdit(hw, buf, IDC_MW_AUTO_HUE_SEC, x + rw / 2 + 64, y, 70, lineH, hFont, 0, false));
   y += lineH + gap + 4;
-  PAGE_CTRL(2, CreateBtn(hw, L"Reset", IDC_MW_RESET_COLORS, x, y, 80, lineH, hFont));
+  PAGE_CTRL(2, CreateBtn(hw, L"Reset", IDC_MW_RESET_COLORS, x, y, MulDiv(80, lineH, 26), lineH, hFont));
 
   // ====== PAGE 3: Sound (created hidden) ======
   y = tabTop + 10;
@@ -11486,8 +11496,12 @@ void CPlugin::BuildSettingsControls() {
     PAGE_CTRL(4, hList);
   }
   y += 204;
-  PAGE_CTRL(4, CreateBtn(hw, L"Add...", IDC_MW_FILE_ADD, x, y, 70, lineH, hFont));
-  PAGE_CTRL(4, CreateBtn(hw, L"Remove", IDC_MW_FILE_REMOVE, x + 74, y, 70, lineH, hFont));
+  {
+    int bx = x, bg = 4;
+    int fbw = MulDiv(70, lineH, 26);
+    PAGE_CTRL(4, CreateBtn(hw, L"Add...", IDC_MW_FILE_ADD, bx, y, fbw, lineH, hFont)); bx += fbw + bg;
+    PAGE_CTRL(4, CreateBtn(hw, L"Remove", IDC_MW_FILE_REMOVE, bx, y, fbw, lineH, hFont));
+  }
   y += lineH + gap;
   {
     HWND hDesc = CreateWindowExW(0, L"STATIC",
@@ -11517,8 +11531,12 @@ void CPlugin::BuildSettingsControls() {
     PAGE_CTRL(4, hEdit);
   }
   y += lineH + 6;
-  PAGE_CTRL(4, CreateBtn(hw, L"Browse...", IDC_MW_RANDTEX_BROWSE, x, y, 80, lineH, hFont));
-  PAGE_CTRL(4, CreateBtn(hw, L"Clear", IDC_MW_RANDTEX_CLEAR, x + 84, y, 60, lineH, hFont));
+  {
+    int bx = x, bg = 4;
+    int bw1 = MulDiv(80, lineH, 26), bw2 = MulDiv(60, lineH, 26);
+    PAGE_CTRL(4, CreateBtn(hw, L"Browse...", IDC_MW_RANDTEX_BROWSE, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
+    PAGE_CTRL(4, CreateBtn(hw, L"Clear", IDC_MW_RANDTEX_CLEAR, bx, y, bw2, lineH, hFont));
+  }
 
   // ===== Messages tab (page 5) =====
   y = tabTop + 10;
@@ -11537,29 +11555,36 @@ void CPlugin::BuildSettingsControls() {
   }
   y += 10 * lineH + 4;
 
-  // Button row 1: Push Now, Up, Down, Add, Edit, Delete
+  // Button row 1: Push Now, Up, Down, Add, Edit, Delete, Play
   {
-    int bx = x, btnW = 65, arrowW = 30, btnGap = 4;
-    PAGE_CTRL(5, CreateBtn(hw, L"Push Now", IDC_MW_MSG_PUSH, bx, y, btnW, lineH, hFont));
-    bx += btnW + btnGap;
+    int bx = x, btnGap = 4;
+    int pushW = MulDiv(75, lineH, 26), arrowW = MulDiv(30, lineH, 26);
+    int smallW = MulDiv(40, lineH, 26), medW = MulDiv(50, lineH, 26);
+    PAGE_CTRL(5, CreateBtn(hw, L"Push Now", IDC_MW_MSG_PUSH, bx, y, pushW, lineH, hFont));
+    bx += pushW + btnGap;
     PAGE_CTRL(5, CreateBtn(hw, L"\x25B2", IDC_MW_MSG_UP, bx, y, arrowW, lineH, hFont));
     bx += arrowW + btnGap;
     PAGE_CTRL(5, CreateBtn(hw, L"\x25BC", IDC_MW_MSG_DOWN, bx, y, arrowW, lineH, hFont));
     bx += arrowW + btnGap;
-    PAGE_CTRL(5, CreateBtn(hw, L"Add", IDC_MW_MSG_ADD, bx, y, 40, lineH, hFont));
-    bx += 40 + btnGap;
-    PAGE_CTRL(5, CreateBtn(hw, L"Edit", IDC_MW_MSG_EDIT, bx, y, 40, lineH, hFont));
-    bx += 40 + btnGap;
-    PAGE_CTRL(5, CreateBtn(hw, L"Delete", IDC_MW_MSG_DELETE, bx, y, 50, lineH, hFont));
-    bx += 50 + btnGap;
-    PAGE_CTRL(5, CreateBtn(hw, m_bMsgAutoplay ? L"Stop" : L"Play", IDC_MW_MSG_PLAY, bx, y, 50, lineH, hFont));
+    PAGE_CTRL(5, CreateBtn(hw, L"Add", IDC_MW_MSG_ADD, bx, y, smallW, lineH, hFont));
+    bx += smallW + btnGap;
+    PAGE_CTRL(5, CreateBtn(hw, L"Edit", IDC_MW_MSG_EDIT, bx, y, smallW, lineH, hFont));
+    bx += smallW + btnGap;
+    PAGE_CTRL(5, CreateBtn(hw, L"Delete", IDC_MW_MSG_DELETE, bx, y, medW, lineH, hFont));
+    bx += medW + btnGap;
+    PAGE_CTRL(5, CreateBtn(hw, m_bMsgAutoplay ? L"Stop" : L"Play", IDC_MW_MSG_PLAY, bx, y, medW, lineH, hFont));
   }
   y += lineH + gap;
 
-  PAGE_CTRL(5, CreateBtn(hw, L"Reload from File", IDC_MW_MSG_RELOAD, x, y, 130, lineH, hFont));
-  PAGE_CTRL(5, CreateBtn(hw, L"Paste", IDC_MW_MSG_PASTE, x + 134, y, 55, lineH, hFont));
-  PAGE_CTRL(5, CreateBtn(hw, L"Open INI", IDC_MW_MSG_OPENINI, x + 193, y, 70, lineH, hFont));
-  PAGE_CTRL(5, CreateBtn(hw, L"Overrides", IDC_MW_MSG_OVERRIDES, x + 267, y, 75, lineH, hFont));
+  {
+    int bx = x, btnGap = 4;
+    int bw1 = MulDiv(130, lineH, 26), bw2 = MulDiv(55, lineH, 26);
+    int bw3 = MulDiv(70, lineH, 26), bw4 = MulDiv(75, lineH, 26);
+    PAGE_CTRL(5, CreateBtn(hw, L"Reload from File", IDC_MW_MSG_RELOAD, bx, y, bw1, lineH, hFont)); bx += bw1 + btnGap;
+    PAGE_CTRL(5, CreateBtn(hw, L"Paste", IDC_MW_MSG_PASTE, bx, y, bw2, lineH, hFont)); bx += bw2 + btnGap;
+    PAGE_CTRL(5, CreateBtn(hw, L"Open INI", IDC_MW_MSG_OPENINI, bx, y, bw3, lineH, hFont)); bx += bw3 + btnGap;
+    PAGE_CTRL(5, CreateBtn(hw, L"Overrides", IDC_MW_MSG_OVERRIDES, bx, y, bw4, lineH, hFont));
+  }
   y += lineH + gap + 4;
 
   // Autoplay controls
@@ -11643,6 +11668,19 @@ void CPlugin::ShowSettingsPage(int page) {
   m_nSettingsActivePage = page;
 }
 
+int CPlugin::GetSettingsLineHeight() {
+  if (!m_hSettingsFont || !m_hSettingsWnd) return 26;
+  HDC hdc = GetDC(m_hSettingsWnd);
+  if (!hdc) return 26;
+  HFONT hOld = (HFONT)SelectObject(hdc, m_hSettingsFont);
+  TEXTMETRIC tm = {};
+  GetTextMetrics(hdc, &tm);
+  SelectObject(hdc, hOld);
+  ReleaseDC(m_hSettingsWnd, hdc);
+  int h = tm.tmHeight + tm.tmExternalLeading + 6;
+  return max(h, 20);
+}
+
 void CPlugin::LayoutSettingsControls() {
   if (!m_hSettingsWnd || !m_hSettingsTab) return;
 
@@ -11653,8 +11691,9 @@ void CPlugin::LayoutSettingsControls() {
   // Get the content area inside the tab control
   RECT rcDisplay = { 0, 0, rc.right, rc.bottom };
   TabCtrl_AdjustRect(m_hSettingsTab, FALSE, &rcDisplay);
+  int lineH = GetSettingsLineHeight();
   int rw = rc.right - 36;  // 16px left + 20px right margin
-  int lw = 160;
+  int lw = MulDiv(160, lineH, 26);
   int newSliderW = rw - lw - 60;
   if (newSliderW < 80) newSliderW = 80;
 
@@ -11703,7 +11742,7 @@ void CPlugin::LayoutSettingsControls() {
   if (hFileList) {
     RECT r; GetWindowRect(hFileList, &r);
     MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
-    int lineH = 24, gap = 6;
+    int gap = 6;
     int reserveBelow = 4 + lineH + gap + lineH * 2 + gap + lineH + 2 + (lineH + 4) + 6 + lineH;  // buttons + desc + randtex label + edit + browse/clear
     int listBottom = rcDisplay.bottom - reserveBelow;
     if (listBottom < r.top + 40) listBottom = r.top + 40;
@@ -11712,8 +11751,9 @@ void CPlugin::LayoutSettingsControls() {
     int btnY = listBottom + 4;
     HWND hAdd = GetDlgItem(m_hSettingsWnd, IDC_MW_FILE_ADD);
     HWND hRem = GetDlgItem(m_hSettingsWnd, IDC_MW_FILE_REMOVE);
-    if (hAdd) MoveWindow(hAdd, r.left, btnY, 70, lineH, TRUE);
-    if (hRem) MoveWindow(hRem, r.left + 74, btnY, 70, lineH, TRUE);
+    int fbw = MulDiv(70, lineH, 26), fbg = 4;
+    if (hAdd) MoveWindow(hAdd, r.left, btnY, fbw, lineH, TRUE);
+    if (hRem) MoveWindow(hRem, r.left + fbw + fbg, btnY, fbw, lineH, TRUE);
 
     HWND hDesc = GetDlgItem(m_hSettingsWnd, IDC_MW_FILE_DESC);
     if (hDesc) MoveWindow(hDesc, r.left, btnY + lineH + gap, rw, lineH * 2, TRUE);
@@ -11726,8 +11766,9 @@ void CPlugin::LayoutSettingsControls() {
     HWND hRandClear = GetDlgItem(m_hSettingsWnd, IDC_MW_RANDTEX_CLEAR);
     if (hRandLabel) MoveWindow(hRandLabel, r.left, randY, rw, lineH, TRUE);
     if (hRandEdit) MoveWindow(hRandEdit, r.left, randY + lineH + 2, rw, lineH + 4, TRUE);
-    if (hRandBrowse) MoveWindow(hRandBrowse, r.left, randY + lineH + 2 + lineH + 6, 80, lineH, TRUE);
-    if (hRandClear) MoveWindow(hRandClear, r.left + 84, randY + lineH + 2 + lineH + 6, 60, lineH, TRUE);
+    int rbw1 = MulDiv(80, lineH, 26), rbw2 = MulDiv(60, lineH, 26);
+    if (hRandBrowse) MoveWindow(hRandBrowse, r.left, randY + lineH + 2 + lineH + 6, rbw1, lineH, TRUE);
+    if (hRandClear) MoveWindow(hRandClear, r.left + rbw1 + 4, randY + lineH + 2 + lineH + 6, rbw2, lineH, TRUE);
   }
 
   // Stretch Messages tab ListBox and reposition all controls below it
@@ -11735,7 +11776,7 @@ void CPlugin::LayoutSettingsControls() {
   if (hMsgList) {
     RECT r; GetWindowRect(hMsgList, &r);
     MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
-    int lineH = 24, gap = 6;
+    int gap = 6;
     // Reserve: gap + buttons + gap + reload + gap+4 + autoplay + 2 + sequential + gap + interval + gap + preview
     int reserveBelow = 4 + (lineH + gap) + (lineH + gap + 4) + (lineH + 2) + (lineH + gap) + (lineH + gap) + lineH * 3;
     int listBottom = rcDisplay.bottom - reserveBelow;
@@ -11746,24 +11787,31 @@ void CPlugin::LayoutSettingsControls() {
     int y = listBottom + 4;
     int x = r.left;
     // Button row
-    int bx = x, btnW = 65, arrowW = 30, btnGap = 4;
+    int bx = x, btnGap = 4;
+    int pushW = MulDiv(75, lineH, 26), arrowW = MulDiv(30, lineH, 26);
+    int smallW = MulDiv(40, lineH, 26), medW = MulDiv(50, lineH, 26);
     auto moveCtrl = [&](int id, int cx, int cy, int cw, int ch) {
       HWND h = GetDlgItem(m_hSettingsWnd, id);
       if (h) MoveWindow(h, cx, cy, cw, ch, TRUE);
     };
-    moveCtrl(IDC_MW_MSG_PUSH, bx, y, btnW, lineH); bx += btnW + btnGap;
+    moveCtrl(IDC_MW_MSG_PUSH, bx, y, pushW, lineH); bx += pushW + btnGap;
     moveCtrl(IDC_MW_MSG_UP, bx, y, arrowW, lineH); bx += arrowW + btnGap;
     moveCtrl(IDC_MW_MSG_DOWN, bx, y, arrowW, lineH); bx += arrowW + btnGap;
-    moveCtrl(IDC_MW_MSG_ADD, bx, y, 40, lineH); bx += 40 + btnGap;
-    moveCtrl(IDC_MW_MSG_EDIT, bx, y, 40, lineH); bx += 40 + btnGap;
-    moveCtrl(IDC_MW_MSG_DELETE, bx, y, 50, lineH); bx += 50 + btnGap;
-    moveCtrl(IDC_MW_MSG_PLAY, bx, y, 50, lineH);
+    moveCtrl(IDC_MW_MSG_ADD, bx, y, smallW, lineH); bx += smallW + btnGap;
+    moveCtrl(IDC_MW_MSG_EDIT, bx, y, smallW, lineH); bx += smallW + btnGap;
+    moveCtrl(IDC_MW_MSG_DELETE, bx, y, medW, lineH); bx += medW + btnGap;
+    moveCtrl(IDC_MW_MSG_PLAY, bx, y, medW, lineH);
     y += lineH + gap;
     // Reload + Paste + Open INI + Overrides
-    moveCtrl(IDC_MW_MSG_RELOAD, x, y, 130, lineH);
-    moveCtrl(IDC_MW_MSG_PASTE, x + 134, y, 55, lineH);
-    moveCtrl(IDC_MW_MSG_OPENINI, x + 193, y, 70, lineH);
-    moveCtrl(IDC_MW_MSG_OVERRIDES, x + 267, y, 75, lineH);
+    {
+      int rbx = x;
+      int bw1 = MulDiv(130, lineH, 26), bw2 = MulDiv(55, lineH, 26);
+      int bw3 = MulDiv(70, lineH, 26), bw4 = MulDiv(75, lineH, 26);
+      moveCtrl(IDC_MW_MSG_RELOAD, rbx, y, bw1, lineH); rbx += bw1 + btnGap;
+      moveCtrl(IDC_MW_MSG_PASTE, rbx, y, bw2, lineH); rbx += bw2 + btnGap;
+      moveCtrl(IDC_MW_MSG_OPENINI, rbx, y, bw3, lineH); rbx += bw3 + btnGap;
+      moveCtrl(IDC_MW_MSG_OVERRIDES, rbx, y, bw4, lineH);
+    }
     y += lineH + gap + 4;
     // Checkboxes
     moveCtrl(IDC_MW_MSG_AUTOPLAY, x, y, rw, lineH);
@@ -12043,25 +12091,29 @@ static BOOL CALLBACK SetFontProc(HWND hChild, LPARAM lParam) {
 void CPlugin::RebuildSettingsFonts() {
   if (!m_hSettingsWnd) return;
 
-  // Recreate fonts at new size
-  if (m_hSettingsFont) DeleteObject(m_hSettingsFont);
-  m_hSettingsFont = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+  // Save current tab selection
+  int curTab = m_hSettingsTab ? TabCtrl_GetCurSel(m_hSettingsTab) : 0;
 
-  if (m_hSettingsFontBold) DeleteObject(m_hSettingsFontBold);
-  m_hSettingsFontBold = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+  // Destroy all child windows (tab, controls, etc.)
+  HWND hChild = GetWindow(m_hSettingsWnd, GW_CHILD);
+  while (hChild) {
+    HWND hNext = GetWindow(hChild, GW_HWNDNEXT);
+    DestroyWindow(hChild);
+    hChild = hNext;
+  }
+  m_hSettingsTab = NULL;
+  for (int i = 0; i < 7; i++) m_settingsPageCtrls[i].clear();
 
-  // Apply to all child controls
-  EnumChildWindows(m_hSettingsWnd, SetFontProc, (LPARAM)m_hSettingsFont);
+  // Rebuild all controls at the new font size
+  // (BuildSettingsControls recreates fonts, tab, and all controls)
+  BuildSettingsControls();
+  ApplySettingsDarkTheme();
 
-  // Tab control needs the font too for header sizing
-  if (m_hSettingsTab)
-    SendMessage(m_hSettingsTab, WM_SETFONT, (WPARAM)m_hSettingsFont, TRUE);
-
-  InvalidateRect(m_hSettingsWnd, NULL, TRUE);
+  // Restore tab selection
+  if (m_hSettingsTab && curTab > 0) {
+    TabCtrl_SetCurSel(m_hSettingsTab, curTab);
+    ShowSettingsPage(curTab);
+  }
 }
 
 void CPlugin::NavigatePresetDirUp(HWND hSettingsWnd) {
@@ -15916,8 +15968,24 @@ bool CPlugin::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
     data.nColorB = -1;
   }
 
-  // Size the window for the desired client area, accounting for borders/title
-  int clientW = 440, clientH = 400;
+  // Create font for controls (use settings font size)
+  HFONT hFont = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+    DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  // Compute line height from font metrics for proportional layout
+  HDC hdcTmp = GetDC(hParent);
+  HFONT hOldTmp = (HFONT)SelectObject(hdcTmp, hFont);
+  TEXTMETRIC tmDlg = {};
+  GetTextMetrics(hdcTmp, &tmDlg);
+  SelectObject(hdcTmp, hOldTmp);
+  ReleaseDC(hParent, hdcTmp);
+  int dlgLineH = tmDlg.tmHeight + tmDlg.tmExternalLeading + 6;
+  if (dlgLineH < 20) dlgLineH = 20;
+
+  // Scale dialog dimensions from baseline (440x400 at lineH=20)
+  int clientW = MulDiv(440, dlgLineH, 20);
+  int clientH = MulDiv(400, dlgLineH, 20);
   DWORD dwStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
   DWORD dwExStyle = WS_EX_DLGMODALFRAME;
   RECT rcSize = { 0, 0, clientW, clientH };
@@ -15943,33 +16011,35 @@ bool CPlugin::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
   HWND hDlg = CreateWindowExW(dwExStyle,
     WND_CLASS, title, dwStyle,
     px, py, dlgW, dlgH, hParent, NULL, GetModuleHandle(NULL), NULL);
-  if (!hDlg) return false;
+  if (!hDlg) { DeleteObject(hFont); return false; }
 
   data.hDlgWnd = hDlg;
   SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)&data);
 
-  // Create font for controls
-  HFONT hFont = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-    DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-
-  int margin = 12, rw = dlgW - margin * 2 - 8;
-  int lblW = 90, editW = 60, y = 10;
+  // Scale layout constants from baseline (designed at lineH=20)
+  int margin = MulDiv(12, dlgLineH, 20);
+  int rw = clientW - margin * 2;
+  int lblW = MulDiv(90, dlgLineH, 20), editW = MulDiv(60, dlgLineH, 20);
+  int y = MulDiv(10, dlgLineH, 20);
   int xVal = margin + lblW + 4;
+  int smallH = dlgLineH - 4;      // label height
+  int editH = dlgLineH;           // edit control height
+  int btnH = dlgLineH + 4;        // button height
+  int textEditH = dlgLineH * 2 + 8; // multiline text edit
   wchar_t buf[64];
 
   // Text label + edit
-  CreateLabel(hDlg, L"Message Text:", margin, y, rw, 16, hFont);
-  y += 18;
-  HWND hText = CreateEdit(hDlg, data.szText, IDC_MSGEDIT_TEXT, margin, y, rw, 48, hFont,
+  CreateLabel(hDlg, L"Message Text:", margin, y, rw, smallH, hFont);
+  y += smallH + 2;
+  HWND hText = CreateEdit(hDlg, data.szText, IDC_MSGEDIT_TEXT, margin, y, rw, textEditH, hFont,
     ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL);
-  y += 54;
+  y += textEditH + 6;
 
   // Font section
-  CreateLabel(hDlg, L"Base Font:", margin, y + 2, 70, 20, hFont);
+  CreateLabel(hDlg, L"Base Font:", margin, y + 2, MulDiv(70, dlgLineH, 20), smallH, hFont);
   HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
     WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
-    margin + 74, y, rw - 74, 300, hDlg, (HMENU)(INT_PTR)IDC_MSGEDIT_FONT_COMBO,
+    margin + MulDiv(74, dlgLineH, 20), y, rw - MulDiv(74, dlgLineH, 20), 300, hDlg, (HMENU)(INT_PTR)IDC_MSGEDIT_FONT_COMBO,
     GetModuleHandle(NULL), NULL);
   if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
   for (int i = 0; i < MAX_CUSTOM_MESSAGE_FONTS; i++) {
@@ -15981,63 +16051,67 @@ bool CPlugin::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
     SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)entry);
   }
   SendMessage(hCombo, CB_SETCURSEL, data.nFont, 0);
-  y += 28;
+  y += dlgLineH + 4;
 
   // Choose Font, Choose Color, Color Swatch
-  CreateBtn(hDlg, L"Choose Font...", IDC_MSGEDIT_CHOOSE_FONT, margin, y, 110, 24, hFont);
-  CreateBtn(hDlg, L"Choose Color...", IDC_MSGEDIT_CHOOSE_COLOR, margin + 116, y, 110, 24, hFont);
+  int chooseBtnW = MulDiv(110, dlgLineH, 20);
+  CreateBtn(hDlg, L"Choose Font...", IDC_MSGEDIT_CHOOSE_FONT, margin, y, chooseBtnW, btnH, hFont);
+  CreateBtn(hDlg, L"Choose Color...", IDC_MSGEDIT_CHOOSE_COLOR, margin + chooseBtnW + 6, y, chooseBtnW, btnH, hFont);
   // Color swatch (owner-drawn button)
+  int swatchSize = smallH;
   HWND hSwatch = CreateWindowExW(0, L"BUTTON", L"",
     WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-    margin + 232, y + 2, 20, 20, hDlg,
+    margin + chooseBtnW * 2 + 12, y + 2, swatchSize, swatchSize, hDlg,
     (HMENU)(INT_PTR)IDC_MSGEDIT_COLOR_SWATCH, GetModuleHandle(NULL), NULL);
-  y += 30;
+  y += btnH + 6;
 
   // Font preview
-  HWND hPreview = CreateLabel(hDlg, L"", margin, y, rw, 20, hFont);
+  HWND hPreview = CreateLabel(hDlg, L"", margin, y, rw, smallH, hFont);
   SetWindowLongPtr(hPreview, GWL_ID, IDC_MSGEDIT_FONT_PREVIEW);
-  y += 28;
+  y += dlgLineH + 4;
 
   // Separator
   y += 4;
 
   // Size, X, Y on same row
-  CreateLabel(hDlg, L"Size (0-100):", margin, y + 2, lblW, 20, hFont);
+  CreateLabel(hDlg, L"Size (0-100):", margin, y + 2, lblW, smallH, hFont);
   swprintf(buf, 64, L"%.0f", data.fSize);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_SIZE, xVal, y, editW, 22, hFont);
-  CreateLabel(hDlg, L"X:", xVal + editW + 10, y + 2, 16, 20, hFont);
+  CreateEdit(hDlg, buf, IDC_MSGEDIT_SIZE, xVal, y, editW, editH, hFont);
+  int smallLblW = MulDiv(16, dlgLineH, 20);
+  CreateLabel(hDlg, L"X:", xVal + editW + 10, y + 2, smallLblW, smallH, hFont);
   swprintf(buf, 64, L"%.2f", data.x);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_XPOS, xVal + editW + 28, y, editW, 22, hFont);
-  CreateLabel(hDlg, L"Y:", xVal + editW * 2 + 38, y + 2, 16, 20, hFont);
+  CreateEdit(hDlg, buf, IDC_MSGEDIT_XPOS, xVal + editW + 10 + smallLblW + 2, y, editW, editH, hFont);
+  CreateLabel(hDlg, L"Y:", xVal + editW * 2 + 10 + smallLblW + 12, y + 2, smallLblW, smallH, hFont);
   swprintf(buf, 64, L"%.2f", data.y);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_YPOS, xVal + editW * 2 + 56, y, editW, 22, hFont);
-  y += 28;
+  CreateEdit(hDlg, buf, IDC_MSGEDIT_YPOS, xVal + editW * 2 + 10 + smallLblW * 2 + 14, y, editW, editH, hFont);
+  y += dlgLineH + 4;
 
   // Growth
-  CreateLabel(hDlg, L"Growth:", margin, y + 2, lblW, 20, hFont);
+  CreateLabel(hDlg, L"Growth:", margin, y + 2, lblW, smallH, hFont);
   swprintf(buf, 64, L"%.2f", data.growth);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_GROWTH, xVal, y, editW, 22, hFont);
-  y += 28;
+  CreateEdit(hDlg, buf, IDC_MSGEDIT_GROWTH, xVal, y, editW, editH, hFont);
+  y += dlgLineH + 4;
 
   // Duration
-  CreateLabel(hDlg, L"Duration (s):", margin, y + 2, lblW, 20, hFont);
+  CreateLabel(hDlg, L"Duration (s):", margin, y + 2, lblW, smallH, hFont);
   swprintf(buf, 64, L"%.1f", data.fTime);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_TIME, xVal, y, editW, 22, hFont);
-  y += 28;
+  CreateEdit(hDlg, buf, IDC_MSGEDIT_TIME, xVal, y, editW, editH, hFont);
+  y += dlgLineH + 4;
 
   // Fade In, Fade Out on same row
-  CreateLabel(hDlg, L"Fade In (s):", margin, y + 2, lblW, 20, hFont);
+  int fadeOutLblW = MulDiv(70, dlgLineH, 20);
+  CreateLabel(hDlg, L"Fade In (s):", margin, y + 2, lblW, smallH, hFont);
   swprintf(buf, 64, L"%.1f", data.fFade);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_FADEIN, xVal, y, editW, 22, hFont);
-  CreateLabel(hDlg, L"Fade Out:", xVal + editW + 10, y + 2, 70, 20, hFont);
+  CreateEdit(hDlg, buf, IDC_MSGEDIT_FADEIN, xVal, y, editW, editH, hFont);
+  CreateLabel(hDlg, L"Fade Out:", xVal + editW + 10, y + 2, fadeOutLblW, smallH, hFont);
   swprintf(buf, 64, L"%.1f", data.fFadeOut);
-  CreateEdit(hDlg, buf, IDC_MSGEDIT_FADEOUT, xVal + editW + 82, y, editW, 22, hFont);
-  y += 36;
+  CreateEdit(hDlg, buf, IDC_MSGEDIT_FADEOUT, xVal + editW + 10 + fadeOutLblW + 2, y, editW, editH, hFont);
+  y += dlgLineH + 12;
 
   // OK / Cancel buttons
-  int btnW = 80, btnH = 28;
-  CreateBtn(hDlg, L"OK", IDC_MSGEDIT_OK, dlgW / 2 - btnW - 10, y, btnW, btnH, hFont);
-  CreateBtn(hDlg, L"Cancel", IDC_MSGEDIT_CANCEL, dlgW / 2 + 10, y, btnW, btnH, hFont);
+  int okBtnW = MulDiv(80, dlgLineH, 20);
+  CreateBtn(hDlg, L"OK", IDC_MSGEDIT_OK, clientW / 2 - okBtnW - 10, y, okBtnW, btnH, hFont);
+  CreateBtn(hDlg, L"Cancel", IDC_MSGEDIT_CANCEL, clientW / 2 + 10, y, okBtnW, btnH, hFont);
 
   // Update the font preview
   UpdateMsgEditFontPreview(&data);
@@ -16266,8 +16340,24 @@ bool CPlugin::ShowMsgOverridesDialog(HWND hParent) {
   data.nSizeMax = m_nMsgOverrideSizeMax;
   data.nMaxOnScreen = m_nMsgMaxOnScreen;
 
-  // Size the window
-  int clientW = 350, clientH = 280;
+  // Create font for controls (use settings font size)
+  HFONT hFont = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+    DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  // Compute line height from font metrics for proportional layout
+  HDC hdcTmp = GetDC(hParent);
+  HFONT hOldTmp = (HFONT)SelectObject(hdcTmp, hFont);
+  TEXTMETRIC tmDlg = {};
+  GetTextMetrics(hdcTmp, &tmDlg);
+  SelectObject(hdcTmp, hOldTmp);
+  ReleaseDC(hParent, hdcTmp);
+  int dlgLineH = tmDlg.tmHeight + tmDlg.tmExternalLeading + 6;
+  if (dlgLineH < 20) dlgLineH = 20;
+
+  // Scale dialog dimensions from baseline (350x280 at lineH=20)
+  int clientW = MulDiv(350, dlgLineH, 20);
+  int clientH = MulDiv(280, dlgLineH, 20);
   DWORD dwStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
   DWORD dwExStyle = WS_EX_DLGMODALFRAME;
   RECT rcSize = { 0, 0, clientW, clientH };
@@ -16291,53 +16381,55 @@ bool CPlugin::ShowMsgOverridesDialog(HWND hParent) {
   HWND hDlg = CreateWindowExW(dwExStyle,
     WND_CLASS, L"Message Overrides", dwStyle,
     px, py, dlgW, dlgH, hParent, NULL, GetModuleHandle(NULL), NULL);
-  if (!hDlg) return false;
+  if (!hDlg) { DeleteObject(hFont); return false; }
 
   data.hDlgWnd = hDlg;
   SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)&data);
 
-  HFONT hFont = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-    DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-
-  int margin = 16, rw = clientW - margin * 2;
-  int y = 14;
+  // Scale layout constants from baseline (designed at lineH=20)
+  int margin = MulDiv(16, dlgLineH, 20), rw = clientW - margin * 2;
+  int editH = dlgLineH;
+  int smallH = dlgLineH - 4;
+  int btnH = dlgLineH + 4;
+  int y = MulDiv(14, dlgLineH, 20);
   wchar_t buf[32];
 
   // Checkboxes
-  CreateCheck(hDlg, L"Randomize font face", IDC_MSGOVERRIDE_RAND_FONT, margin, y, rw, 22, hFont, data.bRandomFont, true);
-  y += 26;
-  CreateCheck(hDlg, L"Randomize color", IDC_MSGOVERRIDE_RAND_COLOR, margin, y, rw, 22, hFont, data.bRandomColor, true);
-  y += 26;
-  CreateCheck(hDlg, L"Randomize effects (bold/italic)", IDC_MSGOVERRIDE_RAND_EFFECTS, margin, y, rw, 22, hFont, data.bRandomEffects, true);
-  y += 26;
-  CreateCheck(hDlg, L"Randomize size", IDC_MSGOVERRIDE_RAND_SIZE, margin, y, rw, 22, hFont, data.bRandomSize, true);
-  y += 28;
+  CreateCheck(hDlg, L"Randomize font face", IDC_MSGOVERRIDE_RAND_FONT, margin, y, rw, editH, hFont, data.bRandomFont, true);
+  y += dlgLineH + 2;
+  CreateCheck(hDlg, L"Randomize color", IDC_MSGOVERRIDE_RAND_COLOR, margin, y, rw, editH, hFont, data.bRandomColor, true);
+  y += dlgLineH + 2;
+  CreateCheck(hDlg, L"Randomize effects (bold/italic)", IDC_MSGOVERRIDE_RAND_EFFECTS, margin, y, rw, editH, hFont, data.bRandomEffects, true);
+  y += dlgLineH + 2;
+  CreateCheck(hDlg, L"Randomize size", IDC_MSGOVERRIDE_RAND_SIZE, margin, y, rw, editH, hFont, data.bRandomSize, true);
+  y += dlgLineH + 4;
 
   // Size min/max
-  int lblW2 = 70, editW2 = 50;
-  CreateLabel(hDlg, L"Min size:", margin + 20, y + 2, lblW2, 20, hFont);
+  int lblW2 = MulDiv(70, dlgLineH, 20), editW2 = MulDiv(50, dlgLineH, 20);
+  int indent = MulDiv(20, dlgLineH, 20);
+  CreateLabel(hDlg, L"Min size:", margin + indent, y + 2, lblW2, smallH, hFont);
   swprintf(buf, 32, L"%d", data.nSizeMin);
-  CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_SIZE_MIN, margin + 20 + lblW2, y, editW2, 22, hFont, 0);
-  CreateLabel(hDlg, L"Max size:", margin + 20 + lblW2 + editW2 + 16, y + 2, lblW2, 20, hFont);
+  CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_SIZE_MIN, margin + indent + lblW2, y, editW2, editH, hFont, 0);
+  CreateLabel(hDlg, L"Max size:", margin + indent + lblW2 + editW2 + 16, y + 2, lblW2, smallH, hFont);
   swprintf(buf, 32, L"%d", data.nSizeMax);
-  CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_SIZE_MAX, margin + 20 + lblW2 * 2 + editW2 + 16, y, editW2, 22, hFont, 0);
-  y += 28;
+  CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_SIZE_MAX, margin + indent + lblW2 * 2 + editW2 + 16, y, editW2, editH, hFont, 0);
+  y += dlgLineH + 4;
 
-  CreateLabel(hDlg, L"(min \x2265 5, max \x2264 50)", margin + 20, y, rw, 18, hFont);
-  y += 26;
+  CreateLabel(hDlg, L"(min \x2265 5, max \x2264 50)", margin + indent, y, rw, smallH, hFont);
+  y += dlgLineH + 2;
 
   // Max on screen
-  CreateLabel(hDlg, L"Max messages on screen:", margin, y + 2, 170, 20, hFont);
+  int maxLblW = MulDiv(170, dlgLineH, 20);
+  CreateLabel(hDlg, L"Max messages on screen:", margin, y + 2, maxLblW, smallH, hFont);
   swprintf(buf, 32, L"%d", data.nMaxOnScreen);
-  CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_MAX_ONSCREEN, margin + 174, y, 40, 22, hFont, 0);
-  CreateLabel(hDlg, L"(1-10)", margin + 220, y + 2, 50, 20, hFont);
-  y += 36;
+  CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_MAX_ONSCREEN, margin + maxLblW + 4, y, MulDiv(40, dlgLineH, 20), editH, hFont, 0);
+  CreateLabel(hDlg, L"(1-10)", margin + maxLblW + MulDiv(50, dlgLineH, 20), y + 2, MulDiv(50, dlgLineH, 20), smallH, hFont);
+  y += dlgLineH + 12;
 
   // OK / Cancel
-  int btnW = 80, btnH = 28;
-  CreateBtn(hDlg, L"OK", IDC_MSGOVERRIDE_OK, clientW / 2 - btnW - 10, y, btnW, btnH, hFont);
-  CreateBtn(hDlg, L"Cancel", IDC_MSGOVERRIDE_CANCEL, clientW / 2 + 10, y, btnW, btnH, hFont);
+  int okBtnW = MulDiv(80, dlgLineH, 20);
+  CreateBtn(hDlg, L"OK", IDC_MSGOVERRIDE_OK, clientW / 2 - okBtnW - 10, y, okBtnW, btnH, hFont);
+  CreateBtn(hDlg, L"Cancel", IDC_MSGOVERRIDE_CANCEL, clientW / 2 + 10, y, okBtnW, btnH, hFont);
 
   // Show dialog and make parent modal
   ShowWindow(hDlg, SW_SHOW);
