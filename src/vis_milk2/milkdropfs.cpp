@@ -3221,6 +3221,15 @@ void CPlugin::DX12_DrawCustomShapes() {
           v[0].z = 0;
           v[0].tu = 0.5f;
           v[0].tv = 0.5f;
+          // Early-exit: skip shapes where both center and outer alpha are zero.
+          // With SrcAlpha/InvSrcAlpha blending, alpha=0 shapes contribute nothing
+          // but still cost draw calls. Matches MilkDrop2 behavior where invisible
+          // shapes don't affect the render target.
+          float shapeA  = (float)*pState->m_shape[i].var_pf_a  * alpha_mult;
+          float shapeA2 = (float)*pState->m_shape[i].var_pf_a2 * alpha_mult;
+          if (shapeA <= 0.0f && shapeA2 <= 0.0f)
+            continue;
+
           v[0].Diffuse =
             ((((int)(*pState->m_shape[i].var_pf_a * 255 * alpha_mult)) & 0xFF) << 24) |
             ((((int)(*pState->m_shape[i].var_pf_r * 255)) & 0xFF) << 16) |

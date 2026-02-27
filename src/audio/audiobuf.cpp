@@ -17,8 +17,8 @@ float mdropdx12_audio_sensitivity = 1.0f;  // Pre-quantization gain applied to W
 bool  mdropdx12_audio_adaptive = false;    // AudioSensitivity=-1: auto-normalize audio levels
 
 // Adaptive audio normalization state
-static float s_adaptivePeak = 0.01f;   // Tracked peak level (never zero to avoid div-by-zero)
-static float s_adaptiveGain = 32.0f;   // Current computed gain
+static float s_adaptivePeak = 0.1f;    // Tracked peak level (start assuming moderate audio)
+static float s_adaptiveGain = 1.0f;    // Current computed gain (start at unity)
 
 void ResetAudioBuf() {
   std::unique_lock<std::mutex> lock(pcmLpbMutex);
@@ -59,6 +59,7 @@ void GetAudioBuf(unsigned char* pWaveL, unsigned char* pWaveR, int SamplesCount)
 }
 
 int8_t FltToInt(float flt) {
+  static int s_diagCount = 0;
   float gain;
   if (mdropdx12_audio_adaptive) {
     // Adaptive mode: track peak level and auto-compute gain
@@ -67,15 +68,24 @@ int8_t FltToInt(float flt) {
       s_adaptivePeak = absFlt;               // Instant attack
     else
       s_adaptivePeak *= 0.99998f;            // Slow decay (~1.5s at 48kHz)
-    // Target 70% of full range, clamped to [1, 64]
-    gain = 0.7f / (s_adaptivePeak > 0.0001f ? s_adaptivePeak : 0.0001f);
-    if (gain < 1.0f)  gain = 1.0f;
-    if (gain > 64.0f) gain = 64.0f;
+    // Target 10% of full range — produces gain=1.0 at typical music levels
+    // (WASAPI peak ~0.1). Gain < 1.0 attenuates loud audio to prevent
+    // spectrum saturation; gain > 1.0 gently boosts very quiet audio.
+    gain = 0.10f / (s_adaptivePeak > 0.0001f ? s_adaptivePeak : 0.0001f);
+    if (gain < 0.1f)  gain = 0.1f;   // Floor: don't mute completely
+    if (gain > 8.0f)  gain = 8.0f;   // Ceiling: moderate boost for very quiet audio
     s_adaptiveGain = gain;
   } else {
     gain = mdropdx12_audio_sensitivity;       // Fixed gain from INI
   }
   flt *= gain;
+  if (++s_diagCount >= 48000) { // Log once per ~1 second
+    char dbg[128];
+    sprintf(dbg, "[AudioDiag] adaptive=%d gain=%.3f peak=%.5f flt_out=%.4f\n",
+      (int)mdropdx12_audio_adaptive, gain, s_adaptivePeak, flt);
+    OutputDebugStringA(dbg);
+    s_diagCount = 0;
+  }
   if (flt >= 1.0f)  return +127;
   if (flt < -1.0f)  return -128;
   return (int8_t)(flt * 128);
