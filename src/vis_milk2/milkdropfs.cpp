@@ -729,33 +729,35 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
           LoadRandomPreset(m_fBlendTimeAuto);
       }
 
-      for (int i = 0; i < NUM_SUPERTEXTS; i++) {
-        // randomly spawn Song Title, if time
-        if (m_fTimeBetweenRandomSongTitles > 0 &&
-          !m_supertexts[i].bRedrawSuperText &&
-          GetTime() >= m_supertexts[i].fStartTime + m_supertexts[i].fDuration + 1.0f / GetFps()) {
-          int n = GetNumToSpawn(GetTime(), fDeltaT, 1.0f / m_fTimeBetweenRandomSongTitles, 0.5f, m_nSongTitlesSpawned);
-          if (n > 0) {
-            LaunchSongTitleAnim(i);
-            m_nSongTitlesSpawned += n;
+      if (MessagesEnabled()) {
+        for (int i = 0; i < NUM_SUPERTEXTS; i++) {
+          // randomly spawn Song Title, if time
+          if (m_fTimeBetweenRandomSongTitles > 0 &&
+            !m_supertexts[i].bRedrawSuperText &&
+            GetTime() >= m_supertexts[i].fStartTime + m_supertexts[i].fDuration + 1.0f / GetFps()) {
+            int n = GetNumToSpawn(GetTime(), fDeltaT, 1.0f / m_fTimeBetweenRandomSongTitles, 0.5f, m_nSongTitlesSpawned);
+            if (n > 0) {
+              LaunchSongTitleAnim(i);
+              m_nSongTitlesSpawned += n;
+            }
           }
-        }
 
-        // Legacy random spawn Custom Message (when autoplay off)
-        if (!m_bMsgAutoplay && m_fTimeBetweenRandomCustomMsgs > 0 &&
-          !m_supertexts[i].bRedrawSuperText &&
-          GetTime() >= m_supertexts[i].fStartTime + m_supertexts[i].fDuration + 1.0f / GetFps()) {
-          int n = GetNumToSpawn(GetTime(), fDeltaT, 1.0f / m_fTimeBetweenRandomCustomMsgs, 0.5f, m_nCustMsgsSpawned);
-          if (n > 0) {
-            LaunchCustomMessage(-1);
-            m_nCustMsgsSpawned += n;
+          // Legacy random spawn Custom Message (when autoplay off)
+          if (!m_bMsgAutoplay && m_fTimeBetweenRandomCustomMsgs > 0 &&
+            !m_supertexts[i].bRedrawSuperText &&
+            GetTime() >= m_supertexts[i].fStartTime + m_supertexts[i].fDuration + 1.0f / GetFps()) {
+            int n = GetNumToSpawn(GetTime(), fDeltaT, 1.0f / m_fTimeBetweenRandomCustomMsgs, 0.5f, m_nCustMsgsSpawned);
+            if (n > 0) {
+              LaunchCustomMessage(-1);
+              m_nCustMsgsSpawned += n;
+            }
           }
         }
       }
 
       // Autoplay custom messages (managed via Messages tab)
       // Moved outside per-slot loop to support concurrent messages via m_nMsgMaxOnScreen
-      if (m_bMsgAutoplay && m_nMsgAutoplayCount > 0 &&
+      if (MessagesEnabled() && m_bMsgAutoplay && m_nMsgAutoplayCount > 0 &&
         m_fNextAutoMsgTime > 0 && GetTime() >= m_fNextAutoMsgTime) {
         int nActiveCustomMsgs = 0;
         for (int j = 0; j < NUM_SUPERTEXTS; j++) {
@@ -840,7 +842,8 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
     // ──── DX12 rendering path ────
     if (!lpDevice && m_lpDX && m_lpDX->m_device) {
       DX12_RenderWarpAndComposite();
-      DrawUserSprites();
+      if (SpritesEnabled())
+        DrawUserSprites();
       std::swap(m_dx12VS[0], m_dx12VS[1]);
       return;
     }
@@ -2106,14 +2109,16 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     DX12_DrawSprites();
 
     // Burn completed supertexts into VS1 (persistence through warp feedback)
-    for (int i = 0; i < NUM_SUPERTEXTS; i++) {
-      if (m_supertexts[i].fStartTime >= 0 && !m_supertexts[i].bRedrawSuperText) {
-        float fProgress = (GetTime() - m_supertexts[i].fStartTime) / m_supertexts[i].fDuration;
-        if (fProgress >= 1.0f) {
-          ShowSongTitleAnim(m_nTexSizeX, m_nTexSizeY, fProgress, i);
-          float fTimeAfterFullDuration = GetTime() - m_supertexts[i].fStartTime - m_supertexts[i].fDuration;
-          if (fTimeAfterFullDuration >= m_supertexts[i].fBurnTime) {
-            m_supertexts[i].fStartTime = -1.0f;  // 'off' state
+    if (MessagesEnabled()) {
+      for (int i = 0; i < NUM_SUPERTEXTS; i++) {
+        if (m_supertexts[i].fStartTime >= 0 && !m_supertexts[i].bRedrawSuperText) {
+          float fProgress = (GetTime() - m_supertexts[i].fStartTime) / m_supertexts[i].fDuration;
+          if (fProgress >= 1.0f) {
+            ShowSongTitleAnim(m_nTexSizeX, m_nTexSizeY, fProgress, i);
+            float fTimeAfterFullDuration = GetTime() - m_supertexts[i].fStartTime - m_supertexts[i].fDuration;
+            if (fTimeAfterFullDuration >= m_supertexts[i].fBurnTime) {
+              m_supertexts[i].fStartTime = -1.0f;  // 'off' state
+            }
           }
         }
       }
@@ -2182,11 +2187,13 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
   }
 
   // ── Display active supertexts on the backbuffer ──
-  for (int i = 0; i < NUM_SUPERTEXTS; i++) {
-    if (m_supertexts[i].fStartTime >= 0 && !m_supertexts[i].bRedrawSuperText) {
-      float fProgress = (GetTime() - m_supertexts[i].fStartTime) / m_supertexts[i].fDuration;
-      if (fProgress <= 1.0f) {
-        ShowSongTitleAnim(GetWidth(), GetHeight(), min(fProgress, 0.9999f), i);
+  if (MessagesEnabled()) {
+    for (int i = 0; i < NUM_SUPERTEXTS; i++) {
+      if (m_supertexts[i].fStartTime >= 0 && !m_supertexts[i].bRedrawSuperText) {
+        float fProgress = (GetTime() - m_supertexts[i].fStartTime) / m_supertexts[i].fDuration;
+        if (fProgress <= 1.0f) {
+          ShowSongTitleAnim(GetWidth(), GetHeight(), min(fProgress, 0.9999f), i);
+        }
       }
     }
   }

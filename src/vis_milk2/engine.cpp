@@ -710,6 +710,7 @@ SettingDesc g_settingsDesc[] = {
   { L"Always On Top",          ST_BOOL,     SET_ALWAYS_ON_TOP,    0, 0, 0,       L"Milkwave",  L"WindowAlwaysOnTop" },
   { L"Borderless Window",      ST_BOOL,     SET_BORDERLESS,       0, 0, 0,       L"Milkwave",  L"WindowBorderless" },
   { L"Spout Output",           ST_BOOL,     SET_SPOUT,            0, 0, 0,       L"Settings",  L"bSpoutOut" },
+  { L"Messages/Sprites",       ST_INT,      SET_SPRITES_MESSAGES, 0, 3, 1,       L"Settings",  L"nSpriteMessagesMode" },
 };
 
 } // namespace mdrop (close for cross-namespace externs)
@@ -985,6 +986,7 @@ void Engine::MyPreInitialize() {
   m_bEnableRating = true;
   //m_bInstaScan            = false;
   m_bSongTitleAnims = false;
+  m_nSpriteMessagesMode = 3;  // Messages & Sprites
   m_fSongTitleAnimDuration = 1.7f;
   m_fTimeBetweenRandomSongTitles = -1.0f;
   m_fTimeBetweenRandomCustomMsgs = -1.0f;
@@ -1197,6 +1199,8 @@ void Engine::MyReadConfig() {
   // m_bShowPressF1ForHelp = GetPrivateProfileBoolW(L"Settings", L"bShowPressF1ForHelp", m_bShowPressF1ForHelp, pIni);
   //m_bShowMenuToolTips = GetPrivateProfileBool("settings","bShowMenuToolTips",m_bShowMenuToolTips,pIni);
   m_bSongTitleAnims = GetPrivateProfileBoolW(L"Settings", L"bSongTitleAnims", m_bSongTitleAnims, pIni);
+  m_nSpriteMessagesMode = GetPrivateProfileIntW(L"Settings", L"nSpriteMessagesMode", 3, pIni);
+  if (m_nSpriteMessagesMode < 0 || m_nSpriteMessagesMode > 3) m_nSpriteMessagesMode = 3;
   m_bEnablePresetStartup = GetPrivateProfileBoolW(L"Settings", L"bEnablePresetStartup", m_bEnablePresetStartup, pIni);
   m_bEnableAudioCapture = GetPrivateProfileBoolW(L"Settings", L"bEnableAudioCapture", m_bEnableAudioCapture, pIni);
   m_bEnableD2DText = GetPrivateProfileBoolW(L"Settings", L"bEnableD2DText", m_bEnableD2DText, pIni);
@@ -1436,6 +1440,7 @@ void Engine::MyWriteConfig() {
   WritePrivateProfileFloatW(m_fRenderQuality, L"fRenderQuality", pIni, L"Settings");
 
   WritePrivateProfileIntW(m_bSongTitleAnims, L"bSongTitleAnims", pIni, L"Settings");
+  WritePrivateProfileIntW(m_nSpriteMessagesMode, L"nSpriteMessagesMode", pIni, L"Settings");
   WritePrivateProfileIntW(m_bHardCutsDisabled, L"bHardCutsDisabled", pIni, L"Settings");
   WritePrivateProfileIntW(m_nInjectEffectMode, L"nInjectEffectMode", pIni, L"Settings");
   WritePrivateProfileIntW(m_bEnableRating, L"bEnableRating", pIni, L"Settings");

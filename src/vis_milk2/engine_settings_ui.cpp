@@ -63,6 +63,11 @@ void Engine::GetSettingValueString(int id, wchar_t* buf, int bufLen) {
   case SET_ALWAYS_ON_TOP:    lstrcpyW(buf, m_bAlwaysOnTop ? L"on" : L"off"); break;
   case SET_BORDERLESS:       lstrcpyW(buf, m_WindowBorderless ? L"on" : L"off"); break;
   case SET_SPOUT:            lstrcpyW(buf, bSpoutOut ? L"on" : L"off"); break;
+  case SET_SPRITES_MESSAGES: {
+    const wchar_t* labels[] = { L"Off", L"Messages", L"Sprites", L"Messages & Sprites" };
+    lstrcpyW(buf, labels[m_nSpriteMessagesMode & 3]);
+    break;
+  }
   default: buf[0] = 0; break;
   }
 }
@@ -89,6 +94,10 @@ void Engine::ToggleSetting(int id) {
   case SET_ALWAYS_ON_TOP:    pBool = &m_bAlwaysOnTop; break;
   case SET_BORDERLESS:       pBool = &m_WindowBorderless; break;
   case SET_SPOUT:            pBool = &bSpoutOut; break;
+  case SET_SPRITES_MESSAGES:
+    m_nSpriteMessagesMode = (m_nSpriteMessagesMode + 1) & 3;
+    SaveSettingToINI(SET_SPRITES_MESSAGES);
+    return;
   default: return;
   }
   *pBool = !(*pBool);
@@ -143,6 +152,9 @@ void Engine::SaveSettingToINI(int id) {
   case SET_SHOW_FPS:
   case SET_ALWAYS_ON_TOP:
   case SET_BORDERLESS:
+  case SET_SPRITES_MESSAGES:
+    swprintf(val, L"%d", m_nSpriteMessagesMode);
+    break;
   case SET_SPOUT: {
     bool bVal = false;
     switch (id) {
@@ -717,6 +729,17 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       SetWindowTextW(GetDlgItem(hWnd, IDC_MW_RANDTEX_EDIT), L"");
       p->SaveFallbackPaths();
       p->m_bNeedRescanTexturesDir = true;
+      return 0;
+    }
+
+    // Messages/Sprites combo box selection
+    if (id == IDC_MW_SPRITES_MESSAGES && code == CBN_SELCHANGE) {
+      HWND hCombo = (HWND)lParam;
+      int sel = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
+      if (sel >= 0 && sel <= 3) {
+        p->m_nSpriteMessagesMode = sel;
+        p->SaveSettingToINI(SET_SPRITES_MESSAGES);
+      }
       return 0;
     }
 
@@ -1722,6 +1745,21 @@ void Engine::BuildSettingsControls() {
   PAGE_CTRL(0, CreateCheck(hw, L"Hard Cuts Disabled",      IDC_MW_HARD_CUTS,    x, y, rw, lineH, hFont, m_bHardCutsDisabled)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Preset Lock on Startup",  IDC_MW_PRESET_LOCK,  x, y, rw, lineH, hFont, m_bPresetLockOnAtStartup)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Sequential Preset Order", IDC_MW_SEQ_ORDER,    x, y, rw, lineH, hFont, m_bSequentialPresetOrder)); y += lineH + 2;
+  PAGE_CTRL(0, CreateLabel(hw, L"Messages/Sprites:", x, y, lw, lineH, hFont));
+  {
+    HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
+      x + lw + 4, y, rw - lw - 4, lineH + 4 * lineH + 4, hw, (HMENU)(INT_PTR)IDC_MW_SPRITES_MESSAGES,
+      GetModuleHandle(NULL), NULL);
+    if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Off");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Messages");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Sprites");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Messages & Sprites");
+    SendMessageW(hCombo, CB_SETCURSEL, m_nSpriteMessagesMode, 0);
+    PAGE_CTRL(0, hCombo);
+  }
+  y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Song Title Animations",   IDC_MW_SONG_TITLE,   x, y, rw, lineH, hFont, m_bSongTitleAnims)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Change Preset w/ Song",   IDC_MW_CHANGE_SONG,  x, y, rw, lineH, hFont, m_ChangePresetWithSong)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Show FPS",                IDC_MW_SHOW_FPS,     x, y, rw, lineH, hFont, m_bShowFPS)); y += lineH + 2;

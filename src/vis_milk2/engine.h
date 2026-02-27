@@ -294,6 +294,11 @@ typedef std::vector<PresetInfo> PresetList;
 class Engine : public EngineShell {
 public:
   MDropDX12* mdropdx12;
+
+  // Messages/Sprites mode helpers
+  bool MessagesEnabled() const { return (m_nSpriteMessagesMode & 1) != 0; }
+  bool SpritesEnabled()  const { return (m_nSpriteMessagesMode & 2) != 0; }
+
   //====[ 1. members added to create this specific example plugin: ]================================================
 
 // =========================================================
@@ -375,6 +380,7 @@ public:
   bool		m_bEnableRating;
   //bool        m_bInstaScan;
   bool		m_bSongTitleAnims;
+  int     m_nSpriteMessagesMode = 3;  // 0=Off, 1=Messages, 2=Sprites, 3=Messages & Sprites
   float		m_fSongTitleAnimDuration;
   float		m_fTimeBetweenRandomSongTitles;
   float		m_fTimeBetweenRandomCustomMsgs;
