@@ -1,0 +1,2886 @@
+/*
+  Plugin module: Preset Management
+  Extracted from plugin.cpp for maintainability.
+  Contains: Preset loading, browsing, file operations, blend pattern, plasma generation
+*/
+
+#include "plugin.h"
+#include "plugin_helpers.h"
+#include "utility.h"
+#include "support.h"
+#include "resource.h"
+#include "defines.h"
+#include "shell_defines.h"
+#include "wasabi.h"
+#include <assert.h>
+#include <locale.h>
+#include <process.h>
+#include <strsafe.h>
+#include <Windows.h>
+#include "AutoCharFn.h"
+#include <sstream>
+
+#define FRAND ((rand() % 7381)/7380.0f)
+
+extern CPlugin g_plugin;
+extern int NumTotalPresetsLoaded;
+extern uint64_t LastSentMDropDX12Message;
+
+// Thread globals — defined in plugin.cpp
+extern volatile HANDLE g_hThread;
+extern volatile bool g_bThreadAlive;
+extern volatile int g_bThreadShouldQuit;
+extern CRITICAL_SECTION g_cs;
+
+// Forward declaration for helper defined later in this file
+// (non-static because also called from plugin.cpp and plugin_input.cpp)
+
+void CPlugin::dumpmsg(wchar_t* s) {
+  DebugLogW(s);
+}
+
+void CPlugin::PrevPreset(float fBlendTime) {
+  if (m_RemotePresetLink) {
+    PostMessageToMDropDX12Remote(WM_USER_PREV_PRESET);
+    return;
+  }
+
+  if (m_bSequentialPresetOrder) {
+    m_nCurrentPreset--;
+    if (m_nCurrentPreset < m_nDirs)
+      m_nCurrentPreset = m_nPresets - 1;
+    if (m_nCurrentPreset >= m_nPresets) // just in case
+      m_nCurrentPreset = m_nDirs;
+
+    wchar_t szFile[MAX_PATH];
+    lstrcpyW(szFile, m_szPresetDir);	// note: m_szPresetDir always ends with '\'
+    lstrcatW(szFile, m_presets[m_nCurrentPreset].szFilename.c_str());
+
+    LoadPreset(szFile, fBlendTime);
+  }
+  else {
+    int prev = (m_presetHistoryPos - 1 + PRESET_HIST_LEN) % PRESET_HIST_LEN;
+    if (m_presetHistoryPos != m_presetHistoryBackFence) {
+      m_presetHistoryPos = prev;
+      LoadPreset(m_presetHistory[m_presetHistoryPos].c_str(), fBlendTime);
+    }
+  }
+}
+
+void CPlugin::NextPreset(float fBlendTime)  // if not retracing our former steps, it will choose a random one.
+{
+  LoadRandomPreset(fBlendTime);
+}
+
+void CPlugin::LoadRandomPreset(float fBlendTime) {
+  if (m_RemotePresetLink) {
+    PostMessageToMDropDX12Remote(WM_USER_NEXT_PRESET);
+    return;
+  }
+
+  // make sure file list is ok
+  if (m_nPresets - m_nDirs == 0) {
+    wchar_t buf[1024];
+    swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILE_FOUND_IN_X_MILK), m_szPresetDir);
+    AddError(buf, 6.0f, ERR_MISC, true);
+    DebugLogA("ERROR: No preset files found in preset directory");
+
+    if (m_UI_mode == UI_REGULAR || m_UI_mode == UI_MENU) {
+      m_UI_mode = UI_LOAD;
+      m_bUserPagedUp = false;
+      m_bUserPagedDown = false;
+    }
+    return;
+  }
+
+  bool bHistoryEmpty = (m_presetHistoryFwdFence == m_presetHistoryBackFence);
+
+  // if we have history to march back forward through, do that first
+  if (!m_bSequentialPresetOrder) {
+    int next = (m_presetHistoryPos + 1) % PRESET_HIST_LEN;
+    if (next != m_presetHistoryFwdFence && !bHistoryEmpty) {
+      m_presetHistoryPos = next;
+      LoadPreset(m_presetHistory[m_presetHistoryPos].c_str(), fBlendTime);
+      return;
+    }
+  }
+
+  // --TEMPORARY--
+  // this comes in handy if you want to mass-modify a batch of presets;
+  // just automatically tweak values in Import, then they immediately get exported to a .MILK in a new dir.
+  /*
+  for (int i=0; i<m_nPresets; i++)
+  {
+    char szPresetFile[512];
+    lstrcpy(szPresetFile, m_szPresetDir);	// note: m_szPresetDir always ends with '\'
+    lstrcat(szPresetFile, m_pPresetAddr[i]);
+    //CState newstate;
+    m_state2.Import(szPresetFile, GetTime());
+
+    lstrcpy(szPresetFile, "c:\\t7\\");
+    lstrcat(szPresetFile, m_pPresetAddr[i]);
+    m_state2.Export(szPresetFile);
+  }
+  */
+  // --[END]TEMPORARY--
+
+  if (m_bSequentialPresetOrder) {
+    m_nCurrentPreset++;
+    if (m_nCurrentPreset < m_nDirs || m_nCurrentPreset >= m_nPresets)
+      m_nCurrentPreset = m_nDirs;
+  }
+  else {
+    // pick a random file
+    if (!m_bEnableRating || (m_presets[m_nPresets - 1].fRatingCum < 0.1f))// || (m_nRatingReadProgress < m_nPresets))
+    {
+      m_nCurrentPreset = m_nDirs + (rand() % (m_nPresets - m_nDirs));
+    }
+    else {
+      float cdf_pos = (rand() % 14345) / 14345.0f * m_presets[m_nPresets - 1].fRatingCum;
+
+      /*
+      char buf[512];
+      sprintf(buf, "max = %f, rand = %f, \tvalues: ", m_presets[m_nPresets - 1].fRatingCum, cdf_pos);
+      for (int i=m_nDirs; i<m_nPresets; i++)
+      {
+        char buf2[32];
+        sprintf(buf2, "%3.1f ", m_presets[i].fRatingCum);
+        lstrcat(buf, buf2);
+      }
+      dumpmsg(buf);
+      */
+
+      if (cdf_pos < m_presets[m_nDirs].fRatingCum) {
+        m_nCurrentPreset = m_nDirs;
+      }
+      else {
+        int lo = m_nDirs;
+        int hi = m_nPresets;
+        while (lo + 1 < hi) {
+          int mid = (lo + hi) / 2;
+          if (m_presets[mid].fRatingCum > cdf_pos)
+            hi = mid;
+          else
+            lo = mid;
+        }
+        m_nCurrentPreset = hi;
+      }
+    }
+  }
+
+  // m_pPresetAddr[m_nCurrentPreset] points to the preset file to load (w/o the path);
+  // first prepend the path, then load section [preset00] within that file
+  wchar_t szFile[MAX_PATH] = { 0 };
+  lstrcpyW(szFile, m_szPresetDir);	// note: m_szPresetDir always ends with '\'
+  lstrcatW(szFile, m_presets[m_nCurrentPreset].szFilename.c_str());
+
+  if (!bHistoryEmpty)
+    m_presetHistoryPos = (m_presetHistoryPos + 1) % PRESET_HIST_LEN;
+
+  LoadPreset(szFile, fBlendTime);
+}
+
+void CPlugin::RandomizeBlendPattern() {
+  if (!m_vertinfo)
+    return;
+
+  // note: we now avoid constant uniform blend b/c it's half-speed for shader blending.
+  //       (both old & new shaders would have to run on every pixel...)           reenabled due to further notice
+  int mixtype = 0 + (rand() % 19);
+  if (m_nMixType > -1) mixtype = m_nMixType;
+
+  if (mixtype == 0) {
+    // constant, uniform blend
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      for (int x = 0; x <= m_nGridX; x++) {
+        m_vertinfo[nVert].a = 1;
+        m_vertinfo[nVert].c = 0;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 1) {
+    // directional wipe
+    float ang = FRAND * 6.28f;
+    float vx = cosf(ang);
+    float vy = sinf(ang);
+    float band = 0.1f + 0.2f * FRAND; // 0.2 is good
+    float inv_band = 1.0f / band;
+
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy;
+      if (m_bScreenDependentRenderMode)
+        fy = (y / (float)m_nGridY);
+      else
+        fy = (y / (float)m_nGridY) * m_fAspectY;
+
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx;
+        if (m_bScreenDependentRenderMode)
+          fx = (x / (float)m_nGridX);
+        else
+          fx = (x / (float)m_nGridX) * m_fAspectX;
+
+        // at t==0, mix rangse from -10..0
+        // at t==1, mix ranges from   1..11
+
+        float t = (fx - 0.5f) * vx + (fy - 0.5f) * vy + 0.5f;
+        t = (t - 0.5f) / sqrtf(2.0f) + 0.5f;
+
+        m_vertinfo[nVert].a = inv_band * (1 + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;//(x/(float)m_nGridX - 0.5f)/band;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 2) {
+    // plasma transition
+    float band = 0.12f + 0.13f * FRAND;//0.02f + 0.18f*FRAND;
+    float inv_band = 1.0f / band;
+
+    // first generate plasma array of height values
+    m_vertinfo[0].c = FRAND;
+    m_vertinfo[m_nGridX].c = FRAND;
+    m_vertinfo[m_nGridY * (m_nGridX + 1)].c = FRAND;
+    m_vertinfo[m_nGridY * (m_nGridX + 1) + m_nGridX].c = FRAND;
+    GenPlasma(0, m_nGridX, 0, m_nGridY, 0.25f);
+
+    // then find min,max so we can normalize to [0..1] range and then to the proper 'constant offset' range.
+    float minc = m_vertinfo[0].c;
+    float maxc = m_vertinfo[0].c;
+    int x, y, nVert;
+
+    nVert = 0;
+    for (y = 0; y <= m_nGridY; y++) {
+      for (x = 0; x <= m_nGridX; x++) {
+        if (minc > m_vertinfo[nVert].c)
+          minc = m_vertinfo[nVert].c;
+        if (maxc < m_vertinfo[nVert].c)
+          maxc = m_vertinfo[nVert].c;
+        nVert++;
+      }
+    }
+
+    float mult = 1.0f / (maxc - minc);
+    nVert = 0;
+    for (y = 0; y <= m_nGridY; y++) {
+      for (x = 0; x <= m_nGridX; x++) {
+        float t = (m_vertinfo[nVert].c - minc) * mult;
+        m_vertinfo[nVert].a = inv_band * (1 + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 3) {
+    // radial blend
+    float band = 0.02f + 0.14f * FRAND + 0.34f * FRAND;
+    float inv_band = 1.0f / band;
+    float dir = (float)((rand() % 2) * 2 - 1);      // 1=outside-in, -1=inside-out
+
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+
+      float dy;
+      if (m_bScreenDependentRenderMode)
+        dy = (y / (float)m_nGridY - 0.5f);
+      else
+        dy = (y / (float)m_nGridY - 0.5f) * m_fAspectY;
+
+      for (int x = 0; x <= m_nGridX; x++) {
+        float dx;
+        if (m_bScreenDependentRenderMode)
+          dx = (x / (float)m_nGridX - 0.5f);
+        else
+          dx = (x / (float)m_nGridX - 0.5f) * m_fAspectX;
+
+        float t = sqrtf(dx * dx + dy * dy) * 1.41421f;
+        if (dir == -1)
+          t = 1 - t;
+
+        m_vertinfo[nVert].a = inv_band * (1 + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 4) {
+    // DeepSeek - seamless clock transition
+    float band = 0.08f + 0.14f * FRAND;  // optimal band width for clock transition
+    float inv_band = 1.0f / band;
+    float dir = (rand() % 2) ? 1.0f : -1.0f; // random direction
+    float start_angle = FRAND * 6.2831853f;  // random starting angle
+
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy;
+      if (m_bScreenDependentRenderMode)
+        fy = (y / (float)m_nGridY - 0.5f);
+      else
+        fy = (y / (float)m_nGridY - 0.5f) * m_fAspectY;
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx;
+        if (m_bScreenDependentRenderMode)
+          fx = (x / (float)m_nGridX - 0.5f);
+        else
+          fx = (x / (float)m_nGridX - 0.5f) * m_fAspectX;
+
+        // Calculate angle and distance from center
+        float angle = atan2f(fy, fx); // range: -PI to PI
+        float dist = sqrtf(fx * fx + fy * fy) * 1.41421356f; // normalized 0-1
+
+        // Convert angle to 0-2PI range and apply direction/start
+        if (angle < 0) angle += 6.2831853f;
+        angle = fmodf(angle * dir + start_angle + 10.0f * 6.2831853f, 6.2831853f);
+
+        // Calculate blend factor with seamless wrap-around
+        float t = angle / 6.2831853f;
+        float t_adjusted = t;
+
+        // Handle wrap-around for smooth transition
+        if (t < band) {
+          t_adjusted = t + 1.0f; // treat as next cycle
+        }
+
+        // Combine with distance for better visual (optional)
+        float blend = (t_adjusted - dist * 0.1f); // slight radial component
+
+        m_vertinfo[nVert].a = inv_band * (1.0f + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * blend;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 5) {
+    // DeepSeek - Spiral/Snail transition
+    float band = 0.07f + 0.1f * FRAND;  // optimal band width for spiral
+    float inv_band = 1.0f / band;
+    int loops = 2 + (rand() % 7);       // random loops between 2-8
+    float rotation_speed = FRAND * 0.5f; // optional slow rotation (0-0.5)
+    bool inward_spiral = (rand() % 2) == 0; // random inward/outward direction
+
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy;
+      if (m_bScreenDependentRenderMode)
+        fy = (y / (float)m_nGridY - 0.5f);
+      else
+        fy = (y / (float)m_nGridY - 0.5f) * m_fAspectY;
+
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx;
+        if (m_bScreenDependentRenderMode)
+          fx = (x / (float)m_nGridX - 0.5f);
+        else
+          fx = (x / (float)m_nGridX - 0.5f) * m_fAspectX;
+
+        // Calculate polar coordinates
+        float angle = atan2f(fy, fx); // range: -PI to PI
+        float radius = sqrtf(fx * fx + fy * fy) * 1.41421356f; // normalized 0-1
+
+        // Convert angle to 0-2PI range
+        if (angle < 0) angle += 6.2831853f;
+
+        // Calculate spiral progression (0-1)
+        float spiral_progress = fmodf(angle / (6.2831853f) + loops * radius + rotation_speed, 1.0f);
+
+        // Reverse direction if inward spiral
+        if (inward_spiral) {
+          spiral_progress = 1.0f - spiral_progress;
+        }
+
+        // Apply band blending
+        m_vertinfo[nVert].a = inv_band * (1.0f + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * spiral_progress;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 6) {
+    // DeepSeek - Rhombus/Diamond transition
+    float band = 0.07f + 0.12f * FRAND;  // slightly narrower band for sharper edges
+    float inv_band = 1.0f / band;
+    float angle = FRAND * 6.2831853f;     // random rotation angle (0-2π)
+    float aspect = 0.8f + FRAND * 2.4f;   // aspect ratio (0.8-3.2)
+    bool reverse = (rand() % 2) == 0;     // random direction
+
+    // Precompute rotation matrix and normalization factor
+    float cos_a = cosf(angle);
+    float sin_a = sinf(angle);
+    float norm_factor = 1.0f / (1.0f + aspect);
+
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy;
+      if (m_bScreenDependentRenderMode)
+        fy = (y / (float)m_nGridY - 0.5f);
+      else
+        fy = (y / (float)m_nGridY - 0.5f) * m_fAspectY;
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx;
+        if (m_bScreenDependentRenderMode)
+          fx = (x / (float)m_nGridX - 0.5f);
+        else
+          fx = (x / (float)m_nGridX - 0.5f) * m_fAspectX;
+
+        // Rotate coordinates
+        float rx = fx * cos_a - fy * sin_a;
+        float ry = fx * sin_a + fy * cos_a;
+
+        // Rhombus distance function (manhattan distance)
+        float diamond = (fabsf(rx) * aspect + fabsf(ry)) * norm_factor;
+
+        // Apply direction
+        float t = reverse ? (1.0f - diamond) : diamond;
+
+        // Apply band blending with edge clamping
+        m_vertinfo[nVert].a = inv_band * (1.0f + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 7) {
+    // DeepSeek - Nuclear Clock Wipe Transition
+    float band = 0.05f + 0.15f * FRAND;  // band width for the transition edge
+    float inv_band = 1.0f / band;
+    const int exact_repeats = 3;         // exactly 3 full rotations
+    bool reverse_direction = (rand() % 2) == 0;
+    float glow_intensity = 0.5f + FRAND * 1.5f; // nuclear glow effect
+
+    // Calculate center point with slight random offset
+    float center_x = 0.5f + (FRAND - 0.5f) * 0.1f;
+    float center_y = 0.5f + (FRAND - 0.5f) * 0.1f;
+
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy;
+      if (m_bScreenDependentRenderMode)
+        fy = (y / (float)m_nGridY - center_y);
+      else
+        fy = (y / (float)m_nGridY - center_y) * m_fAspectY;
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx;
+        if (m_bScreenDependentRenderMode)
+          fx = (x / (float)m_nGridX - center_x);
+        else
+          fx = (x / (float)m_nGridX - center_x) * m_fAspectX;
+
+        // Calculate angle and distance from center
+        float angle = atan2f(fy, fx); // range: -PI to PI
+        float dist = sqrtf(fx * fx + fy * fy) * 1.41421356f; // normalized distance
+
+        // Convert angle to 0-2PI range
+        if (angle < 0) angle += 6.2831853f;
+
+        // Calculate exact 3-repeat position (0-3 range)
+        float clock_pos = angle / 6.2831853f * exact_repeats;
+
+        if (reverse_direction)
+          clock_pos = exact_repeats - clock_pos;
+
+        // Keep only fractional part for seamless looping
+        clock_pos = clock_pos - floorf(clock_pos);
+
+        // Create nuclear effect by combining distance and angle
+        float t = clock_pos;
+
+        // Add distance-based falloff for glow effect
+        float glow = (1.0f - dist) * glow_intensity;
+        t += glow * 0.3f; // blend in some glow
+
+        // Apply band blending
+        m_vertinfo[nVert].a = inv_band * (1.0f + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 8) {
+    // DeepSeek - Square/Diamond Transition
+    float band = 0.08f + 0.12f * FRAND;  // transition edge width
+    float inv_band = 1.0f / band;
+    bool diagonal = (rand() % 2) == 0;    // true = X-shape, false = +-shape
+    float center_bias = 0.3f + FRAND * 0.4f; // 0.3-0.7, controls center emphasis
+    float softness = 0.1f + FRAND * 0.2f; // edge softness
+
+    // Define our own clamp function
+    auto clamp = [](float value, float min, float max) {
+      return (value < min) ? min : ((value > max) ? max : value);
+      };
+
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy;
+      if (m_bScreenDependentRenderMode)
+        fy = (y / (float)m_nGridY - 0.5f);
+      else
+        fy = (y / (float)m_nGridY - 0.5f) * m_fAspectY;
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx;
+        if (m_bScreenDependentRenderMode)
+          fx = (x / (float)m_nGridX - 0.5f);
+        else
+          fx = (x / (float)m_nGridX - 0.5f) * m_fAspectX;
+
+        float t;
+        if (diagonal) {
+          // X-shaped wipe (diagonal)
+          float d1 = (fx + fy) * 0.7071f; // 1/sqrt(2)
+          float d2 = (fx - fy) * 0.7071f;
+          t = (fabsf(d1) > fabsf(d2)) ? fabsf(d1) : fabsf(d2);
+        }
+        else {
+          // +-shaped wipe (cardinal directions)
+          t = (fabsf(fx) > fabsf(fy)) ? fabsf(fx) : fabsf(fy);
+        }
+
+        // Apply center bias for more interesting pattern
+        t = powf(t, center_bias);
+
+        // Add optional softness to edges
+        t = t * (1.0f + softness) - softness * 0.5f;
+        t = clamp(t, 0.0f, 1.0f);
+
+        // Apply band blending
+        m_vertinfo[nVert].a = inv_band * (1.0f + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 9) {
+    // DeepSeek - Animated Checkerboard Transition
+    float band = 0.05f + 0.15f * FRAND;  // transition edge sharpness
+    float inv_band = 1.0f / band;
+    int checker_size = 4 + (rand() % 12); // checker squares size (4-15)
+    float anim_speed = 0.5f + FRAND * 2.0f; // animation speed (0.5-2.5)
+    bool diagonal_anim = (rand() % 2) == 0; // diagonal or straight animation
+    bool reverse = (rand() % 2) == 0; // reverse animation direction
+
+    // Get current time for animation (using a fake time if not available)
+    static float fake_time = 0.0f;
+    fake_time += 1 / GetFps();
+    float time = fake_time; // replace with actual time if available
+
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy = y / (float)m_nGridY;
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx = x / (float)m_nGridX;
+
+        // Calculate checkerboard pattern (0 or 1)
+        int cx = (int)(fx * checker_size);
+        int cy;
+        if (m_bScreenDependentRenderMode)
+          cy = (int)(fy * checker_size);
+        else
+          cy = (int)(fy * checker_size * m_fAspectY);
+        int checker = (cx + cy) % 2;
+
+        // Calculate animation progress
+        float anim_progress;
+        if (diagonal_anim) {
+          // Diagonal animation (top-left to bottom-right)
+          anim_progress = (fx + fy) * 0.5f + time * anim_speed;
+        }
+        else {
+          // Horizontal animation
+          anim_progress = fx + time * anim_speed;
+        }
+
+        // Wrap around and reverse if needed
+        anim_progress = fmodf(anim_progress, 2.0f);
+        if (anim_progress > 1.0f) anim_progress = 2.0f - anim_progress;
+        if (reverse) anim_progress = 1.0f - anim_progress;
+
+        // Combine checker pattern with animation
+        float t;
+        if (checker == 0) {
+          // First set of squares - delayed animation
+          t = anim_progress - 0.3f;
+        }
+        else {
+          // Second set of squares - advanced animation
+          t = anim_progress + 0.3f;
+        }
+
+        // Apply band blending
+        m_vertinfo[nVert].a = inv_band * (1.0f + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 10) {
+    // DeepSeek - Curtain Transition
+    float band = 0.05f + 0.15f * FRAND;  // transition edge width
+    float inv_band = 1.0f / band;
+    bool opening = (rand() % 2) == 0;    // true = opening, false = closing
+    bool vertical = (rand() % 2) == 0;   // true = vertical curtains, false = horizontal
+    float curtain_wrinkles = 0.5f + FRAND * 2.0f; // amount of wrinkles/folds (0.5-2.5)
+    float center_gap = 0.05f + FRAND * 0.15f; // gap between curtains (0.05-0.2)
+    bool reverse_motion = (rand() % 2) == 0; // reverse motion direction
+
+    // NEW: Configure repeats/wipe patterns
+    int repeats = 1 + (rand() % 4); // 1-4 repeats (1=normal curtain, 2-4=striped patterns)
+    float repeat_width = 1.0f / repeats; // width of each repeat segment
+    float repeat_variation = 0.3f * FRAND; // 0-0.3 variation in repeat timing
+    bool alternate_direction = (rand() % 2) == 0; // alternate stripe directions
+
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy = (y / (float)m_nGridY);
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx = (x / (float)m_nGridX);
+
+        float t;
+        if (vertical) {
+          // Vertical curtains (left and right)
+          float pos = fx;
+          float segment_pos = pos * repeats; // position within repeat segments
+          int segment_idx = (int)floorf(segment_pos); // which segment we're in
+          float segment_local = segment_pos - segment_idx; // 0-1 within segment
+
+          float center_dist = fabsf(segment_local - 0.5f) - center_gap / 2;
+          if (center_dist < 0) center_dist = 0;
+
+          // Determine which curtain this pixel belongs to
+          float curtain_side = (segment_local < 0.5f) ? -1.0f : 1.0f;
+
+          // Calculate base transition value
+          t = center_dist * 2.0f; // ranges 0-1 for each curtain segment
+
+          // Add per-segment variation
+          float segment_variation = sinf(segment_idx * 1.618f) * repeat_variation;
+          t += segment_variation;
+
+          // Add wrinkles/folds effect using sine wave
+          float wrinkles = sinf(fy * 3.14159f * curtain_wrinkles) * 0.1f;
+          t += wrinkles * (1.0f - t);
+
+          // Adjust for opening/closing
+          if (opening)
+            t = 1.0f - t;
+
+          // Adjust for curtain side and alternate directions
+          if (alternate_direction && (segment_idx % 2 == 1))
+            curtain_side *= -1.0f;
+
+          if (reverse_motion)
+            t = curtain_side > 0 ? t : 1.0f - t;
+          else
+            t = curtain_side > 0 ? 1.0f - t : t;
+        }
+        else {
+          // Horizontal curtains (top and bottom)
+          float pos = fy;
+          float segment_pos = pos * repeats; // position within repeat segments
+          int segment_idx = (int)floorf(segment_pos); // which segment we're in
+          float segment_local = segment_pos - segment_idx; // 0-1 within segment
+
+          float center_dist = fabsf(segment_local - 0.5f) - center_gap / 2;
+          if (center_dist < 0) center_dist = 0;
+
+          // Determine which curtain this pixel belongs to
+          float curtain_side = (segment_local < 0.5f) ? -1.0f : 1.0f;
+
+          // Calculate base transition value
+          t = center_dist * 2.0f; // ranges 0-1 for each curtain segment
+
+          // Add per-segment variation
+          float segment_variation = sinf(segment_idx * 1.618f) * repeat_variation;
+          t += segment_variation;
+
+          // Add wrinkles/folds effect using sine wave
+          float wrinkles = sinf(fx * 3.14159f * curtain_wrinkles) * 0.1f;
+          t += wrinkles * (1.0f - t);
+
+          // Adjust for opening/closing
+          if (opening)
+            t = 1.0f - t;
+
+          // Adjust for curtain side and alternate directions
+          if (alternate_direction && (segment_idx % 2 == 1))
+            curtain_side *= -1.0f;
+
+          if (reverse_motion)
+            t = curtain_side > 0 ? t : 1.0f - t;
+          else
+            t = curtain_side > 0 ? 1.0f - t : t;
+        }
+
+        // Apply band blending
+        m_vertinfo[nVert].a = inv_band * (1.0f + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 11) {
+    // DeepSeek - Bubble Transition
+    float band = 0.05f + 0.15f * FRAND;  // transition edge width
+    float inv_band = 1.0f / band;
+    int bubble_count = 10 + (rand() % 30); // number of bubbles (10-40)
+    float bubble_size_min = 0.05f + FRAND * 0.1f; // min bubble size (0.05-0.15)
+    float bubble_size_max = 0.15f + FRAND * 0.2f; // max bubble size (0.15-0.35)
+    bool growing_bubbles = (rand() % 2) == 0; // true = bubbles grow, false = shrink
+
+    // Generate random bubble positions and sizes
+    struct Bubble {
+      float x, y;     // position (0-1 range)
+      float size;     // radius (0-1 range)
+      float speed;    // growth/shrink speed
+    };
+
+    Bubble* bubbles = new Bubble[bubble_count];
+    for (int i = 0; i < bubble_count; i++) {
+      bubbles[i].x = FRAND;
+      bubbles[i].y = FRAND;
+      bubbles[i].size = bubble_size_min + FRAND * (bubble_size_max - bubble_size_min);
+      bubbles[i].speed = 0.5f + FRAND * 1.5f; // speed multiplier (0.5-2.0)
+    }
+
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy = (y / (float)m_nGridY);
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx = (x / (float)m_nGridX);
+
+        // Find the maximum bubble influence at this pixel
+        float max_influence = 0.0f;
+
+        for (int i = 0; i < bubble_count; i++) {
+          // Calculate distance to bubble center
+          float dx, dy;
+          if (m_bScreenDependentRenderMode) {
+            dx = (fx - bubbles[i].x);
+            dy = (fy - bubbles[i].y);
+          }
+          else {
+            dx = (fx - bubbles[i].x) * m_fAspectX;
+            dy = (fy - bubbles[i].y) * m_fAspectY;
+          }
+          float dist = sqrtf(dx * dx + dy * dy);
+
+          // Calculate bubble influence (1 at center, 0 at edge)
+          float influence = 1.0f - (dist / bubbles[i].size);
+          if (influence < 0) influence = 0;
+
+          // Apply smoothstep for smoother edges
+          influence = influence * influence * (3.0f - 2.0f * influence);
+
+          if (influence > max_influence)
+            max_influence = influence;
+        }
+
+        // If we're shrinking bubbles, invert the influence
+        float t = growing_bubbles ? max_influence : (1.0f - max_influence);
+
+        // Apply band blending
+        m_vertinfo[nVert].a = inv_band * (1.0f + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;
+        nVert++;
+      }
+    }
+    delete[] bubbles;
+  }
+  else if (mixtype == 12) {
+    // DeepSeek - Kaleidoscope Wipe Transition
+    float band = 0.06f + 0.14f * FRAND;  // transition edge width
+    float inv_band = 1.0f / band;
+
+    // Kaleidoscope parameters
+    int segments = 3 + (rand() % 9);     // 3-12 segments (triangular to dodecagonal)
+    float segment_angle = 6.2831853f / segments; // angle per segment in radians
+    float rotation = FRAND * 6.2831853f; // random initial rotation
+    bool mirror_effect = (rand() % 2) == 0; // true = mirrored segments, false = just rotated
+    float radial_factor = 0.5f + FRAND;  // 0.5-1.5 - how much radial distance affects the pattern
+
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy;
+      if (m_bScreenDependentRenderMode)
+        fy = (y / (float)m_nGridY - 0.5f);
+      else
+        fy = (y / (float)m_nGridY - 0.5f) * m_fAspectY;
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx;
+        if (m_bScreenDependentRenderMode)
+          fx = (x / (float)m_nGridX - 0.5f);
+        else
+          fx = (x / (float)m_nGridX - 0.5f) * m_fAspectX;
+
+        // Calculate polar coordinates
+        float angle = atan2f(fy, fx) + rotation; // range: -PI to PI plus rotation
+        float radius = sqrtf(fx * fx + fy * fy) * 1.41421356f; // normalized distance
+
+        // Wrap angle to 0-2PI range
+        if (angle < 0) angle += 6.2831853f;
+        if (angle >= 6.2831853f) angle -= 6.2831853f;
+
+        // Find which segment we're in and map to first segment
+        int segment = (int)(angle / segment_angle);
+        float segment_offset = angle - segment * segment_angle;
+
+        // For mirrored segments, reflect angles past the halfway point
+        if (mirror_effect && segment_offset > segment_angle * 0.5f) {
+          segment_offset = segment_angle - segment_offset;
+        }
+
+        // Normalize the segment angle to 0-1 range
+        float normalized_angle = segment_offset / segment_angle;
+
+        // Combine angle and radius for the pattern
+        float t = (normalized_angle * 0.7f + radius * 0.3f * radial_factor);
+
+        // Apply band blending
+        m_vertinfo[nVert].a = inv_band * (1.0f + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 13) {
+    // DeepSeek - Moebius Strip Transition
+    float band = 0.07f + 0.13f * FRAND;  // transition edge width
+    float inv_band = 1.0f / band;
+
+    // Moebius parameters
+    float twist_factor = 1.0f + FRAND * 2.0f; // 1-3 controls twist intensity
+    bool reverse_twist = (rand() % 2) == 0;   // random twist direction
+    float strip_width = 0.3f + FRAND * 0.4f;  // 0.3-0.7 width of the moebius strip
+    float progress_offset = FRAND * 0.5f;     // 0-0.5 random phase offset
+
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy;
+      if (m_bScreenDependentRenderMode)
+        fy = (y / (float)m_nGridY - 0.5f);
+      else
+        fy = (y / (float)m_nGridY - 0.5f) * m_fAspectY;
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx;
+        if (m_bScreenDependentRenderMode)
+          fx = (x / (float)m_nGridX - 0.5f);
+        else
+          fx = (x / (float)m_nGridX - 0.5f) * m_fAspectX;
+
+        // Convert to polar coordinates
+        float angle = atan2f(fy, fx); // range: -PI to PI
+        float radius = sqrtf(fx * fx + fy * fy) * 1.41421356f; // normalized 0-1
+
+        // Create moebius strip effect
+        float normalized_angle = (angle + 3.14159265f) / 6.2831853f; // 0-1
+
+        // Calculate the twist - makes a half-twist as we go around the circle
+        float twist_progress = (normalized_angle + progress_offset) * twist_factor;
+        if (reverse_twist) twist_progress = -twist_progress;
+
+        // Moebius strip effect combines radius with twisted angle
+        float moebius_value = radius + 0.3f * sinf(twist_progress * 3.14159265f);
+
+        // Apply strip width to create the banding effect
+        float t = fmodf(moebius_value * (1.0f / strip_width), 1.0f);
+
+        // Make the transition flow outward
+        t = 1.0f - t;
+
+        // Apply band blending
+        m_vertinfo[nVert].a = inv_band * (1.0f + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 14) {
+    // DeepSeek - Star Wipe Transition
+    float band = 0.05f + 0.15f * FRAND;  // transition edge width
+    float inv_band = 1.0f / band;
+    int points = 5 + (rand() % 2);      // 5-6 points on the star
+    float inner_radius = 0.3f + FRAND * 0.4f; // 0.3-0.7 inner radius
+    float rotation = FRAND * 6.2831853f; // random initial rotation
+    bool reverse = (rand() % 2) == 0;    // reverse direction
+
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy;
+      if (m_bScreenDependentRenderMode)
+        fy = (y / (float)m_nGridY - 0.5f);
+      else
+        fy = (y / (float)m_nGridY - 0.5f) * m_fAspectY;
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx;
+        if (m_bScreenDependentRenderMode)
+          fx = (x / (float)m_nGridX - 0.5f);
+        else
+          fx = (x / (float)m_nGridX - 0.5f) * m_fAspectX;
+
+        // Convert to polar coordinates
+        float angle = atan2f(fy, fx) + rotation; // range: -PI to PI plus rotation
+        float radius = sqrtf(fx * fx + fy * fy) * 1.41421356f; // normalized distance
+
+        // Wrap angle to 0-2PI range
+        if (angle < 0) angle += 6.2831853f;
+        if (angle >= 6.2831853f) angle -= 6.2831853f;
+
+        // Calculate star pattern
+        float segment = 6.2831853f / points;
+        float point_angle = fmodf(angle, segment) / segment; // 0-1 within each segment
+
+        // Alternate between inner and outer radius
+        float star_radius;
+        if (point_angle < 0.5f) {
+          // First half of segment - interpolate from inner to outer radius
+          star_radius = inner_radius + (1.0f - inner_radius) * point_angle * 2.0f;
+        }
+        else {
+          // Second half of segment - interpolate from outer back to inner radius
+          star_radius = 1.0f - (1.0f - inner_radius) * (point_angle - 0.5f) * 2.0f;
+        }
+
+        // Calculate how far we are from the star edge
+        float t = (radius / star_radius);
+        if (reverse) t = 1.0f - t;
+
+        // Apply band blending
+        m_vertinfo[nVert].a = inv_band * (1.0f + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 15) {
+    // DeepSeek - Disco Floor Transition
+    float band = 0.08f + 0.12f * FRAND;  // transition edge width
+    float inv_band = 1.0f / band;
+
+    // Disco floor parameters
+    int tile_size = 8 + (rand() % 25);    // 8-32 pixel tile size (approximate)
+    float beat_sync = 0.5f + FRAND * 1.5f; // 0.5-2.0 beat sync intensity
+    bool diagonal_pattern = (rand() % 2) == 0; // alternate diagonal pattern
+    bool color_cycling = (rand() % 2) == 0;   // enable color cycling effect
+    float speed_factor = 0.5f + FRAND * 2.0f; // animation speed (0.5-2.5)
+
+    // Get current time for animation (using a fake time if not available)
+    static float fake_time = 0.0f;
+    fake_time += 1 / GetFps();
+    float time = fake_time * speed_factor;
+
+    // Simulate beat detection with a sine wave if real beat info isn't available
+    float beat = sinf(time * 3.0f) * 0.5f + 0.5f;
+    beat = powf(beat, beat_sync);
+
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy = y / (float)m_nGridY;
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx = x / (float)m_nGridX;
+
+        // Calculate tile coordinates
+        int tile_x = (int)(fx * m_nGridX / tile_size);
+        int tile_y = (int)(fy * m_nGridY / tile_size);
+
+        // Create alternating pattern
+        float pattern;
+        if (diagonal_pattern) {
+          // Diagonal checkerboard pattern
+          pattern = ((tile_x + tile_y) % 2) * 0.8f + 0.1f;
+        }
+        else {
+          // Standard checkerboard pattern
+          pattern = ((tile_x % 2) == (tile_y % 2)) * 0.8f + 0.1f;
+        }
+
+        // Add animation based on tile position and time
+        float anim = sinf(time * 2.0f + tile_x * 0.3f + tile_y * 0.7f) * 0.5f + 0.5f;
+
+        // Combine with beat detection
+        float t = (pattern * 0.7f + anim * 0.3f) * beat;
+
+        // Add color cycling effect if enabled
+        if (color_cycling) {
+          float hue = fmodf(time * 0.2f + tile_x * 0.1f + tile_y * 0.15f, 1.0f);
+          t = fmodf(t + hue * 0.3f, 1.0f);
+        }
+
+        // Apply band blending
+        m_vertinfo[nVert].a = inv_band * (1.0f + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 16) {
+    // DeepSeek - Fire/Flame Transition - rising upward with random patterns
+    float band = 0.08f + 0.04f * FRAND;  // flame edge thickness
+    float inv_band = 1.0f / band;
+
+    // Fire parameters
+    float flame_speed = 0.7f + FRAND * 0.6f;    // speed (0.7-1.3)
+    float base_height = 0.0f;                   // always start at bottom
+
+    // Pre-compute some random flame properties
+    float seed1 = FRAND * 10.0f;
+    float seed2 = FRAND * 20.0f;
+    float seed3 = FRAND * 30.0f;
+
+    // Get current time for animation
+    static float fire_time = 0.0f;
+    fire_time += 1 / GetFps();
+    float time = fire_time;
+
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy = (y / (float)m_nGridY); // 0-1 from bottom to top
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx = (x / (float)m_nGridX);
+
+        // Generate deterministic random patterns using noise functions
+        float random_flame =
+          sinf(fx * 15.0f + seed1 + time * 2.0f) * 0.4f +
+          sinf(fx * 30.0f + seed2 + time * 3.7f) * 0.2f +
+          sinf(fx * 45.0f + seed3 + time * 5.3f) * 0.1f;
+
+        // Shape the flame (wider at bottom, narrower at top)
+        float flame_shape = (1.0f - fy) * (0.3f + random_flame * 0.7f);
+
+        // Calculate flame front position (rising from bottom)
+        float flame_front = fmodf(time * flame_speed, 1.5f);
+
+        // Flame transition value - positive when below flame front
+        float t = 1.0f - (fy - flame_front + flame_shape);
+
+        // Basic 0-1 clamping
+        t = (t < 0) ? 0 : ((t > 1) ? 1 : t);
+
+        // Apply band blending
+        m_vertinfo[nVert].a = inv_band * (1.0f + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 17) {
+    // DeepSeek - Drain Swirl Transition, modified by Incubo_
+    float band = 0.05f + 0.15f * FRAND;  // transition edge width
+    float inv_band = 1.0f / band;
+
+    // Drain parameters
+    float swirl_intensity = 2.0f + FRAND * 3.0f; // 2-5 - controls how tight the swirl is
+    float drain_speed = 0.5f + FRAND * 1.5f;    // 0.5-2.0 - speed of the drain effect
+    bool clockwise = (rand() % 2) == 0;         // random swirl direction
+    float center_pull = 0.7f + FRAND * 0.6f;    // 0.7-1.3 - how strongly it pulls to center
+    bool invert = (rand() % 2) == 0;           // random inversion
+
+    // Get current time for animation
+    static float drain_time = 0.0f;
+    drain_time += 1 / GetFps();
+    float time = drain_time * drain_speed;
+
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy;
+      if (m_bScreenDependentRenderMode)
+        fy = (y / (float)m_nGridY - 0.5f);
+      else
+        fy = (y / (float)m_nGridY - 0.5f) * m_fAspectY;
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx;
+        if (m_bScreenDependentRenderMode)
+          fx = (x / (float)m_nGridX - 0.5f);
+        else
+          fx = (x / (float)m_nGridX - 0.5f) * m_fAspectX;
+
+        // Calculate polar coordinates
+        float radius = sqrtf(fx * fx + fy * fy) * 1.41421356f; // normalized distance
+        float angle = atan2f(fy, fx); // range: -PI to PI
+
+        // Apply swirl effect - angle changes more as you get closer to center
+        float swirl_factor = (1.0f - radius) * swirl_intensity;
+        if (clockwise) swirl_factor = -swirl_factor;
+
+        // Combine with time-based animation
+        float swirled_angle = angle + swirl_factor + time * 2.0f;
+
+        // Create the drain effect - combines radial and angular motion
+        float t = radius * center_pull + (1.0f - center_pull) *
+          (0.5f + 0.5f * sinf(swirled_angle * 2.0f + radius * 5.0f));
+
+        // Invert the drain if needed.
+        if (invert)
+          t = 1.0f - t;
+
+        // Apply band blending
+        m_vertinfo[nVert].a = inv_band * (1.0f + band);
+        m_vertinfo[nVert].c = -inv_band + inv_band * t;
+        nVert++;
+      }
+    }
+  }
+  else if (mixtype == 18) {
+    // DeepSeek - Smooth Julia Set Fractal Transition
+    float band = 0.08f + 0.12f * FRAND;  // Wider band for smoother transitions
+    float inv_band = 1.0f / band;
+
+    // Julia set parameters with constrained ranges for better blending
+    float julia_real = -0.8f + FRAND * 1.6f;    // (-0.8 to 0.8)
+    float julia_imag = -0.8f + FRAND * 1.6f;    // (-0.8 to 0.8)
+    int max_iterations = 20 + (rand() % 20);     // 20-40 iterations (good balance)
+    float zoom = 0.7f + FRAND * 1.6f;           // 0.7-2.3 zoom level
+    float rotation = FRAND * 6.2831853f;         // random rotation
+
+    // Always use smooth coloring for this version
+    const bool smooth_coloring = true;
+
+    // Additional smoothing parameters
+    float edge_softness = 0.3f + FRAND * 0.5f;  // 0.3-0.8 edge softness
+    float contrast = 0.7f + FRAND * 0.6f;       // 0.7-1.3 contrast adjustment
+
+    // Precompute rotation values
+    float cos_rot = cosf(rotation);
+    float sin_rot = sinf(rotation);
+
+    // Find min/max for normalization
+    float min_val = FLT_MAX;
+    float max_val = -FLT_MAX;
+    std::vector<float> values((m_nGridY + 1) * (m_nGridX + 1));
+
+    // First pass: compute all values and find range
+    int nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      float fy;
+      if (m_bScreenDependentRenderMode)
+        fy = (y / (float)m_nGridY - 0.5f);
+      else
+        fy = (y / (float)m_nGridY - 0.5f) * m_fAspectY;
+
+      for (int x = 0; x <= m_nGridX; x++) {
+        float fx;
+        if (m_bScreenDependentRenderMode)
+          fx = (x / (float)m_nGridX - 0.5f);
+        else
+          fx = (x / (float)m_nGridX - 0.5f) * m_fAspectX;
+
+        // Apply rotation and zoom
+        float zx = (fx * cos_rot - fy * sin_rot) * zoom;
+        float zy = (fx * sin_rot + fy * cos_rot) * zoom;
+
+        // Julia set iteration
+        float cx = julia_real;
+        float cy = julia_imag;
+        int i;
+        for (i = 0; i < max_iterations; i++) {
+          float tmp = zx * zx - zy * zy + cx;
+          zy = 2 * zx * zy + cy;
+          zx = tmp;
+
+          if (zx * zx + zy * zy > 4.0f)
+            break;
+        }
+
+        // Calculate smooth value
+        float t;
+        if (i < max_iterations) {
+          float log_zn = logf(zx * zx + zy * zy) / 2.0f;
+          float nu = logf(log_zn / logf(2.0f)) / logf(2.0f);
+          t = (i + 1 - nu) / max_iterations;
+        }
+        else {
+          t = 1.0f;  // Interior points
+        }
+
+        // Apply contrast adjustment
+        t = powf(t, contrast);
+
+        values[nVert] = t;
+        if (t < min_val) min_val = t;
+        if (t > max_val) max_val = t;
+        nVert++;
+      }
+    }
+
+    // Normalize and apply blending
+    float range = max_val - min_val;
+    if (range < 0.0001f) range = 1.0f; // Prevent division by zero
+
+    nVert = 0;
+    for (int y = 0; y <= m_nGridY; y++) {
+      for (int x = 0; x <= m_nGridX; x++) {
+        // Normalize value to 0-1 range
+        float t = (values[nVert] - min_val) / range;
+
+        // Apply edge softness using smoothstep function
+        t = t * t * (3.0f - 2.0f * t) * (1.0f - edge_softness) + t * edge_softness;
+
+        // Final blending calculation with smoother transition
+        m_vertinfo[nVert].a = inv_band * (1.0f + band * 1.5f);  // Increased blend area
+        m_vertinfo[nVert].c = -inv_band + inv_band * t * 1.1f;  // Slightly extended range
+
+        // Ensure values stay within reasonable bounds
+        m_vertinfo[nVert].c = max(-10.0f, min(10.0f, m_vertinfo[nVert].c));
+        nVert++;
+      }
+    }
+  }
+}
+
+void CPlugin::GenPlasma(int x0, int x1, int y0, int y1, float dt) {
+  int midx = (x0 + x1) / 2;
+  int midy = (y0 + y1) / 2;
+  float t00 = m_vertinfo[y0 * (m_nGridX + 1) + x0].c;
+  float t01 = m_vertinfo[y0 * (m_nGridX + 1) + x1].c;
+  float t10 = m_vertinfo[y1 * (m_nGridX + 1) + x0].c;
+  float t11 = m_vertinfo[y1 * (m_nGridX + 1) + x1].c;
+
+  if (y1 - y0 >= 2) {
+    if (x0 == 0)
+      if (m_bScreenDependentRenderMode)
+        m_vertinfo[midy * (m_nGridX + 1) + x0].c = 0.5f * (t00 + t10) + (FRAND * 2 - 1) * dt;
+      else
+        m_vertinfo[midy * (m_nGridX + 1) + x0].c = 0.5f * (t00 + t10) + (FRAND * 2 - 1) * dt * m_fAspectY;
+    if (m_bScreenDependentRenderMode)
+      m_vertinfo[midy * (m_nGridX + 1) + x1].c = 0.5f * (t01 + t11) + (FRAND * 2 - 1) * dt;
+    else
+      m_vertinfo[midy * (m_nGridX + 1) + x1].c = 0.5f * (t01 + t11) + (FRAND * 2 - 1) * dt * m_fAspectY;
+  }
+  if (x1 - x0 >= 2) {
+    if (y0 == 0)
+      if (m_bScreenDependentRenderMode)
+        m_vertinfo[y0 * (m_nGridX + 1) + midx].c = 0.5f * (t00 + t01) + (FRAND * 2 - 1) * dt;
+      else
+        m_vertinfo[y0 * (m_nGridX + 1) + midx].c = 0.5f * (t00 + t01) + (FRAND * 2 - 1) * dt * m_fAspectX;
+    if (m_bScreenDependentRenderMode)
+      m_vertinfo[y1 * (m_nGridX + 1) + midx].c = 0.5f * (t10 + t11) + (FRAND * 2 - 1) * dt;
+    else
+      m_vertinfo[y1 * (m_nGridX + 1) + midx].c = 0.5f * (t10 + t11) + (FRAND * 2 - 1) * dt * m_fAspectX;
+  }
+
+  if (y1 - y0 >= 2 && x1 - x0 >= 2) {
+    // do midpoint & recurse:
+    t00 = m_vertinfo[midy * (m_nGridX + 1) + x0].c;
+    t01 = m_vertinfo[midy * (m_nGridX + 1) + x1].c;
+    t10 = m_vertinfo[y0 * (m_nGridX + 1) + midx].c;
+    t11 = m_vertinfo[y1 * (m_nGridX + 1) + midx].c;
+    m_vertinfo[midy * (m_nGridX + 1) + midx].c = 0.25f * (t10 + t11 + t00 + t01) + (FRAND * 2 - 1) * dt;
+
+    GenPlasma(x0, midx, y0, midy, dt * 0.5f);
+    GenPlasma(midx, x1, y0, midy, dt * 0.5f);
+    GenPlasma(x0, midx, midy, y1, dt * 0.5f);
+    GenPlasma(midx, x1, midy, y1, dt * 0.5f);
+  }
+}
+
+void CPlugin::CompilePresetShadersToFile(wchar_t* sPresetFile) {
+  CState* pState = new CState();
+  PShaderSet pShaders;
+  RemoveAngleBrackets(sPresetFile);
+
+  DWORD ApplyFlags = STATE_ALL;
+  pState->Import(sPresetFile, GetTime(), NULL, ApplyFlags);
+  LoadShaders(&pShaders, pState, false, true);
+  delete pState;
+  pState = NULL;
+}
+
+void CPlugin::ClearPreset() {
+
+  m_pState->Default(STATE_ALL);
+  wcscpy(m_szCurrentPresetFile, m_pState->m_szDesc);
+  RemoveAngleBrackets(m_szCurrentPresetFile);
+
+  // Append ".milk" to m_szCurrentPresetFile
+  if (wcslen(m_szCurrentPresetFile) + wcslen(L".milk") < MAX_PATH) {
+    wcscat_s(m_szCurrentPresetFile, MAX_PATH, L".milk");
+  }
+
+  // release stuff from m_OldShaders, then move m_shaders to m_OldShaders, then load the new shaders.
+  m_OldShaders.warp.Clear();
+  m_OldShaders.comp.Clear();
+  m_OldShaders = m_shaders;
+  // Null out m_shaders' COM pointers WITHOUT releasing — ownership transferred to m_OldShaders.
+  m_shaders.warp.ptr = NULL;
+  m_shaders.warp.CT = NULL;
+  m_shaders.warp.bytecodeBlob = NULL;
+  m_shaders.warp.params.Clear();
+  m_shaders.comp.ptr = NULL;
+  m_shaders.comp.CT = NULL;
+  m_shaders.comp.bytecodeBlob = NULL;
+  m_shaders.comp.params.Clear();
+
+  LoadShaders(&m_shaders, m_pState, false, false);
+  CreateDX12PresetPSOs();
+  NumTotalPresetsLoaded++;
+  OnFinishedLoadingPreset();
+}
+
+void CPlugin::RemoveAngleBrackets(wchar_t* str) {
+  wchar_t cleaned[MAX_PATH] = { 0 }; // Temporary buffer for the cleaned string
+  int j = 0;
+
+  for (int i = 0; str[i] != L'\0'; i++) {
+    if (str[i] != L'<' && str[i] != L'>') {
+      cleaned[j++] = str[i];
+    }
+  }
+
+  cleaned[j] = L'\0'; // Null-terminate the cleaned string
+  wcscpy_s(str, MAX_PATH, cleaned); // Copy the cleaned string back to the original
+}
+
+// ---------------------------------------------------------------------------
+// .milk2 double-preset support
+// ---------------------------------------------------------------------------
+
+// Maps MilkDrop3 blend-pattern names to MDropDX12 RandomizeBlendPattern() mixtype indices.
+// Returns -1 (random) for any name that is not explicitly mapped.
+static int Milk2PatternNameToMixtype(const char* name) {
+  struct { const char* name; int type; } kMap[] = {
+    {"zoom",     0},  // uniform fade
+    {"side",     1},  // directional wipe
+    {"plasma",   2},  // fractal plasma
+    {"cercle",   3},  // radial / circle
+    {"clock",    4},  // angular clock sweep
+    {"snail",    5},  // spiral
+    {"snail2",   5},
+    {"snail3",   5},
+    {"triangle", 6},
+    {"plasma2",  2},  // plasma variants -> plasma
+    {"plasma3",  2},
+  };
+  for (auto& e : kMap)
+    if (_stricmp(name, e.name) == 0) return e.type;
+  return -1;
+}
+
+// Parses a .milk2 file and writes its two preset blocks to temporary .milk files.
+// On success, outTemp1/outTemp2 hold MAX_PATH paths to temp files that the caller must delete.
+// Returns false on parse failure (malformed .milk2); temp files are not written.
+bool CPlugin::ParseMilk2File(const wchar_t* szPath,
+                              wchar_t* outTemp1, wchar_t* outTemp2,
+                              int& outMixType, float& outProgress, int& outDirection) {
+  outMixType  = -1;
+  outProgress = 0.5f;
+  outDirection = 1;
+
+  // Read entire file into a string buffer.
+  FILE* f = _wfopen(szPath, L"rb");
+  if (!f) return false;
+  fseek(f, 0, SEEK_END);
+  long fsize = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  std::string buf(fsize, '\0');
+  fread(&buf[0], 1, fsize, f);
+  fclose(f);
+
+  // Parse header key=value lines before [PRESET1_BEGIN].
+  {
+    size_t hdrEnd = buf.find("[PRESET1_BEGIN]");
+    if (hdrEnd == std::string::npos) return false;
+    std::string hdr = buf.substr(0, hdrEnd);
+    auto getVal = [&](const char* key) -> std::string {
+      std::string k = std::string(key) + "=";
+      size_t pos = hdr.find(k);
+      if (pos == std::string::npos) return "";
+      size_t start = pos + k.size();
+      size_t end = hdr.find_first_of("\r\n", start);
+      return hdr.substr(start, end - start);
+    };
+    std::string pat = getVal("blending_pattern");
+    if (!pat.empty()) outMixType = Milk2PatternNameToMixtype(pat.c_str());
+    std::string prog = getVal("blending_progress");
+    if (!prog.empty()) outProgress = (float)atof(prog.c_str());
+    std::string dir = getVal("blending_direction");
+    if (!dir.empty()) outDirection = atoi(dir.c_str());
+  }
+
+  // Helper: extract text between two markers, starting from [preset00] or version header.
+  auto extractPreset = [&](const char* beginMarker, const char* endMarker) -> std::string {
+    size_t bPos = buf.find(beginMarker);
+    if (bPos == std::string::npos) return "";
+    size_t ePos = buf.find(endMarker, bPos);
+    if (ePos == std::string::npos) return "";
+    // The block between [PRESETn_BEGIN] and [PRESETn_END] starts with NAME= / version lines,
+    // then [preset00].  Pass everything from the version/name header so Import() can
+    // read MILKDROP_PRESET_VERSION and PSVERSION* before the [preset00] section.
+    size_t contentStart = bPos + strlen(beginMarker);
+    // Skip past the [PRESETn_BEGIN] line ending
+    contentStart = buf.find_first_of("\r\n", contentStart);
+    if (contentStart == std::string::npos) return "";
+    contentStart = buf.find_first_not_of("\r\n", contentStart);
+    if (contentStart == std::string::npos) return "";
+    return buf.substr(contentStart, ePos - contentStart);
+  };
+
+  std::string p1 = extractPreset("[PRESET1_BEGIN]", "[PRESET1_END]");
+  std::string p2 = extractPreset("[PRESET2_BEGIN]", "[PRESET2_END]");
+  if (p1.empty() || p2.empty()) return false;
+
+  // Write to Windows temp files.
+  wchar_t tempDir[MAX_PATH];
+  GetTempPathW(MAX_PATH, tempDir);
+
+  if (GetTempFileNameW(tempDir, L"mk2", 0, outTemp1) == 0) return false;
+  if (GetTempFileNameW(tempDir, L"mk2", 0, outTemp2) == 0) {
+    DeleteFileW(outTemp1);
+    return false;
+  }
+
+  auto writeTmp = [](const wchar_t* path, const std::string& text) -> bool {
+    FILE* out = _wfopen(path, L"wb");
+    if (!out) return false;
+    fwrite(text.data(), 1, text.size(), out);
+    fclose(out);
+    return true;
+  };
+
+  if (!writeTmp(outTemp1, p1) || !writeTmp(outTemp2, p2)) {
+    DeleteFileW(outTemp1);
+    DeleteFileW(outTemp2);
+    return false;
+  }
+  return true;
+}
+
+// Forward declaration: resets _GetLineByName's static FILE* cache in state.cpp.
+// Required to prevent stale data when two Import() calls use consecutively-allocated FILE*s.
+extern void GetFast_CLEAR();
+
+// Loads a .milk2 double-preset: imports both preset blocks, sets up the blend pattern
+// from the file's metadata, and starts the animated crossfade.
+void CPlugin::LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime) {
+  wchar_t temp1[MAX_PATH] = {}, temp2[MAX_PATH] = {};
+  int mixType = -1;
+  float progress = 0.5f;
+  int direction = 1;
+
+  if (!ParseMilk2File(szPresetFilename, temp1, temp2, mixType, progress, direction)) {
+    // Malformed .milk2 — log and bail
+    {
+      wchar_t dbgBuf[MAX_PATH + 64];
+      swprintf_s(dbgBuf, L"LoadMilk2Preset: failed to parse %s", szPresetFilename);
+      DebugLogW(dbgBuf);
+    }
+    return;
+  }
+
+  // Update current preset path
+  lstrcpyW(m_szCurrentPresetFile, szPresetFilename);
+
+  // Log which preset is now actively rendering (helps diagnose GPU TDR crashes)
+  {
+    const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
+    if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
+    name = name ? name + 1 : m_szCurrentPresetFile;
+    char dbg[512];
+    sprintf(dbg, "Render: Active preset: %ls", name);
+    DebugLogA(dbg);
+  }
+
+  // Import preset 1 into m_pOldState (the "from" state)
+  m_pOldState->Import(temp1, GetTime(), nullptr, STATE_ALL);
+
+  // IMPORTANT: _GetLineByName in state.cpp caches the last FILE* it saw. If the OS reuses
+  // the same FILE* address for the second temp file, it would return stale data from preset 1.
+  // GetFast_CLEAR() forces a re-scan on the next Import() call.
+  GetFast_CLEAR();
+
+  // Import preset 2 into m_pState (the "to" state), using m_pOldState for CBlendableFloat init
+  m_pState->Import(temp2, GetTime(), m_pOldState, STATE_ALL);
+
+  // Fix descriptions: Import() derives m_szDesc from the temp file path, which would show
+  // something like "mk2XXXX". Override with the .milk2 filename (without path or extension).
+  {
+    const wchar_t* p = wcsrchr(szPresetFilename, L'\\');
+    if (!p) p = szPresetFilename; else p++;
+    // m_pState shows the .milk2 name in the UI overlay
+    wcsncpy_s(m_pState->m_szDesc, p, MAX_PATH - 1);
+    // Strip .milk2 extension
+    wchar_t* dot = wcsrchr(m_pState->m_szDesc, L'.');
+    if (dot) *dot = L'\0';
+    // m_pOldState (blend source) can share the same display name
+    wcscpy_s(m_pOldState->m_szDesc, m_pState->m_szDesc);
+  }
+
+  // Apply the blend pattern from the .milk2 metadata, then restore user's mixtype preference
+  int savedMixType = m_nMixType;
+  m_nMixType = mixType;
+  RandomizeBlendPattern();
+  m_nMixType = savedMixType;
+
+  // Start animated crossfade
+  if (fBlendTime >= 0.001f)
+    m_pState->StartBlendFrom(m_pOldState, GetTime(), fBlendTime);
+
+  // Compile shaders for m_pOldState -> m_OldShaders
+  m_OldShaders.warp.Clear();
+  m_OldShaders.comp.Clear();
+  LoadShaders(&m_OldShaders, m_pOldState, false, false);
+
+  // Compile shaders for m_pState -> m_shaders
+  m_shaders.warp.Clear();
+  m_shaders.comp.Clear();
+  LoadShaders(&m_shaders, m_pState, false, false);
+  CreateDX12PresetPSOs();
+
+  m_fPresetStartTime = GetTime();
+  m_fNextPresetTime  = -1.0f;
+  NumTotalPresetsLoaded++;
+  OnFinishedLoadingPreset();
+
+  // Clean up temp files
+  DeleteFileW(temp1);
+  DeleteFileW(temp2);
+}
+
+// ---------------------------------------------------------------------------
+
+void CPlugin::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
+  // clear old error msg...
+  if (m_nFramesSinceResize > 4)
+    ClearErrors(ERR_PRESET);
+
+  // make sure preset still exists.  (might not if they are using the "back"/fwd buttons
+  //  in RANDOM preset order and a file was renamed or deleted!)
+  if (GetFileAttributesW(szPresetFilename) == 0xFFFFFFFF) {
+
+    wchar_t fullPath[MAX_PATH];
+    GetFullPathNameW(szPresetFilename, MAX_PATH, fullPath, NULL);
+    DebugLogW(fullPath);
+
+    wchar_t buf[1024];
+    swprintf(buf, wasabiApiLangString(IDS_ERROR_PRESET_NOT_FOUND_X), fullPath);
+    AddError(buf, 6.0f, ERR_PRESET, true);
+    m_fPresetStartTime = GetTime();
+    m_fNextPresetTime = -1.0f;		// flags UpdateTime() to recompute this
+    return;
+  }
+
+  if (!m_bSequentialPresetOrder) {
+    // save preset in the history.  keep in mind - maybe we are searching back through it already!
+    if (m_presetHistoryFwdFence == m_presetHistoryPos) {
+      // we're at the forward frontier; add to history
+      m_presetHistory[m_presetHistoryPos] = szPresetFilename;
+      m_presetHistoryFwdFence = (m_presetHistoryFwdFence + 1) % PRESET_HIST_LEN;
+
+      // don't let the two fences touch
+      if (m_presetHistoryBackFence == m_presetHistoryFwdFence)
+        m_presetHistoryBackFence = (m_presetHistoryBackFence + 1) % PRESET_HIST_LEN;
+    }
+    else {
+      // we're retracing our steps, either forward or backward...
+    }
+  }
+
+  // .milk2 double-preset: route to dedicated loader
+  {
+    int fnLen = lstrlenW(szPresetFilename);
+    if (fnLen >= 6 && wcsicmp(szPresetFilename + fnLen - 6, L".milk2") == 0) {
+      LoadMilk2Preset(szPresetFilename, fBlendTime);
+      return;
+    }
+  }
+
+  // if no preset was valid before, make sure there is no blend, because there is nothing valid to blend from.
+  if (!wcscmp(m_pState->m_szDesc, INVALID_PRESET_DESC))
+    fBlendTime = 0;
+
+  if (fBlendTime == 0) {
+    // do it all NOW!
+    if (szPresetFilename != m_szCurrentPresetFile) //[sic]
+      lstrcpyW(m_szCurrentPresetFile, szPresetFilename);
+
+    // Log which preset is now actively rendering (helps diagnose GPU TDR crashes)
+    {
+      const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
+      if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
+      name = name ? name + 1 : m_szCurrentPresetFile;
+      char dbg[512];
+      sprintf(dbg, "Render: Active preset: %ls", name);
+      DebugLogA(dbg);
+    }
+
+    CState* temp = m_pState;
+    m_pState = m_pOldState;
+    m_pOldState = temp;
+
+    DWORD ApplyFlags = STATE_ALL;
+    ApplyFlags ^= (m_bWarpShaderLock ? STATE_WARP : 0);
+    ApplyFlags ^= (m_bCompShaderLock ? STATE_COMP : 0);
+
+    m_pState->Import(m_szCurrentPresetFile, GetTime(), m_pOldState, ApplyFlags);
+
+    if (fBlendTime >= 0.001f) {
+      RandomizeBlendPattern();
+      m_pState->StartBlendFrom(m_pOldState, GetTime(), fBlendTime);
+    }
+
+    m_fPresetStartTime = GetTime();
+    m_fNextPresetTime = -1.0f;		// flags UpdateTime() to recompute this
+
+    // release stuff from m_OldShaders, then move m_shaders to m_OldShaders, then load the new shaders.
+    m_OldShaders.warp.Clear();
+    m_OldShaders.comp.Clear();
+    m_OldShaders = m_shaders;
+    // Null out m_shaders' COM pointers WITHOUT releasing — ownership transferred to m_OldShaders.
+    m_shaders.warp.ptr = NULL;
+    m_shaders.warp.CT = NULL;
+    m_shaders.warp.bytecodeBlob = NULL;
+    m_shaders.warp.params.Clear();
+    m_shaders.comp.ptr = NULL;
+    m_shaders.comp.CT = NULL;
+    m_shaders.comp.bytecodeBlob = NULL;
+    m_shaders.comp.params.Clear();
+
+    LoadShaders(&m_shaders, m_pState, false, false);
+    CreateDX12PresetPSOs();
+    NumTotalPresetsLoaded++;
+    OnFinishedLoadingPreset();
+  }
+  else {
+    // DX12: async preset loading on a background thread.
+    // Import + shader compilation run off the main thread so the current
+    // preset keeps rendering without stutter. When the thread finishes,
+    // LoadPresetTick() detects it and does an instant hard-cut swap.
+
+    // If a previous load is still running, wait for it first
+    if (m_presetLoadThread.joinable()) {
+      m_presetLoadThread.join();
+      m_bPresetLoadReady = false;
+    }
+
+    m_NewShaders.warp.Clear();
+    m_NewShaders.comp.Clear();
+
+    m_nLoadingPreset = 1;  // signals "load in progress" to the rest of the code
+    m_bPresetLoadReady = false;
+    m_fLoadingPresetBlendTime = fBlendTime;
+    lstrcpyW(m_szLoadingPreset, szPresetFilename);
+    NumTotalPresetsLoaded++;
+
+    // Capture values the thread needs (avoid reading member vars from bg thread)
+    float loadTime = GetTime();
+    DWORD ApplyFlags = STATE_ALL;
+    ApplyFlags ^= (m_bWarpShaderLock ? STATE_WARP : 0);
+    ApplyFlags ^= (m_bCompShaderLock ? STATE_COMP : 0);
+
+    m_presetLoadThread = std::thread([this, loadTime, ApplyFlags]() {
+      // Import preset (parses .milk file, compiles NSEEL expressions)
+      m_pNewState->Import(m_szLoadingPreset, loadTime, m_pOldState, ApplyFlags);
+      // Compile both warp + comp pixel shaders (D3DCompile — the expensive part)
+      LoadShaders(&m_NewShaders, m_pNewState, false, false);
+      // Signal main thread that we're ready for the swap
+      m_bPresetLoadReady.store(true);
+    });
+  }
+}
+
+void CPlugin::OnFinishedLoadingPreset() {
+  // note: only used this if you loaded the preset *intact* (or mostly intact)
+
+  // Clamp unreasonably low gamma to avoid black-screen presets
+  if (m_pState->m_fGammaAdj.eval(-1) < 0.5f)
+    m_pState->m_fGammaAdj = 1.0f;
+
+  SetMenusForPresetVersion(m_pState->m_nWarpPSVersion, m_pState->m_nCompPSVersion);
+  m_nPresetsLoadedTotal++; //only increment this on COMPLETION of the load.
+
+  // GPU Protection: warn about heavy presets
+  {
+    int totalInstances = 0;
+    for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+      if (m_pState->m_shape[i].enabled)
+        totalInstances += m_pState->m_shape[i].instances;
+    }
+    if (totalInstances > 512) {
+      const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
+      if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
+      name = name ? name + 1 : m_szCurrentPresetFile;
+      char dbg[512];
+      sprintf(dbg, "GPU Warning: Preset has %d total shape instances (preset: %ls, res: %dx%d)",
+              totalInstances, name, m_nTexSizeX, m_nTexSizeY);
+      DebugLogA(dbg);
+    }
+  }
+
+  for (int mash = 0; mash < MASH_SLOTS; mash++)
+    m_nMashPreset[mash] = m_nCurrentPreset;
+
+  SendPresetChangedInfoToMDropDX12Remote();
+
+  // Notify Settings window so its preset listbox stays in sync
+  if (m_hSettingsWnd && IsWindow(m_hSettingsWnd))
+    PostMessage(m_hSettingsWnd, WM_MW_PRESET_CHANGED, 0, 0);
+
+  // Auto-refresh resource viewer if open
+  if (m_hResourceWnd && IsWindow(m_hResourceWnd) && IsWindowVisible(m_hResourceWnd))
+    PostMessage(m_hResourceWnd, WM_COMMAND, MAKEWPARAM(IDC_RV_REFRESH, BN_CLICKED), 0);
+}
+int CPlugin::SendMessageToMDropDX12Remote(const wchar_t* messageToSend) {
+  return SendMessageToMDropDX12Remote(messageToSend, false);
+}
+
+int CPlugin::SendMessageToMDropDX12Remote(const wchar_t* messageToSend, bool doForce) {
+  using namespace std::chrono;
+  try {
+    if (!messageToSend || !*messageToSend) {
+      wprintf(L"message is null or empty.\n");
+      return 0;
+    }
+
+    // Get current time since epoch in milliseconds
+    uint64_t Now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+    if (!doForce && Now - LastSentMDropDX12Message < 100) {
+      // Skipping message send to MDropDX12 Remote to avoid flooding
+      return 0;
+    }
+    LastSentMDropDX12Message = Now;
+
+    // Find the MDropDX12 Remote window
+    HWND hRemoteWnd = FindWindowW(NULL, L"MDropDX12 Remote");
+    if (!hRemoteWnd) {
+      wprintf(L"MDropDX12 Remote window not found.\n");
+      return 0;
+    }
+
+    // Prepare the COPYDATASTRUCT
+    COPYDATASTRUCT cds;
+    cds.dwData = 1; // Custom identifier for the message
+    cds.cbData = (wcslen(messageToSend) + 1) * sizeof(wchar_t); // Size of the data in bytes
+    cds.lpData = (void*)messageToSend; // Pointer to the data
+
+    if (IsWindow(hRemoteWnd)) {
+      // Send the WM_COPYDATA message
+      if (SendMessage(hRemoteWnd, WM_COPYDATA, (WPARAM)GetPluginWindow(), (LPARAM)&cds) != 0) {
+        wprintf(L"Failed to send WM_COPYDATA message to MDropDX12 Remote.\n");
+        return 0;
+      }
+      else {
+        wprintf(L"WM_COPYDATA message sent successfully to MDropDX12 Remote.\n");
+      }
+    }
+  } catch (...) {
+    // ignore
+  }
+  return 1;
+}
+
+void CPlugin::PostMessageToMDropDX12Remote(UINT msg) {
+  try {
+    // Find the MDropDX12 Remote window
+    HWND hRemoteWnd = FindWindowW(NULL, L"MDropDX12 Remote");
+    if (!hRemoteWnd) {
+      return;
+    }
+    if (IsWindow(hRemoteWnd)) {
+      PostMessageW(hRemoteWnd, msg, 0, 0);
+    }
+  } catch (...) {
+    // ignore
+  }
+}
+
+void CPlugin::LoadPresetTick() {
+  if (m_nLoadingPreset > 0 && m_bPresetLoadReady.load()) {
+    // Background thread finished — join it and apply the preset
+    if (m_presetLoadThread.joinable())
+      m_presetLoadThread.join();
+    m_bPresetLoadReady = false;
+
+    // Apply the preset: swap state pointers
+    lstrcpyW(m_szCurrentPresetFile, m_szLoadingPreset);
+    m_szLoadingPreset[0] = 0;
+
+    // Log which preset is now actively rendering (helps diagnose GPU TDR crashes)
+    {
+      const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
+      if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
+      name = name ? name + 1 : m_szCurrentPresetFile;
+      char dbg[512];
+      sprintf(dbg, "Render: Active preset: %ls", name);
+      DebugLogA(dbg);
+    }
+
+    CState* temp = m_pState;
+    m_pState = m_pOldState;
+    m_pOldState = temp;
+
+    temp = m_pState;
+    m_pState = m_pNewState;
+    m_pNewState = temp;
+
+    // DX12: hard cut — no smooth blend. StartBlendFrom copies needed
+    // state values (old wave mode, etc.) then we immediately disable blending.
+    m_pState->StartBlendFrom(m_pOldState, GetTime(), 0);
+    m_pState->m_bBlending = false;
+
+    m_fPresetStartTime = GetTime();
+    m_fNextPresetTime = -1.0f;		// flags UpdateTime() to recompute this
+
+    // release stuff from m_OldShaders, then move m_shaders to m_OldShaders, then load the new shaders.
+    m_OldShaders.warp.Clear();
+    m_OldShaders.comp.Clear();
+    m_OldShaders = m_shaders;
+    m_shaders = m_NewShaders;
+    // Null out m_NewShaders' COM pointers WITHOUT releasing — ownership transferred to m_shaders.
+    // But DO properly clear the params (vectors were deep-copied by the assignment above).
+    m_NewShaders.warp.ptr = NULL;
+    m_NewShaders.warp.CT = NULL;
+    m_NewShaders.warp.bytecodeBlob = NULL;
+    m_NewShaders.warp.params.Clear();
+    m_NewShaders.comp.ptr = NULL;
+    m_NewShaders.comp.CT = NULL;
+    m_NewShaders.comp.bytecodeBlob = NULL;
+    m_NewShaders.comp.params.Clear();
+
+    // end loading mode
+    m_nLoadingPreset = 0;
+
+    // Defer PSO creation to next frame's render pass — releasing old PSOs here
+    // would destroy them while the current frame's command list still references them.
+    m_bDX12PSOsDirty = true;
+    OnFinishedLoadingPreset();
+  }
+}
+
+void CPlugin::SeekToPreset(wchar_t cStartChar) {
+  if (cStartChar >= L'a' && cStartChar <= L'z')
+    cStartChar -= L'a' - L'A';
+
+  for (int i = m_nDirs; i < m_nPresets; i++) {
+    wchar_t ch = m_presets[i].szFilename.c_str()[0];
+    if (ch >= L'a' && ch <= L'z')
+      ch -= L'a' - L'A';
+    if (ch == cStartChar) {
+      m_nPresetListCurPos = i;
+      return;
+    }
+  }
+}
+
+void CPlugin::FindValidPresetDir() {
+  swprintf(m_szPresetDir, L"%spresets\\", m_szMilkdrop2Path);
+  if (GetFileAttributesW(m_szPresetDir) != -1) {
+    TryDescendIntoPresetSubdirHelper(m_szPresetDir);
+    return;
+  }
+  lstrcpyW(m_szPresetDir, m_szMilkdrop2Path);
+  if (GetFileAttributesW(m_szPresetDir) != -1)
+    return;
+  lstrcpyW(m_szPresetDir, GetPluginsDirPath());
+  if (GetFileAttributesW(m_szPresetDir) != -1)
+    return;
+  // Keep default preset path — do NOT fall back to c:\program files or c:\
+  // which would cause extremely long directory scans.
+  swprintf(m_szPresetDir, L"%spresets\\", m_szMilkdrop2Path);
+}
+
+char* NextLine(char* p) {
+  // p points to the beginning of a line
+  // we'll return a pointer to the first char of the next line
+  // if we hit a NULL char before that, we'll return NULL.
+  if (!p)
+    return NULL;
+
+  char* s = p;
+  while (*s != '\r' && *s != '\n' && *s != 0)
+    s++;
+
+  while (*s == '\r' || *s == '\n')
+    s++;
+
+  if (*s == 0)
+    return NULL;
+
+  return s;
+}
+
+static unsigned int WINAPI __UpdatePresetList(void* lpVoid) {
+  // NOTE - this is run in a separate thread!!!
+
+  DWORD flags = (DWORD)(uintptr_t)lpVoid;
+  bool bForce = (flags & 1) ? true : false;
+  bool bTryReselectCurrentPreset = (flags & 2) ? true : false;
+
+  WIN32_FIND_DATAW fd;
+  ZeroMemory(&fd, sizeof(fd));
+  HANDLE h = INVALID_HANDLE_VALUE;
+
+  int nTry = 0;
+  bool bRetrying = false;
+
+  EnterCriticalSection(&g_cs);
+retry:
+
+  // make sure the path exists; if not, go to winamp plugins dir
+  if (GetFileAttributesW(g_plugin.m_szPresetDir) == -1) {
+    //FIXME...
+    g_plugin.FindValidPresetDir();
+  }
+
+  // if Mask (dir) changed, do a full re-scan;
+  // if not, just finish our old scan.
+  wchar_t szMask[MAX_PATH];
+  swprintf(szMask, L"%s*.*", g_plugin.m_szPresetDir);  // cuz dirnames could have extensions, etc.
+  if (bForce || !g_plugin.m_szUpdatePresetMask[0] || wcscmp(szMask, g_plugin.m_szUpdatePresetMask)) {
+    // if old dir was "" or the dir changed, reset our search
+    if (h != INVALID_HANDLE_VALUE)
+      FindClose(h);
+    h = INVALID_HANDLE_VALUE;
+    g_plugin.m_bPresetListReady = false;
+    lstrcpyW(g_plugin.m_szUpdatePresetMask, szMask);
+    ZeroMemory(&fd, sizeof(fd));
+
+    g_plugin.m_nPresets = 0;
+    g_plugin.m_nDirs = 0;
+    g_plugin.m_presets.clear();
+
+    // find first .MILK file
+    //if( (hFile = _findfirst(szMask, &c_file )) != -1L )		// note: returns filename -without- path
+    if ((h = FindFirstFileW(g_plugin.m_szUpdatePresetMask, &fd)) == INVALID_HANDLE_VALUE)		// note: returns filename -without- path
+    {
+      // --> revert back to plugins dir
+      wchar_t buf[1024];
+      swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILES_OR_DIRS_FOUND_IN_X), g_plugin.m_szPresetDir);
+      g_plugin.AddError(buf, 4.0f, ERR_MISC, true);
+
+      if (bRetrying) {
+        LeaveCriticalSection(&g_cs);
+        g_bThreadAlive = false;
+        _endthreadex(0);
+        return 0;
+      }
+
+      g_plugin.FindValidPresetDir();
+
+      bRetrying = true;
+      goto retry;
+    }
+
+    // g_plugin.AddError(wasabiApiLangString(IDS_SCANNING_PRESETS), 8.0f, ERR_SCANNING_PRESETS, false);
+  }
+
+  if (g_plugin.m_bPresetListReady) {
+    LeaveCriticalSection(&g_cs);
+    g_bThreadAlive = false;
+    _endthreadex(0);
+    return 0;
+  }
+
+  int  nMaxPSVersion = g_plugin.m_nMaxPSVersion;
+  wchar_t szPresetDir[MAX_PATH];
+  lstrcpyW(szPresetDir, g_plugin.m_szPresetDir);
+
+  LeaveCriticalSection(&g_cs);
+
+  PresetList temp_presets;
+  int temp_nDirs = 0;
+  int temp_nPresets = 0;
+
+  // scan for the desired # of presets, this call...
+  while (!g_bThreadShouldQuit && h != INVALID_HANDLE_VALUE) {
+    bool bSkip = false;
+    bool bIsDir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    float fRating = 0;
+
+    wchar_t szFilename[512];
+    lstrcpyW(szFilename, fd.cFileName);
+
+    if (bIsDir) {
+      // skip "." directory
+      if (wcscmp(fd.cFileName, L".") == 0)// || lstrlen(ffd.cFileName) < 1)
+        bSkip = true;
+      else
+        swprintf(szFilename, L"*%s", fd.cFileName);
+    }
+    else {
+      // skip normal files not ending in ".milk" or ".milk2"
+      int len = lstrlenW(fd.cFileName);
+      bool bIsMilk  = (len >= 5 && wcsicmp(fd.cFileName + len - 5, L".milk")  == 0);
+      bool bIsMilk2 = (len >= 6 && wcsicmp(fd.cFileName + len - 6, L".milk2") == 0);
+      if (!bIsMilk && !bIsMilk2)
+        bSkip = true;
+
+      // if it is .milk/.milk2, make sure we know how to run its pixel shaders -
+      // otherwise we don't want to show it in the preset list!
+      if (!bSkip) {
+        // If the first line of the file is not "MILKDROP_PRESET_VERSION XXX",
+        //   then it's a MilkDrop 1 era preset, so it is definitely runnable. (no shaders)
+        // Otherwise, check for the value "PSVERSION".  It will be 0, 2, or 3.
+        //   If missing, assume it is 2.
+        wchar_t szFullPath[MAX_PATH];
+        swprintf(szFullPath, L"%s%s", szPresetDir, fd.cFileName);
+        FILE* f = _wfopen(szFullPath, L"r");
+        if (!f)
+          bSkip = true;
+        else {
+#define PRESET_HEADER_SCAN_BYTES 160
+          char szLine[PRESET_HEADER_SCAN_BYTES];
+          char* p = szLine;
+
+          int bytes_to_read = sizeof(szLine) - 1;
+          int count = fread(szLine, bytes_to_read, 1, f);
+          if (count < 1) {
+            fseek(f, SEEK_SET, 0);
+            count = fread(szLine, 1, bytes_to_read, f);
+            szLine[count] = 0;
+          }
+          else
+            szLine[bytes_to_read - 1] = 0;
+
+          bool bScanForPreset00AndRating = false;
+          bool bRatingKnown = false;
+
+          // try to read the PSVERSION and the fRating= value.
+          // most presets (unless hand-edited) will have these right at the top.
+          // if not, [at least for fRating] use GetPrivateProfileFloat to search whole file.
+          // read line 1
+          //p = NextLine(p);//fgets(p, sizeof(p)-1, f);
+          if (!strncmp(p, "MILKDROP_PRESET_VERSION", 23)) {
+            p = NextLine(p);//fgets(p, sizeof(p)-1, f);
+            int ps_version = 2;
+            if (p && !strncmp(p, "PSVERSION", 9)) {
+              sscanf(&p[10], "%d", &ps_version);
+              if (ps_version > nMaxPSVersion)
+                bSkip = true;
+              else {
+                p = NextLine(p);//fgets(p, sizeof(p)-1, f);
+                bScanForPreset00AndRating = true;
+              }
+            }
+          }
+          else {
+            // otherwise it's a MilkDrop 1 preset - we can run it.
+            bScanForPreset00AndRating = true;
+          }
+
+          // scan up to 10 more lines in the file, looking for [preset00] and fRating=...
+          // (this is WAY faster than GetPrivateProfileFloat, when it works!)
+          int reps = (bScanForPreset00AndRating) ? 10 : 0;
+          for (int z = 0; z < reps; z++) {
+            if (p && !strncmp(p, "[preset00]", 10)) {
+              p = NextLine(p);
+              if (p && !strncmp(p, "fRating=", 8)) {
+                _sscanf_l(&p[8], "%f", g_use_C_locale, &fRating);
+                bRatingKnown = true;
+                break;
+              }
+            }
+            p = NextLine(p);
+          }
+
+          fclose(f);
+
+          if (!bRatingKnown)
+            fRating = GetPrivateProfileFloatW(L"preset00", L"fRating", 3.0f, szFullPath);
+          fRating = max(0.0f, min(5.0f, fRating));
+        }
+      }
+    }
+
+    if (!bSkip) {
+      float fPrevPresetRatingCum = 0;
+      if (temp_nPresets > 0)
+        fPrevPresetRatingCum += temp_presets[temp_nPresets - 1].fRatingCum;
+
+      PresetInfo x;
+      x.szFilename = szFilename;
+      x.fRatingThis = fRating;
+      x.fRatingCum = fPrevPresetRatingCum + fRating;
+      temp_presets.push_back(x);
+
+      temp_nPresets++;
+      if (bIsDir)
+        temp_nDirs++;
+    }
+
+    if (!FindNextFileW(h, &fd)) {
+      FindClose(h);
+      h = INVALID_HANDLE_VALUE;
+
+      break;
+    }
+
+    // every so often, add some presets...
+#define PRESET_UPDATE_INTERVAL 64
+    if (temp_nPresets == 30 || ((temp_nPresets % PRESET_UPDATE_INTERVAL) == 0)) {
+      EnterCriticalSection(&g_cs);
+
+      //g_plugin.m_presets  = temp_presets;
+      int curPreset = g_plugin.m_nPresets;
+      while (!g_bThreadShouldQuit && curPreset < temp_nPresets) {
+        g_plugin.m_presets.push_back(temp_presets[curPreset]);
+        curPreset++;
+      }
+      g_plugin.m_nPresets = curPreset;
+      g_plugin.m_nDirs = temp_nDirs;
+
+      LeaveCriticalSection(&g_cs);
+    }
+  }
+
+  if (g_bThreadShouldQuit) {
+    // just abort... we are exiting the program or restarting the scan.
+    g_bThreadAlive = false;
+    _endthreadex(0);
+    return 0;
+  }
+
+  EnterCriticalSection(&g_cs);
+
+  //g_plugin.m_presets  = temp_presets;
+  for (int i = g_plugin.m_nPresets; i < temp_nPresets; i++)
+    g_plugin.m_presets.push_back(temp_presets[i]);
+  g_plugin.m_nPresets = temp_nPresets;
+  g_plugin.m_nDirs = temp_nDirs;
+  g_plugin.m_bPresetListReady = true;
+
+  if (g_plugin.m_bPresetListReady && g_plugin.m_nPresets == 0) {
+    // no presets OR directories found - weird - but it happens.
+    // --> revert back to plugins dir
+    wchar_t buf[1024];
+    swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILES_OR_DIRS_FOUND_IN_X), g_plugin.m_szPresetDir);
+    g_plugin.AddError(buf, 4.0f, ERR_MISC, true);
+
+    if (bRetrying) {
+      LeaveCriticalSection(&g_cs);
+      g_bThreadAlive = false;
+      _endthreadex(0);
+      return 0;
+    }
+
+    g_plugin.FindValidPresetDir();
+
+    bRetrying = true;
+    goto retry;
+  }
+
+  if (g_plugin.m_bPresetListReady) {
+    g_plugin.MergeSortPresets(0, g_plugin.m_nPresets - 1);
+
+    // update cumulative ratings, since order changed...
+    g_plugin.m_presets[0].fRatingCum = g_plugin.m_presets[0].fRatingThis;
+    for (int i = 0; i < g_plugin.m_nPresets; i++)
+      g_plugin.m_presets[i].fRatingCum = i == 0 ? 0 : g_plugin.m_presets[i - 1].fRatingCum + g_plugin.m_presets[i].fRatingThis;
+
+    // clear the "scanning presets" msg
+    g_plugin.ClearErrors(ERR_SCANNING_PRESETS);
+
+    // finally, try to re-select the most recently-used preset in the list
+    g_plugin.m_nPresetListCurPos = 0;
+    if (bTryReselectCurrentPreset) {
+      if (g_plugin.m_szCurrentPresetFile[0]) {
+        // try to automatically seek to the last preset loaded
+        wchar_t* p = wcsrchr(g_plugin.m_szCurrentPresetFile, L'\\');
+        p = (p) ? (p + 1) : g_plugin.m_szCurrentPresetFile;
+        for (int i = g_plugin.m_nDirs; i < g_plugin.m_nPresets; i++) {
+          if (wcscmp(p, g_plugin.m_presets[i].szFilename.c_str()) == 0) {
+            g_plugin.m_nPresetListCurPos = i;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  LeaveCriticalSection(&g_cs);
+
+  g_bThreadAlive = false;
+  _endthreadex(0);
+  return 0;
+}
+
+void CPlugin::UpdatePresetList(bool bBackground, bool bForce, bool bTryReselectCurrentPreset) {
+  // note: if dir changed, make sure bForce is true!
+
+  if (bForce) {
+    if (g_bThreadAlive)
+      CancelThread(500);  // flags it to exit; shorter timeout for interactive responsiveness
+  }
+  else {
+    if (bBackground && (g_bThreadAlive || m_bPresetListReady))
+      return;
+    if (!bBackground && m_bPresetListReady)
+      return;
+  }
+
+  assert(!g_bThreadAlive);
+
+  // spawn new thread:
+  DWORD flags = (bForce ? 1 : 0) | (bTryReselectCurrentPreset ? 2 : 0);
+  g_bThreadShouldQuit = false;
+  g_bThreadAlive = true;
+  g_hThread = (HANDLE)_beginthreadex(NULL, 0, __UpdatePresetList, (void*)flags, 0, 0);
+
+  if (!bBackground) {
+    // crank up priority, wait for it to finish, and then return
+    SetThreadPriority(g_hThread, THREAD_PRIORITY_HIGHEST); //THREAD_PRIORITY_IDLE,    THREAD_PRIORITY_LOWEST,    THREAD_PRIORITY_NORMAL,    THREAD_PRIORITY_HIGHEST,
+
+    // wait for it to finish
+    while (g_bThreadAlive)
+      Sleep(30);
+
+    assert(g_hThread != INVALID_HANDLE_VALUE);
+    CloseHandle(g_hThread);
+    g_hThread = INVALID_HANDLE_VALUE;
+  }
+  else {
+    // Background mode: wait briefly for an initial batch of presets so that
+    // LoadRandomPreset (called right after this at startup) has something to work with.
+    // This does NOT hold the critical section, so the render loop is NOT blocked.
+    SetThreadPriority(g_hThread, THREAD_PRIORITY_ABOVE_NORMAL);
+
+    int waited = 0;
+    while (g_bThreadAlive && waited < 3000) {
+      Sleep(30);
+      waited += 30;
+
+      // Check preset count without the CS to avoid blocking the render thread.
+      // A brief race on m_nPresets is acceptable — we just need a rough count.
+      if (g_plugin.m_nPresets >= 30)
+        break;
+    }
+  }
+
+  return;
+}
+
+void CPlugin::MergeSortPresets(int left, int right) {
+  // note: left..right range is inclusive
+  int nItems = right - left + 1;
+
+  if (nItems > 2) {
+    // recurse to sort 2 halves (but don't actually recurse on a half if it only has 1 element)
+    int mid = (left + right) / 2;
+    /*if (mid   != left) */ MergeSortPresets(left, mid);
+    /*if (mid+1 != right)*/ MergeSortPresets(mid + 1, right);
+
+    // then merge results
+    int a = left;
+    int b = mid + 1;
+    while (a <= mid && b <= right) {
+      bool bSwap;
+
+      // merge the sorted arrays; give preference to strings that start with a '*' character
+      int nSpecial = 0;
+      if (m_presets[a].szFilename.c_str()[0] == '*') nSpecial++;
+      if (m_presets[b].szFilename.c_str()[0] == '*') nSpecial++;
+
+      if (nSpecial == 1) {
+        bSwap = (m_presets[b].szFilename.c_str()[0] == '*');
+      }
+      else {
+        bSwap = (mystrcmpiW(m_presets[a].szFilename.c_str(), m_presets[b].szFilename.c_str()) > 0);
+      }
+
+      if (bSwap) {
+        PresetInfo temp = m_presets[b];
+        for (int k = b; k > a; k--)
+          m_presets[k] = m_presets[k - 1];
+        m_presets[a] = temp;
+        mid++;
+        b++;
+      }
+      a++;
+    }
+  }
+  else if (nItems == 2) {
+    // sort 2 items; give preference to 'special' strings that start with a '*' character
+    int nSpecial = 0;
+    if (m_presets[left].szFilename.c_str()[0] == '*') nSpecial++;
+    if (m_presets[right].szFilename.c_str()[0] == '*') nSpecial++;
+
+    if (nSpecial == 1) {
+      if (m_presets[right].szFilename.c_str()[0] == '*') {
+        PresetInfo temp = m_presets[left];
+        m_presets[left] = m_presets[right];
+        m_presets[right] = temp;
+      }
+    }
+    else if (mystrcmpiW(m_presets[left].szFilename.c_str(), m_presets[right].szFilename.c_str()) > 0) {
+      PresetInfo temp = m_presets[left];
+      m_presets[left] = m_presets[right];
+      m_presets[right] = temp;
+    }
+  }
+}
+
+void CPlugin::SavePresetAs(wchar_t* szNewFile) {
+  // overwrites the file if it was already there,
+  // so you should check if the file exists first & prompt user to overwrite,
+  //   before calling this function
+
+  if (!m_pState->Export(szNewFile)) {
+    // error
+    AddError(wasabiApiLangString(IDS_ERROR_UNABLE_TO_SAVE_THE_FILE), 6.0f, ERR_PRESET, true);
+  }
+  else {
+    // pop up confirmation
+    AddNotification(wasabiApiLangString(IDS_SAVE_SUCCESSFUL));
+
+    // update m_pState->m_szDesc with the new name
+    lstrcpyW(m_pState->m_szDesc, m_waitstring.szText);
+
+    // refresh file listing
+    UpdatePresetList(true, true);
+  }
+}
+
+void CPlugin::DeletePresetFile(wchar_t* szDelFile) {
+  // NOTE: this function additionally assumes that m_nPresetListCurPos indicates
+  //		 the slot that the to-be-deleted preset occupies!
+
+  // delete file
+  if (!DeleteFileW(szDelFile)) {
+    // error
+    AddError(wasabiApiLangString(IDS_ERROR_UNABLE_TO_DELETE_THE_FILE), 6.0f, ERR_MISC, true);
+  }
+  else {
+    // pop up confirmation
+    wchar_t buf[1024];
+    swprintf(buf, wasabiApiLangString(IDS_PRESET_X_DELETED), m_presets[m_nPresetListCurPos].szFilename.c_str());
+    AddNotification(buf);
+
+    // refresh file listing & re-select the next file after the one deleted
+    int newPos = m_nPresetListCurPos;
+    UpdatePresetList(true, true);
+    m_nPresetListCurPos = max(0, min(m_nPresets - 1, newPos));
+  }
+}
+
+void CPlugin::RenamePresetFile(wchar_t* szOldFile, wchar_t* szNewFile) {
+  // NOTE: this function additionally assumes that m_nPresetListCurPos indicates
+  //		 the slot that the to-be-renamed preset occupies!
+
+  if (GetFileAttributesW(szNewFile) != -1)		// check if file already exists
+  {
+    // error
+    AddError(wasabiApiLangString(IDS_ERROR_A_FILE_ALREADY_EXISTS_WITH_THAT_FILENAME), 6.0f, ERR_PRESET, true);
+
+    // (user remains in UI_LOAD_RENAME mode to try another filename)
+  }
+  else {
+    // rename
+    if (!MoveFileW(szOldFile, szNewFile)) {
+      // error
+      AddError(wasabiApiLangString(IDS_ERROR_UNABLE_TO_RENAME_FILE), 6.0f, ERR_MISC, true);
+    }
+    else {
+      // pop up confirmation
+      AddError(wasabiApiLangString(IDS_RENAME_SUCCESSFUL), 3.0f, ERR_NOTIFY, false);
+
+      // if this preset was the active one, update m_pState->m_szDesc with the new name
+      wchar_t buf[512];
+      swprintf(buf, L"%s.milk", m_pState->m_szDesc);
+      if (wcscmp(m_presets[m_nPresetListCurPos].szFilename.c_str(), buf) == 0) {
+        lstrcpyW(m_pState->m_szDesc, m_waitstring.szText);
+      }
+
+      // refresh file listing & do a trick to make it re-select the renamed file
+      wchar_t buf2[512];
+      lstrcpyW(buf2, m_waitstring.szText);
+      lstrcatW(buf2, L".milk");
+      m_presets[m_nPresetListCurPos].szFilename = buf2;
+      UpdatePresetList(true, true, false);
+
+      // jump to (highlight) the new file:
+      m_nPresetListCurPos = 0;
+      wchar_t* p = wcsrchr(szNewFile, L'\\');
+      if (p) {
+        p++;
+        for (int i = m_nDirs; i < m_nPresets; i++) {
+          if (wcscmp(p, m_presets[i].szFilename.c_str()) == 0) {
+            m_nPresetListCurPos = i;
+            break;
+          }
+        }
+      }
+    }
+
+    // exit waitstring mode (return to load menu)
+    m_UI_mode = UI_LOAD;
+    m_waitstring.bActive = false;
+  }
+}
+
+/*
+void CPlugin::UpdatePresetRatings()
+{
+  if (!m_bEnableRating)
+    return;
+
+    if (m_nRatingReadProgress==-1 || m_nRatingReadProgress==m_nPresets)
+        return;
+
+  int k;
+
+    if (m_nRatingReadProgress==0 && m_nDirs>0)
+    {
+      for (k=0; k<m_nDirs; k++)
+      {
+        m_presets[m_nRatingReadProgress].fRatingCum = 0.0f;
+            m_nRatingReadProgress++;
+      }
+
+        if (!m_bInstaScan)
+            return;
+    }
+
+    int presets_per_frame = m_bInstaScan ? 4096 : 1;
+    int k1 = m_nRatingReadProgress;
+    int k2 = min(m_nRatingReadProgress + presets_per_frame, m_nPresets);
+  for (k=k1; k<k2; k++)
+  {
+    char szFullPath[512];
+    sprintf(szFullPath, "%s%s", m_szPresetDir, m_presets[k].szFilename.c_str());
+    float f = GetPrivateProfileFloat("preset00", "fRating", 3.0f, szFullPath);
+    if (f < 0) f = 0;
+    if (f > 5) f = 5;
+
+    if (k==0)
+      m_presets[k].fRatingCum = f;
+    else
+      m_presets[k].fRatingCum = m_presets[k-1].fRatingCum + f;
+
+        m_nRatingReadProgress++;
+  }
+}
+*/
+
+void CPlugin::SetCurrentPresetRating(float fNewRating) {
+  if (!m_bEnableRating)
+    return;
+
+  if (fNewRating < 0) fNewRating = 0;
+  if (fNewRating > 5) fNewRating = 5;
+  float change = (fNewRating - m_pState->m_fRating);
+
+  // update the file on disk:
+  //char szPresetFileNoPath[512];
+  //char szPresetFileWithPath[512];
+  //sprintf(szPresetFileNoPath,   "%s.milk", m_pState->m_szDesc);
+  //sprintf(szPresetFileWithPath, "%s%s.milk", GetPresetDir(), m_pState->m_szDesc);
+  WritePrivateProfileFloatW(fNewRating, L"fRating", m_szCurrentPresetFile, L"preset00");
+
+  // update the copy of the preset in memory
+  m_pState->m_fRating = fNewRating;
+
+  // update the cumulative internal listing:
+  m_presets[m_nCurrentPreset].fRatingThis += change;
+  if (m_nCurrentPreset != -1)// && m_nRatingReadProgress >= m_nCurrentPreset)		// (can be -1 if dir. changed but no new preset was loaded yet)
+    for (int i = m_nCurrentPreset; i < m_nPresets; i++)
+      m_presets[i].fRatingCum += change;
+
+  /* keep in view:
+    -test switching dirs w/o loading a preset, and trying to change the rating
+      ->m_nCurrentPreset is out of range!
+    -soln: when adjusting rating:
+      1. file to modify is m_szCurrentPresetFile
+      2. only update CDF if m_nCurrentPreset is not -1
+    -> set m_nCurrentPreset to -1 whenever dir. changes
+    -> set m_szCurrentPresetFile whenever you load a preset
+  */
+
+  // show a message
+  if (!m_bShowRating) {
+    // see also: DrawText() in milkdropfs.cpp
+    m_fShowRatingUntilThisTime = GetTime() + 2.0f;
+  }
+}
+
+// ============================================================================
+// Messages tab functions
+// ============================================================================
+
+
+// Functions that were interleaved with other modules in plugin.cpp
+bool DirHasMilkFilesHelper(const wchar_t* szDir) {
+  wchar_t szMask[MAX_PATH];
+  swprintf(szMask, L"%s*.milk", szDir);
+  WIN32_FIND_DATAW fd;
+  HANDLE h = FindFirstFileW(szMask, &fd);
+  if (h != INVALID_HANDLE_VALUE) { FindClose(h); return true; }
+  return false;
+}
+
+bool TryDescendIntoPresetSubdirHelper(wchar_t* szDir) {
+  if (GetFileAttributesW(szDir) == INVALID_FILE_ATTRIBUTES)
+    return false;
+
+  if (DirHasMilkFilesHelper(szDir))
+    return true;  // already has .milk files
+
+  wchar_t szMask[MAX_PATH];
+  swprintf(szMask, L"%s*.*", szDir);
+  WIN32_FIND_DATAW fd;
+  HANDLE h = FindFirstFileW(szMask, &fd);
+  if (h == INVALID_HANDLE_VALUE) return false;
+
+  int nChecked = 0;
+  do {
+    if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+        wcscmp(fd.cFileName, L".") != 0 && wcscmp(fd.cFileName, L"..") != 0) {
+      wchar_t szSubDir[MAX_PATH];
+      swprintf(szSubDir, L"%s%s\\", szDir, fd.cFileName);
+      if (DirHasMilkFilesHelper(szSubDir)) {
+        lstrcpyW(szDir, szSubDir);
+        FindClose(h);
+        return true;
+      }
+      if (++nChecked >= 20) break;  // safety limit
+    }
+  } while (FindNextFileW(h, &fd));
+
+  FindClose(h);
+  return false;
+}
+//----------------------------------------------------------------------
+
+void CPlugin::KillAllSprites() {
+  for (int x = 0; x < NUM_TEX; x++)
+    if (m_texmgr.m_tex[x].pSurface)
+      m_texmgr.KillTex(x);
+}
+
+void CPlugin::KillAllSupertexts() {
+  for (int x = 0; x < NUM_SUPERTEXTS; x++) {
+    m_supertexts[x].fStartTime = -1.0f;
+    m_supertexts[x].bRedrawSuperText = false;
+  }
+}
+
+bool CPlugin::ChangePresetDir(wchar_t* newDir, wchar_t* oldDir) {
+  // change dir
+  wchar_t szOldDir[512];
+  wchar_t szNewDir[512];
+  lstrcpyW(szOldDir, oldDir);
+  lstrcpyW(szNewDir, newDir);
+
+  int len = lstrlenW(szNewDir);
+  if (len > 0 && szNewDir[len - 1] != L'\\')
+    lstrcatW(szNewDir, L"\\");
+
+  lstrcpyW(g_plugin.m_szPresetDir, szNewDir);
+
+  bool bSuccess = true;
+  if (GetFileAttributesW(g_plugin.m_szPresetDir) == -1)
+    bSuccess = false;
+  if (bSuccess) {
+    UpdatePresetList(true, true, false);
+
+    // bSuccess = (m_nPresets > 0);
+    // success
+    lstrcpyW(g_plugin.m_szPresetDir, szNewDir);
+
+    // save new path to registry
+    WritePrivateProfileStringW(L"Settings", L"szPresetDir", g_plugin.m_szPresetDir, GetConfigIniFile());
+  }
+  else {
+    // new dir. was invalid -> allow them to try again
+    lstrcpyW(g_plugin.m_szPresetDir, oldDir);
+
+    // give them a warning
+    AddError(wasabiApiLangString(IDS_INVALID_PATH), 3.5f, ERR_MISC, true);
+  }
+
+  return bSuccess;
+}
+
+void CPlugin::SaveCurrentPresetToQuicksave(bool altDir) {
+  // Find the last occurrence of the path separator ('\\') in the full path
+  wchar_t* presetFilename = wcsrchr(m_szCurrentPresetFile, L'\\');
+  if (presetFilename) {
+    // Move past the '\\' to get the filename
+    presetFilename++;
+  }
+  else {
+    // If no '\\' is found, assume the full path is just the filename
+    presetFilename = m_szCurrentPresetFile;
+  }
+
+  if (presetFilename[0] == L'\0') { // Check if presetFilename is empty
+    RemoveAngleBrackets(m_pState->m_szDesc);
+    presetFilename = m_pState->m_szDesc; // Default filename if empty
+    // append ".milk" extension
+    presetFilename = wcscat(presetFilename, L".milk");
+  }
+
+  // Get the executable's directory
+  std::filesystem::path exeDir = std::filesystem::path(m_szBaseDir).parent_path();
+
+  std::string quicksaveDir = "resources/presets/Quicksave";
+  if (altDir) {
+    quicksaveDir = "resources/presets/Quicksave2";
+  }
+  std::filesystem::path quicksavePresetPath = exeDir / quicksaveDir;
+  std::filesystem::create_directories(quicksavePresetPath);
+
+  quicksavePresetPath.append(presetFilename);
+  // Convert std::filesystem::path to const wchar_t* before passing to Export
+  if (!m_pState->Export(quicksavePresetPath.wstring().c_str())) {
+    AddError(L"Quicksave failed", 5.0f, ERR_PRESET, true);
+  }
+  else {
+    RemoveAngleBrackets(m_pState->m_szDesc);
+    // lstrcpyW(m_pState->m_szDesc, m_szCurrentPresetFile);
+    AddNotification(L"Quicksave successful");
+  }
+}
+
+wchar_t* FormImageCacheSizeString(wchar_t* itemStr, UINT sizeID) {
+  static wchar_t cacheBuf[128] = { 0 };
+  StringCchPrintfW(cacheBuf, 128, L"%s %s", itemStr, wasabiApiLangString(sizeID));
+  return cacheBuf;
+}
+
+//----------------------------------------------------------------------
+
+void CPlugin::Randomize() {
+  srand((int)(GetTime() * 100));
+  //m_fAnimTime		= (rand() % 51234L)*0.01f;
+  m_fRandStart[0] = (rand() % 64841L) * 0.01f;
+  m_fRandStart[1] = (rand() % 53751L) * 0.01f;
+  m_fRandStart[2] = (rand() % 42661L) * 0.01f;
+  m_fRandStart[3] = (rand() % 31571L) * 0.01f;
+
+  //CState temp;
+  //temp.Randomize(rand() % NUM_MODES);
+  //m_pState->StartBlend(&temp, m_fAnimTime, m_fBlendTimeUser);
+}
+
+//----------------------------------------------------------------------
+
+void CPlugin::SetMenusForPresetVersion(int WarpPSVersion, int CompPSVersion) {
+  int MaxPSVersion = max(WarpPSVersion, CompPSVersion);
+
+  m_menuPreset.EnableItem(wasabiApiLangString(IDS_MENU_EDIT_WARP_SHADER), WarpPSVersion > 0);
+  m_menuPreset.EnableItem(wasabiApiLangString(IDS_MENU_EDIT_COMPOSITE_SHADER), CompPSVersion > 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_SUSTAIN_LEVEL), WarpPSVersion == 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_TEXTURE_WRAP), WarpPSVersion == 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_GAMMA_ADJUSTMENT), CompPSVersion == 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_HUE_SHADER), CompPSVersion == 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_VIDEO_ECHO_ALPHA), CompPSVersion == 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_VIDEO_ECHO_ZOOM), CompPSVersion == 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_VIDEO_ECHO_ORIENTATION), CompPSVersion == 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_FILTER_INVERT), CompPSVersion == 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_FILTER_BRIGHTEN), CompPSVersion == 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_FILTER_DARKEN), CompPSVersion == 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_FILTER_SOLARIZE), CompPSVersion == 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_BLUR1_EDGE_DARKEN_AMOUNT), MaxPSVersion > 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_BLUR1_MIN_COLOR_VALUE), MaxPSVersion > 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_BLUR1_MAX_COLOR_VALUE), MaxPSVersion > 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_BLUR2_MIN_COLOR_VALUE), MaxPSVersion > 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_BLUR2_MAX_COLOR_VALUE), MaxPSVersion > 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_BLUR3_MIN_COLOR_VALUE), MaxPSVersion > 0);
+  m_menuPost.EnableItem(wasabiApiLangString(IDS_MENU_BLUR3_MAX_COLOR_VALUE), MaxPSVersion > 0);
+}
+
+void CPlugin::BuildMenus() {
+  wchar_t buf[1024];
+
+  m_pCurMenu = &m_menuPreset;//&m_menuMain;
+
+  m_menuPreset.Init(wasabiApiLangString(IDS_EDIT_CURRENT_PRESET));
+  m_menuMotion.Init(wasabiApiLangString(IDS_MOTION));
+  m_menuCustomShape.Init(wasabiApiLangString(IDS_DRAWING_CUSTOM_SHAPES));
+  m_menuCustomWave.Init(wasabiApiLangString(IDS_DRAWING_CUSTOM_WAVES));
+  m_menuWave.Init(wasabiApiLangString(IDS_DRAWING_SIMPLE_WAVEFORM));
+  m_menuAugment.Init(wasabiApiLangString(IDS_DRAWING_BORDERS_MOTION_VECTORS));
+  m_menuPost.Init(wasabiApiLangString(IDS_POST_PROCESSING_MISC));
+  for (int i = 0; i < MAX_CUSTOM_WAVES; i++) {
+    swprintf(buf, wasabiApiLangString(IDS_CUSTOM_WAVE_X), i + 1);
+    m_menuWavecode[i].Init(buf);
+  }
+  for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+    swprintf(buf, wasabiApiLangString(IDS_CUSTOM_SHAPE_X), i + 1);
+    m_menuShapecode[i].Init(buf);
+  }
+
+  //-------------------------------------------
+
+  // MAIN MENU / menu hierarchy
+
+  m_menuPreset.AddChildMenu(&m_menuMotion);
+  m_menuPreset.AddChildMenu(&m_menuCustomShape);
+  m_menuPreset.AddChildMenu(&m_menuCustomWave);
+  m_menuPreset.AddChildMenu(&m_menuWave);
+  m_menuPreset.AddChildMenu(&m_menuAugment);
+  m_menuPreset.AddChildMenu(&m_menuPost);
+
+  for (int i = 0; i < MAX_CUSTOM_SHAPES; i++)
+    m_menuCustomShape.AddChildMenu(&m_menuShapecode[i]);
+  for (int i = 0; i < MAX_CUSTOM_WAVES; i++)
+    m_menuCustomWave.AddChildMenu(&m_menuWavecode[i]);
+
+  // NOTE: all of the eval menuitems use a CALLBACK function to register the user's changes (see last param)
+  m_menuPreset.AddItem(wasabiApiLangString(IDS_MENU_EDIT_PRESET_INIT_CODE),
+    &m_pState->m_szPerFrameInit, MENUITEMTYPE_STRING,
+    wasabiApiLangString(IDS_MENU_EDIT_PRESET_INIT_CODE_TT, buf, 1024),
+    256, 0, &OnUserEditedPresetInit, sizeof(m_pState->m_szPerFrameInit), 0);
+
+  m_menuPreset.AddItem(wasabiApiLangString(IDS_MENU_EDIT_PER_FRAME_EQUATIONS),
+    &m_pState->m_szPerFrameExpr, MENUITEMTYPE_STRING,
+    wasabiApiLangString(IDS_MENU_EDIT_PER_FRAME_EQUATIONS_TT, buf, 1024),
+    256, 0, &OnUserEditedPerFrame, sizeof(m_pState->m_szPerFrameExpr), 0);
+
+  m_menuPreset.AddItem(wasabiApiLangString(IDS_MENU_EDIT_PER_VERTEX_EQUATIONS),
+    &m_pState->m_szPerPixelExpr, MENUITEMTYPE_STRING,
+    wasabiApiLangString(IDS_MENU_EDIT_PER_VERTEX_EQUATIONS_TT, buf, 1024),
+    256, 0, &OnUserEditedPerPixel, sizeof(m_pState->m_szPerPixelExpr), 0);
+
+  m_menuPreset.AddItem(wasabiApiLangString(IDS_MENU_EDIT_WARP_SHADER),
+    &m_pState->m_szWarpShadersText, MENUITEMTYPE_STRING,
+    wasabiApiLangString(IDS_MENU_EDIT_WARP_SHADER_TT, buf, 1024),
+    256, 0, &OnUserEditedWarpShaders, sizeof(m_pState->m_szWarpShadersText), 0);
+
+  m_menuPreset.AddItem(wasabiApiLangString(IDS_MENU_EDIT_COMPOSITE_SHADER),
+    &m_pState->m_szCompShadersText, MENUITEMTYPE_STRING,
+    wasabiApiLangString(IDS_MENU_EDIT_COMPOSITE_SHADER_TT, buf, 1024),
+    256, 0, &OnUserEditedCompShaders, sizeof(m_pState->m_szCompShadersText), 0);
+
+  m_menuPreset.AddItem(wasabiApiLangString(IDS_MENU_EDIT_UPGRADE_PRESET_PS_VERSION),
+    (void*)UI_UPGRADE_PIXEL_SHADER, MENUITEMTYPE_UIMODE,
+    wasabiApiLangString(IDS_MENU_EDIT_UPGRADE_PRESET_PS_VERSION_TT, buf, 1024),
+    0, 0, NULL, UI_UPGRADE_PIXEL_SHADER, 0);
+
+  m_menuPreset.AddItem(wasabiApiLangString(IDS_MENU_EDIT_DO_A_PRESET_MASH_UP),
+    (void*)UI_MASHUP, MENUITEMTYPE_UIMODE,
+    wasabiApiLangString(IDS_MENU_EDIT_DO_A_PRESET_MASH_UP_TT, buf, 1024),
+    0, 0, NULL, UI_MASHUP, 0);
+
+  //-------------------------------------------
+
+// menu items
+#define MEN_T(id) wasabiApiLangString(id)
+#define MEN_TT(id) wasabiApiLangString(id, buf, 1024)
+
+  m_menuWave.AddItem(MEN_T(IDS_MENU_WAVE_TYPE), &m_pState->m_nWaveMode, MENUITEMTYPE_INT, MEN_TT(IDS_MENU_WAVE_TYPE_TT), 0, NUM_WAVES - 1);
+  m_menuWave.AddItem(MEN_T(IDS_MENU_SIZE), &m_pState->m_fWaveScale, MENUITEMTYPE_LOGBLENDABLE, MEN_TT(IDS_MENU_SIZE_TT));
+  m_menuWave.AddItem(MEN_T(IDS_MENU_SMOOTH), &m_pState->m_fWaveSmoothing, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_SMOOTH_TT), 0.0f, 0.9f);
+  m_menuWave.AddItem(MEN_T(IDS_MENU_MYSTERY_PARAMETER), &m_pState->m_fWaveParam, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_MYSTERY_PARAMETER_TT), -1.0f, 1.0f);
+  m_menuWave.AddItem(MEN_T(IDS_MENU_POSITION_X), &m_pState->m_fWaveX, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_POSITION_X_TT), 0, 1);
+  m_menuWave.AddItem(MEN_T(IDS_MENU_POSITION_Y), &m_pState->m_fWaveY, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_POSITION_Y_TT), 0, 1);
+  m_menuWave.AddItem(MEN_T(IDS_MENU_COLOR_RED), &m_pState->m_fWaveR, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_COLOR_RED_TT), 0, 1);
+  m_menuWave.AddItem(MEN_T(IDS_MENU_COLOR_GREEN), &m_pState->m_fWaveG, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_COLOR_GREEN_TT), 0, 1);
+  m_menuWave.AddItem(MEN_T(IDS_MENU_COLOR_BLUE), &m_pState->m_fWaveB, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_COLOR_BLUE_TT), 0, 1);
+  m_menuWave.AddItem(MEN_T(IDS_MENU_OPACITY), &m_pState->m_fWaveAlpha, MENUITEMTYPE_LOGBLENDABLE, MEN_TT(IDS_MENU_OPACITY_TT), 0.001f, 100.0f);
+  m_menuWave.AddItem(MEN_T(IDS_MENU_USE_DOTS), &m_pState->m_bWaveDots, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_USE_DOTS_TT));
+  m_menuWave.AddItem(MEN_T(IDS_MENU_DRAW_THICK), &m_pState->m_bWaveThick, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_DRAW_THICK_TT));
+  m_menuWave.AddItem(MEN_T(IDS_MENU_MODULATE_OPACITY_BY_VOLUME), &m_pState->m_bModWaveAlphaByVolume, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_MODULATE_OPACITY_BY_VOLUME_TT));
+  m_menuWave.AddItem(MEN_T(IDS_MENU_MODULATION_TRANSPARENT_VOLUME), &m_pState->m_fModWaveAlphaStart, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_MODULATION_TRANSPARENT_VOLUME_TT), 0.0f, 2.0f);
+  m_menuWave.AddItem(MEN_T(IDS_MENU_MODULATION_OPAQUE_VOLUME), &m_pState->m_fModWaveAlphaEnd, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_MODULATION_OPAQUE_VOLUME_TT), 0.0f, 2.0f);
+  m_menuWave.AddItem(MEN_T(IDS_MENU_ADDITIVE_DRAWING), &m_pState->m_bAdditiveWaves, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_ADDITIVE_DRAWING_TT));
+  m_menuWave.AddItem(MEN_T(IDS_MENU_COLOR_BRIGHTENING), &m_pState->m_bMaximizeWaveColor, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_COLOR_BRIGHTENING_TT));
+
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_OUTER_BORDER_THICKNESS), &m_pState->m_fOuterBorderSize, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_OUTER_BORDER_THICKNESS_TT), 0, 0.5f);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_COLOR_RED_OUTER), &m_pState->m_fOuterBorderR, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_COLOR_RED_OUTER_TT), 0, 1);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_COLOR_GREEN_OUTER), &m_pState->m_fOuterBorderG, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_COLOR_GREEN_OUTER_TT), 0, 1);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_COLOR_BLUE_OUTER), &m_pState->m_fOuterBorderB, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_COLOR_BLUE_OUTER_TT), 0, 1);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_OPACITY_OUTER), &m_pState->m_fOuterBorderA, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_OPACITY_OUTER_TT), 0, 1);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_INNER_BORDER_THICKNESS), &m_pState->m_fInnerBorderSize, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_INNER_BORDER_THICKNESS_TT), 0, 0.5f);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_COLOR_RED_OUTER), &m_pState->m_fInnerBorderR, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_COLOR_RED_INNER_TT), 0, 1);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_COLOR_GREEN_OUTER), &m_pState->m_fInnerBorderG, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_COLOR_GREEN_INNER_TT), 0, 1);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_COLOR_BLUE_OUTER), &m_pState->m_fInnerBorderB, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_COLOR_BLUE_INNER_TT), 0, 1);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_OPACITY_OUTER), &m_pState->m_fInnerBorderA, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_OPACITY_INNER_TT), 0, 1);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_MOTION_VECTOR_OPACITY), &m_pState->m_fMvA, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_MOTION_VECTOR_OPACITY_TT), 0, 1);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_NUM_MOT_VECTORS_X), &m_pState->m_fMvX, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_NUM_MOT_VECTORS_X_TT), 0, 64);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_NUM_MOT_VECTORS_Y), &m_pState->m_fMvY, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_NUM_MOT_VECTORS_Y_TT), 0, 48);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_OFFSET_X), &m_pState->m_fMvDX, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_OFFSET_X_TT), -1, 1);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_OFFSET_Y), &m_pState->m_fMvDY, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_OFFSET_Y_TT), -1, 1);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_TRAIL_LENGTH), &m_pState->m_fMvL, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_TRAIL_LENGTH_TT), 0, 5);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_COLOR_RED_OUTER), &m_pState->m_fMvR, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_COLOR_RED_MOTION_VECTOR_TT), 0, 1);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_COLOR_GREEN_OUTER), &m_pState->m_fMvG, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_COLOR_GREEN_MOTION_VECTOR_TT), 0, 1);
+  m_menuAugment.AddItem(MEN_T(IDS_MENU_COLOR_BLUE_OUTER), &m_pState->m_fMvB, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_COLOR_BLUE_MOTION_VECTOR_TT), 0, 1);
+
+  m_menuMotion.AddItem(MEN_T(IDS_MENU_ZOOM_AMOUNT), &m_pState->m_fZoom, MENUITEMTYPE_LOGBLENDABLE, MEN_TT(IDS_MENU_ZOOM_AMOUNT_TT));
+  m_menuMotion.AddItem(MEN_T(IDS_MENU_ZOOM_EXPONENT), &m_pState->m_fZoomExponent, MENUITEMTYPE_LOGBLENDABLE, MEN_TT(IDS_MENU_ZOOM_EXPONENT_TT));
+  m_menuMotion.AddItem(MEN_T(IDS_MENU_WARP_AMOUNT), &m_pState->m_fWarpAmount, MENUITEMTYPE_LOGBLENDABLE, MEN_TT(IDS_MENU_WARP_AMOUNT_TT));
+  m_menuMotion.AddItem(MEN_T(IDS_MENU_WARP_SCALE), &m_pState->m_fWarpScale, MENUITEMTYPE_LOGBLENDABLE, MEN_TT(IDS_MENU_WARP_SCALE_TT));
+  m_menuMotion.AddItem(MEN_T(IDS_MENU_WARP_SPEED), &m_pState->m_fWarpAnimSpeed, MENUITEMTYPE_LOGFLOAT, MEN_TT(IDS_MENU_WARP_SPEED_TT));
+  m_menuMotion.AddItem(MEN_T(IDS_MENU_ROTATION_AMOUNT), &m_pState->m_fRot, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_ROTATION_AMOUNT_TT), -1.00f, 1.00f);
+  m_menuMotion.AddItem(MEN_T(IDS_MENU_ROTATION_CENTER_OF_X), &m_pState->m_fRotCX, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_ROTATION_CENTER_OF_X_TT), -1.0f, 2.0f);
+  m_menuMotion.AddItem(MEN_T(IDS_MENU_ROTATION_CENTER_OF_Y), &m_pState->m_fRotCY, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_ROTATION_CENTER_OF_Y_TT), -1.0f, 2.0f);
+  m_menuMotion.AddItem(MEN_T(IDS_MENU_TRANSLATION_X), &m_pState->m_fXPush, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_TRANSLATION_X_TT), -1.0f, 1.0f);
+  m_menuMotion.AddItem(MEN_T(IDS_MENU_TRANSLATION_Y), &m_pState->m_fYPush, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_TRANSLATION_Y_TT), -1.0f, 1.0f);
+  m_menuMotion.AddItem(MEN_T(IDS_MENU_SCALING_X), &m_pState->m_fStretchX, MENUITEMTYPE_LOGBLENDABLE, MEN_TT(IDS_MENU_SCALING_X_TT));
+  m_menuMotion.AddItem(MEN_T(IDS_MENU_SCALING_Y), &m_pState->m_fStretchY, MENUITEMTYPE_LOGBLENDABLE, MEN_TT(IDS_MENU_SCALING_Y_TT));
+
+  m_menuPost.AddItem(MEN_T(IDS_MENU_SUSTAIN_LEVEL), &m_pState->m_fDecay, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_SUSTAIN_LEVEL_TT), 0.50f, 1.0f);
+  m_menuPost.AddItem(MEN_T(IDS_MENU_DARKEN_CENTER), &m_pState->m_bDarkenCenter, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_DARKEN_CENTER_TT));
+  m_menuPost.AddItem(MEN_T(IDS_MENU_GAMMA_ADJUSTMENT), &m_pState->m_fGammaAdj, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_GAMMA_ADJUSTMENT_TT), 1.0f, 8.0f);
+  m_menuPost.AddItem(MEN_T(IDS_MENU_HUE_SHADER), &m_pState->m_fShader, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_HUE_SHADER_TT), 0.0f, 1.0f);
+  m_menuPost.AddItem(MEN_T(IDS_MENU_VIDEO_ECHO_ALPHA), &m_pState->m_fVideoEchoAlpha, MENUITEMTYPE_BLENDABLE, MEN_TT(IDS_MENU_VIDEO_ECHO_ALPHA_TT), 0.0f, 1.0f);
+  m_menuPost.AddItem(MEN_T(IDS_MENU_VIDEO_ECHO_ZOOM), &m_pState->m_fVideoEchoZoom, MENUITEMTYPE_LOGBLENDABLE, MEN_TT(IDS_MENU_VIDEO_ECHO_ZOOM_TT));
+  m_menuPost.AddItem(MEN_T(IDS_MENU_VIDEO_ECHO_ORIENTATION), &m_pState->m_nVideoEchoOrientation, MENUITEMTYPE_INT, MEN_TT(IDS_MENU_VIDEO_ECHO_ORIENTATION_TT), 0.0f, 3.0f);
+  m_menuPost.AddItem(MEN_T(IDS_MENU_TEXTURE_WRAP), &m_pState->m_bTexWrap, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_TEXTURE_WRAP_TT));
+  //m_menuPost.AddItem("stereo 3D",               &m_pState->m_bRedBlueStereo,        MENUITEMTYPE_BOOL, "displays the image in stereo 3D; you need 3D glasses (with red and blue lenses) for this.");
+  m_menuPost.AddItem(MEN_T(IDS_MENU_FILTER_INVERT), &m_pState->m_bInvert, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_FILTER_INVERT_TT));
+  m_menuPost.AddItem(MEN_T(IDS_MENU_FILTER_BRIGHTEN), &m_pState->m_bBrighten, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_FILTER_BRIGHTEN_TT));
+  m_menuPost.AddItem(MEN_T(IDS_MENU_FILTER_DARKEN), &m_pState->m_bDarken, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_FILTER_DARKEN_TT));
+  m_menuPost.AddItem(MEN_T(IDS_MENU_FILTER_SOLARIZE), &m_pState->m_bSolarize, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_FILTER_SOLARIZE_TT));
+  m_menuPost.AddItem(MEN_T(IDS_MENU_BLUR1_EDGE_DARKEN_AMOUNT), &m_pState->m_fBlur1EdgeDarken, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_BLUR1_EDGE_DARKEN_AMOUNT_TT), 0.0f, 1.0f);
+  m_menuPost.AddItem(MEN_T(IDS_MENU_BLUR1_MIN_COLOR_VALUE), &m_pState->m_fBlur1Min, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_BLUR1_MIN_COLOR_VALUE_TT), 0.0f, 1.0f);
+  m_menuPost.AddItem(MEN_T(IDS_MENU_BLUR1_MAX_COLOR_VALUE), &m_pState->m_fBlur1Max, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_BLUR1_MAX_COLOR_VALUE_TT), 0.0f, 1.0f);
+  m_menuPost.AddItem(MEN_T(IDS_MENU_BLUR2_MIN_COLOR_VALUE), &m_pState->m_fBlur2Min, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_BLUR2_MIN_COLOR_VALUE_TT), 0.0f, 1.0f);
+  m_menuPost.AddItem(MEN_T(IDS_MENU_BLUR2_MAX_COLOR_VALUE), &m_pState->m_fBlur2Max, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_BLUR2_MAX_COLOR_VALUE_TT), 0.0f, 1.0f);
+  m_menuPost.AddItem(MEN_T(IDS_MENU_BLUR3_MIN_COLOR_VALUE), &m_pState->m_fBlur3Min, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_BLUR3_MIN_COLOR_VALUE_TT), 0.0f, 1.0f);
+  m_menuPost.AddItem(MEN_T(IDS_MENU_BLUR3_MAX_COLOR_VALUE), &m_pState->m_fBlur3Max, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_BLUR3_MAX_COLOR_VALUE_TT), 0.0f, 1.0f);
+
+  for (int i = 0; i < MAX_CUSTOM_WAVES; i++) {
+    // blending: do both; fade opacities in/out (w/exagerrated weighting)
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_ENABLED), &m_pState->m_wave[i].enabled, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_ENABLED_TT)); // bool
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_NUMBER_OF_SAMPLES), &m_pState->m_wave[i].samples, MENUITEMTYPE_INT, MEN_TT(IDS_MENU_NUMBER_OF_SAMPLES_TT), 2, 512);        // 0-512
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_L_R_SEPARATION), &m_pState->m_wave[i].sep, MENUITEMTYPE_INT, MEN_TT(IDS_MENU_L_R_SEPARATION_TT), 0, 256);        // 0-512
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_SCALING), &m_pState->m_wave[i].scaling, MENUITEMTYPE_LOGFLOAT, MEN_TT(IDS_MENU_SCALING_TT));
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_SMOOTH), &m_pState->m_wave[i].smoothing, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_SMOOTHING_TT), 0, 1);
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_COLOR_RED), &m_pState->m_wave[i].r, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_COLOR_RED_TT), 0, 1);
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_COLOR_GREEN), &m_pState->m_wave[i].g, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_COLOR_GREEN_TT), 0, 1);
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_COLOR_BLUE), &m_pState->m_wave[i].b, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_COLOR_BLUE_TT), 0, 1);
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_OPACITY), &m_pState->m_wave[i].a, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_OPACITY_WAVE_TT), 0, 1);
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_USE_SPECTRUM), &m_pState->m_wave[i].bSpectrum, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_USE_SPECTRUM_TT));        // 0-5 [0=wave left, 1=wave center, 2=wave right; 3=spectrum left, 4=spec center, 5=spec right]
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_USE_DOTS), &m_pState->m_wave[i].bUseDots, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_USE_DOTS_WAVE_TT)); // bool
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_DRAW_THICK), &m_pState->m_wave[i].bDrawThick, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_DRAW_THICK_WAVE_TT)); // bool
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_ADDITIVE_DRAWING), &m_pState->m_wave[i].bAdditive, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_ADDITIVE_DRAWING_WAVE_TT)); // bool
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_EXPORT_TO_FILE), (void*)UI_EXPORT_WAVE, MENUITEMTYPE_UIMODE, MEN_TT(IDS_MENU_EXPORT_TO_FILE_TT), 0, 0, NULL, UI_EXPORT_WAVE, i);
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_IMPORT_FROM_FILE), (void*)UI_IMPORT_WAVE, MENUITEMTYPE_UIMODE, MEN_TT(IDS_MENU_IMPORT_FROM_FILE_TT), 0, 0, NULL, UI_IMPORT_WAVE, i);
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_EDIT_INIT_CODE), &m_pState->m_wave[i].m_szInit, MENUITEMTYPE_STRING, MEN_TT(IDS_MENU_EDIT_INIT_CODE_TT), 256, 0, &OnUserEditedWavecodeInit, sizeof(m_pState->m_wave[i].m_szInit), 0);
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_EDIT_PER_FRAME_CODE), &m_pState->m_wave[i].m_szPerFrame, MENUITEMTYPE_STRING, MEN_TT(IDS_MENU_EDIT_PER_FRAME_CODE_TT), 256, 0, &OnUserEditedWavecode, sizeof(m_pState->m_wave[i].m_szPerFrame), 0);
+    m_menuWavecode[i].AddItem(MEN_T(IDS_MENU_EDIT_PER_POINT_CODE), &m_pState->m_wave[i].m_szPerPoint, MENUITEMTYPE_STRING, MEN_TT(IDS_MENU_EDIT_PER_POINT_CODE_TT), 256, 0, &OnUserEditedWavecode, sizeof(m_pState->m_wave[i].m_szPerPoint), 0);
+  }
+
+  for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+    // blending: do both; fade opacities in/out (w/exagerrated weighting)
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_ENABLED), &m_pState->m_shape[i].enabled, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_ENABLED_SHAPE_TT)); // bool
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_NUMBER_OF_INSTANCES), &m_pState->m_shape[i].instances, MENUITEMTYPE_INT, MEN_TT(IDS_MENU_NUMBER_OF_INSTANCES_TT), 1, 1024);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_NUMBER_OF_SIDES), &m_pState->m_shape[i].sides, MENUITEMTYPE_INT, MEN_TT(IDS_MENU_NUMBER_OF_SIDES_TT), 3, 100);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_DRAW_THICK), &m_pState->m_shape[i].thickOutline, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_DRAW_THICK_SHAPE_TT)); // bool
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_ADDITIVE_DRAWING), &m_pState->m_shape[i].additive, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_ADDITIVE_DRAWING_SHAPE_TT)); // bool
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_X_POSITION), &m_pState->m_shape[i].x, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_X_POSITION_TT), 0, 1);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_Y_POSITION), &m_pState->m_shape[i].y, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_Y_POSITION_TT), 0, 1);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_RADIUS), &m_pState->m_shape[i].rad, MENUITEMTYPE_LOGFLOAT, MEN_TT(IDS_MENU_RADIUS_TT));
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_ANGLE), &m_pState->m_shape[i].ang, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_ANGLE_TT), 0, 3.1415927f * 2.0f);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_TEXTURED), &m_pState->m_shape[i].textured, MENUITEMTYPE_BOOL, MEN_TT(IDS_MENU_TEXTURED_TT)); // bool
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_TEXTURE_ZOOM), &m_pState->m_shape[i].tex_zoom, MENUITEMTYPE_LOGFLOAT, MEN_TT(IDS_MENU_TEXTURE_ZOOM_TT)); // bool
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_TEXTURE_ANGLE), &m_pState->m_shape[i].tex_ang, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_TEXTURE_ANGLE_TT), 0, 3.1415927f * 2.0f); // bool
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_INNER_COLOR_RED), &m_pState->m_shape[i].r, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_INNER_COLOR_RED_TT), 0, 1);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_INNER_COLOR_GREEN), &m_pState->m_shape[i].g, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_INNER_COLOR_GREEN_TT), 0, 1);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_INNER_COLOR_BLUE), &m_pState->m_shape[i].b, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_INNER_COLOR_BLUE_TT), 0, 1);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_INNER_OPACITY), &m_pState->m_shape[i].a, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_INNER_OPACITY_TT), 0, 1);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_OUTER_COLOR_RED), &m_pState->m_shape[i].r2, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_OUTER_COLOR_RED_TT), 0, 1);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_OUTER_COLOR_GREEN), &m_pState->m_shape[i].g2, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_OUTER_COLOR_GREEN_TT), 0, 1);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_OUTER_COLOR_BLUE), &m_pState->m_shape[i].b2, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_OUTER_COLOR_BLUE_TT), 0, 1);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_OUTER_OPACITY), &m_pState->m_shape[i].a2, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_OUTER_OPACITY_TT), 0, 1);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_BORDER_COLOR_RED), &m_pState->m_shape[i].border_r, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_BORDER_COLOR_RED_TT), 0, 1);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_BORDER_COLOR_GREEN), &m_pState->m_shape[i].border_g, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_BORDER_COLOR_GREEN_TT), 0, 1);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_BORDER_COLOR_BLUE), &m_pState->m_shape[i].border_b, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_BORDER_COLOR_BLUE_TT), 0, 1);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_BORDER_OPACITY), &m_pState->m_shape[i].border_a, MENUITEMTYPE_FLOAT, MEN_TT(IDS_MENU_BORDER_OPACITY_TT), 0, 1);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_EXPORT_TO_FILE), NULL, MENUITEMTYPE_UIMODE, MEN_TT(IDS_MENU_EXPORT_TO_FILE_SHAPE_TT), 0, 0, NULL, UI_EXPORT_SHAPE, i);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_IMPORT_FROM_FILE), NULL, MENUITEMTYPE_UIMODE, MEN_TT(IDS_MENU_IMPORT_FROM_FILE_SHAPE_TT), 0, 0, NULL, UI_IMPORT_SHAPE, i);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_EDIT_INIT_CODE), &m_pState->m_shape[i].m_szInit, MENUITEMTYPE_STRING, MEN_TT(IDS_MENU_EDIT_INIT_CODE_SHAPE_TT), 256, 0, &OnUserEditedShapecodeInit, sizeof(m_pState->m_shape[i].m_szInit), 0);
+    m_menuShapecode[i].AddItem(MEN_T(IDS_MENU_EDIT_PER_FRAME_INSTANCE_CODE), &m_pState->m_shape[i].m_szPerFrame, MENUITEMTYPE_STRING, MEN_TT(IDS_MENU_EDIT_PER_FRAME_INSTANCE_CODE_TT), 256, 0, &OnUserEditedShapecode, sizeof(m_pState->m_shape[i].m_szPerFrame), 0);
+    //m_menuShapecode[i].AddItem("[ edit per-point code ]",&m_pState->m_shape[i].m_szPerPoint,  MENUITEMTYPE_STRING, "IN: sample [0..1]; value1 [left ch], value2 [right ch], plus all vars for per-frame code / OUT: x,y; r,g,b,a; t1-t8", 256, 0, &OnUserEditedWavecode);
+  }
+}
+

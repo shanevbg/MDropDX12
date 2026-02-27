@@ -1,0 +1,244 @@
+#pragma once
+#include <string>
+#include <vector>
+#include <Windows.h>
+
+// Shared macros — used by shader and texture modules
+#define IsAlphabetChar(x) ((x >= 'a' && x <= 'z') || (x >= 'A' && x <= 'Z'))
+#define IsAlphanumericChar(x) ((x >= 'a' && x <= 'z') || (x >= 'A' && x <= 'Z') || (x >= '0' && x <= '9') || x == '.')
+#define IsNumericChar(x) (x >= '0' && x <= '9')
+
+// Forward declarations for standalone helpers shared across plugin_*.cpp modules.
+// Definitions live in plugin.cpp.
+bool ReadFileToString(const wchar_t* szBaseFilename, char* szDestText, int nMaxBytes, bool bConvertToLFCA);
+void StripComments(char* p);
+void ConvertLLCto1310(char* d, const char* s);
+void CancelThread(int max_wait_time_ms);
+
+// Preset directory helpers — defined in plugin_presets.cpp.
+bool DirHasMilkFilesHelper(const wchar_t* szDir);
+bool TryDescendIntoPresetSubdirHelper(wchar_t* szDir);
+
+// Case-insensitive comparison table — defined in plugin.cpp.
+extern const unsigned char LC2UC[256];
+
+// Case-insensitive wide-string compare — defined in plugin_input.cpp.
+int mystrcmpiW(const wchar_t* s1, const wchar_t* s2);
+
+// OnUserEdited callbacks — defined in plugin.cpp, used as function pointers in menus.
+void OnUserEditedPerFrame(LPARAM param1, LPARAM param2);
+void OnUserEditedPerPixel(LPARAM param1, LPARAM param2);
+void OnUserEditedPresetInit(LPARAM param1, LPARAM param2);
+void OnUserEditedWavecode(LPARAM param1, LPARAM param2);
+void OnUserEditedWavecodeInit(LPARAM param1, LPARAM param2);
+void OnUserEditedShapecode(LPARAM param1, LPARAM param2);
+void OnUserEditedShapecodeInit(LPARAM param1, LPARAM param2);
+void OnUserEditedWarpShaders(LPARAM param1, LPARAM param2);
+void OnUserEditedCompShaders(LPARAM param1, LPARAM param2);
+
+// Texture file extensions — defined in plugin_textures.cpp, used by settings UI.
+extern std::wstring texture_exts[];
+extern const int texture_exts_count;
+extern const wchar_t szExtsWithSlashes[];
+
+// Texture helpers — defined in plugin_textures.cpp.
+bool PickRandomTexture(const wchar_t* prefix, wchar_t* szRetTextureFilename);
+
+// UI factory functions — defined in plugin.cpp,
+// used by settings window and message dialogs.
+HWND CreateLabel(HWND hParent, const wchar_t* text, int x, int y, int w, int h, HFONT hFont, bool visible = true);
+HWND CreateEdit(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, DWORD extraStyle = 0, bool visible = true);
+HWND CreateCheck(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool checked, bool visible = true);
+HWND CreateBtn(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool visible = true);
+void DrawOwnerCheckbox(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBg, COLORREF colCtrlBg, COLORREF colBorder, COLORREF colText);
+void draw3DEdge(HDC hdc, const RECT& rc, COLORREF hi, COLORREF shadow, bool raised);
+void DrawOwnerButton(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBtnFace, COLORREF colBtnHi, COLORREF colBtnShadow, COLORREF colText);
+
+//----------------------------------------------------------------------
+// Settings screen types (used by settings UI + input modules)
+//----------------------------------------------------------------------
+enum SettingType { ST_PATH, ST_BOOL, ST_INT, ST_FLOAT, ST_READONLY };
+
+struct SettingDesc {
+  const wchar_t* name;
+  SettingType type;
+  int id;
+  float fMin, fMax, fStep;
+  const wchar_t* iniSection;
+  const wchar_t* iniKey;
+};
+
+enum {
+  SET_PRESET_DIR = 0,
+  SET_AUDIO_DEVICE,
+  SET_AUDIO_SENSITIVITY,
+  SET_BLEND_TIME,
+  SET_TIME_BETWEEN,
+  SET_HARD_CUTS,
+  SET_PRESET_LOCK,
+  SET_SEQ_ORDER,
+  SET_SONG_TITLE_ANIMS,
+  SET_CHANGE_WITH_SONG,
+  SET_SHOW_FPS,
+  SET_ALWAYS_ON_TOP,
+  SET_BORDERLESS,
+  SET_SPOUT,
+  SET_COUNT
+};
+
+// g_settingsDesc[] — defined in plugin.cpp, used by settings UI.
+extern SettingDesc g_settingsDesc[];
+
+// Settings window class — defined in plugin_settings_ui.cpp.
+extern const wchar_t* SETTINGS_WND_CLASS;
+extern bool g_bSettingsWndClassRegistered;
+
+//----------------------------------------------------------------------
+// Settings window control IDs
+//----------------------------------------------------------------------
+#define IDC_MW_PRESET_DIR    2001
+#define IDC_MW_BROWSE_DIR    2002
+#define IDC_MW_AUDIO_DEVICE  2003
+#define IDC_MW_AUDIO_SENS    2004
+#define IDC_MW_BLEND_TIME    2005
+#define IDC_MW_TIME_BETWEEN  2006
+#define IDC_MW_HARD_CUTS     2007
+#define IDC_MW_PRESET_LOCK   2008
+#define IDC_MW_SEQ_ORDER     2009
+#define IDC_MW_SONG_TITLE    2010
+#define IDC_MW_CHANGE_SONG   2011
+#define IDC_MW_SHOW_FPS      2012
+#define IDC_MW_ALWAYS_TOP    2013
+#define IDC_MW_BORDERLESS    2014
+#define IDC_MW_SPOUT         2015
+#define IDC_MW_CLOSE         2016
+
+// -- Visualization controls --
+#define IDC_MW_OPACITY          2020
+#define IDC_MW_OPACITY_LABEL    2021
+#define IDC_MW_TIME_FACTOR      2022
+#define IDC_MW_FRAME_FACTOR     2023
+#define IDC_MW_FPS_FACTOR       2024
+#define IDC_MW_VIS_INTENSITY    2025
+#define IDC_MW_VIS_SHIFT        2026
+#define IDC_MW_VIS_VERSION      2027
+#define IDC_MW_RENDER_QUALITY   2028
+#define IDC_MW_QUALITY_LABEL    2029
+#define IDC_MW_QUALITY_AUTO     2030
+
+// -- Color Shift controls --
+#define IDC_MW_COL_HUE          2031
+#define IDC_MW_COL_HUE_LABEL    2032
+#define IDC_MW_COL_SAT          2033
+#define IDC_MW_COL_SAT_LABEL    2034
+#define IDC_MW_COL_BRIGHT       2035
+#define IDC_MW_COL_BRIGHT_LABEL 2036
+#define IDC_MW_AUTO_HUE         2037
+#define IDC_MW_AUTO_HUE_SEC     2038
+
+// -- Spout Extended controls --
+#define IDC_MW_SPOUT_FIXED      2040
+#define IDC_MW_SPOUT_WIDTH      2041
+#define IDC_MW_SPOUT_HEIGHT     2042
+#define IDC_MW_TAB              2050
+#define IDC_MW_PRESET_LIST      2051
+#define IDC_MW_PRESET_PREV      2052
+#define IDC_MW_PRESET_NEXT      2053
+#define IDC_MW_PRESET_COPY      2054
+#define IDC_MW_COL_GAMMA        2055
+#define IDC_MW_COL_GAMMA_LABEL  2056
+#define IDC_MW_RESOURCES        2057   // "Resources..." button on General tab
+#define IDC_MW_RESET_VISUAL     2058   // Reset button on Visual tab
+#define IDC_MW_RESET_COLORS     2059   // Reset button on Colors tab
+#define IDC_MW_RESET_ALL        2060   // Factory Reset (General tab)
+#define IDC_MW_SAVE_DEFAULTS    2061   // Save Safe Defaults (General tab)
+#define IDC_MW_USER_RESET       2062   // User Safe Reset (General tab)
+#define IDC_MW_FILE_LIST        2063   // ListBox on Files tab
+#define IDC_MW_FILE_ADD         2064   // Add button on Files tab
+#define IDC_MW_FILE_REMOVE      2065   // Remove button on Files tab
+#define IDC_MW_FILE_DESC        2066   // Description label on Files tab
+#define IDC_MW_DARK_THEME       2067   // Dark Theme checkbox on General tab
+#define IDC_MW_PRESET_UP        2068   // Navigate to parent directory
+#define IDC_MW_PRESET_INTO      2069   // Enter selected subdirectory
+#define IDC_MW_RANDTEX_LABEL    2070   // Random textures dir label
+#define IDC_MW_RANDTEX_EDIT     2071   // Random textures dir edit control
+#define IDC_MW_RANDTEX_BROWSE   2072   // Random textures dir Browse button
+#define IDC_MW_RANDTEX_CLEAR    2073   // Random textures dir Clear button
+
+// Messages tab (page 5)
+#define IDC_MW_MSG_LIST         2080
+#define IDC_MW_MSG_PUSH         2081
+#define IDC_MW_MSG_UP           2082
+#define IDC_MW_MSG_DOWN         2083
+#define IDC_MW_MSG_ADD          2084
+#define IDC_MW_MSG_EDIT         2085
+#define IDC_MW_MSG_DELETE       2086
+#define IDC_MW_MSG_RELOAD       2087
+#define IDC_MW_MSG_AUTOPLAY     2088
+#define IDC_MW_MSG_SEQUENTIAL   2089
+#define IDC_MW_MSG_INTERVAL     2090
+#define IDC_MW_MSG_JITTER       2092
+#define IDC_MW_MSG_PREVIEW      2094
+#define IDC_MW_MSG_PASTE        2095
+#define IDC_MW_MSG_INTERVAL_LBL 2096
+#define IDC_MW_MSG_JITTER_LBL   2097
+#define IDC_MW_MSG_OPENINI      2098
+#define IDC_MW_MSG_AUTOSIZE     2099
+
+// -- Settings window controls --
+#define IDC_MW_RESET_WINDOW         2110   // Reset Window Size button (General tab)
+#define IDC_MW_FONT_PLUS            2111   // Font size + button (General tab)
+#define IDC_MW_FONT_MINUS           2112   // Font size - button (General tab)
+
+// -- GPU Protection controls (Visual tab) --
+#define IDC_MW_GPU_MAX_INST         2100
+#define IDC_MW_GPU_SCALE_BY_RES     2101
+#define IDC_MW_GPU_SCALE_BASE       2102
+#define IDC_MW_GPU_SKIP_HEAVY       2103
+#define IDC_MW_GPU_HEAVY_THRESHOLD  2104
+#define IDC_MW_GPU_RELOAD_PRESET    2105
+
+#define IDC_MW_MSG_PLAY             4010   // "Play/Stop" toggle button on Messages tab
+
+// Resource viewer control IDs
+#define IDC_RV_LISTVIEW         3001   // ListView in resource viewer
+#define IDC_RV_COPY_PATH        3002   // "Copy Path" button
+#define IDC_RV_REFRESH          3003   // "Refresh" button
+
+// Message Edit Dialog control IDs (shared between settings UI and message modules)
+#define IDC_MSGEDIT_TEXT         2100
+#define IDC_MSGEDIT_FONT_COMBO  2101
+#define IDC_MSGEDIT_CHOOSE_FONT 2102
+#define IDC_MSGEDIT_CHOOSE_COLOR 2103
+#define IDC_MSGEDIT_FONT_PREVIEW 2104
+#define IDC_MSGEDIT_SIZE        2105
+#define IDC_MSGEDIT_XPOS        2106
+#define IDC_MSGEDIT_YPOS        2107
+#define IDC_MSGEDIT_GROWTH      2108
+#define IDC_MSGEDIT_TIME        2109
+#define IDC_MSGEDIT_FADEIN      2110
+#define IDC_MSGEDIT_FADEOUT     2111
+#define IDC_MSGEDIT_OK          2112
+#define IDC_MSGEDIT_CANCEL      2113
+#define IDC_MSGEDIT_COLOR_SWATCH 2114
+
+// Message Overrides Dialog control IDs
+#define IDC_MSGOVERRIDE_RAND_FONT     4000
+#define IDC_MSGOVERRIDE_RAND_COLOR    4001
+#define IDC_MSGOVERRIDE_RAND_SIZE     4002
+#define IDC_MSGOVERRIDE_RAND_EFFECTS  4003
+#define IDC_MSGOVERRIDE_SIZE_MIN      4004
+#define IDC_MSGOVERRIDE_SIZE_MAX      4005
+#define IDC_MSGOVERRIDE_MAX_ONSCREEN  4006
+#define IDC_MSGOVERRIDE_OK            4007
+#define IDC_MSGOVERRIDE_CANCEL        4008
+#define IDC_MW_MSG_OVERRIDES          4009
+
+// Custom messages for thread-safe side effects (settings thread → render thread)
+#define WM_MW_SET_OPACITY       (WM_APP + 1)
+#define WM_MW_SET_ALWAYS_ON_TOP (WM_APP + 2)
+#define WM_MW_TOGGLE_SPOUT      (WM_APP + 3)
+#define WM_MW_RESET_BUFFERS     (WM_APP + 4)
+#define WM_MW_SPOUT_FIXEDSIZE   (WM_APP + 5)
+#define WM_MW_PUSH_MESSAGE      (WM_APP + 6)
+#define WM_MW_PRESET_CHANGED    (WM_APP + 7)
