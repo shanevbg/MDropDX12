@@ -359,6 +359,13 @@
     <ClCompile Include="milkdropfs.cpp" />
     <ClCompile Include="mdropdx12.cpp" />
     <ClCompile Include="plugin.cpp" />
+    <ClCompile Include="plugin_input.cpp" />
+    <ClCompile Include="plugin_messages.cpp" />
+    <ClCompile Include="plugin_presets.cpp" />
+    <ClCompile Include="plugin_rendering.cpp" />
+    <ClCompile Include="plugin_settings_ui.cpp" />
+    <ClCompile Include="plugin_shaders.cpp" />
+    <ClCompile Include="plugin_textures.cpp" />
     <ClCompile Include="pluginshell.cpp" />
     <ClCompile Include="state.cpp" />
     <ClCompile Include="support.cpp" />

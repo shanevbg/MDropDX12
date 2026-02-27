@@ -776,24 +776,21 @@ bool DXContext::CreateRootSignature()
     rootParams[1].DescriptorTable.pDescriptorRanges   = &srvRange;
     rootParams[1].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
-    // Static samplers — 16 slots (s0-s15) matching explicit register assignments in include.fx.
-    // Each sampler's filter and addressing mode matches the DX9 naming convention:
+    // Static samplers — 16 slots (s0-s15).
+    // Slots with explicit register(sN) in include.fx have fixed assignments:
     //   s0  = sampler_main        (LINEAR + WRAP)   — default warp/comp main texture
     //   s1  = sampler_fc_main     (LINEAR + CLAMP)  — filter + clamp
     //   s2  = sampler_pc_main     (POINT  + CLAMP)  — point  + clamp
     //   s3  = sampler_fw_main     (LINEAR + WRAP)   — filter + wrap
     //   s4  = sampler_pw_main     (POINT  + WRAP)   — point  + wrap
-    //   s5  = sampler_noise_lq    (LINEAR + WRAP)   — noise textures tile
-    //   s6  = sampler_noise_lq_lite (LINEAR + WRAP)
-    //   s7  = sampler_noise_mq    (LINEAR + WRAP)
-    //   s8  = sampler_noise_hq    (LINEAR + WRAP)
-    //   s9  = sampler_noisevol_lq (LINEAR + WRAP)
-    //   s10 = sampler_noisevol_hq (LINEAR + WRAP)
-    //   s11 = (unused, LINEAR + WRAP default)
-    //   s12 = sampler_blur_src    (LINEAR + CLAMP)  — blur pass source
-    //   s13 = sampler_blur1       (LINEAR + CLAMP)  — blur output level 1
-    //   s14 = sampler_blur2       (LINEAR + CLAMP)  — blur output level 2
-    //   s15 = sampler_blur3       (LINEAR + CLAMP)  — blur output level 3
+    //   s5-s10 = (auto-assigned, LINEAR + WRAP)     — noise textures + user textures
+    //   s11 = sampler_blur1       (LINEAR + CLAMP)  — blur output level 1
+    //   s12 = sampler_blur2       (LINEAR + CLAMP)  — blur output level 2
+    //   s13 = sampler_blur3       (LINEAR + CLAMP)  — blur output level 3
+    //   s14-s15 = (auto-assigned, LINEAR + WRAP)    — noise textures + user textures
+    // Noise samplers (sampler_noise_*, sampler_noisevol_*) have NO register annotations,
+    // so the compiler auto-assigns them only when used, sharing s5-s10/s14-s15 with
+    // user texture samplers (sampler_rand00..N). All use LINEAR+WRAP (the default).
     D3D12_STATIC_SAMPLER_DESC staticSamplers[16] = {};
     for (int i = 0; i < 16; i++) {
         staticSamplers[i].Filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -804,8 +801,8 @@ bool DXContext::CreateRootSignature()
         staticSamplers[i].ShaderRegister   = i;
         staticSamplers[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     }
-    // CLAMP samplers: s1 (fc_main), s2 (pc_main), s12-s15 (blur)
-    for (int i : {1, 2, 12, 13, 14, 15}) {
+    // CLAMP samplers: s1 (fc_main), s2 (pc_main), s11-s13 (blur)
+    for (int i : {1, 2, 11, 12, 13}) {
         staticSamplers[i].AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         staticSamplers[i].AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         staticSamplers[i].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
