@@ -822,6 +822,11 @@ static SettingDesc g_settingsDesc[] = {
 #define IDC_MW_MSG_OPENINI      2098
 #define IDC_MW_MSG_AUTOSIZE     2099
 
+// -- Settings window controls --
+#define IDC_MW_RESET_WINDOW         2110   // Reset Window Size button (General tab)
+#define IDC_MW_FONT_PLUS            2111   // Font size + button (General tab)
+#define IDC_MW_FONT_MINUS           2112   // Font size - button (General tab)
+
 // -- GPU Protection controls (Visual tab) --
 #define IDC_MW_GPU_MAX_INST         2100
 #define IDC_MW_GPU_SCALE_BY_RES     2101
@@ -1687,12 +1692,19 @@ void CPlugin::MyReadConfig() {
   m_WindowY = GetPrivateProfileIntW(L"Milkwave", L"WindowY", m_WindowY, pIni);
   m_WindowWidth = GetPrivateProfileIntW(L"Milkwave", L"WindowWidth", m_WindowWidth, pIni);
   m_WindowHeight = GetPrivateProfileIntW(L"Milkwave", L"WindowHeight", m_WindowHeight, pIni);
-  m_nSettingsWndW = GetPrivateProfileIntW(L"Milkwave", L"SettingsWidth", 600, pIni);
-  m_nSettingsWndH = GetPrivateProfileIntW(L"Milkwave", L"SettingsHeight", 800, pIni);
+  m_nSettingsWndW = GetPrivateProfileIntW(L"Milkwave", L"SettingsWidth", 620, pIni);
+  m_nSettingsWndH = GetPrivateProfileIntW(L"Milkwave", L"SettingsHeight", 700, pIni);
+  m_nSettingsFontSize = GetPrivateProfileIntW(L"Milkwave", L"SettingsFontSize", -16, pIni);
   if (m_nSettingsWndW < 500) m_nSettingsWndW = 500;
   if (m_nSettingsWndH < 450) m_nSettingsWndH = 450;
-  if (m_nSettingsWndW > 2000) m_nSettingsWndW = 2000;
-  if (m_nSettingsWndH > 2000) m_nSettingsWndH = 2000;
+  { // Cap to screen work area instead of hardcoded 2000
+    int scrW = GetSystemMetrics(SM_CXSCREEN);
+    int scrH = GetSystemMetrics(SM_CYSCREEN);
+    if (m_nSettingsWndW > scrW) m_nSettingsWndW = scrW;
+    if (m_nSettingsWndH > scrH) m_nSettingsWndH = scrH;
+  }
+  if (m_nSettingsFontSize > -12) m_nSettingsFontSize = -12;  // min font size
+  if (m_nSettingsFontSize < -24) m_nSettingsFontSize = -24;  // max font size
 
   // Settings window dark theme — just on/off toggle, colors come from code defaults
   m_bSettingsDarkTheme = GetPrivateProfileBoolW(L"SettingsTheme", L"DarkTheme", m_bSettingsDarkTheme, pIni);
@@ -1851,6 +1863,7 @@ void CPlugin::MyWriteConfig() {
   WritePrivateProfileIntW(m_WindowHeight, L"WindowHeight", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_nSettingsWndW, L"SettingsWidth", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_nSettingsWndH, L"SettingsHeight", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_nSettingsFontSize, L"SettingsFontSize", pIni, L"Milkwave");
 
   // GPU Protection
   WritePrivateProfileIntW(m_nMaxShapeInstances, L"MaxShapeInstances", pIni, L"Milkwave");
@@ -9984,6 +9997,13 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     MINMAXINFO* mmi = (MINMAXINFO*)lParam;
     mmi->ptMinTrackSize.x = 500;
     mmi->ptMinTrackSize.y = 450;
+    // Cap max to current monitor's work area to prevent oversized window
+    HMONITOR hMon = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = { sizeof(mi) };
+    if (GetMonitorInfo(hMon, &mi)) {
+      mmi->ptMaxTrackSize.x = mi.rcWork.right - mi.rcWork.left;
+      mmi->ptMaxTrackSize.y = mi.rcWork.bottom - mi.rcWork.top;
+    }
     return 0;
   }
 
@@ -10260,6 +10280,27 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
 
     if (id == IDC_MW_USER_RESET && code == BN_CLICKED) {
       p->ResetToUserDefaults(hWnd);
+      return 0;
+    }
+
+    if (id == IDC_MW_RESET_WINDOW && code == BN_CLICKED) {
+      p->ResetSettingsWindow();
+      return 0;
+    }
+
+    if (id == IDC_MW_FONT_PLUS && code == BN_CLICKED) {
+      if (p->m_nSettingsFontSize > -24) {  // max font pixel height
+        p->m_nSettingsFontSize -= 2;       // more negative = larger
+        p->RebuildSettingsFonts();
+      }
+      return 0;
+    }
+
+    if (id == IDC_MW_FONT_MINUS && code == BN_CLICKED) {
+      if (p->m_nSettingsFontSize < -12) {  // min font pixel height
+        p->m_nSettingsFontSize += 2;       // less negative = smaller
+        p->RebuildSettingsFonts();
+      }
       return 0;
     }
 
@@ -11114,12 +11155,12 @@ void CPlugin::BuildSettingsControls() {
 
   // Create fonts (cached for LayoutSettingsControls)
   if (m_hSettingsFont) DeleteObject(m_hSettingsFont);
-  m_hSettingsFont = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+  m_hSettingsFont = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
     CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
 
   if (m_hSettingsFontBold) DeleteObject(m_hSettingsFontBold);
-  m_hSettingsFontBold = CreateFontW(-14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+  m_hSettingsFontBold = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
     CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
 
@@ -11148,7 +11189,7 @@ void CPlugin::BuildSettingsControls() {
   TabCtrl_AdjustRect(m_hSettingsTab, FALSE, &rcDisplay);
   int tabTop = rcDisplay.top;
 
-  int x = 16, lw = 140, lineH = 24, gap = 6;
+  int x = 16, lw = 160, lineH = 26, gap = 6;
   int rw = clientW - 36;
   int sliderW = rw - lw - 60;
   wchar_t buf[64];
@@ -11232,6 +11273,10 @@ void CPlugin::BuildSettingsControls() {
   PAGE_CTRL(0, CreateBtn(hw, L"Reset", IDC_MW_RESET_ALL, x + 99, y, 65, lineH, hFont));
   PAGE_CTRL(0, CreateBtn(hw, L"Save Safe", IDC_MW_SAVE_DEFAULTS, x + 168, y, 80, lineH, hFont));
   PAGE_CTRL(0, CreateBtn(hw, L"Safe Reset", IDC_MW_USER_RESET, x + 252, y, 80, lineH, hFont));
+  y += lineH + gap;
+  PAGE_CTRL(0, CreateBtn(hw, L"Reset Window", IDC_MW_RESET_WINDOW, x, y, 100, lineH, hFont));
+  PAGE_CTRL(0, CreateBtn(hw, L"Font +", IDC_MW_FONT_PLUS, x + 104, y, 55, lineH, hFont));
+  PAGE_CTRL(0, CreateBtn(hw, L"Font \x2013", IDC_MW_FONT_MINUS, x + 163, y, 55, lineH, hFont));
 
   // ====== PAGE 1: Visual (created hidden) ======
   y = tabTop + 10;
@@ -11585,7 +11630,7 @@ void CPlugin::LayoutSettingsControls() {
   RECT rcDisplay = { 0, 0, rc.right, rc.bottom };
   TabCtrl_AdjustRect(m_hSettingsTab, FALSE, &rcDisplay);
   int rw = rc.right - 36;  // 16px left + 20px right margin
-  int lw = 140;
+  int lw = 160;
   int newSliderW = rw - lw - 60;
   if (newSliderW < 80) newSliderW = 80;
 
@@ -11941,6 +11986,56 @@ static BOOL CALLBACK FindAltMonitorProc(HMONITOR hMon, HDC, LPRECT, LPARAM lp) {
     return FALSE; // stop enumerating
   }
   return TRUE;
+}
+
+void CPlugin::ResetSettingsWindow() {
+  if (!m_hSettingsWnd || !IsWindow(m_hSettingsWnd)) return;
+
+  m_nSettingsWndW = 620;
+  m_nSettingsWndH = 700;
+
+  // Center on the monitor the settings window is currently on
+  HMONITOR hMon = MonitorFromWindow(m_hSettingsWnd, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO mi = { sizeof(mi) };
+  if (GetMonitorInfo(hMon, &mi)) {
+    int monW = mi.rcWork.right - mi.rcWork.left;
+    int monH = mi.rcWork.bottom - mi.rcWork.top;
+    int posX = mi.rcWork.left + (monW - m_nSettingsWndW) / 2;
+    int posY = mi.rcWork.top + (monH - m_nSettingsWndH) / 2;
+    SetWindowPos(m_hSettingsWnd, HWND_TOPMOST, posX, posY, m_nSettingsWndW, m_nSettingsWndH, SWP_SHOWWINDOW);
+  } else {
+    SetWindowPos(m_hSettingsWnd, HWND_TOPMOST, 0, 0, m_nSettingsWndW, m_nSettingsWndH, SWP_NOMOVE | SWP_SHOWWINDOW);
+  }
+  LayoutSettingsControls();
+}
+
+static BOOL CALLBACK SetFontProc(HWND hChild, LPARAM lParam) {
+  SendMessage(hChild, WM_SETFONT, (WPARAM)lParam, TRUE);
+  return TRUE;
+}
+
+void CPlugin::RebuildSettingsFonts() {
+  if (!m_hSettingsWnd) return;
+
+  // Recreate fonts at new size
+  if (m_hSettingsFont) DeleteObject(m_hSettingsFont);
+  m_hSettingsFont = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  if (m_hSettingsFontBold) DeleteObject(m_hSettingsFontBold);
+  m_hSettingsFontBold = CreateFontW(m_nSettingsFontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  // Apply to all child controls
+  EnumChildWindows(m_hSettingsWnd, SetFontProc, (LPARAM)m_hSettingsFont);
+
+  // Tab control needs the font too for header sizing
+  if (m_hSettingsTab)
+    SendMessage(m_hSettingsTab, WM_SETFONT, (WPARAM)m_hSettingsFont, TRUE);
+
+  InvalidateRect(m_hSettingsWnd, NULL, TRUE);
 }
 
 void CPlugin::EnsureSettingsVisible() {
