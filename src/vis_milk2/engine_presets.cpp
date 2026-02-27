@@ -1706,12 +1706,14 @@ int Engine::SendMessageToMDropDX12Remote(const wchar_t* messageToSend, bool doFo
     }
     LastSentMDropDX12Message = Now;
 
-    // Find the MDropDX12 Remote window
-    HWND hRemoteWnd = FindWindowW(NULL, L"MDropDX12 Remote");
-    if (!hRemoteWnd) {
-      wprintf(L"MDropDX12 Remote window not found.\n");
+    // Find the Remote window (configured title first, then default)
+    HWND hRemoteWnd = NULL;
+    if (m_szRemoteWindowTitle[0] != L'\0')
+      hRemoteWnd = FindWindowW(NULL, m_szRemoteWindowTitle);
+    if (!hRemoteWnd)
+      hRemoteWnd = FindWindowW(NULL, L"MDropDX12 Remote");
+    if (!hRemoteWnd)
       return 0;
-    }
 
     // Prepare the COPYDATASTRUCT
     COPYDATASTRUCT cds;
@@ -1737,11 +1739,14 @@ int Engine::SendMessageToMDropDX12Remote(const wchar_t* messageToSend, bool doFo
 
 void Engine::PostMessageToMDropDX12Remote(UINT msg) {
   try {
-    // Find the MDropDX12 Remote window
-    HWND hRemoteWnd = FindWindowW(NULL, L"MDropDX12 Remote");
-    if (!hRemoteWnd) {
+    // Find the Remote window (configured title first, then default)
+    HWND hRemoteWnd = NULL;
+    if (m_szRemoteWindowTitle[0] != L'\0')
+      hRemoteWnd = FindWindowW(NULL, m_szRemoteWindowTitle);
+    if (!hRemoteWnd)
+      hRemoteWnd = FindWindowW(NULL, L"MDropDX12 Remote");
+    if (!hRemoteWnd)
       return;
-    }
     if (IsWindow(hRemoteWnd)) {
       PostMessageW(hRemoteWnd, msg, 0, 0);
     }

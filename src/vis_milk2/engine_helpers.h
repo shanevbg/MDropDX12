@@ -203,6 +203,14 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_GPU_RELOAD_PRESET    2105
 #define IDC_MW_RESTART_RENDER       2106
 
+// Remote tab control IDs
+#define IDC_MW_IPC_TITLE            2120  // Edit: Window Title
+#define IDC_MW_IPC_REMOTE_TITLE     2121  // Edit: Remote Window Title
+#define IDC_MW_IPC_APPLY            2122  // Button: Apply & Restart IPC
+#define IDC_MW_IPC_LIST             2123  // ListBox: active IPC windows
+#define IDC_MW_IPC_TITLE_HINT       2125  // Label: hint for window title
+#define IDC_MW_IPC_REMOTE_HINT      2126  // Label: hint for remote title
+
 #define IDC_MW_MSG_PLAY             4010   // "Play/Stop" toggle button on Messages tab
 
 // Resource viewer control IDs
@@ -248,3 +256,5 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_PUSH_MESSAGE      (WM_APP + 6)
 #define WM_MW_PRESET_CHANGED    (WM_APP + 7)
 #define WM_MW_RESTART_DEVICE    (WM_APP + 8)
+#define WM_MW_IPC_MESSAGE       (WM_APP + 9)  // lParam = heap-allocated wchar_t* from IPC thread
+#define WM_MW_RESTART_IPC       (WM_APP + 10) // settings thread requests IPC window restart

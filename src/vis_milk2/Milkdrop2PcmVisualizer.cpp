@@ -150,6 +150,7 @@ using Microsoft::WRL::ComPtr;
 // older Windows versions: Entry Point Not Found Fix
 
 #include "engine.h"
+#include "engine_helpers.h"
 #include "resource.h"
 #include "engineshell.h"
 #include "utility.h"
@@ -221,6 +222,13 @@ bool pauseRender = false;
 
 static HICON icon = nullptr;
 
+// --- IPC window thread (non-blocking Milkwave Remote handler) ---
+static std::atomic<HANDLE> threadIPC = nullptr;
+static unsigned threadIPCId = 0;
+std::atomic<HWND> g_hRenderWindow{nullptr};  // set after render window CreateWindowW
+std::atomic<bool> g_bIPCRunning{false};
+WCHAR g_szIPCWindowTitle[256] = {};  // title for IPC window (set before thread start)
+
 
 // SPOUT
 // ===============================================
@@ -242,6 +250,120 @@ BOOL CALLBACK GetWindowNames(HWND h, LPARAM l) {
   return TRUE;
 }
 // ===============================================
+
+// --- IPC hidden window: receives WM_COPYDATA on its own thread, forwards to render thread ---
+static LRESULT CALLBACK IPCWindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+  switch (uMsg) {
+  case WM_COPYDATA:
+  {
+    PCOPYDATASTRUCT pCopyData = (PCOPYDATASTRUCT)lParam;
+    if (pCopyData->dwData == 1) {
+      size_t cbData = pCopyData->cbData;
+      size_t messageLength = cbData / sizeof(wchar_t);
+      if (messageLength == 0)
+        return TRUE;
+
+      // Copy message to heap (WM_COPYDATA buffer is only valid during SendMessage)
+      wchar_t* copy = (wchar_t*)malloc((messageLength + 1) * sizeof(wchar_t));
+      if (!copy)
+        return TRUE;
+      memcpy(copy, pCopyData->lpData, cbData);
+      copy[messageLength] = L'\0';  // ensure null-terminated
+
+      // Post to render window — render thread will call LaunchMessage and free the buffer
+      HWND hRender = g_hRenderWindow.load();
+      if (hRender && IsWindow(hRender)) {
+        if (!PostMessage(hRender, WM_MW_IPC_MESSAGE, 0, (LPARAM)copy)) {
+          free(copy);  // PostMessage failed (window closing?)
+        }
+      }
+      else {
+        free(copy);  // render window not ready yet
+      }
+      return TRUE;  // message handled — unblocks sender immediately
+    }
+    break;
+  }
+  case WM_DESTROY:
+    PostQuitMessage(0);
+    return 0;
+  }
+  return DefWindowProc(hWnd, uMsg, wParam, lParam);
+}
+
+static unsigned __stdcall IPCWindowThread(void* data) {
+  HINSTANCE hInst = (HINSTANCE)data;
+
+  // Register IPC window class
+  WNDCLASSW wc = {};
+  wc.lpfnWndProc = IPCWindowProc;
+  wc.hInstance = hInst;
+  wc.lpszClassName = L"MDropDX12_IPC";
+  if (!RegisterClassW(&wc)) {
+    if (GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+      return 0;
+  }
+
+  // Create hidden window with the configured discoverable title
+  HWND hIPC = CreateWindowExW(
+    WS_EX_TOOLWINDOW,        // excluded from taskbar and Alt+Tab
+    L"MDropDX12_IPC",
+    g_szIPCWindowTitle,       // same title as render window (discoverable by Remote)
+    WS_POPUP,                 // minimal — no decorations
+    0, 0, 0, 0,              // zero size
+    NULL, NULL, hInst, NULL);
+
+  if (!hIPC) {
+    DebugLogA("IPC thread: CreateWindowExW failed\n");
+    return 0;
+  }
+
+  // Don't call ShowWindow — keep it hidden but discoverable by EnumWindows
+  g_bIPCRunning.store(true);
+
+  wchar_t dbg[512];
+  swprintf_s(dbg, L"IPC thread: hidden window created (title: \"%s\", HWND: 0x%p)\n",
+             g_szIPCWindowTitle, (void*)hIPC);
+  DebugLogW(dbg);
+
+  // Message loop — runs independently of the render thread
+  MSG msg;
+  while (GetMessage(&msg, NULL, 0, 0) > 0) {
+    TranslateMessage(&msg);
+    DispatchMessage(&msg);
+  }
+
+  DestroyWindow(hIPC);
+  UnregisterClassW(L"MDropDX12_IPC", hInst);
+  g_bIPCRunning.store(false);
+
+  DebugLogA("IPC thread: exited\n");
+  return 0;
+}
+
+void StartIPCThread(HINSTANCE hInst) {
+  // Copy the render window title for the IPC window
+  // (must be set before calling this — uses VisualizerWindowTitle from CreateWindowAndRun)
+  threadIPC.store((HANDLE)_beginthreadex(
+    nullptr, 0, &IPCWindowThread, (void*)hInst, 0, &threadIPCId));
+
+  if (threadIPC.load())
+    DebugLogA("IPC thread: started\n");
+  else
+    DebugLogA("IPC thread: failed to start\n");
+}
+
+void StopIPCThread() {
+  HANDLE h = threadIPC.exchange(nullptr);
+  if (h) {
+    if (threadIPCId != 0)
+      PostThreadMessage(threadIPCId, WM_QUIT, 0, 0);
+    WaitForSingleObject(h, 3000);
+    CloseHandle(h);
+    threadIPCId = 0;
+    DebugLogA("IPC thread: stopped\n");
+  }
+}
 
 void InitD3d(HWND hwnd, int width, int height) {
   HRESULT hr;
@@ -1625,15 +1747,20 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   WCHAR VisualizerWindowTitle[256];
   // printf("Number of existing BeatDrops (%d)\n", nBeatDrops);
 
+  // Use configured title or default
+  const wchar_t* baseTitle = (g_engine.m_szWindowTitle[0] != L'\0')
+    ? g_engine.m_szWindowTitle
+    : L"MDropDX12 Visualizer";
+
   bool freeTitleFound = false;
   nBeatDrops = 0;
 
   while (!freeTitleFound && nBeatDrops < 100) {
     if (nBeatDrops == 0) {
-      lstrcpyW(VisualizerWindowTitle, L"MDropDX12 Visualizer");
+      lstrcpyW(VisualizerWindowTitle, baseTitle);
     }
     else {
-      swprintf_s(VisualizerWindowTitle, L"MDropDX12 Visualizer %d", nBeatDrops + 1);
+      swprintf_s(VisualizerWindowTitle, L"%s %d", baseTitle, nBeatDrops + 1);
     }
 
     // Check if a window with this title already exists
@@ -1699,6 +1826,13 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
     DWORD dwError = GetLastError();
     return 0;
   }
+
+  // Publish render window HWND for the IPC thread
+  g_hRenderWindow.store(hwnd);
+
+  // Start IPC hidden window thread (non-blocking WM_COPYDATA handler)
+  lstrcpyW(g_szIPCWindowTitle, VisualizerWindowTitle);
+  StartIPCThread(instance);
 
   if (!icon) {
     icon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_ENGINE_ICON));
@@ -1830,6 +1964,10 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
     mdropdx12.LogException(L"CreateWindowAndRun: Exception in main loop", e, true);
   }
   mdropdx12.LogInfo(L"CreateWindowAndRun: Message loop ended");
+
+  // Stop IPC thread before tearing down the render window
+  StopIPCThread();
+  g_hRenderWindow.store(nullptr);
 
   g_engine.MyWriteConfig();
   g_engine.PluginQuit();

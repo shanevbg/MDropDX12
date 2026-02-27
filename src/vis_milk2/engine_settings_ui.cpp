@@ -30,6 +30,7 @@
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
 #include <set>
+#include "Milkdrop2PcmVisualizer.h"
 
 namespace mdrop {
 
@@ -295,7 +296,7 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     if (p) {
       p->m_hSettingsWnd = NULL;
       p->m_hSettingsTab = NULL;
-      for (int i = 0; i < 7; i++) p->m_settingsPageCtrls[i].clear();
+      for (int i = 0; i < 8; i++) p->m_settingsPageCtrls[i].clear();
       if (p->m_hSettingsFont) { DeleteObject(p->m_hSettingsFont); p->m_hSettingsFont = NULL; }
       if (p->m_hSettingsFontBold) { DeleteObject(p->m_hSettingsFontBold); p->m_hSettingsFontBold = NULL; }
       p->CleanupSettingsThemeBrushes();
@@ -1041,6 +1042,33 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       }
     }
 
+    // Remote tab: Apply & Restart IPC
+    if (id == IDC_MW_IPC_APPLY && code == BN_CLICKED) {
+      // Read current edit field values
+      wchar_t buf[256];
+      HWND hEdit = GetDlgItem(hWnd, IDC_MW_IPC_TITLE);
+      if (hEdit) {
+        GetWindowTextW(hEdit, buf, 256);
+        lstrcpyW(p->m_szWindowTitle, buf);
+      }
+      hEdit = GetDlgItem(hWnd, IDC_MW_IPC_REMOTE_TITLE);
+      if (hEdit) {
+        GetWindowTextW(hEdit, buf, 256);
+        lstrcpyW(p->m_szRemoteWindowTitle, buf);
+      }
+      // Save to INI
+      const wchar_t* pIni = p->GetConfigIniFile();
+      WritePrivateProfileStringW(L"Milkwave", L"WindowTitle", p->m_szWindowTitle, pIni);
+      WritePrivateProfileStringW(L"Milkwave", L"RemoteWindowTitle", p->m_szRemoteWindowTitle, pIni);
+      // Restart IPC on render thread
+      HWND hw = p->GetPluginWindow();
+      if (hw) PostMessage(hw, WM_MW_RESTART_IPC, 0, 0);
+      // Give IPC thread a moment to restart, then refresh list
+      Sleep(200);
+      p->RefreshIPCList(hWnd);
+      return 0;
+    }
+
     // Messages tab listbox selection (different notification code)
     if (id == IDC_MW_MSG_LIST && code == LBN_SELCHANGE) {
       int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
@@ -1140,6 +1168,18 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         if (val > 9999.0f) val = 9999.0f;
         p->m_fMsgAutoplayJitter = val;
         p->SaveMsgAutoplaySettings();
+        return 0;
+      }
+      case IDC_MW_IPC_TITLE: {
+        wchar_t tbuf[256];
+        GetWindowTextW((HWND)lParam, tbuf, 256);
+        lstrcpyW(p->m_szWindowTitle, tbuf);
+        return 0;
+      }
+      case IDC_MW_IPC_REMOTE_TITLE: {
+        wchar_t tbuf[256];
+        GetWindowTextW((HWND)lParam, tbuf, 256);
+        lstrcpyW(p->m_szRemoteWindowTitle, tbuf);
         return 0;
       }
       }
@@ -1493,7 +1533,7 @@ void Engine::BuildSettingsControls() {
   if (!hw) return;
 
   // Clear previous page control lists
-  for (int i = 0; i < 7; i++) m_settingsPageCtrls[i].clear();
+  for (int i = 0; i < 8; i++) m_settingsPageCtrls[i].clear();
 
   RECT rcWnd;
   GetClientRect(hw, &rcWnd);
@@ -1523,8 +1563,8 @@ void Engine::BuildSettingsControls() {
   SetWindowSubclass(m_hSettingsTab, SettingsTabSubclassProc, 1, (DWORD_PTR)this);
 
   // Insert tab pages (use TCM_INSERTITEMW explicitly — project is _MBCS, not UNICODE)
-  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"Sound", L"Files", L"Messages", L"About" };
-  for (int i = 0; i < 7; i++) {
+  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"Sound", L"Files", L"Messages", L"About", L"Remote" };
+  for (int i = 0; i < 8; i++) {
     TCITEMW ti = {};
     ti.mask = TCIF_TEXT;
     ti.pszText = (LPWSTR)tabNames[i];
@@ -1975,14 +2015,86 @@ void Engine::BuildSettingsControls() {
   y += lineH + 4;
   PAGE_CTRL(6, CreateLabel(hw, L"DirectX 12 / Windows 11 64-bit", x, y, rw, lineH, hFont, false));
 
+  // ===== Remote tab (page 7) =====
+  y = tabTop + 10;
+
+  // Section header
+  PAGE_CTRL(7, CreateLabel(hw, L"Milkwave Remote Compatibility", x, y, rw, lineH, hFontBold, false));
+  y += lineH + gap;
+
+  // Info line
+  PAGE_CTRL(7, CreateLabel(hw, L"Configure window titles so Milkwave Remote (or other controllers) can discover this instance.", x, y, rw, lineH * 2, hFont, false));
+  y += lineH * 2 + gap;
+
+  // Window Title
+  PAGE_CTRL(7, CreateLabel(hw, L"Window Title:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(7, CreateEdit(hw, m_szWindowTitle, IDC_MW_IPC_TITLE, x + lw + 4, y, rw - lw - 4, lineH, hFont, 0, false));
+  y += lineH + 2;
+
+  // Hint
+  PAGE_CTRL(7, CreateLabel(hw, L"(empty = \"MDropDX12 Visualizer\"  |  e.g. \"Milkwave Visualizer\")", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
+  y += lineH + gap;
+
+  // Remote Window Title
+  PAGE_CTRL(7, CreateLabel(hw, L"Remote Title:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(7, CreateEdit(hw, m_szRemoteWindowTitle, IDC_MW_IPC_REMOTE_TITLE, x + lw + 4, y, rw - lw - 4, lineH, hFont, 0, false));
+  y += lineH + 2;
+
+  // Hint
+  PAGE_CTRL(7, CreateLabel(hw, L"(empty = \"MDropDX12 Remote\"  |  e.g. \"Milkwave Remote\")", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
+  y += lineH + gap;
+
+  // Apply button
+  {
+    int applyW = MulDiv(150, lineH, 26);
+    PAGE_CTRL(7, CreateBtn(hw, L"Apply && Restart IPC", IDC_MW_IPC_APPLY, x, y, applyW, lineH, hFont, false));
+    y += lineH + gap + 8;
+  }
+
+  // Active IPC Windows section
+  PAGE_CTRL(7, CreateLabel(hw, L"Active IPC Windows", x, y, rw, lineH, hFontBold, false));
+  y += lineH + gap;
+
+  // IPC list box
+  {
+    int listH = lineH * 6;
+    HWND hIPCList = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", NULL,
+      WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
+      x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_IPC_LIST, GetModuleHandle(NULL), NULL);
+    if (hIPCList && hFont) SendMessage(hIPCList, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(7, hIPCList);
+    y += listH + gap;
+  }
+
+  // Future placeholder
+  PAGE_CTRL(7, CreateLabel(hw, L"Future: multiple IPC windows for multi-screen rendering", x, y, rw, lineH, hFont, false));
+
+  // Populate IPC list with current state
+  RefreshIPCList(hw);
+
   #undef PAGE_CTRL
 
   // Show only page 0 initially, hide all others
   ShowSettingsPage(0);
 }
 
+void Engine::RefreshIPCList(HWND hSettingsWnd) {
+  HWND hList = GetDlgItem(hSettingsWnd, IDC_MW_IPC_LIST);
+  if (!hList) return;
+
+  SendMessage(hList, LB_RESETCONTENT, 0, 0);
+
+  if (g_bIPCRunning.load()) {
+    wchar_t entry[512];
+    swprintf_s(entry, L"%s  \u2014  Running", g_szIPCWindowTitle);
+    SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)entry);
+  } else {
+    SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)L"(no IPC window active)");
+  }
+}
+
 void Engine::ShowSettingsPage(int page) {
-  for (int i = 0; i < 7; i++) {
+  for (int i = 0; i < 8; i++) {
     if (i == page) {
       // Show + bring to top z-order so controls above resized siblings receive clicks
       for (HWND h : m_settingsPageCtrls[i])
@@ -2155,6 +2267,27 @@ void Engine::LayoutSettingsControls() {
     y += lineH + gap;
     // Preview
     moveCtrl(IDC_MW_MSG_PREVIEW, x, y, rw, lineH * 3);
+  }
+
+  // Stretch Remote tab edit fields and list box to fill width
+  {
+    int lw = MulDiv(160, lineH, 26);
+    auto moveCtrl = [&](int id, int cx, int cy, int cw, int ch) {
+      HWND h = GetDlgItem(m_hSettingsWnd, id);
+      if (!h) return;
+      RECT r; GetWindowRect(h, &r);
+      MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+      if (cx < 0) cx = r.left;
+      if (cy < 0) cy = r.top;
+      if (cw < 0) cw = r.right - r.left;
+      if (ch < 0) ch = r.bottom - r.top;
+      MoveWindow(h, cx, cy, cw, ch, TRUE);
+    };
+    int editX = rcDisplay.left + 16 + lw + 4;
+    int editW = rw - lw - 4;
+    moveCtrl(IDC_MW_IPC_TITLE, editX, -1, editW, -1);
+    moveCtrl(IDC_MW_IPC_REMOTE_TITLE, editX, -1, editW, -1);
+    moveCtrl(IDC_MW_IPC_LIST, rcDisplay.left + 16, -1, rw, -1);
   }
 
   InvalidateRect(m_hSettingsWnd, NULL, TRUE);
@@ -2429,7 +2562,7 @@ void Engine::RebuildSettingsFonts() {
     hChild = hNext;
   }
   m_hSettingsTab = NULL;
-  for (int i = 0; i < 7; i++) m_settingsPageCtrls[i].clear();
+  for (int i = 0; i < 8; i++) m_settingsPageCtrls[i].clear();
 
   // Rebuild all controls at the new font size
   // (BuildSettingsControls recreates fonts, tab, and all controls)

@@ -644,6 +644,8 @@ public:
   wchar_t     m_szAudioDevice[MAX_PATH];
   wchar_t     m_szAudioDeviceDisplayName[MAX_PATH];
   wchar_t     m_SongInfoFormat[MAX_PATH];
+  wchar_t     m_szWindowTitle[256];         // configurable window title (empty = "MDropDX12 Visualizer")
+  wchar_t     m_szRemoteWindowTitle[256];   // configurable remote title (empty = "MDropDX12 Remote")
   int m_nSettingsCurSel = 0;       // currently highlighted setting in UI_SETTINGS
   bool m_bSettingsNeedAttention = false; // force settings open on bad config
   int m_nAudioLoopState = 0; // 0: Running, 1: Cancel running thread, 2: Must restart
@@ -821,7 +823,7 @@ public:
   HWND        m_hSettingsWnd = NULL;
   HWND        m_hSettingsTab = NULL;       // Tab control
   int         m_nSettingsActivePage = 0;
-  std::vector<HWND> m_settingsPageCtrls[7]; // HWNDs per tab (General, Visual, Colors, Sound, Files, Messages, About)
+  std::vector<HWND> m_settingsPageCtrls[8]; // HWNDs per tab (General, Visual, Colors, Sound, Files, Messages, About, Remote)
   HFONT       m_hSettingsFont = NULL;
   HFONT       m_hSettingsFontBold = NULL;
   int         m_nSettingsFontSize = -16;     // Negative = pixel height (default 16px ~ 12pt)
@@ -842,6 +844,8 @@ public:
   void        NavigatePresetDirUp(HWND hSettingsWnd);
   void        NavigatePresetDirInto(HWND hSettingsWnd, int sel);
   static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+  // Remote tab
+  void        RefreshIPCList(HWND hSettingsWnd);
   // Messages tab
   bool        ShowMsgOverridesDialog(HWND hParent);
   void        PopulateMsgListBox(HWND hList);

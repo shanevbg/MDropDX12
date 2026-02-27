@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
+#include "Milkdrop2PcmVisualizer.h"
 
 #define FRAND ((rand() % 7381)/7380.0f)
 #define clamp(value, min, max) ((value) < (min) ? (min) : ((value) > (max) ? (max) : (value)))
@@ -411,6 +412,20 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     LaunchCustomMessage((int)wParam);
     return 0;
 
+  case WM_MW_RESTART_IPC:
+  {
+    // Settings thread requested IPC restart with new title
+    extern HINSTANCE api_orig_hinstance;
+    StopIPCThread();
+    // Build the IPC title from configured window title (or default)
+    const wchar_t* baseTitle = (g_engine.m_szWindowTitle[0] != L'\0')
+      ? g_engine.m_szWindowTitle
+      : L"MDropDX12 Visualizer";
+    lstrcpyW(g_szIPCWindowTitle, baseTitle);
+    StartIPCThread(api_orig_hinstance);
+    return 0;
+  }
+
   case WM_SIZE:
     // If render window went fullscreen, move settings window to another monitor
     if (wParam == SIZE_MAXIMIZED || wParam == SIZE_RESTORED)
@@ -419,25 +434,31 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
 
   case WM_COPYDATA:
   {
+    // Fallback: direct WM_COPYDATA to render window (if IPC hidden window didn't intercept)
     PCOPYDATASTRUCT pCopyData = (PCOPYDATASTRUCT)lParam;
-    if (pCopyData->dwData == 1) { // Custom identifier for the message
+    if (pCopyData->dwData == 1) {
       wchar_t* receivedMessage = (wchar_t*)pCopyData->lpData;
-
-      // Calculate the length in wchar_t units
       size_t messageLength = pCopyData->cbData / sizeof(wchar_t);
-
-      // Ensure the received message is null-terminated
       if (messageLength > 0) {
         if (receivedMessage[messageLength - 1] != L'\0') {
-          // Add null-terminator only if it's not already present
           receivedMessage[messageLength] = L'\0';
         }
       }
       LaunchMessage(receivedMessage);
-      return 0; // Message handled
-      //MessageBoxW(hWnd, receivedMessage, L"Received Message", MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
+      return 0;
     }
     break;
+  }
+
+  case WM_MW_IPC_MESSAGE:
+  {
+    // Forwarded from hidden IPC window thread — lParam is heap-allocated wchar_t*
+    wchar_t* message = (wchar_t*)lParam;
+    if (message) {
+      LaunchMessage(message);
+      free(message);
+    }
+    return 0;
   }
 
   case WM_COMMAND:
