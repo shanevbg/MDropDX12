@@ -34,7 +34,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 
 
-#include "plugin.h"
+#include "engine.h"
 #include "resource.h"
 #include "support.h"
 //#include "evallib\eval.h"		// for math. expr. eval - thanks Francis! (in SourceOffSite, it's the 'vis_avs\evallib' project.)
@@ -44,6 +44,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <assert.h>
 #include <math.h>
 #include <algorithm>  // std::swap
+using namespace mdrop;
 
 #define D3DCOLOR_RGBA_01(r,g,b,a) D3DCOLOR_RGBA(((int)(r*255)),((int)(g*255)),((int)(b*255)),((int)(a*255)))
 #define FRAND ((rand() % 7381)/7380.0f)
@@ -166,7 +167,7 @@ int GetNumToSpawn(float fTime, float fDeltaT, float fRate, float fRegularity, in
   return (int)(fNumToSpawn + 0.49f);
 }
 
-bool CPlugin::RenderStringToTitleTexture(int supertextIndex)
+bool mdrop::Engine::RenderStringToTitleTexture(int supertextIndex)
 {
   int texIndex = supertextIndex;
 
@@ -353,7 +354,7 @@ bool CPlugin::RenderStringToTitleTexture(int supertextIndex)
   return true;
 }
 
-void CPlugin::LoadPerFrameEvallibVars(CState* pState) {
+void mdrop::Engine::LoadPerFrameEvallibVars(CState* pState) {
   // load the 'var_pf_*' variables in this CState object with the correct values.
   // for vars that affect pixel motion, that means evaluating them at time==-1,
   //    (i.e. no blending w/blendto value); the blending of the file dx/dy
@@ -469,7 +470,7 @@ void CPlugin::LoadPerFrameEvallibVars(CState* pState) {
   *pState->var_pf_mouseclick = m_mouseClicked > 0 ? 1.0 : 0.0;
 }
 
-void CPlugin::RunPerFrameEquations(int code) {
+void mdrop::Engine::RunPerFrameEquations(int code) {
   // run per-frame calculations
 
     /*
@@ -684,7 +685,7 @@ void CPlugin::RunPerFrameEquations(int code) {
   }
 }
 
-void CPlugin::RenderFrame(int bRedraw) {
+void mdrop::Engine::RenderFrame(int bRedraw) {
 
   // Get the Direct3D device (may be null in DX12 mode — CPU code still runs)
   LPDIRECT3DDEVICE9 lpDevice = GetDevice();
@@ -1127,7 +1128,7 @@ void CPlugin::RenderFrame(int bRedraw) {
   //
   // NOTE - fps is capped at 30 default and can be confirmed with F4 in the VJ control window
   // It is normally adjusted by the Winamp config panel which is not available for BeatDrop
-  // However, default fps variables can be changed in : plugin.cpp - CPlugin::OverrideDefaults()
+  // However, default fps variables can be changed in : plugin.cpp - mdrop::Engine::OverrideDefaults()
   // and, if Winamp is installed, the Milkdrop generated configuration file can be copied using "F8"
   //
   // The device must be D3D9ex and not D3D9.
@@ -1154,7 +1155,7 @@ void CPlugin::RenderFrame(int bRedraw) {
         //	if (desc.Width != (rc.right - rc.left) && desc.Height != (rc.bottom - rc.top)) {
         //		// Check backbuffer size against sender initialized size
         //		if (g_Width != desc.Width || g_Height != desc.Height) {
-        //			SpoutLogNotice("CPlugin::RenderFrame - size change from %dx%d to %dx%d", g_Width, g_Height, desc.Width, desc.Height);
+        //			SpoutLogNotice("mdrop::Engine::RenderFrame - size change from %dx%d to %dx%d", g_Width, g_Height, desc.Width, desc.Height);
         //			g_Width = desc.Width;
         //			g_Height = desc.Height;
         //			// DX9 device will have been re-created so create the sender again
@@ -1205,7 +1206,7 @@ void CPlugin::RenderFrame(int bRedraw) {
 
 } // end RenderFrame
 
-void CPlugin::DrawMotionVectors() {
+void mdrop::Engine::DrawMotionVectors() {
   // FLEXIBLE MOTION VECTOR FIELD
   if ((float)*m_pState->var_pf_mv_a >= 0.001f) {
     //-------------------------------------------------------
@@ -1350,7 +1351,7 @@ void CPlugin::DrawMotionVectors() {
 }
 
 /*
-void CPlugin::UpdateSongInfo()
+void mdrop::Engine::UpdateSongInfo()
 {
   if (m_bShowSongTitle || m_bSongTitleAnims)
   {
@@ -1470,7 +1471,7 @@ void CPlugin::UpdateSongInfo()
         }
         */
 
-bool CPlugin::ReversePropagatePoint(float fx, float fy, float* fx2, float* fy2) {
+bool mdrop::Engine::ReversePropagatePoint(float fx, float fy, float* fx2, float* fy2) {
   //float fy = y/(float)nMotionVectorsY;
   int   y0 = (int)(fy * m_nGridY);
   float dy = fy * m_nGridY - y0;
@@ -1506,7 +1507,7 @@ bool CPlugin::ReversePropagatePoint(float fx, float fy, float* fx2, float* fy2) 
   return true;
 }
 
-void CPlugin::GetSafeBlurMinMax(CState* pState, float* blur_min, float* blur_max) {
+void mdrop::Engine::GetSafeBlurMinMax(CState* pState, float* blur_min, float* blur_max) {
   blur_min[0] = (float)*pState->var_pf_blur1min;
   blur_min[1] = (float)*pState->var_pf_blur2min;
   blur_min[2] = (float)*pState->var_pf_blur3min;
@@ -1538,7 +1539,7 @@ void CPlugin::GetSafeBlurMinMax(CState* pState, float* blur_min, float* blur_max
   }
 }
 
-void CPlugin::BlurPasses() {
+void mdrop::Engine::BlurPasses() {
 #if (NUM_BLUR_TEX>0)
 
   // Note: Blur is currently a little funky.  It blurs the *current* frame after warp;
@@ -1719,7 +1720,7 @@ void CPlugin::BlurPasses() {
 // progressively halved resolution.  Blur textures are sampled in comp
 // shaders via GetBlur1/2/3().
 // ---------------------------------------------------------------------------
-void CPlugin::DX12_BlurPasses()
+void mdrop::Engine::DX12_BlurPasses()
 {
 #if (NUM_BLUR_TEX > 0)
   if (!m_lpDX || !m_lpDX->m_device || !m_lpDX->m_commandList)
@@ -1894,7 +1895,7 @@ void CPlugin::DX12_BlurPasses()
 // Called from RenderFrame after CPU-side computation (per-frame equations,
 // per-vertex warp) has filled m_verts[] with final UVs.
 // ---------------------------------------------------------------------------
-void CPlugin::DX12_RenderWarpAndComposite()
+void mdrop::Engine::DX12_RenderWarpAndComposite()
 {
   if (!m_lpDX || !m_lpDX->m_device || !m_lpDX->m_commandList)
     return;
@@ -2196,7 +2197,7 @@ void CPlugin::DX12_RenderWarpAndComposite()
 // Forward declaration — defined later in this file
 int SmoothWave(WFVERTEX* vi, int nVertsIn, WFVERTEX* vo);
 
-void CPlugin::DX12_DrawWave(float* fL, float* fR) {
+void mdrop::Engine::DX12_DrawWave(float* fL, float* fR) {
   if (!m_lpDX || !m_lpDX->m_commandList)
     return;
 
@@ -3037,7 +3038,7 @@ static int ExpandFanToTriList(const V* src, int nFanVerts, V* dest) {
   return out;
 }
 
-void CPlugin::DX12_DrawSprites() {
+void mdrop::Engine::DX12_DrawSprites() {
   if (!m_lpDX || !m_lpDX->m_commandList)
     return;
 
@@ -3135,7 +3136,7 @@ void CPlugin::DX12_DrawSprites() {
   }
 }
 
-void CPlugin::DX12_DrawCustomShapes() {
+void mdrop::Engine::DX12_DrawCustomShapes() {
   if (!m_lpDX || !m_lpDX->m_commandList)
     return;
 
@@ -3350,7 +3351,7 @@ void CPlugin::DX12_DrawCustomShapes() {
   }
 }
 
-void CPlugin::DX12_DrawCustomWaves() {
+void mdrop::Engine::DX12_DrawCustomWaves() {
   if (!m_lpDX || !m_lpDX->m_commandList)
     return;
 
@@ -3504,7 +3505,7 @@ void CPlugin::DX12_DrawCustomWaves() {
   }
 }
 
-void CPlugin::ComputeGridAlphaValues() {
+void mdrop::Engine::ComputeGridAlphaValues() {
   float fBlend = m_pState->m_fBlendProgress;//max(0,min(1,(m_pState->m_fBlendProgress*1.6f - 0.3f)));
   /*switch(code) //if (nPassOverride==0)
   {
@@ -3699,7 +3700,7 @@ void CPlugin::ComputeGridAlphaValues() {
   }
 }
 
-void CPlugin::WarpedBlit_NoShaders(int nPass, bool bAlphaBlend, bool bFlipAlpha, bool bCullTiles, bool bFlipCulling) {
+void mdrop::Engine::WarpedBlit_NoShaders(int nPass, bool bAlphaBlend, bool bFlipAlpha, bool bCullTiles, bool bFlipCulling) {
   MungeFPCW(NULL);	// puts us in single-precision mode & disables exceptions
 
   LPDIRECT3DDEVICE9 lpDevice = GetDevice();
@@ -3912,7 +3913,7 @@ void CPlugin::WarpedBlit_NoShaders(int nPass, bool bAlphaBlend, bool bFlipAlpha,
   lpDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
-void CPlugin::WarpedBlit_Shaders(int nPass, bool bAlphaBlend, bool bFlipAlpha, bool bCullTiles, bool bFlipCulling) {
+void mdrop::Engine::WarpedBlit_Shaders(int nPass, bool bAlphaBlend, bool bFlipAlpha, bool bCullTiles, bool bFlipCulling) {
   // if nPass==0, it draws old preset (blending 1 of 2).
   // if nPass==1, it draws new preset (blending 2 of 2, OR done blending)
 
@@ -4028,7 +4029,7 @@ void CPlugin::WarpedBlit_Shaders(int nPass, bool bAlphaBlend, bool bFlipAlpha, b
   RestoreShaderParams();
 }
 
-void CPlugin::DrawCustomShapes() {
+void mdrop::Engine::DrawCustomShapes() {
   LPDIRECT3DDEVICE9 lpDevice = GetDevice();
   if (!lpDevice)
     return;
@@ -4208,7 +4209,7 @@ void CPlugin::DrawCustomShapes() {
   lpDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 }
 
-void CPlugin::LoadCustomShapePerFrameEvallibVars(CState* pState, int i, int instance) {
+void mdrop::Engine::LoadCustomShapePerFrameEvallibVars(CState* pState, int i, int instance) {
   *pState->m_shape[i].var_pf_time = (double)(GetTime() - m_fStartTime);
   *pState->m_shape[i].var_pf_frame = (double)GetFrame();
   *pState->m_shape[i].var_pf_fps = (double)GetFps();
@@ -4252,7 +4253,7 @@ void CPlugin::LoadCustomShapePerFrameEvallibVars(CState* pState, int i, int inst
   *pState->m_shape[i].var_pf_border_a = pState->m_shape[i].border_a;
 }
 
-void CPlugin::LoadCustomWavePerFrameEvallibVars(CState* pState, int i) {
+void mdrop::Engine::LoadCustomWavePerFrameEvallibVars(CState* pState, int i) {
   *pState->m_wave[i].var_pf_time = (double)(GetTime() - m_fStartTime);
   *pState->m_wave[i].var_pf_frame = (double)GetFrame();
   *pState->m_wave[i].var_pf_fps = (double)GetFps();
@@ -4306,7 +4307,7 @@ int SmoothWave(WFVERTEX* vi, int nVertsIn, WFVERTEX* vo) {
   return j;
 }
 
-void CPlugin::DrawCustomWaves() {
+void mdrop::Engine::DrawCustomWaves() {
   LPDIRECT3DDEVICE9 lpDevice = GetDevice();
   if (!lpDevice)
     return;
@@ -4315,7 +4316,7 @@ void CPlugin::DrawCustomWaves() {
   lpDevice->SetVertexShader(NULL);
   lpDevice->SetFVF(WFVERTEX_FORMAT);
 
-  // note: read in all sound data from CPluginShell's m_sound
+  // note: read in all sound data from mdrop::EngineShell's m_sound
   int num_reps = (m_pState->m_bBlending) ? 2 : 1;
   for (int rep = 0; rep < num_reps; rep++) {
     CState* pState = (rep == 0) ? m_pState : m_pOldState;
@@ -4489,7 +4490,7 @@ void CPlugin::DrawCustomWaves() {
   lpDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 }
 
-void CPlugin::DrawWave(float* fL, float* fR) {
+void mdrop::Engine::DrawWave(float* fL, float* fR) {
   LPDIRECT3DDEVICE9 lpDevice = GetDevice();
   if (!lpDevice)
     return;
@@ -5874,7 +5875,7 @@ SKIP_DRAW_WAVE:
   lpDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
-void CPlugin::DrawSprites() {
+void mdrop::Engine::DrawSprites() {
   LPDIRECT3DDEVICE9 lpDevice = GetDevice();
   if (!lpDevice)
     return;
@@ -5985,7 +5986,7 @@ void CPlugin::DrawSprites() {
 }
 
 /*
-bool CPlugin::SetMilkdropRenderTarget(LPDIRECTDRAWSURFACE7 lpSurf, int w, int h, char *szErrorMsg)
+bool mdrop::Engine::SetMilkdropRenderTarget(LPDIRECTDRAWSURFACE7 lpSurf, int w, int h, char *szErrorMsg)
 {
   HRESULT hr = m_lpD3DDev->SetRenderTarget(0, lpSurf, 0);
   if (hr != D3D_OK)
@@ -6009,7 +6010,7 @@ bool CPlugin::SetMilkdropRenderTarget(LPDIRECTDRAWSURFACE7 lpSurf, int w, int h,
 }
 */
 
-void CPlugin::DrawUserSprites()	// from system memory, to back buffer.
+void mdrop::Engine::DrawUserSprites()	// from system memory, to back buffer.
 {
   if (!m_lpDX || !m_lpDX->m_commandList)
     return;
@@ -6233,7 +6234,7 @@ void CPlugin::DrawUserSprites()	// from system memory, to back buffer.
   }
 }
 
-void CPlugin::UvToMathSpace(float u, float v, float* rad, float* ang) {
+void mdrop::Engine::UvToMathSpace(float u, float v, float* rad, float* ang) {
   // (screen space = -1..1 on both axes; corresponds to UV space)
   // uv space = [0..1] on both axes
   // "math" space = what the preset authors are used to:
@@ -6260,7 +6261,7 @@ void CPlugin::UvToMathSpace(float u, float v, float* rad, float* ang) {
     *ang += 6.2831853071796f;
 }
 
-void CPlugin::RestoreShaderParams() {
+void mdrop::Engine::RestoreShaderParams() {
   LPDIRECT3DDEVICE9 lpDevice = GetDevice();
   for (int i = 0; i < 2; i++) {
     lpDevice->SetSamplerState(i, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP);//texaddr);
@@ -6280,7 +6281,7 @@ void CPlugin::RestoreShaderParams() {
 
 }
 
-void CPlugin::BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16]) {
+void mdrop::Engine::BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16]) {
   for (int i = 0; i < 16; i++) {
     outSlots[i] = UINT_MAX;
     switch (params->m_texcode[i]) {
@@ -6316,7 +6317,7 @@ void CPlugin::BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex,
   }
 }
 
-void CPlugin::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CState* pState) {
+void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CState* pState) {
   LPDIRECT3DDEVICE9 lpDevice = GetDevice();
 
   // bind textures + sampler states (DX9 only — skip if no DX9 device)
@@ -6464,7 +6465,7 @@ void CPlugin::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CStat
   }
 }
 
-void CPlugin::ShowToUser_NoShaders()//int bRedraw, int nPassOverride)
+void mdrop::Engine::ShowToUser_NoShaders()//int bRedraw, int nPassOverride)
 {
   // note: this one has to draw the whole screen!  (one big quad)
 
@@ -6765,7 +6766,7 @@ void CPlugin::ShowToUser_NoShaders()//int bRedraw, int nPassOverride)
   }
 }
 
-void CPlugin::ShowToUser_Shaders(int nPass, bool bAlphaBlend, bool bFlipAlpha, bool bCullTiles, bool bFlipCulling)//int bRedraw, int nPassOverride, bool bFlipAlpha)
+void mdrop::Engine::ShowToUser_Shaders(int nPass, bool bAlphaBlend, bool bFlipAlpha, bool bCullTiles, bool bFlipCulling)//int bRedraw, int nPassOverride, bool bFlipAlpha)
 {
   LPDIRECT3DDEVICE9 lpDevice = GetDevice();
   if (!lpDevice)
@@ -6941,7 +6942,7 @@ void CPlugin::ShowToUser_Shaders(int nPass, bool bAlphaBlend, bool bFlipAlpha, b
   RestoreShaderParams();
 }
 
-void CPlugin::ShowSongTitleAnim(int w, int h, float fProgress, int supertextIndex) {
+void mdrop::Engine::ShowSongTitleAnim(int w, int h, float fProgress, int supertextIndex) {
   int i, x, y;
 
   int texIndex = supertextIndex;

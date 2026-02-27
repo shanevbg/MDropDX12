@@ -8,24 +8,26 @@
 #define IsAlphanumericChar(x) ((x >= 'a' && x <= 'z') || (x >= 'A' && x <= 'Z') || (x >= '0' && x <= '9') || x == '.')
 #define IsNumericChar(x) (x >= '0' && x <= '9')
 
-// Forward declarations for standalone helpers shared across plugin_*.cpp modules.
-// Definitions live in plugin.cpp.
+namespace mdrop {
+
+// Forward declarations for standalone helpers shared across engine_*.cpp modules.
+// Definitions live in engine.cpp.
 bool ReadFileToString(const wchar_t* szBaseFilename, char* szDestText, int nMaxBytes, bool bConvertToLFCA);
 void StripComments(char* p);
 void ConvertLLCto1310(char* d, const char* s);
 void CancelThread(int max_wait_time_ms);
 
-// Preset directory helpers — defined in plugin_presets.cpp.
+// Preset directory helpers — defined in engine_presets.cpp.
 bool DirHasMilkFilesHelper(const wchar_t* szDir);
 bool TryDescendIntoPresetSubdirHelper(wchar_t* szDir);
 
-// Case-insensitive comparison table — defined in plugin.cpp.
+// Case-insensitive comparison table — defined in engine.cpp.
 extern const unsigned char LC2UC[256];
 
-// Case-insensitive wide-string compare — defined in plugin_input.cpp.
+// Case-insensitive wide-string compare — defined in engine_input.cpp.
 int mystrcmpiW(const wchar_t* s1, const wchar_t* s2);
 
-// OnUserEdited callbacks — defined in plugin.cpp, used as function pointers in menus.
+// OnUserEdited callbacks — defined in engine.cpp, used as function pointers in menus.
 void OnUserEditedPerFrame(LPARAM param1, LPARAM param2);
 void OnUserEditedPerPixel(LPARAM param1, LPARAM param2);
 void OnUserEditedPresetInit(LPARAM param1, LPARAM param2);
@@ -36,15 +38,15 @@ void OnUserEditedShapecodeInit(LPARAM param1, LPARAM param2);
 void OnUserEditedWarpShaders(LPARAM param1, LPARAM param2);
 void OnUserEditedCompShaders(LPARAM param1, LPARAM param2);
 
-// Texture file extensions — defined in plugin_textures.cpp, used by settings UI.
+// Texture file extensions — defined in engine_textures.cpp, used by settings UI.
 extern std::wstring texture_exts[];
 extern const int texture_exts_count;
 extern const wchar_t szExtsWithSlashes[];
 
-// Texture helpers — defined in plugin_textures.cpp.
+// Texture helpers — defined in engine_textures.cpp.
 bool PickRandomTexture(const wchar_t* prefix, wchar_t* szRetTextureFilename);
 
-// UI factory functions — defined in plugin.cpp,
+// UI factory functions — defined in engine.cpp,
 // used by settings window and message dialogs.
 HWND CreateLabel(HWND hParent, const wchar_t* text, int x, int y, int w, int h, HFONT hFont, bool visible = true);
 HWND CreateEdit(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, DWORD extraStyle = 0, bool visible = true);
@@ -86,12 +88,14 @@ enum {
   SET_COUNT
 };
 
-// g_settingsDesc[] — defined in plugin.cpp, used by settings UI.
+// g_settingsDesc[] — defined in engine.cpp, used by settings UI.
 extern SettingDesc g_settingsDesc[];
 
-// Settings window class — defined in plugin_settings_ui.cpp.
+// Settings window class — defined in engine_settings_ui.cpp.
 extern const wchar_t* SETTINGS_WND_CLASS;
 extern bool g_bSettingsWndClassRegistered;
+
+} // namespace mdrop
 
 //----------------------------------------------------------------------
 // Settings window control IDs

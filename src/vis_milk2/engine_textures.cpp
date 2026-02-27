@@ -1,10 +1,10 @@
 /*
   Plugin module: Texture Management
-  Extracted from plugin.cpp for maintainability.
+  Extracted from engine.cpp for maintainability.
   Contains: AddNoiseTex, AddNoiseVol, EvictSomeTexture, PickRandomTexture
 */
 
-#include "plugin.h"
+#include "engine.h"
 #include "utility.h"
 #include "support.h"
 #include "resource.h"
@@ -18,14 +18,16 @@
 #include <vector>
 #include <string>
 
-extern CPlugin g_plugin;
+namespace mdrop {
+
+extern Engine g_engine;
 extern CShaderParamsList global_CShaderParams_master_list;
 
-// Forward declarations for helpers defined in plugin.cpp
+// Forward declarations for helpers defined in engine.cpp
 DWORD dwCubicInterpolate(DWORD y0, DWORD y1, DWORD y2, DWORD y3, float t);
 float fCubicInterpolate(float y0, float y1, float y2, float y3, float t);
 
-bool CPlugin::AddNoiseTex(const wchar_t* szTexName, int size, int zoom_factor) {
+bool Engine::AddNoiseTex(const wchar_t* szTexName, int size, int zoom_factor) {
   if (!GetDevice()) {
     // DX12 path: generate noise into CPU buffer, then upload via DX12
     int RANGE = (zoom_factor > 1) ? 216 : 256;
@@ -217,7 +219,7 @@ bool CPlugin::AddNoiseTex(const wchar_t* szTexName, int size, int zoom_factor) {
   return true;
 }
 
-bool CPlugin::AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor) {
+bool Engine::AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor) {
   if (!GetDevice()) {
     // DX12 path: generate 3D noise into CPU buffer, then upload via DX12
     int RANGE = (zoom_factor > 1) ? 216 : 256;
@@ -465,7 +467,7 @@ bool CPlugin::AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor) {
 }
 
 
-bool CPlugin::EvictSomeTexture() {
+bool Engine::EvictSomeTexture() {
   // note: this won't evict a texture whose age is zero,
   //       or whose reported size is zero!
 
@@ -547,8 +549,8 @@ bool PickRandomTexture(const wchar_t* prefix, wchar_t* szRetTextureFilename)  //
   // (..just enough to make sure we don't do it more than once per preset load)
   //DWORD t = timeGetTime(); // in milliseconds
   //if (abs(t - texfiles_timestamp) > 2000)
-  if (g_plugin.m_bNeedRescanTexturesDir) {
-    g_plugin.m_bNeedRescanTexturesDir = false;
+  if (g_engine.m_bNeedRescanTexturesDir) {
+    g_engine.m_bNeedRescanTexturesDir = false;
     texfiles.clear();
 
     // Helper lambda: scan a directory for valid texture files (filename only, no path)
@@ -572,19 +574,19 @@ bool PickRandomTexture(const wchar_t* prefix, wchar_t* szRetTextureFilename)  //
     };
 
     // 1) Dedicated random textures directory (highest priority)
-    if (g_plugin.m_szRandomTexDir[0])
-      scanDir(g_plugin.m_szRandomTexDir, texfiles);
+    if (g_engine.m_szRandomTexDir[0])
+      scanDir(g_engine.m_szRandomTexDir, texfiles);
 
     // 2) Fallback paths (user's texture collection)
     if (texfiles.empty()) {
-      for (auto& fbPath : g_plugin.m_fallbackPaths)
+      for (auto& fbPath : g_engine.m_fallbackPaths)
         scanDir(fbPath.c_str(), texfiles);
     }
 
     // 3) Built-in textures directory
     if (texfiles.empty()) {
       wchar_t szBuiltin[MAX_PATH];
-      swprintf(szBuiltin, L"%stextures\\", g_plugin.m_szMilkdrop2Path);
+      swprintf(szBuiltin, L"%stextures\\", g_engine.m_szMilkdrop2Path);
       scanDir(szBuiltin, texfiles);
     }
   }
@@ -622,3 +624,5 @@ bool PickRandomTexture(const wchar_t* prefix, wchar_t* szRetTextureFilename)  //
   return true;
 }
 
+
+} // namespace mdrop

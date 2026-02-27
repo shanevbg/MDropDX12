@@ -358,15 +358,15 @@
     <ClCompile Include="Milkdrop2PcmVisualizer.cpp" />
     <ClCompile Include="milkdropfs.cpp" />
     <ClCompile Include="mdropdx12.cpp" />
-    <ClCompile Include="plugin.cpp" />
-    <ClCompile Include="plugin_input.cpp" />
-    <ClCompile Include="plugin_messages.cpp" />
-    <ClCompile Include="plugin_presets.cpp" />
-    <ClCompile Include="plugin_rendering.cpp" />
-    <ClCompile Include="plugin_settings_ui.cpp" />
-    <ClCompile Include="plugin_shaders.cpp" />
-    <ClCompile Include="plugin_textures.cpp" />
-    <ClCompile Include="pluginshell.cpp" />
+    <ClCompile Include="engine.cpp" />
+    <ClCompile Include="engine_input.cpp" />
+    <ClCompile Include="engine_messages.cpp" />
+    <ClCompile Include="engine_presets.cpp" />
+    <ClCompile Include="engine_rendering.cpp" />
+    <ClCompile Include="engine_settings_ui.cpp" />
+    <ClCompile Include="engine_shaders.cpp" />
+    <ClCompile Include="engine_textures.cpp" />
+    <ClCompile Include="engineshell.cpp" />
     <ClCompile Include="state.cpp" />
     <ClCompile Include="support.cpp" />
     <ClCompile Include="texmgr.cpp" />
@@ -403,8 +403,8 @@
     <ClInclude Include="menu.h" />
     <ClInclude Include="Milkdrop2PcmVisualizer.h" />
     <ClInclude Include="mdropdx12.h" />
-    <ClInclude Include="plugin.h" />
-    <ClInclude Include="pluginshell.h" />
+    <ClInclude Include="engine.h" />
+    <ClInclude Include="engineshell.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="shell_defines.h" />
     <ClInclude Include="state.h" />
@@ -416,7 +416,7 @@
     <ClInclude Include="wasabi.h" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="plugin.rc" />
+    <ResourceCompile Include="engine.rc" />
   </ItemGroup>
   <ItemGroup>
     <None Include="plugin.dsp" />
@@ -428,7 +428,7 @@
     <Xml Include="manifest.xml" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="plugin_icon.ico" />
+    <Image Include="engine_icon.ico" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

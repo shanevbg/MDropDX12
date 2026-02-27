@@ -1,12 +1,12 @@
 /*
   Plugin module: Settings Window, Resource Viewer & Configuration
-  Extracted from plugin.cpp for maintainability.
+  Extracted from engine.cpp for maintainability.
   Contains: Settings window management, controls, theme, resource viewer,
             settings config, user defaults, fallback paths
 */
 
-#include "plugin.h"
-#include "plugin_helpers.h"
+#include "engine.h"
+#include "engine_helpers.h"
 #include "utility.h"
 #include "support.h"
 #include "resource.h"
@@ -31,20 +31,22 @@
 #pragma comment(lib, "dwmapi.lib")
 #include <set>
 
-extern CPlugin g_plugin;
+namespace mdrop {
+
+extern Engine g_engine;
 extern int ToggleFPSNumPressed;
 
 const wchar_t* SETTINGS_WND_CLASS = L"MDropDX12SettingsWnd";
 bool g_bSettingsWndClassRegistered = false;
 
-void CPlugin::WriteRealtimeConfig() {
+void Engine::WriteRealtimeConfig() {
   // WritePrivateProfileIntW(m_bShowSongTitle, L"bShowSongTitle", GetConfigIniFile(), L"Settings");
   // WritePrivateProfileIntW(m_bShowSongTime, L"bShowSongTime", GetConfigIniFile(), L"Settings");
   // WritePrivateProfileIntW(m_bShowSongLen, L"bShowSongLen", GetConfigIniFile(), L"Settings");
 }
 
 // Get the current value of a setting as a display string
-void CPlugin::GetSettingValueString(int id, wchar_t* buf, int bufLen) {
+void Engine::GetSettingValueString(int id, wchar_t* buf, int bufLen) {
   switch (id) {
   case SET_PRESET_DIR:       lstrcpynW(buf, m_szPresetDir, bufLen); break;
   case SET_AUDIO_DEVICE:     lstrcpynW(buf, m_szAudioDevice, bufLen); break;
@@ -65,7 +67,7 @@ void CPlugin::GetSettingValueString(int id, wchar_t* buf, int bufLen) {
 }
 
 // Get the hint text for a setting
-const wchar_t* CPlugin::GetSettingHint(int id) {
+const wchar_t* Engine::GetSettingHint(int id) {
   SettingType t = g_settingsDesc[id].type;
   if (t == ST_PATH)     return L"ENTER: browse";
   if (t == ST_BOOL)     return L"ENTER: toggle";
@@ -74,7 +76,7 @@ const wchar_t* CPlugin::GetSettingHint(int id) {
 }
 
 // Toggle or adjust a setting, save to INI
-void CPlugin::ToggleSetting(int id) {
+void Engine::ToggleSetting(int id) {
   bool* pBool = NULL;
   switch (id) {
   case SET_HARD_CUTS:        pBool = &m_bHardCutsDisabled; break;
@@ -96,7 +98,7 @@ void CPlugin::ToggleSetting(int id) {
     ToggleAlwaysOnTop(GetPluginWindow());
 }
 
-void CPlugin::AdjustSetting(int id, int direction) {
+void Engine::AdjustSetting(int id, int direction) {
   SettingDesc& s = g_settingsDesc[id];
   float* pFloat = NULL;
   switch (id) {
@@ -122,7 +124,7 @@ void CPlugin::AdjustSetting(int id, int direction) {
   SaveSettingToINI(id);
 }
 
-void CPlugin::SaveSettingToINI(int id) {
+void Engine::SaveSettingToINI(int id) {
   SettingDesc& s = g_settingsDesc[id];
   if (!s.iniSection || !s.iniKey) return;
   wchar_t val[MAX_PATH];
@@ -160,7 +162,7 @@ void CPlugin::SaveSettingToINI(int id) {
   WritePrivateProfileStringW(s.iniSection, s.iniKey, val, GetConfigIniFile());
 }
 
-void CPlugin::OpenFolderPickerForPresetDir() {
+void Engine::OpenFolderPickerForPresetDir() {
   DebugLogW(L"OpenFolderPicker: entering");
 
   // COM must be initialized on this thread for IFileDialog
@@ -258,7 +260,7 @@ static LRESULT CALLBACK SettingsTabSubclassProc(
 {
   switch (msg) {
   case WM_ERASEBKGND: {
-    CPlugin* p = (CPlugin*)refData;
+    Engine* p = (Engine*)refData;
     if (p && p->m_bSettingsDarkTheme && p->m_hBrSettingsBg) {
       HDC hdc = (HDC)wParam;
       RECT rc;
@@ -275,14 +277,14 @@ static LRESULT CALLBACK SettingsTabSubclassProc(
   return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
-LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
   // Set GWLP_USERDATA on first message so dark theme painting works during creation
   if (uMsg == WM_NCCREATE) {
     CREATESTRUCTW* pcs = (CREATESTRUCTW*)lParam;
     if (pcs && pcs->lpCreateParams)
       SetWindowLongPtrW(hWnd, GWLP_USERDATA, (LONG_PTR)pcs->lpCreateParams);
   }
-  CPlugin* p = (CPlugin*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+  Engine* p = (Engine*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
   switch (uMsg) {
   case WM_CLOSE:
@@ -1352,7 +1354,7 @@ static int EnumAudioDevicesIntoCombo(HWND hCombo, const wchar_t* szCurrentDevice
   return curIdx;
 }
 
-void CPlugin::OpenSettingsWindow() {
+void Engine::OpenSettingsWindow() {
   // If already open, bring to front (and move off fullscreen monitor if needed)
   if (m_hSettingsWnd && IsWindow(m_hSettingsWnd)) {
     EnsureSettingsVisible();
@@ -1364,10 +1366,10 @@ void CPlugin::OpenSettingsWindow() {
   if (m_settingsThread.joinable())
     m_settingsThread.join();
 
-  m_settingsThread = std::thread(&CPlugin::CreateSettingsWindowOnThread, this);
+  m_settingsThread = std::thread(&Engine::CreateSettingsWindowOnThread, this);
 }
 
-void CPlugin::CreateSettingsWindowOnThread() {
+void Engine::CreateSettingsWindowOnThread() {
   m_bSettingsThreadRunning.store(true);
   CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
@@ -1428,12 +1430,12 @@ void CPlugin::CreateSettingsWindowOnThread() {
   m_bSettingsThreadRunning.store(false);
 }
 
-void CPlugin::CleanupSettingsThemeBrushes() {
+void Engine::CleanupSettingsThemeBrushes() {
   if (m_hBrSettingsBg)     { DeleteObject(m_hBrSettingsBg);     m_hBrSettingsBg = NULL; }
   if (m_hBrSettingsCtrlBg) { DeleteObject(m_hBrSettingsCtrlBg); m_hBrSettingsCtrlBg = NULL; }
 }
 
-void CPlugin::LoadSettingsThemeFromINI() {
+void Engine::LoadSettingsThemeFromINI() {
   // Brushes are (re)created from the current color values
   CleanupSettingsThemeBrushes();
   if (m_bSettingsDarkTheme) {
@@ -1442,7 +1444,7 @@ void CPlugin::LoadSettingsThemeFromINI() {
   }
 }
 
-void CPlugin::ApplySettingsDarkTheme() {
+void Engine::ApplySettingsDarkTheme() {
   HWND hw = m_hSettingsWnd;
   if (!hw) return;
 
@@ -1480,7 +1482,7 @@ void CPlugin::ApplySettingsDarkTheme() {
   RedrawWindow(hw, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME | RDW_UPDATENOW);
 }
 
-void CPlugin::BuildSettingsControls() {
+void Engine::BuildSettingsControls() {
   HWND hw = m_hSettingsWnd;
   if (!hw) return;
 
@@ -1972,7 +1974,7 @@ void CPlugin::BuildSettingsControls() {
   ShowSettingsPage(0);
 }
 
-void CPlugin::ShowSettingsPage(int page) {
+void Engine::ShowSettingsPage(int page) {
   for (int i = 0; i < 7; i++) {
     if (i == page) {
       // Show + bring to top z-order so controls above resized siblings receive clicks
@@ -1986,7 +1988,7 @@ void CPlugin::ShowSettingsPage(int page) {
   m_nSettingsActivePage = page;
 }
 
-int CPlugin::GetSettingsLineHeight() {
+int Engine::GetSettingsLineHeight() {
   if (!m_hSettingsFont || !m_hSettingsWnd) return 26;
   HDC hdc = GetDC(m_hSettingsWnd);
   if (!hdc) return 26;
@@ -1999,7 +2001,7 @@ int CPlugin::GetSettingsLineHeight() {
   return max(h, 20);
 }
 
-void CPlugin::LayoutSettingsControls() {
+void Engine::LayoutSettingsControls() {
   if (!m_hSettingsWnd || !m_hSettingsTab) return;
 
   RECT rc;
@@ -2151,7 +2153,7 @@ void CPlugin::LayoutSettingsControls() {
   InvalidateRect(m_hSettingsWnd, NULL, TRUE);
 }
 
-void CPlugin::CloseSettingsWindow() {
+void Engine::CloseSettingsWindow() {
   if (m_hSettingsWnd && IsWindow(m_hSettingsWnd)) {
     PostMessage(m_hSettingsWnd, WM_CLOSE, 0, 0);
   }
@@ -2161,7 +2163,7 @@ void CPlugin::CloseSettingsWindow() {
 
 // ====== User Defaults & Fallback Paths ======
 
-void CPlugin::UpdateVisualUI(HWND hWnd) {
+void Engine::UpdateVisualUI(HWND hWnd) {
   wchar_t buf[32];
   SendMessage(GetDlgItem(hWnd, IDC_MW_OPACITY), TBM_SETPOS, TRUE, (int)(fOpacity * 100));
   swprintf(buf, 32, L"%d%%", (int)(fOpacity * 100));
@@ -2196,7 +2198,7 @@ void CPlugin::UpdateVisualUI(HWND hWnd) {
   if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
 }
 
-void CPlugin::UpdateColorsUI(HWND hWnd) {
+void Engine::UpdateColorsUI(HWND hWnd) {
   wchar_t buf[32];
   SendMessage(GetDlgItem(hWnd, IDC_MW_COL_HUE), TBM_SETPOS, TRUE, (int)(m_ColShiftHue * 100) + 100);
   swprintf(buf, 32, L"%.2f", m_ColShiftHue);
@@ -2216,7 +2218,7 @@ void CPlugin::UpdateColorsUI(HWND hWnd) {
   SetWindowTextW(GetDlgItem(hWnd, IDC_MW_AUTO_HUE_SEC), buf);
 }
 
-void CPlugin::ResetToFactory(HWND hWnd) {
+void Engine::ResetToFactory(HWND hWnd) {
   // Visual defaults
   fOpacity = 1.0f;
   m_fRenderQuality = 1.0f;
@@ -2239,7 +2241,7 @@ void CPlugin::ResetToFactory(HWND hWnd) {
   UpdateColorsUI(hWnd);
 }
 
-void CPlugin::SaveUserDefaults() {
+void Engine::SaveUserDefaults() {
   // Copy current values with safety clamps
   m_udOpacity = max(fOpacity, 0.5f);
   m_udRenderQuality = m_fRenderQuality;
@@ -2275,7 +2277,7 @@ void CPlugin::SaveUserDefaults() {
   #undef WRITE_UD_FLOAT
 }
 
-void CPlugin::LoadUserDefaults() {
+void Engine::LoadUserDefaults() {
   wchar_t* pIni = GetConfigIniFile();
   wchar_t buf[32];
   m_bUserDefaultsSaved = GetPrivateProfileIntW(L"UserDefaults", L"Saved", 0, pIni) != 0;
@@ -2297,7 +2299,7 @@ void CPlugin::LoadUserDefaults() {
   #undef READ_UD_FLOAT
 }
 
-void CPlugin::ResetToUserDefaults(HWND hWnd) {
+void Engine::ResetToUserDefaults(HWND hWnd) {
   if (!m_bUserDefaultsSaved) {
     ResetToFactory(hWnd);
     return;
@@ -2324,7 +2326,7 @@ void CPlugin::ResetToUserDefaults(HWND hWnd) {
   UpdateColorsUI(hWnd);
 }
 
-void CPlugin::SaveFallbackPaths() {
+void Engine::SaveFallbackPaths() {
   wchar_t* pIni = GetConfigIniFile();
   wchar_t buf[32];
   swprintf(buf, 32, L"%d", (int)m_fallbackPaths.size());
@@ -2345,7 +2347,7 @@ void CPlugin::SaveFallbackPaths() {
     m_szRandomTexDir[0] ? m_szRandomTexDir : NULL, pIni);
 }
 
-void CPlugin::LoadFallbackPaths() {
+void Engine::LoadFallbackPaths() {
   wchar_t* pIni = GetConfigIniFile();
   int count = GetPrivateProfileIntW(L"FallbackPaths", L"Count", 0, pIni);
   m_fallbackPaths.clear();
@@ -2380,7 +2382,7 @@ static BOOL CALLBACK FindAltMonitorProc(HMONITOR hMon, HDC, LPRECT, LPARAM lp) {
   return TRUE;
 }
 
-void CPlugin::ResetSettingsWindow() {
+void Engine::ResetSettingsWindow() {
   if (!m_hSettingsWnd || !IsWindow(m_hSettingsWnd)) return;
 
   m_nSettingsWndW = 620;
@@ -2406,7 +2408,7 @@ static BOOL CALLBACK SetFontProc(HWND hChild, LPARAM lParam) {
   return TRUE;
 }
 
-void CPlugin::RebuildSettingsFonts() {
+void Engine::RebuildSettingsFonts() {
   if (!m_hSettingsWnd) return;
 
   // Save current tab selection
@@ -2434,7 +2436,7 @@ void CPlugin::RebuildSettingsFonts() {
   }
 }
 
-void CPlugin::NavigatePresetDirUp(HWND hSettingsWnd) {
+void Engine::NavigatePresetDirUp(HWND hSettingsWnd) {
   wchar_t* pDir = GetPresetDir();
   int dirLen = lstrlenW(pDir);
 
@@ -2465,7 +2467,7 @@ void CPlugin::NavigatePresetDirUp(HWND hSettingsWnd) {
   }
 }
 
-void CPlugin::NavigatePresetDirInto(HWND hSettingsWnd, int sel) {
+void Engine::NavigatePresetDirInto(HWND hSettingsWnd, int sel) {
   if (sel < 0 || sel >= m_nPresets) return;
   if (m_presets[sel].szFilename.c_str()[0] != L'*') return;
 
@@ -2489,7 +2491,7 @@ void CPlugin::NavigatePresetDirInto(HWND hSettingsWnd, int sel) {
   }
 }
 
-void CPlugin::EnsureSettingsVisible() {
+void Engine::EnsureSettingsVisible() {
   if (!m_hSettingsWnd || !IsWindow(m_hSettingsWnd) || !IsWindowVisible(m_hSettingsWnd))
     return;
 
@@ -2528,7 +2530,7 @@ void CPlugin::EnsureSettingsVisible() {
 
 static bool g_bResourceViewerClassRegistered = false;
 
-void CPlugin::OpenResourceViewer() {
+void Engine::OpenResourceViewer() {
   if (m_hResourceWnd && IsWindow(m_hResourceWnd)) {
     ShowWindow(m_hResourceWnd, SW_SHOW);
     SetForegroundWindow(m_hResourceWnd);
@@ -2636,8 +2638,8 @@ void CPlugin::OpenResourceViewer() {
   PopulateResourceViewer();
 }
 
-LRESULT CALLBACK CPlugin::ResourceViewerWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-  CPlugin* p = (CPlugin*)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
+LRESULT CALLBACK Engine::ResourceViewerWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+  Engine* p = (Engine*)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
 
   switch (uMsg) {
   case WM_CLOSE:
@@ -2786,7 +2788,7 @@ LRESULT CALLBACK CPlugin::ResourceViewerWndProc(HWND hWnd, UINT uMsg, WPARAM wPa
   return DefWindowProcW(hWnd, uMsg, wParam, lParam);
 }
 
-void CPlugin::LayoutResourceViewer() {
+void Engine::LayoutResourceViewer() {
   if (!m_hResourceWnd || !m_hResourceList) return;
   RECT rc;
   GetClientRect(m_hResourceWnd, &rc);
@@ -2858,7 +2860,7 @@ static void RV_AddRow(HWND hList, int idx, const wchar_t* status, const wchar_t*
   SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&item);
 }
 
-void CPlugin::PopulateResourceViewer() {
+void Engine::PopulateResourceViewer() {
   if (!m_hResourceList) return;
 
   SendMessageW(m_hResourceList, LVM_DELETEALLITEMS, 0, 0);
@@ -3059,3 +3061,5 @@ void CPlugin::PopulateResourceViewer() {
 
 //----------------------------------------------------------------------
 
+
+} // namespace mdrop

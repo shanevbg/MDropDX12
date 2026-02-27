@@ -34,12 +34,13 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "textmgr.h"
 #include "dxcontext.h"
-#include "pluginshell.h"  // td_fontinfo
+#include "engineshell.h"  // td_fontinfo
 #include "support.h"      // SPRITEVERTEX, WFVERTEX
 #include "dx12pipeline.h" // PSO enums
 #include "utility.h"
 #include <cmath>
 #include <vector>
+using namespace mdrop;
 
 #define MAX_MSG_CHARS (65536*2)
 static wchar_t g_szMsgPool[MAX_MSG_CHARS];

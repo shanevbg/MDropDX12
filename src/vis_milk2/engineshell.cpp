@@ -133,7 +133,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
                 http://www.digiwar.com/scripts/renderpage.php?section=2&subsection=2
             -http://www.experts-exchange.com/Programming/Programming_Platforms/Win_Prog/Q_20096218.html
 */
-#include "pluginshell.h"
+#include "engineshell.h"
 #include "utility.h"
 #include "defines.h"
 #include "shell_defines.h"
@@ -149,6 +149,8 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma comment(lib,"user32.lib")  // ensure GetSystemMetrics (user32) is linked
 
 #define clamp(value, min, max) ((value) < (min) ? (min) : ((value) > (max) ? (max) : (value)))
+
+namespace mdrop {
 
 // STATE VALUES & VERTEX FORMATS FOR HELP SCREEN TEXTURE:
 #define TEXT_SURFACE_NOT_READY  0
@@ -202,29 +204,29 @@ static BOOL CALLBACK GetWindowNames(HWND h, LPARAM l) {
 
 
 
-CPluginShell::CPluginShell() {
+EngineShell::EngineShell() {
   // this should remain empty!
 }
 
-CPluginShell::~CPluginShell() {
+EngineShell::~EngineShell() {
   // this should remain empty!
 }
 
-int       CPluginShell::GetFrame() {
+int       EngineShell::GetFrame() {
   //return (int)m_frame * m_frameFactor;
   return m_frame;
 };
-float     CPluginShell::GetTime() {
+float     EngineShell::GetTime() {
   return (float)(m_time * m_timeFactor);
 };
-float     CPluginShell::GetFps() {
+float     EngineShell::GetFps() {
   return m_fps * m_fpsFactor;
 };
 
-HWND      CPluginShell::GetPluginWindow() {
+HWND      EngineShell::GetPluginWindow() {
   if (m_lpDX) return m_lpDX->GetHwnd();       else return NULL;
 };
-int       CPluginShell::GetWidth() {
+int       EngineShell::GetWidth() {
   if (m_lpDX) {
     if (IsSpoutActiveAndFixed()) {
       return m_lpDX->m_backbuffer_width;
@@ -236,7 +238,7 @@ int       CPluginShell::GetWidth() {
   else return 0;
 };
 
-int       CPluginShell::GetHeight() {
+int       EngineShell::GetHeight() {
   if (m_lpDX) {
     if (IsSpoutActiveAndFixed()) {
       return m_lpDX->m_backbuffer_height;
@@ -248,27 +250,27 @@ int       CPluginShell::GetHeight() {
   else return 0;
 }
 
-int       CPluginShell::GetCanvasMarginX() {
+int       EngineShell::GetCanvasMarginX() {
   if (m_lpDX) return (m_lpDX->m_client_width - m_lpDX->m_REAL_client_width) / 2;
   else return 0;
 };
-int       CPluginShell::GetCanvasMarginY() {
+int       EngineShell::GetCanvasMarginY() {
   if (m_lpDX) return (m_lpDX->m_client_height - m_lpDX->m_REAL_client_height) / 2;
   else return 0;
 };
-HINSTANCE CPluginShell::GetInstance() {
+HINSTANCE EngineShell::GetInstance() {
   return m_hInstance;
 };
-wchar_t* CPluginShell::GetPluginsDirPath() {
+wchar_t* EngineShell::GetPluginsDirPath() {
   return m_szPluginsDirPath;
 };
-wchar_t* CPluginShell::GetConfigIniFile() {
+wchar_t* EngineShell::GetConfigIniFile() {
   return m_szConfigIniFile;
 };
-char* CPluginShell::GetConfigIniFileA() {
+char* EngineShell::GetConfigIniFileA() {
   return m_szConfigIniFileA;
 }
-int  CPluginShell::GetFontHeight(eFontIndex idx) {
+int  EngineShell::GetFontHeight(eFontIndex idx) {
   if (idx >= 0 && idx < NUM_BASIC_FONTS + NUM_EXTRA_FONTS) {
     // Use absolute value since nSize may be negative (CreateFontW convention)
     int sz = abs((int)m_fontinfo[idx].nSize);
@@ -281,35 +283,35 @@ int  CPluginShell::GetFontHeight(eFontIndex idx) {
   }
   else return 0;
 };
-int CPluginShell::GetBitDepth() {
+int EngineShell::GetBitDepth() {
   return m_lpDX->GetBitDepth();
 };
 
 // GetDevice() is declared inline in pluginshell.h returning LPDIRECT3DDEVICE9 = nullptr.
 // GetDX12Device() returns the real ID3D12Device* for Phase 2+ DX12 code.
-ID3D12Device* CPluginShell::GetDX12Device() {
+ID3D12Device* EngineShell::GetDX12Device() {
   return m_lpDX ? m_lpDX->m_device.Get() : nullptr;
 }
 
-ID3D12GraphicsCommandList* CPluginShell::GetCommandList() {
+ID3D12GraphicsCommandList* EngineShell::GetCommandList() {
   return m_lpDX ? m_lpDX->m_commandList.Get() : nullptr;
 }
 
-int CPluginShell::InitNondx9Stuff() {
+int EngineShell::InitNondx9Stuff() {
   timeBeginPeriod(1);
   m_fftobj.Init(576, NUM_FREQUENCIES);
   if (!InitGDIStuff()) return false;
   return AllocateMyNonDx9Stuff();
 }
 
-void CPluginShell::CleanUpNondx9Stuff() {
+void EngineShell::CleanUpNondx9Stuff() {
   timeEndPeriod(1);
   CleanUpMyNonDx9Stuff();
   CleanUpGDIStuff();
   m_fftobj.CleanUp();
 }
 
-int CPluginShell::InitGDIStuff() {
+int EngineShell::InitGDIStuff() {
   wchar_t title[64];
   // note: messagebox parent window should be NULL here, because lpDX is still NULL!
   for (int i = 0; i < NUM_BASIC_FONTS + NUM_EXTRA_FONTS; i++) {
@@ -324,7 +326,7 @@ int CPluginShell::InitGDIStuff() {
   return true;
 }
 
-void CPluginShell::CleanUpGDIStuff() {
+void EngineShell::CleanUpGDIStuff() {
   for (int i = 0; i < NUM_BASIC_FONTS + NUM_EXTRA_FONTS; i++) {
     if (m_font[i]) {
       DeleteObject(m_font[i]);
@@ -333,14 +335,14 @@ void CPluginShell::CleanUpGDIStuff() {
   }
 }
 
-int CPluginShell::InitVJStuff(RECT* pClientRect) {
+int EngineShell::InitVJStuff(RECT* pClientRect) {
   // VJ mode (secondary DX9 window) not yet implemented in DX12 migration.
   // Phase 5 TODO: DX12 swap chain + DirectXTK12 SpriteFont for VJ text window.
   return true;
 }
 
 #if 0 // InitVJStuff DX9 body — preserved for Phase 5 reference, does not compile
-int CPluginShell::InitVJStuff_DX9_REMOVED(RECT* pClientRect) {
+int EngineShell::InitVJStuff_DX9_REMOVED(RECT* pClientRect) {
   wchar_t title[64];
 
   // Init VJ mode (second window for text):
@@ -417,7 +419,7 @@ int CPluginShell::InitVJStuff_DX9_REMOVED(RECT* pClientRect) {
     WNDCLASS wc = { 0 };
     wc.lpfnWndProc = VJModeWndProc;				// our window procedure
     wc.hInstance = GetInstance();	// hInstance of DLL
-    wc.hIcon = LoadIcon(GetInstance(), MAKEINTRESOURCE(IDI_PLUGIN_ICON));
+    wc.hIcon = LoadIcon(GetInstance(), MAKEINTRESOURCE(IDI_ENGINE_ICON));
     wc.lpszClassName = TEXT_WINDOW_CLASSNAME;			// our window class name
     wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS; // CS_DBLCLKS lets the window receive WM_LBUTTONDBLCLK, for toggling fullscreen mode...
     wc.cbWndExtra = sizeof(DWORD);
@@ -549,7 +551,7 @@ NULL
 }
 #endif // InitVJStuff DX9 body
 
-void CPluginShell::CleanUpVJStuff() {
+void EngineShell::CleanUpVJStuff() {
   // VJ secondary DX9 device removed in DX12 migration.
   // GPU work is flushed in CleanUpDX9Stuff via WaitForGpu() before resource cleanup.
   // VJ DX9 device removed in DX12 migration — texture cleanup no longer needed here.
@@ -577,7 +579,7 @@ void CPluginShell::CleanUpVJStuff() {
   }
 }
 
-int CPluginShell::AllocateFonts() {
+int EngineShell::AllocateFonts() {
   // Phase 5 TODO: replace with DirectXTK12 SpriteFont.
   // For now, record expected font heights from GDI font metrics for layout.
   for (int i = 0; i < NUM_BASIC_FONTS + NUM_EXTRA_FONTS; i++) {
@@ -589,18 +591,18 @@ int CPluginShell::AllocateFonts() {
   return true;
 }
 
-void CPluginShell::CleanUpFonts() {
+void EngineShell::CleanUpFonts() {
   m_text.CleanupDX12();
   for (int i = 0; i < NUM_BASIC_FONTS + NUM_EXTRA_FONTS; i++)
     m_fontHeight[i] = 0;
 }
 
-void CPluginShell::AllocateTextSurface() {
+void EngineShell::AllocateTextSurface() {
   // Phase 5 TODO: create the DX12 text render target resource here.
   // For now this is a no-op.
 }
 
-int CPluginShell::AllocateDX9Stuff() {
+int EngineShell::AllocateDX9Stuff() {
   if (!m_vj_mode) {
     AllocateFonts();
     if (m_fix_slow_text)
@@ -635,7 +637,7 @@ int CPluginShell::AllocateDX9Stuff() {
   return ret;
 }
 
-void CPluginShell::CleanUpDX9Stuff(int final_cleanup) {
+void EngineShell::CleanUpDX9Stuff(int final_cleanup) {
   // In DX12, wait for GPU idle before releasing resources
   if (m_lpDX) {
     m_lpDX->WaitForGpu();
@@ -659,7 +661,7 @@ void CPluginShell::CleanUpDX9Stuff(int final_cleanup) {
   CleanUpMyDX9Stuff(final_cleanup);
 }
 
-void CPluginShell::OnUserResizeTextWindow() {
+void EngineShell::OnUserResizeTextWindow() {
   // Update window properties
   RECT w, c;
   GetWindowRect(m_hTextWnd, &w);
@@ -699,7 +701,7 @@ void CPluginShell::OnUserResizeTextWindow() {
   }
 }
 
-void CPluginShell::OnUserResizeWindow() {
+void EngineShell::OnUserResizeWindow() {
 
   // Update window properties
   RECT w, c;
@@ -774,7 +776,7 @@ void CPluginShell::OnUserResizeWindow() {
   }
 }
 
-void CPluginShell::StuffParams(DXCONTEXT_PARAMS* pParams) {
+void EngineShell::StuffParams(DXCONTEXT_PARAMS* pParams) {
   // display_mode (D3DDISPLAYMODEEX) removed in DX12 migration
   pParams->nbackbuf = 1;
   pParams->m_dualhead_horz = m_dualhead_horz;
@@ -787,7 +789,7 @@ void CPluginShell::StuffParams(DXCONTEXT_PARAMS* pParams) {
   pParams->parent_window = NULL;
 }
 
-int CPluginShell::InitDirectX(
+int EngineShell::InitDirectX(
     ID3D12Device*       device,
     ID3D12CommandQueue* commandQueue,
     IDXGIFactory4*      factory,
@@ -826,11 +828,11 @@ int CPluginShell::InitDirectX(
   return TRUE;
 }
 
-void CPluginShell::CleanUpDirectX() {
+void EngineShell::CleanUpDirectX() {
   SafeDelete(m_lpDX);
 }
 
-int CPluginShell::PluginPreInitialize(HWND hWinampWnd, HINSTANCE hWinampInstance) {
+int EngineShell::PluginPreInitialize(HWND hWinampWnd, HINSTANCE hWinampInstance) {
 
   // PROTECTED CONFIG PANEL SETTINGS (also see 'private' settings, below)
   m_start_fullscreen = 0;
@@ -1029,7 +1031,7 @@ int CPluginShell::PluginPreInitialize(HWND hWinampWnd, HINSTANCE hWinampInstance
   return TRUE;
 }
 
-int CPluginShell::PluginInitialize(
+int EngineShell::PluginInitialize(
     ID3D12Device*       device,
     ID3D12CommandQueue* commandQueue,
     IDXGIFactory4*      factory,
@@ -1054,7 +1056,7 @@ int CPluginShell::PluginInitialize(
   return TRUE;
 }
 
-void CPluginShell::PluginQuit() {
+void EngineShell::PluginQuit() {
   CleanUpVJStuff();
   CleanUpDX9Stuff(1);
   CleanUpNondx9Stuff();
@@ -1067,7 +1069,7 @@ wchar_t* BuildSettingName(wchar_t* name, int number) {
   return temp;
 }
 
-void CPluginShell::READ_FONT(int n) {
+void EngineShell::READ_FONT(int n) {
   int iniIndex = n + 1;
   GetPrivateProfileStringW(L"Fonts", BuildSettingName(L"FontFace", iniIndex), m_fontinfo[n].szFace, m_fontinfo[n].szFace, sizeof(m_fontinfo[n].szFace), m_szConfigIniFile);
   m_fontinfo[n].nSize = GetPrivateProfileIntW(L"Fonts", BuildSettingName(L"FontSize", iniIndex), m_fontinfo[n].nSize, m_szConfigIniFile);
@@ -1107,7 +1109,7 @@ void CPluginShell::READ_FONT(int n) {
   m_fontinfo[n].B = GetPrivateProfileIntW(L"Fonts", BuildSettingName(L"FontColorB", iniIndex), m_fontinfo[n].B, m_szConfigIniFile);
 }
 
-void CPluginShell::ReadConfig() {
+void EngineShell::ReadConfig() {
   int old_ver = GetPrivateProfileIntW(L"Settings", L"version", -1, m_szConfigIniFile);
   int old_subver = GetPrivateProfileIntW(L"Settings", L"subversion", -1, m_szConfigIniFile);
 
@@ -1183,11 +1185,11 @@ void CPluginShell::ReadConfig() {
   // RefreshRate and Format not persisted in DX12 migration
 
   // note: we don't call MyReadConfig() yet, because we
-  // want to completely finish CPluginShell's preinit (and ReadConfig)
-  // before calling CPlugin's preinit and ReadConfig.
+  // want to completely finish EngineShell's preinit (and ReadConfig)
+  // before calling Engine's preinit and ReadConfig.
 }
 
-void CPluginShell::WRITE_FONT(int n) {
+void EngineShell::WRITE_FONT(int n) {
   WritePrivateProfileStringW(L"Settings", BuildSettingName(L"szFontFace", n), m_fontinfo[n].szFace, m_szConfigIniFile);
   WritePrivateProfileIntW(m_fontinfo[n].bBold, BuildSettingName(L"bFontBold", n), m_szConfigIniFile, L"Settings");
   WritePrivateProfileIntW(m_fontinfo[n].bItalic, BuildSettingName(L"bFontItalic", n), m_szConfigIniFile, L"Settings");
@@ -1195,7 +1197,7 @@ void CPluginShell::WRITE_FONT(int n) {
   WritePrivateProfileIntW(m_fontinfo[n].bAntiAliased, BuildSettingName(L"bFontAA", n), m_szConfigIniFile, L"Settings");
 }
 
-void CPluginShell::WriteConfig() {
+void EngineShell::WriteConfig() {
   // m_multisample_* removed in DX12 migration (MSAA configured via PSO instead)
 
   //GUID m_adapter_guid_fullscreen
@@ -1271,7 +1273,7 @@ void CPluginShell::WriteConfig() {
 //----------------------------------------------------------------------
 //----------------------------------------------------------------------
 
-int CPluginShell::PluginRender(unsigned char* pWaveL, unsigned char* pWaveR)//, unsigned char *pSpecL, unsigned char *pSpecR)
+int EngineShell::PluginRender(unsigned char* pWaveL, unsigned char* pWaveR)//, unsigned char *pSpecL, unsigned char *pSpecR)
 {
   // return FALSE here to tell Winamp to terminate the plugin
 
@@ -1321,7 +1323,7 @@ int CPluginShell::PluginRender(unsigned char* pWaveL, unsigned char* pWaveR)//, 
   return true;
 }
 
-void CPluginShell::DrawAndDisplay(int redraw) {
+void EngineShell::DrawAndDisplay(int redraw) {
   int cx = m_lpDX->m_client_width;
   int cy = m_lpDX->m_client_height;
 
@@ -1524,7 +1526,7 @@ void CPluginShell::DrawAndDisplay(int redraw) {
 
 }
 
-void CPluginShell::EnforceMaxFPS() {
+void EngineShell::EnforceMaxFPS() {
   int max_fps = m_max_fps_w;
 
   if (max_fps <= 0)
@@ -1622,7 +1624,7 @@ void CPluginShell::EnforceMaxFPS() {
   }
 }
 
-void CPluginShell::DoTime() {
+void EngineShell::DoTime() {
   if (m_frame == 0) {
     m_fps = 60;
     m_time = 0;
@@ -1716,7 +1718,7 @@ void CPluginShell::DoTime() {
   }
 }
 
-void CPluginShell::AnalyzeNewSound(unsigned char* pWaveL, unsigned char* pWaveR) {
+void EngineShell::AnalyzeNewSound(unsigned char* pWaveL, unsigned char* pWaveR) {
   // we get 576 samples in from winamp.
   // the output of the fft has 'num_frequencies' samples,
   //   and represents the frequency range 0 hz - 22,050 hz.
@@ -1812,7 +1814,7 @@ void CPluginShell::AnalyzeNewSound(unsigned char* pWaveL, unsigned char* pWaveR)
   }
 }
 
-void CPluginShell::PrepareFor2DDrawing_B(int w, int h) {
+void EngineShell::PrepareFor2DDrawing_B(int w, int h) {
   // Phase 4 TODO: set up a 2D orthographic PSO on the command list for UI overlay rendering.
   // In DX12 all render state is baked into Pipeline State Objects, so there are no
   // individual SetRenderState() / SetTransform() calls here.
@@ -1820,7 +1822,7 @@ void CPluginShell::PrepareFor2DDrawing_B(int w, int h) {
   (void)w; (void)h;
 }
 
-void CPluginShell::DrawDarkTranslucentBox(RECT* pr) {
+void EngineShell::DrawDarkTranslucentBox(RECT* pr) {
   if (!pr || !m_lpDX || !m_lpDX->m_commandList) return;
 
   int cw = m_lpDX->m_client_width;
@@ -1848,7 +1850,7 @@ void CPluginShell::DrawDarkTranslucentBox(RECT* pr) {
   m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, verts, 6, sizeof(WFVERTEX));
 }
 
-void CPluginShell::DrawDarkTranslucentBoxFullWindow() {
+void EngineShell::DrawDarkTranslucentBoxFullWindow() {
   if (!m_lpDX || !m_lpDX->m_commandList) return;
 
   DWORD boxColor = 0xD0000000;
@@ -1866,7 +1868,7 @@ void CPluginShell::DrawDarkTranslucentBoxFullWindow() {
   m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, verts, 6, sizeof(WFVERTEX));
 }
 
-bool CPluginShell::CreateHelpTexture() {
+bool EngineShell::CreateHelpTexture() {
   if (!m_lpDX || !m_lpDX->m_device) return false;
 
   auto* device = m_lpDX->m_device.Get();
@@ -1945,7 +1947,7 @@ bool CPluginShell::CreateHelpTexture() {
   return true;
 }
 
-void CPluginShell::UpdateHelpTexture(int page) {
+void EngineShell::UpdateHelpTexture(int page) {
   if (!m_helpTexture.IsValid() || !m_helpUploadBuffer || !m_lpDX) return;
 
   UINT w = m_helpTexture.width;
@@ -2072,7 +2074,7 @@ void CPluginShell::UpdateHelpTexture(int page) {
   m_helpTexturePage = page;
 }
 
-void CPluginShell::RenderBuiltInTextMsgs() {
+void EngineShell::RenderBuiltInTextMsgs() {
   if (!m_lpDX || m_show_help == 0) return;
 
   UINT curW = (UINT)m_lpDX->m_client_width;
@@ -2138,7 +2140,7 @@ void CPluginShell::RenderBuiltInTextMsgs() {
   m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, textVerts, 6, sizeof(SPRITEVERTEX));
 }
 
-void CPluginShell::RenderPlaylist() {
+void EngineShell::RenderPlaylist() {
   if (!m_show_playlist)
     return;
 
@@ -2245,7 +2247,7 @@ void CPluginShell::RenderPlaylist() {
   }
 }
 
-void CPluginShell::SuggestHowToFreeSomeMem() {
+void EngineShell::SuggestHowToFreeSomeMem() {
   // This function is called when the plugin runs out of video memory;
   //   it lets you show a messagebox to the user so you can (intelligently)
   //   suggest how to free up some video memory, based on what settings
@@ -2259,7 +2261,7 @@ void CPluginShell::SuggestHowToFreeSomeMem() {
   MessageBoxW(m_lpDX->GetHwnd(), str, wasabiApiLangString(IDS_MILKDROP_SUGGESTION), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
 }
 
-LRESULT CALLBACK CPluginShell::WindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK EngineShell::WindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam) {
   //if (uMsg==WM_GETDLGCODE)
   //    return DLGC_WANTALLKEYS|DLGC_WANTCHARS|DLGC_WANTMESSAGE;    // this tells the embedwnd that we want keypresses to flow through to our client wnd.
 
@@ -2268,14 +2270,14 @@ LRESULT CALLBACK CPluginShell::WindowProc(HWND hWnd, unsigned uMsg, WPARAM wPara
     SetWindowLongPtr(hWnd, GWLP_USERDATA, (LONG_PTR)create->lpCreateParams);
   }
 
-  CPluginShell* p = (CPluginShell*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+  EngineShell* p = (EngineShell*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
   if (p)
     return p->PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
   else
     return DefWindowProcW(hWnd, uMsg, wParam, lParam);
 }
 
-LRESULT CPluginShell::PluginShellWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam) {
+LRESULT EngineShell::PluginShellWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam) {
   USHORT mask = 1 << (sizeof(SHORT) * 8 - 1);
   //bool bShiftHeldDown = (GetKeyState(VK_SHIFT) & mask) != 0;
   bool bCtrlHeldDown = (GetKeyState(VK_CONTROL) & mask) != 0;
@@ -2479,7 +2481,7 @@ LRESULT CPluginShell::PluginShellWindowProc(HWND hWnd, unsigned uMsg, WPARAM wPa
     }
 
     // allow the plugin to override any keys:
-    // Note from plugin.cpp
+    // Note from engine.cpp
     // handle non - character keys(virtual keys) and return 0.
     //         if we don't handle them, return 1, and the shell will
     //         (passing some to the shell's key bindings, some to Winamp,
@@ -2522,7 +2524,7 @@ LRESULT CPluginShell::PluginShellWindowProc(HWND hWnd, unsigned uMsg, WPARAM wPa
   return MyWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
-void CPluginShell::ToggleHelp() {
+void EngineShell::ToggleHelp() {
   if (m_show_help == 0) {
     m_show_help = 1;
   }
@@ -2534,15 +2536,15 @@ void CPluginShell::ToggleHelp() {
   }
 }
 
-LRESULT CALLBACK CPluginShell::DesktopWndProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam) {
-  CPluginShell* p = (CPluginShell*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+LRESULT CALLBACK EngineShell::DesktopWndProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam) {
+  EngineShell* p = (EngineShell*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
   if (p)
     return p->PluginShellDesktopWndProc(hWnd, uMsg, wParam, lParam);
   else
     return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
-LRESULT CPluginShell::PluginShellDesktopWndProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam) {
+LRESULT EngineShell::PluginShellDesktopWndProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam) {
   switch (uMsg) {
   case WM_KEYDOWN:
   case WM_KEYUP:
@@ -2559,7 +2561,7 @@ LRESULT CPluginShell::PluginShellDesktopWndProc(HWND hWnd, unsigned uMsg, WPARAM
   return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
-void CPluginShell::AlignWaves() {
+void EngineShell::AlignWaves() {
   // align waves, using recursive (mipmap-style) least-error matching
   // note: NUM_WAVEFORM_SAMPLES must be between 32 and 576.
 
@@ -2695,15 +2697,15 @@ void CPluginShell::AlignWaves() {
     }
 }
 
-LRESULT CALLBACK CPluginShell::VJModeWndProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam) {
-  CPluginShell* p = (CPluginShell*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+LRESULT CALLBACK EngineShell::VJModeWndProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam) {
+  EngineShell* p = (EngineShell*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
   if (p)
     return p->PluginShellVJModeWndProc(hWnd, uMsg, wParam, lParam);
   else
     return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
-LRESULT CPluginShell::PluginShellVJModeWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+LRESULT EngineShell::PluginShellVJModeWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
   switch (message) {
   case WM_KEYDOWN:
   case WM_KEYUP:
@@ -2753,7 +2755,7 @@ LRESULT CPluginShell::PluginShellVJModeWndProc(HWND hwnd, UINT message, WPARAM w
   return DefWindowProc(hwnd, message, wParam, lParam);
 }
 
-DWORD CPluginShell::GetFontColor(int fontIndex) {
+DWORD EngineShell::GetFontColor(int fontIndex) {
   DWORD cr = m_fontinfo[fontIndex].R;
   DWORD cg = m_fontinfo[fontIndex].G;
   DWORD cb = m_fontinfo[fontIndex].B;
@@ -2763,24 +2765,24 @@ DWORD CPluginShell::GetFontColor(int fontIndex) {
   return z;
 }
 
-bool CPluginShell::IsSpoutActiveAndFixed() {
+bool EngineShell::IsSpoutActiveAndFixed() {
   return (bSpoutOut && bSpoutFixedSize);
 }
 
-void CPluginShell::SetVariableBackBuffer(int width, int height) {
+void EngineShell::SetVariableBackBuffer(int width, int height) {
   if (IsSpoutActiveAndFixed() || width == 0 || height == 0) return;
   float q = GetEffectiveRenderQuality(width, height);
   m_backBufWidth  = (int)(width  * q);
   m_backBufHeight = (int)(height * q);
 }
 
-void CPluginShell::UpdateBackBufferTracking(int width, int height) {
+void EngineShell::UpdateBackBufferTracking(int width, int height) {
   if (!m_lpDX) return;
   m_lpDX->m_backbuffer_width = width;
   m_lpDX->m_backbuffer_height = height;
 }
 
-float CPluginShell::GetEffectiveRenderQuality(int width, int height) {
+float EngineShell::GetEffectiveRenderQuality(int width, int height) {
   float q = clamp(m_fRenderQuality, 0.01f, 1.0f);
   if (bQualityAuto) {
     // adjust quality based on window/screen ratio
@@ -2809,7 +2811,7 @@ float CPluginShell::GetEffectiveRenderQuality(int width, int height) {
   return clamp(q, 0.01f, 1.0f);
 }
 
-void CPluginShell::ResetBufferAndFonts() {
+void EngineShell::ResetBufferAndFonts() {
   RECT w, c;
   GetWindowRect(m_lpDX->GetHwnd(), &w);
   GetClientRect(m_lpDX->GetHwnd(), &c);
@@ -2827,3 +2829,4 @@ void CPluginShell::ResetBufferAndFonts() {
     AllocateFonts();
   }
 }
+} // namespace mdrop

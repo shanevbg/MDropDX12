@@ -149,9 +149,9 @@ using Microsoft::WRL::ComPtr;
 #pragma comment(lib, "shcore.lib") // for dpi awareness
 // older Windows versions: Entry Point Not Found Fix
 
-#include "plugin.h"
+#include "engine.h"
 #include "resource.h"
-#include "pluginshell.h"
+#include "engineshell.h"
 #include "utility.h"
 
 #include <mutex>
@@ -175,7 +175,8 @@ namespace fs = std::filesystem;
 #define DEFAULT_WIDTH 720;
 #define DEFAULT_HEIGHT 720;
 
-CPlugin g_plugin;
+namespace mdrop { Engine g_engine; }
+using namespace mdrop;
 MDropDX12 mdropdx12;
 HINSTANCE api_orig_hinstance = nullptr;
 _locale_t g_use_C_locale;
@@ -261,9 +262,9 @@ void InitD3d(HWND hwnd, int width, int height) {
     return;
   }
 
-  // Choose adapter: prefer the one at g_plugin.m_adapterId, fall back to first hardware adapter.
+  // Choose adapter: prefer the one at g_engine.m_adapterId, fall back to first hardware adapter.
   ComPtr<IDXGIAdapter1> hardwareAdapter;
-  UINT wantedIdx = g_plugin.m_adapterId;
+  UINT wantedIdx = g_engine.m_adapterId;
   for (UINT i = 0; ; i++) {
     ComPtr<IDXGIAdapter1> adapter;
     if (pDXGIFactory->EnumAdapters1(i, &adapter) == DXGI_ERROR_NOT_FOUND)
@@ -296,8 +297,8 @@ void InitD3d(HWND hwnd, int width, int height) {
   }
 
   // Set back-buffer dimensions before PluginInitialize creates the swap chain.
-  if (!g_plugin.IsSpoutActiveAndFixed()) {
-    g_plugin.SetVariableBackBuffer(width, height);
+  if (!g_engine.IsSpoutActiveAndFixed()) {
+    g_engine.SetVariableBackBuffer(width, height);
   }
 }
 
@@ -325,7 +326,7 @@ void ToggleStretch(HWND hwnd) {
       GetWindowRect(hwnd, &lastRect);
     }
 
-    g_plugin.SetVariableBackBuffer(width, height);
+    g_engine.SetVariableBackBuffer(width, height);
     // DX12: swap chain resize is triggered by the WM_SIZE handler after SetWindowPos.
     SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
     SetWindowLongPtrW(hwnd, GWL_EXSTYLE, WS_EX_APPWINDOW);
@@ -343,7 +344,7 @@ void ToggleStretch(HWND hwnd) {
     int width = lastRect.right - lastRect.left;
     int height = lastRect.bottom - lastRect.top;
 
-    g_plugin.SetVariableBackBuffer(width, height);
+    g_engine.SetVariableBackBuffer(width, height);
     // DX12: swap chain resize is triggered by the WM_SIZE handler after SetWindowPos.
     SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
     stretch = false;
@@ -417,7 +418,7 @@ static void ToggleBorderlessFullscreen(HWND hWnd) {
         // window appears to be borderless fullscreen
         // Restore the previous window dimensions, borderless state, clickthrough state, and opacity
         LONG_PTR style = GetWindowLongPtr(hWnd, GWL_STYLE);
-        if (g_plugin.m_WindowBorderless) {
+        if (g_engine.m_WindowBorderless) {
           style = WS_POPUP | WS_VISIBLE; // Restore borderless style
         }
         else {
@@ -426,24 +427,24 @@ static void ToggleBorderlessFullscreen(HWND hWnd) {
         SetWindowLongPtr(hWnd, GWL_STYLE, style);
 
         // Check if the saved dimensions are the same as the current dimensions
-        if (g_plugin.m_WindowWidth == (currentRect.right - currentRect.left) &&
-          g_plugin.m_WindowHeight == (currentRect.bottom - currentRect.top)) {
+        if (g_engine.m_WindowWidth == (currentRect.right - currentRect.left) &&
+          g_engine.m_WindowHeight == (currentRect.bottom - currentRect.top)) {
           // Reduce the dimensions by 50%
-          g_plugin.m_WindowWidth /= 2;
-          g_plugin.m_WindowHeight /= 2;
+          g_engine.m_WindowWidth /= 2;
+          g_engine.m_WindowHeight /= 2;
 
           // Center the window
-          g_plugin.m_WindowX = (workArea.right - workArea.left - g_plugin.m_WindowWidth) / 2;
-          g_plugin.m_WindowY = (workArea.bottom - workArea.top - g_plugin.m_WindowHeight) / 2;
+          g_engine.m_WindowX = (workArea.right - workArea.left - g_engine.m_WindowWidth) / 2;
+          g_engine.m_WindowY = (workArea.bottom - workArea.top - g_engine.m_WindowHeight) / 2;
         }
 
         SetWindowPos(
           hWnd,
-          g_plugin.m_WindowBorderless ? HWND_TOPMOST : HWND_NOTOPMOST,
-          g_plugin.m_WindowX,
-          g_plugin.m_WindowY,
-          g_plugin.m_WindowWidth,
-          g_plugin.m_WindowHeight,
+          g_engine.m_WindowBorderless ? HWND_TOPMOST : HWND_NOTOPMOST,
+          g_engine.m_WindowX,
+          g_engine.m_WindowY,
+          g_engine.m_WindowWidth,
+          g_engine.m_WindowHeight,
           SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOACTIVATE
         );
 
@@ -452,15 +453,15 @@ static void ToggleBorderlessFullscreen(HWND hWnd) {
           ToggleClickThrough(hWnd);
         }
 
-        if (g_plugin.fOpacity != previousOpacity) {
-          g_plugin.fOpacity = previousOpacity;
-          g_plugin.SetOpacity(hWnd);
+        if (g_engine.fOpacity != previousOpacity) {
+          g_engine.fOpacity = previousOpacity;
+          g_engine.SetOpacity(hWnd);
         }
 
         // Restore the previous opacity
         // SetLayeredWindowAttributes(hWnd, 0, previousOpacity, LWA_ALPHA);
 
-        borderless = g_plugin.m_WindowBorderless; // Restore the borderless state
+        borderless = g_engine.m_WindowBorderless; // Restore the borderless state
         fullscreen = false;
       }
       else {
@@ -468,14 +469,14 @@ static void ToggleBorderlessFullscreen(HWND hWnd) {
         // Save the current window dimensions, borderless state, clickthrough state, and opacity
         RECT currentWindowRect;
         GetWindowRect(hWnd, &currentWindowRect);
-        g_plugin.m_WindowX = currentWindowRect.left;
-        g_plugin.m_WindowY = currentWindowRect.top;
-        g_plugin.m_WindowWidth = currentWindowRect.right - currentWindowRect.left;
-        g_plugin.m_WindowHeight = currentWindowRect.bottom - currentWindowRect.top;
-        g_plugin.m_WindowBorderless = borderless; // Save the current borderless state
+        g_engine.m_WindowX = currentWindowRect.left;
+        g_engine.m_WindowY = currentWindowRect.top;
+        g_engine.m_WindowWidth = currentWindowRect.right - currentWindowRect.left;
+        g_engine.m_WindowHeight = currentWindowRect.bottom - currentWindowRect.top;
+        g_engine.m_WindowBorderless = borderless; // Save the current borderless state
 
         previousClickthrough = clickthrough; // Save the current clickthrough state
-        previousOpacity = g_plugin.fOpacity;
+        previousOpacity = g_engine.fOpacity;
 
         // Set the window style to borderless
         LONG_PTR style = GetWindowLongPtr(hWnd, GWL_STYLE);
@@ -499,12 +500,12 @@ static void ToggleBorderlessFullscreen(HWND hWnd) {
           if (!clickthrough) {
             ToggleClickThrough(hWnd);
           }
-          g_plugin.fOpacity = g_plugin.m_WindowWatermarkModeOpacity;
-          g_plugin.SetOpacity(hWnd);
-          //SetLayeredWindowAttributes(hWnd, 0, (BYTE)(g_plugin.m_WindowWatermarkModeOpacity * 255), LWA_ALPHA);
+          g_engine.fOpacity = g_engine.m_WindowWatermarkModeOpacity;
+          g_engine.SetOpacity(hWnd);
+          //SetLayeredWindowAttributes(hWnd, 0, (BYTE)(g_engine.m_WindowWatermarkModeOpacity * 255), LWA_ALPHA);
         }
 
-        g_plugin.m_bAlwaysOnTop = isShiftPressed; // Set always on top based on Shift key state
+        g_engine.m_bAlwaysOnTop = isShiftPressed; // Set always on top based on Shift key state
         borderless = true;
       }
     }
@@ -514,7 +515,7 @@ static void ToggleBorderlessFullscreen(HWND hWnd) {
 }
 
 static void ToggleFullScreen(HWND hwnd) {
-  if (g_plugin.IsBorderlessFullscreen(hwnd)) {
+  if (g_engine.IsBorderlessFullscreen(hwnd)) {
     // ShowCursor(TRUE);
     ToggleBorderlessFullscreen(hwnd);
   }
@@ -542,7 +543,7 @@ static void ToggleFullScreen(HWND hwnd) {
     SetWindowLongPtrW(hwnd, GWL_EXSTYLE, WS_EX_APPWINDOW);
     SetWindowPos(hwnd, HWND_TOPMOST, info.rcMonitor.left, info.rcMonitor.top, width, height, SWP_DRAWFRAME | SWP_FRAMECHANGED);
 
-    g_plugin.SetVariableBackBuffer(width, height);
+    g_engine.SetVariableBackBuffer(width, height);
     // DX12: swap chain resize is triggered by the WM_SIZE handler after SetWindowPos.
 
     SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
@@ -557,7 +558,7 @@ static void ToggleFullScreen(HWND hwnd) {
     int width = lastRect.right - lastRect.left;
     int height = lastRect.bottom - lastRect.top;
 
-    g_plugin.SetVariableBackBuffer(width, height);
+    g_engine.SetVariableBackBuffer(width, height);
     // DX12: swap chain resize is triggered by the WM_SIZE handler after SetWindowPos.
     SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
     fullscreen = false;
@@ -588,7 +589,7 @@ void SetWindowFixedDimensions(HWND hwnd) {
   ShowWindow(hwnd, SW_RESTORE);
 
   // Adjust the window size and position
-  SetWindowPos(hwnd, HWND_NOTOPMOST, windowX, windowY, g_plugin.m_WindowFixedWidth, g_plugin.m_WindowFixedHeight, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOACTIVATE);
+  SetWindowPos(hwnd, HWND_NOTOPMOST, windowX, windowY, g_engine.m_WindowFixedWidth, g_engine.m_WindowFixedHeight, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 void ResetWindow(HWND hwnd) {
@@ -619,8 +620,8 @@ void ResetWindow(HWND hwnd) {
   // Ensure the window is fully opaque
   SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
 
-  g_plugin.fOpacity = 1.0f;
-  g_plugin.m_WindowBorderless = false;
+  g_engine.fOpacity = 1.0f;
+  g_engine.m_WindowBorderless = false;
   borderless = false;
   clickthrough = false;
   fullscreen = false;
@@ -680,7 +681,7 @@ static void ToggleBorderlessWindow(HWND hwnd) {
     SetWindowPos(hwnd, hInsertAfter, x, y, width, height, SWP_DRAWFRAME | SWP_FRAMECHANGED);
     borderless = false;
   }
-  g_plugin.m_WindowBorderless = borderless;
+  g_engine.m_WindowBorderless = borderless;
 }
 
 
@@ -767,8 +768,8 @@ static INT_PTR CALLBACK AudioDeviceDlgProc(HWND hDlg, UINT msg, WPARAM wParam, L
       HWND hList = GetDlgItem(hDlg, IDC_DEVICE_LIST);
 
       // Find current device name for highlighting
-      std::wstring currentDevice = g_plugin.m_szAudioDevice;
-      int currentType = g_plugin.m_nAudioDeviceRequestType;
+      std::wstring currentDevice = g_engine.m_szAudioDevice;
+      int currentType = g_engine.m_nAudioDeviceRequestType;
       int selectIndex = -1;
 
       for (size_t i = 0; i < g_dialogDevices.size(); i++) {
@@ -974,19 +975,19 @@ static void ShowAudioDeviceDialog(HWND hParent) {
     const auto& selected = g_dialogDevices[g_dialogSelectedIndex];
 
     // Save previous device
-    wcscpy_s(g_plugin.m_szAudioDevicePrevious, g_plugin.m_szAudioDevice);
-    g_plugin.m_nAudioDevicePreviousType = g_plugin.m_nAudioDeviceActiveType;
+    wcscpy_s(g_engine.m_szAudioDevicePrevious, g_engine.m_szAudioDevice);
+    g_engine.m_nAudioDevicePreviousType = g_engine.m_nAudioDeviceActiveType;
 
     // Set new device
-    wcscpy_s(g_plugin.m_szAudioDevice, selected.friendlyName.c_str());
-    g_plugin.m_nAudioDeviceRequestType = selected.isRender ? 2 : 1;
-    g_plugin.SetAudioDeviceDisplayName(selected.friendlyName.c_str(), selected.isRender);
+    wcscpy_s(g_engine.m_szAudioDevice, selected.friendlyName.c_str());
+    g_engine.m_nAudioDeviceRequestType = selected.isRender ? 2 : 1;
+    g_engine.SetAudioDeviceDisplayName(selected.friendlyName.c_str(), selected.isRender);
 
     // Save to settings.ini
-    g_plugin.MyWriteConfig();
+    g_engine.MyWriteConfig();
 
     // Trigger audio thread restart
-    g_plugin.m_nAudioLoopState = 1;
+    g_engine.m_nAudioLoopState = 1;
 
     wchar_t logBuf[512];
     swprintf_s(logBuf, L"Audio device selected: %s [%s]",
@@ -1053,7 +1054,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   switch (uMsg) {
   case WM_CLOSE:
   {
-    g_plugin.SaveWindowSizeAndPosition(hWnd);
+    g_engine.SaveWindowSizeAndPosition(hWnd);
     DestroyWindow(hWnd);
     UnregisterClassW(L"Direct3DWindowClass", NULL);
     return 0;
@@ -1109,7 +1110,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 
   case WM_KEYDOWN:
   {
-    g_plugin.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
+    g_engine.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
   }
   if (wParam == VK_F2) {
     bool isCtrlPressed = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -1134,22 +1135,22 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     else {
       ToggleClickThrough(hWnd);
       if (clickthrough) {
-        g_plugin.AddNotification(L"Clickthrough Mode enabled");
+        g_engine.AddNotification(L"Clickthrough Mode enabled");
       }
       else {
-        g_plugin.AddNotification(L"Clickthrough Mode disabled");
+        g_engine.AddNotification(L"Clickthrough Mode disabled");
       }
     }
   }
   else if (wParam == VK_C) {
     if (GetKeyState(VK_CONTROL) & 0x8000) { // Check if Ctrl is pressed
-      g_plugin.m_DisplayCover = !g_plugin.m_DisplayCover;
-      mdropdx12.doSaveCover = g_plugin.m_DisplayCover;
-      if (g_plugin.m_DisplayCover) {
-        g_plugin.AddNotification(L"Cover Display enabled");
+      g_engine.m_DisplayCover = !g_engine.m_DisplayCover;
+      mdropdx12.doSaveCover = g_engine.m_DisplayCover;
+      if (g_engine.m_DisplayCover) {
+        g_engine.AddNotification(L"Cover Display enabled");
       }
       else {
-        g_plugin.AddNotification(L"Cover Display disabled");
+        g_engine.AddNotification(L"Cover Display disabled");
       }
     }
     return 0;
@@ -1158,22 +1159,22 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     if (GetKeyState(VK_CONTROL) & 0x8000) { // Check if Ctrl is pressed
       bool isShiftPressed = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
       if (isShiftPressed) {
-        g_plugin.AddNotification(g_plugin.m_szAudioDeviceDisplayName);
+        g_engine.AddNotification(g_engine.m_szAudioDeviceDisplayName);
       }
       else {
-        wcscpy_s(g_plugin.m_szAudioDevicePrevious, g_plugin.m_szAudioDevice);
-        g_plugin.m_nAudioDevicePreviousType = g_plugin.m_nAudioDeviceActiveType;
+        wcscpy_s(g_engine.m_szAudioDevicePrevious, g_engine.m_szAudioDevice);
+        g_engine.m_nAudioDevicePreviousType = g_engine.m_nAudioDeviceActiveType;
 
         IMMDevice* m_pMMDevice;
         std::wstring sAudioDeviceDisplayName;
         GetDefaultAudioDeviceName(&m_pMMDevice, &sAudioDeviceDisplayName);
-        wcscpy(g_plugin.m_szAudioDevice, sAudioDeviceDisplayName.c_str());
+        wcscpy(g_engine.m_szAudioDevice, sAudioDeviceDisplayName.c_str());
 
-        g_plugin.SetAudioDeviceDisplayName(sAudioDeviceDisplayName.c_str(), true);
+        g_engine.SetAudioDeviceDisplayName(sAudioDeviceDisplayName.c_str(), true);
 
         // Restart audio
-        g_plugin.m_nAudioDeviceRequestType = 2;
-        g_plugin.m_nAudioLoopState = 1;
+        g_engine.m_nAudioDeviceRequestType = 2;
+        g_engine.m_nAudioLoopState = 1;
       }
     }
     return 0;
@@ -1186,12 +1187,12 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   }
   else if (wParam == VK_M) {
     if (GetKeyState(VK_CONTROL) & 0x8000) { // Check if Ctrl is pressed
-      g_plugin.m_bEnableMouseInteraction = !g_plugin.m_bEnableMouseInteraction;
-      if (g_plugin.m_bEnableMouseInteraction) {
-        g_plugin.AddNotification(L"Mouse interaction enabled");
+      g_engine.m_bEnableMouseInteraction = !g_engine.m_bEnableMouseInteraction;
+      if (g_engine.m_bEnableMouseInteraction) {
+        g_engine.AddNotification(L"Mouse interaction enabled");
       }
       else {
-        g_plugin.AddNotification(L"Mouse interaction disabled");
+        g_engine.AddNotification(L"Mouse interaction disabled");
       }
     }
   }
@@ -1213,7 +1214,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 
       // When mouse interaction is enabled, let the plugin handle client-area mouse events.
       // Still allow resizing by returning the correct HT* edge codes for the border zones.
-      if (g_plugin.m_bEnableMouseInteraction && !(GetAsyncKeyState(VK_LBUTTON) & 0x8000)) {
+      if (g_engine.m_bEnableMouseInteraction && !(GetAsyncKeyState(VK_LBUTTON) & 0x8000)) {
         if (x < BORDERWIDTH && y < BORDERWIDTH)
           return HTTOPLEFT;
         else if (x > rect.right - rect.left - BORDERWIDTH && y < BORDERWIDTH)
@@ -1296,7 +1297,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       ToggleFullScreen(hWnd);
     }
     else {
-      g_plugin.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
+      g_engine.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
     }
     break;
   }
@@ -1305,16 +1306,16 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   case WM_NCRBUTTONDOWN: // Right mouse button pressed
     // If plugin-level mouse interaction is enabled, let the plugin handle the event.
     rightMouseButtonHeld = true;
-    if (g_plugin.m_bEnableMouseInteraction) {
-      return g_plugin.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
+    if (g_engine.m_bEnableMouseInteraction) {
+      return g_engine.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
     }
     break;
 
   case WM_RBUTTONUP:
   case WM_NCRBUTTONUP: // Right mouse button released
     rightMouseButtonHeld = false;
-    if (g_plugin.m_bEnableMouseInteraction) {
-      return g_plugin.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
+    if (g_engine.m_bEnableMouseInteraction) {
+      return g_engine.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
     }
     break;
 
@@ -1325,14 +1326,14 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       PostMessage(hWnd, WM_CLOSE, 0, 0); // Close the window
     }
     else {
-      return g_plugin.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
+      return g_engine.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
     }
     break;
 
   case WM_LBUTTONUP:
   case WM_NCLBUTTONUP: // Left mouse button released
-    //if (g_plugin.m_bEnableMouseInteraction) {
-    return g_plugin.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
+    //if (g_engine.m_bEnableMouseInteraction) {
+    return g_engine.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
     //}
     // no special action on left button up in existing logic
     break;
@@ -1341,7 +1342,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   case WM_NCMBUTTONDOWN: // Middle mouse button clicked
     if (rightMouseButtonHeld) {
       // Right + Middle
-      g_plugin.OpenMDropDX12Remote();
+      g_engine.OpenMDropDX12Remote();
     }
     break;
 
@@ -1367,8 +1368,8 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 
     // If plugin mouse interaction is enabled and the dblclick is in client area,
     // let the plugin handle it. Otherwise toggle fullscreen.
-    if (g_plugin.m_bEnableMouseInteraction && !inTitle) {
-      return g_plugin.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
+    if (g_engine.m_bEnableMouseInteraction && !inTitle) {
+      return g_engine.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
     }
 
     ToggleFullScreen(hWnd);
@@ -1377,15 +1378,15 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 
   case WM_RBUTTONDBLCLK:
   {
-    if (g_plugin.m_bEnableMouseInteraction) {
-      return g_plugin.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
+    if (g_engine.m_bEnableMouseInteraction) {
+      return g_engine.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
     }
     ToggleBorderlessWindow(hWnd);
     break;
   }
 
   default:
-    return g_plugin.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
+    return g_engine.PluginShellWindowProc(hWnd, uMsg, wParam, lParam);
   }
 
   return DefWindowProc(hWnd, uMsg, wParam, lParam);
@@ -1404,23 +1405,23 @@ void RenderFrame() {
 
   mdropdx12.PollMediaInfo();
   if (mdropdx12.coverUpdated) {
-    g_plugin.PostMessageToMDropDX12Remote(WM_USER_COVER_CHANGED);
+    g_engine.PostMessageToMDropDX12Remote(WM_USER_COVER_CHANGED);
     mdropdx12.coverUpdated = false;
   }
   if (mdropdx12.updated) {
     bool wasExplicit = mdropdx12.doPollExplicit;
 
     if (mdropdx12.isSongChange && !wasExplicit) {
-      if (g_plugin.m_ChangePresetWithSong) {
-        g_plugin.NextPreset(g_plugin.m_fBlendTimeAuto);
+      if (g_engine.m_ChangePresetWithSong) {
+        g_engine.NextPreset(g_engine.m_fBlendTimeAuto);
       }
-      if (g_plugin.m_DisplayCover) {
-        g_plugin.LaunchSprite(0, -1);
+      if (g_engine.m_DisplayCover) {
+        g_engine.LaunchSprite(0, -1);
       }
     }
 
-    if (wasExplicit && g_plugin.m_DisplayCoverWhenPressingB) {
-      g_plugin.LaunchSprite(0, -1);
+    if (wasExplicit && g_engine.m_DisplayCoverWhenPressingB) {
+      g_engine.LaunchSprite(0, -1);
     }
 
     mdropdx12.doPollExplicit = false;
@@ -1432,7 +1433,7 @@ void RenderFrame() {
 
       // Convert wchar_t array to std::string
       std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
-      std::string format = converter.to_bytes(g_plugin.m_SongInfoFormat);
+      std::string format = converter.to_bytes(g_engine.m_SongInfoFormat);
       std::istringstream stream(format);
       std::vector<std::string> tokens;
       std::string token;
@@ -1443,9 +1444,9 @@ void RenderFrame() {
       }
 
       // remove existing song info display
-      g_plugin.ClearErrors(ERR_MSG_BOTTOM_EXTRA_1);
-      g_plugin.ClearErrors(ERR_MSG_BOTTOM_EXTRA_2);
-      g_plugin.ClearErrors(ERR_MSG_BOTTOM_EXTRA_3);
+      g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_1);
+      g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_2);
+      g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_3);
 
       // Iterate over tokens in reverse order
       for (auto it = tokens.rbegin(); it != tokens.rend(); ++it) {
@@ -1457,19 +1458,19 @@ void RenderFrame() {
         if (currentToken == "artist") {
           if (mdropdx12.currentArtist.length() > 0) {
             wcscpy(buf, mdropdx12.currentArtist.c_str());
-            g_plugin.AddError(buf, g_plugin.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_1, false);
+            g_engine.AddError(buf, g_engine.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_1, false);
           }
         }
         else if (currentToken == "title") {
           if (mdropdx12.currentTitle.length() > 0) {
             wcscpy(buf, mdropdx12.currentTitle.c_str());
-            g_plugin.AddError(buf, g_plugin.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_2, false);
+            g_engine.AddError(buf, g_engine.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_2, false);
           }
         }
         else if (currentToken == "album") {
           if (mdropdx12.currentAlbum.length() > 0) {
             wcscpy(buf, mdropdx12.currentAlbum.c_str());
-            g_plugin.AddError(buf, g_plugin.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_3, false);
+            g_engine.AddError(buf, g_engine.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_3, false);
           }
         }
       }
@@ -1478,15 +1479,15 @@ void RenderFrame() {
     mdropdx12.updated = false;
   }
 
-  g_plugin.PluginRender(
+  g_engine.PluginRender(
     (unsigned char*)pcmLeftOut,
     (unsigned char*)pcmRightOut);
 
   // --- TDR Recovery: detect device-lost and attempt full device recreation ---
-  if (g_plugin.m_bDeviceRecoveryPending) {
-    g_plugin.m_bDeviceRecoveryPending = false;
+  if (g_engine.m_bDeviceRecoveryPending) {
+    g_engine.m_bDeviceRecoveryPending = false;
 
-    HWND hwnd = g_plugin.GetPluginWindow();
+    HWND hwnd = g_engine.GetPluginWindow();
     if (!hwnd) return;
 
     RECT rc;
@@ -1499,7 +1500,7 @@ void RenderFrame() {
     DebugLogA("TDR Recovery: Beginning teardown and recreation");
 
     // 1. Full plugin teardown (releases all GPU resources + DXContext)
-    g_plugin.PluginQuit();
+    g_engine.PluginQuit();
 
     // 2. Release D3D12 device and command queue
     DeinitD3d();
@@ -1516,7 +1517,7 @@ void RenderFrame() {
     }
 
     // 5. Reinitialize the plugin with the fresh device
-    int ok = g_plugin.PluginInitialize(
+    int ok = g_engine.PluginInitialize(
       pD3DDevice.Get(), pCommandQueue.Get(), pDXGIFactory.Get(),
       hwnd, w, h);
 
@@ -1527,26 +1528,26 @@ void RenderFrame() {
     }
 
     // 6. Force dimension sync (same as initial startup)
-    if (g_plugin.m_lpDX && g_plugin.m_lpDX->m_ready) {
+    if (g_engine.m_lpDX && g_engine.m_lpDX->m_ready) {
       GetClientRect(hwnd, &rc);
       int actualW = rc.right - rc.left;
       int actualH = rc.bottom - rc.top;
       if (actualW > 0 && actualH > 0 &&
-          (actualW != g_plugin.m_lpDX->m_client_width ||
-           actualH != g_plugin.m_lpDX->m_client_height)) {
-        g_plugin.OnUserResizeWindow();
+          (actualW != g_engine.m_lpDX->m_client_width ||
+           actualH != g_engine.m_lpDX->m_client_height)) {
+        g_engine.OnUserResizeWindow();
       }
     }
 
     // 7. Skip to next preset (the current one likely caused the TDR)
-    g_plugin.NextPreset(0.0f);
+    g_engine.NextPreset(0.0f);
 
     mdropdx12.LogInfo(L"TDR Recovery: Device recreated successfully — skipped to next preset");
     DebugLogA("TDR Recovery: SUCCESS — device recreated, advanced to next preset");
 
     wchar_t msg[256];
     swprintf(msg, 256, L"GPU recovered from TDR — skipped crashing preset");
-    g_plugin.AddError(msg, 8.0f, ERR_NOTIFY, true);
+    g_engine.AddError(msg, 8.0f, ERR_NOTIFY, true);
   }
 }
 
@@ -1571,7 +1572,7 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   wndClass.cbClsExtra = 0;
   wndClass.cbWndExtra = 0;
   wndClass.hInstance = instance;
-  wndClass.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_PLUGIN_ICON));
+  wndClass.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_ENGINE_ICON));
   wndClass.hCursor = LoadCursor(NULL, IDC_ARROW);
   wndClass.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
   wndClass.lpszMenuName = NULL;
@@ -1638,7 +1639,7 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
 
   mdropdx12.LogInfo(L"CreateWindowAndRun: Creating window");
 
-  if (g_plugin.m_WindowX == 0 || g_plugin.m_WindowY == 0 || g_plugin.m_WindowWidth == 0 || g_plugin.m_WindowHeight == 0) {
+  if (g_engine.m_WindowX == 0 || g_engine.m_WindowY == 0 || g_engine.m_WindowWidth == 0 || g_engine.m_WindowHeight == 0) {
     RECT workArea{};
     if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0)) {
       workArea.left = 0;
@@ -1659,10 +1660,10 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
       defaultHeight = 360;
     }
 
-    g_plugin.m_WindowWidth = defaultWidth;
-    g_plugin.m_WindowHeight = defaultHeight;
-    g_plugin.m_WindowX = (workArea.right - gapPx) - g_plugin.m_WindowWidth;
-    g_plugin.m_WindowY = workArea.top + gapPx;
+    g_engine.m_WindowWidth = defaultWidth;
+    g_engine.m_WindowHeight = defaultHeight;
+    g_engine.m_WindowX = (workArea.right - gapPx) - g_engine.m_WindowWidth;
+    g_engine.m_WindowY = workArea.top + gapPx;
   }
 
 
@@ -1672,10 +1673,10 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
     VisualizerWindowTitle,
     WS_OVERLAPPEDWINDOW, // SPOUT
     //dwStyle,
-    g_plugin.m_WindowX,
-    g_plugin.m_WindowY,
-    g_plugin.m_WindowWidth,
-    g_plugin.m_WindowHeight,
+    g_engine.m_WindowX,
+    g_engine.m_WindowY,
+    g_engine.m_WindowWidth,
+    g_engine.m_WindowHeight,
     0,
     NULL,
     instance,
@@ -1688,23 +1689,23 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   }
 
   if (!icon) {
-    icon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_PLUGIN_ICON));
+    icon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_ENGINE_ICON));
   }
 
   SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)icon);
   SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)icon);
 
   // window was closed in borderless fullscreen mode
-  if (g_plugin.IsBorderlessFullscreen(hwnd)) {
-    g_plugin.fOpacity = g_plugin.m_WindowWatermarkModeOpacity;
-    g_plugin.SetOpacity(hwnd);
+  if (g_engine.IsBorderlessFullscreen(hwnd)) {
+    g_engine.fOpacity = g_engine.m_WindowWatermarkModeOpacity;
+    g_engine.SetOpacity(hwnd);
     if (!clickthrough) ToggleClickThrough(hwnd);
-    g_plugin.m_bAlwaysOnTop = true;
-    g_plugin.ToggleAlwaysOnTop(hwnd);
+    g_engine.m_bAlwaysOnTop = true;
+    g_engine.ToggleAlwaysOnTop(hwnd);
   }
   else {
-    if (g_plugin.fOpacity < 1) {
-      g_plugin.SetOpacity(hwnd);
+    if (g_engine.fOpacity < 1) {
+      g_engine.SetOpacity(hwnd);
     }
   }
 
@@ -1715,23 +1716,23 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
     mdropdx12.LogInfo(L"CreateWindowAndRun: ShowWindow failed, window not created");
   }
 
-  if (g_plugin.m_bAlwaysOnTop) {
-    g_plugin.ToggleAlwaysOnTop(hwnd);
+  if (g_engine.m_bAlwaysOnTop) {
+    g_engine.ToggleAlwaysOnTop(hwnd);
   }
-  if (g_plugin.m_WindowBorderless && !borderless) {
+  if (g_engine.m_WindowBorderless && !borderless) {
     ToggleBorderlessWindow(hwnd);
   }
 
   // always ensure .Init is called after the window is created (ShowWindow above)
-  mdropdx12.Init(g_plugin.m_szBaseDir);
-  mdropdx12.doPoll = g_plugin.m_SongInfoPollingEnabled;
-  mdropdx12.doSaveCover = g_plugin.m_DisplayCover;
+  mdropdx12.Init(g_engine.m_szBaseDir);
+  mdropdx12.doPoll = g_engine.m_SongInfoPollingEnabled;
+  mdropdx12.doSaveCover = g_engine.m_DisplayCover;
 
   unsigned int frame = 0;
 
 
   // MDropDX12: Moved to StartThreads()
-  // g_plugin.PluginPreInitialize(0, 0);
+  // g_engine.PluginPreInitialize(0, 0);
 
   // SPOUT
 
@@ -1742,19 +1743,19 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   unsigned int BackbufferHeight = clientRect.bottom - clientRect.top;
   if (BackbufferWidth == 0 || BackbufferHeight == 0) {
     // Fallback to window dimensions if client rect is not yet available
-    BackbufferWidth = g_plugin.m_WindowWidth;
-    BackbufferHeight = g_plugin.m_WindowHeight;
+    BackbufferWidth = g_engine.m_WindowWidth;
+    BackbufferHeight = g_engine.m_WindowHeight;
   }
-  if (g_plugin.IsSpoutActiveAndFixed()) {
-    BackbufferWidth = g_plugin.nSpoutFixedWidth;
-    BackbufferHeight = g_plugin.nSpoutFixedHeight;
+  if (g_engine.IsSpoutActiveAndFixed()) {
+    BackbufferWidth = g_engine.nSpoutFixedWidth;
+    BackbufferHeight = g_engine.nSpoutFixedHeight;
   }
 
   mdropdx12.LogInfo(L"CreateWindowAndRun: InitD3d");
   InitD3d(hwnd, BackbufferWidth, BackbufferHeight);
 
   mdropdx12.LogInfo(L"CreateWindowAndRun: PluginInitialize");
-  g_plugin.PluginInitialize(
+  g_engine.PluginInitialize(
     pD3DDevice.Get(),
     pCommandQueue.Get(),
     pDXGIFactory.Get(),
@@ -1764,20 +1765,20 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
 
   // Force dimension correction: WM_SIZE from ShowWindow was missed because m_lpDX
   // was null at that time. Verify dimensions match the actual client rect now.
-  if (g_plugin.m_lpDX && g_plugin.m_lpDX->m_ready) {
+  if (g_engine.m_lpDX && g_engine.m_lpDX->m_ready) {
     RECT rc;
     GetClientRect(hwnd, &rc);
     int actualW = rc.right - rc.left;
     int actualH = rc.bottom - rc.top;
     if (actualW > 0 && actualH > 0 &&
-        (actualW != g_plugin.m_lpDX->m_client_width ||
-         actualH != g_plugin.m_lpDX->m_client_height)) {
+        (actualW != g_engine.m_lpDX->m_client_width ||
+         actualH != g_engine.m_lpDX->m_client_height)) {
       wchar_t dbg[256];
       swprintf(dbg, 256, L"DX12 init correction: swap chain %dx%d -> client %dx%d\n",
-               g_plugin.m_lpDX->m_client_width, g_plugin.m_lpDX->m_client_height,
+               g_engine.m_lpDX->m_client_width, g_engine.m_lpDX->m_client_height,
                actualW, actualH);
       DebugLogW(dbg);
-      g_plugin.OnUserResizeWindow();
+      g_engine.OnUserResizeWindow();
     }
   }
 
@@ -1818,8 +1819,8 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   }
   mdropdx12.LogInfo(L"CreateWindowAndRun: Message loop ended");
 
-  g_plugin.MyWriteConfig();
-  g_plugin.PluginQuit();
+  g_engine.MyWriteConfig();
+  g_engine.PluginQuit();
 
   DeinitD3d();
 
@@ -1859,10 +1860,10 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
     // LPCWSTR argv[4] = { L"", L"--file", L"loopback-capture.wav", L"--int-16" };
     LPCWSTR argv[4] = { L"", L"", L"", L"" };
 
-    if (wcslen(g_plugin.m_szAudioDevice) > 0) {
+    if (wcslen(g_engine.m_szAudioDevice) > 0) {
       argc = 3;
       argv[1] = L"--device";
-      argv[2] = g_plugin.m_szAudioDevice;
+      argv[2] = g_engine.m_szAudioDevice;
     };
 
     /*
@@ -1877,7 +1878,7 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
 
     hr = S_OK;
 
-    CPrefs prefs(argc, argv, hr, g_plugin.m_nAudioDeviceRequestType);
+    CPrefs prefs(argc, argv, hr, g_engine.m_nAudioDeviceRequestType);
     if (FAILED(hr)) {
       ERR(L"CPrefs::CPrefs constructor failed: hr = 0x%08x", hr);
       return -__LINE__;
@@ -1903,14 +1904,14 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
     }
     CloseHandleOnExit closeStopEvent(hStopEvent);
 
-  g_plugin.SetAudioDeviceDisplayName(prefs.m_szAudioDeviceDisplayName.c_str(), prefs.m_bIsRenderDevice);
+  g_engine.SetAudioDeviceDisplayName(prefs.m_szAudioDeviceDisplayName.c_str(), prefs.m_bIsRenderDevice);
 
     {
       const wchar_t* requestTypeText = L"auto";
-      if (g_plugin.m_nAudioDeviceRequestType == 1) {
+      if (g_engine.m_nAudioDeviceRequestType == 1) {
         requestTypeText = L"capture";
       }
-      else if (g_plugin.m_nAudioDeviceRequestType == 2) {
+      else if (g_engine.m_nAudioDeviceRequestType == 2) {
         requestTypeText = L"render";
       }
 
@@ -1997,17 +1998,17 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
 
       HANDLE rhHandles[2] = { hThreadLoopbackCapture, hStdIn };
       */
-      g_plugin.m_nAudioLoopState = 0;
+      g_engine.m_nAudioLoopState = 0;
       bool bKeepWaiting = true;
       while (bKeepWaiting) {
         if (threadRender == nullptr) {
           // render thread stopped
           bKeepWaiting = false;
         }
-        else if (g_plugin.m_nAudioLoopState == 1) {
+        else if (g_engine.m_nAudioLoopState == 1) {
           // audio device changed
           bKeepWaiting = false;
-          g_plugin.m_nAudioLoopState = 2;
+          g_engine.m_nAudioLoopState = 2;
         }
         else {
           Sleep(100);
@@ -2043,8 +2044,8 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
     }
     // let prefs' destructor call mmioClose
 
-    if (g_plugin.m_nAudioLoopState == 2) {
-      g_plugin.AddNotificationAudioDevice();
+    if (g_engine.m_nAudioLoopState == 2) {
+      g_engine.AddNotificationAudioDevice();
 
       // not the best solution to build a thread tree like this, but too lazy/scared to refactor right now
       int result = StartAudioCaptureThread(instance, ++nestingLevel);
@@ -2053,23 +2054,23 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
 
         /*
         std::wstringstream ss;
-        ss << L"STATUS=Device init \"" << g_plugin.m_szAudioDeviceDisplayName << "\" failed, reverting to \"" << g_plugin.m_szAudioDevicePrevious << "\"";
+        ss << L"STATUS=Device init \"" << g_engine.m_szAudioDeviceDisplayName << "\" failed, reverting to \"" << g_engine.m_szAudioDevicePrevious << "\"";
         statusMessage = ss.str();
-        g_plugin.SendMessageToMDropDX12Remote(statusMessage.data());
+        g_engine.SendMessageToMDropDX12Remote(statusMessage.data());
         */
 
         // if result > 1, we probably encountered a disconnection error earlier (eg. Bluetooth headphone disconnection), 
         // and the m_szAudioDevice was already set using Ctrl+D
         if (result < 0) {
-          wcscpy_s(g_plugin.m_szAudioDevice, g_plugin.m_szAudioDevicePrevious);
-          bool prevIsRender = (g_plugin.m_nAudioDevicePreviousType == 2);
-          g_plugin.SetAudioDeviceDisplayName(g_plugin.m_szAudioDevicePrevious, prevIsRender);
-          g_plugin.m_nAudioDeviceActiveType = g_plugin.m_nAudioDevicePreviousType;
+          wcscpy_s(g_engine.m_szAudioDevice, g_engine.m_szAudioDevicePrevious);
+          bool prevIsRender = (g_engine.m_nAudioDevicePreviousType == 2);
+          g_engine.SetAudioDeviceDisplayName(g_engine.m_szAudioDevicePrevious, prevIsRender);
+          g_engine.m_nAudioDeviceActiveType = g_engine.m_nAudioDevicePreviousType;
         }
 
-        std::wstring statusMessage = L"DEVICE=" + std::wstring(g_plugin.m_szAudioDevice);
-        g_plugin.SendMessageToMDropDX12Remote(statusMessage.data());
-        g_plugin.AddNotificationAudioDevice();
+        std::wstring statusMessage = L"DEVICE=" + std::wstring(g_engine.m_szAudioDevice);
+        g_engine.SendMessageToMDropDX12Remote(statusMessage.data());
+        g_engine.AddNotificationAudioDevice();
         result = StartAudioCaptureThread(instance, ++nestingLevel);
       }
     }
@@ -2084,9 +2085,9 @@ unsigned __stdcall DoSetup(void* param) {
   Sleep(3000); // wait for the render thread to initialize the plugin completely
   HINSTANCE instance = (HINSTANCE)param;
 
-  if (g_plugin.m_ShaderCaching && g_plugin.m_ShaderPrecompileOnStartup) {
+  if (g_engine.m_ShaderCaching && g_engine.m_ShaderPrecompileOnStartup) {
 
-    std::wstring cacheDir = std::wstring(g_plugin.m_szBaseDir) + L"cache";
+    std::wstring cacheDir = std::wstring(g_engine.m_szBaseDir) + L"cache";
     std::wstring compiledListPath = cacheDir + L"\\compiled.txt";
 
     // Abort if compiled.txt already exists
@@ -2115,14 +2116,14 @@ unsigned __stdcall DoSetup(void* param) {
     if (!compiledList.is_open()) {
       std::wstring msg = L"Precompile failed to create " + compiledListPath;
       wchar_t* writableMsg = &msg[0];  // Get non-const pointer to internal buffer
-      g_plugin.AddNotification(writableMsg);
+      g_engine.AddNotification(writableMsg);
       return -1;
     }
 
     // Set UTF-8 locale for the output stream
     compiledList.imbue(std::locale(std::locale::empty(), new std::codecvt_utf8<wchar_t>));
 
-    g_plugin.AddNotification(L"Shader cache empty, precompiling shaders", 10 * 60);
+    g_engine.AddNotification(L"Shader cache empty, precompiling shaders", 10 * 60);
 
     int compiledShaders = 0;
     std::string line;
@@ -2176,7 +2177,7 @@ unsigned __stdcall DoSetup(void* param) {
 
     wchar_t szMessage[256];
     wcsncpy_s(szMessage, message.c_str(), _TRUNCATE);
-    g_plugin.AddNotification(szMessage, 5);
+    g_engine.AddNotification(szMessage, 5);
     mdropdx12.LogInfo(message);
   }
   return 0;
@@ -2186,7 +2187,7 @@ void PrecompilePresetShaders(std::wstring& wLine, std::wofstream& compiledList, 
   wchar_t szFile[512];
   // Treat anything without a drive letter as relative
   if (wLine.find(L":\\") == std::wstring::npos) {
-    lstrcpyW(szFile, g_plugin.m_szBaseDir);
+    lstrcpyW(szFile, g_engine.m_szBaseDir);
     lstrcatW(szFile, wLine.c_str());
   }
   else {
@@ -2196,7 +2197,7 @@ void PrecompilePresetShaders(std::wstring& wLine, std::wofstream& compiledList, 
   // Compile the shader
   if (std::filesystem::exists(std::filesystem::path(szFile))) {
     auto start = std::chrono::high_resolution_clock::now();
-    g_plugin.CompilePresetShadersToFile(szFile);
+    g_engine.CompilePresetShadersToFile(szFile);
     auto end = std::chrono::high_resolution_clock::now();
     auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     std::wstring warn = L" ";
@@ -2223,15 +2224,15 @@ void StartSetupThread(HINSTANCE instance) {
 int StartThreads(HINSTANCE instance) {
   try {
     // MDropDX12: early init so we can read from settings
-    g_plugin.PluginPreInitialize(0, 0);
+    g_engine.PluginPreInitialize(0, 0);
 
     // early assignment so we can use logging
     // mdropdx12.Init() may only be called after the window is created due to threading issues
-    mdropdx12.logLevel = g_plugin.m_LogLevel;
-    g_plugin.mdropdx12 = &mdropdx12;
+    mdropdx12.logLevel = g_engine.m_LogLevel;
+    g_engine.mdropdx12 = &mdropdx12;
 
     mdropdx12.LogInfo(L"MDropDX12 initialized, LogLevel=" + std::to_wstring(mdropdx12.logLevel)
-      + L" BaseDir=" + g_plugin.m_szBaseDir);
+      + L" BaseDir=" + g_engine.m_szBaseDir);
 
     // DX12: no legacy DirectX 9 DLL checks needed.
 
@@ -2242,7 +2243,7 @@ int StartThreads(HINSTANCE instance) {
     mdropdx12.LogInfo(L"Starting setup thread");
     StartSetupThread(instance);
 
-    if (g_plugin.m_bEnableAudioCapture) {
+    if (g_engine.m_bEnableAudioCapture) {
       mdropdx12.LogInfo(L"Starting audio capture thread");
       StartAudioCaptureThread(instance, 0);
     }
@@ -2325,13 +2326,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
     if (!baseDir.empty() && baseDir.back() != L'\\') {
       baseDir += L'\\';
     }
-    wcscpy_s(g_plugin.m_szBaseDir, MAX_PATH, baseDir.c_str());
+    wcscpy_s(g_engine.m_szBaseDir, MAX_PATH, baseDir.c_str());
 
     // Initialize debug log (rotates debug.log → debug.prev.log)
-    DebugLogInit(g_plugin.m_szBaseDir);
+    DebugLogInit(g_engine.m_szBaseDir);
 
     DebugLogW(found ? L"BaseDir resolved (resources found)" : L"BaseDir resolved (resources NOT found)");
-    DebugLogW(g_plugin.m_szBaseDir);
+    DebugLogW(g_engine.m_szBaseDir);
   }
   int res = 0;
   try {

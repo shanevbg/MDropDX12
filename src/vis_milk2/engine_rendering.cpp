@@ -1,11 +1,11 @@
 /*
   Plugin module: HUD/Overlay Rendering & Notifications
-  Extracted from plugin.cpp for maintainability.
+  Extracted from engine.cpp for maintainability.
   Contains: MyRenderUI, DrawTooltip, RenderInjectEffect, notification functions
 */
 
-#include "plugin.h"
-#include "plugin_helpers.h"
+#include "engine.h"
+#include "engine_helpers.h"
 #include "utility.h"
 #include "support.h"
 #include "resource.h"
@@ -19,10 +19,12 @@
 
 #define FRAND ((rand() % 7381)/7380.0f)
 
-extern CPlugin g_plugin;
+namespace mdrop {
+
+extern Engine g_engine;
 extern float timetick;
 
-void CPlugin::RenderInjectEffect()
+void Engine::RenderInjectEffect()
 {
   // Post-process pass: applies the F11 inject effect and (for non-shader presets)
   // per-preset brighten/darken/solarize/invert on the composite back buffer.
@@ -127,7 +129,7 @@ void CPlugin::RenderInjectEffect()
 //----------------------------------------------------------------------
 //----------------------------------------------------------------------
 
-void CPlugin::DrawTooltip(wchar_t* str, int xR, int yB) {
+void Engine::DrawTooltip(wchar_t* str, int xR, int yB) {
   // draws a string in the lower-right corner of the screen.
   // note: ID3DXFont handles DT_RIGHT and DT_BOTTOM *very poorly*.
   //       it is best to calculate the size of the text first,
@@ -231,28 +233,28 @@ void CPlugin::DrawTooltip(wchar_t* str, int xR, int yB) {
     else if (corner == MTO_LOWER_RIGHT) *lower_right_corner_y -= h; \
 }
 
-void CPlugin::OnAltK() {
+void Engine::OnAltK() {
   AddNotification(wasabiApiLangString(IDS_PLEASE_EXIT_VIS_BEFORE_RUNNING_CONFIG_PANEL));
 }
 
-void CPlugin::AddNotification(wchar_t* szMsg) {
-  g_plugin.AddError(szMsg, 3.0F, ERR_NOTIFY, m_fontinfo[SIMPLE_FONT].bBold);
+void Engine::AddNotification(wchar_t* szMsg) {
+  g_engine.AddError(szMsg, 3.0F, ERR_NOTIFY, m_fontinfo[SIMPLE_FONT].bBold);
 }
 
-void CPlugin::AddNotification(wchar_t* szMsg, float time) {
-  g_plugin.AddError(szMsg, time, ERR_NOTIFY, m_fontinfo[SIMPLE_FONT].bBold);
+void Engine::AddNotification(wchar_t* szMsg, float time) {
+  g_engine.AddError(szMsg, time, ERR_NOTIFY, m_fontinfo[SIMPLE_FONT].bBold);
 }
 
-void CPlugin::AddNotificationAudioDevice() {
+void Engine::AddNotificationAudioDevice() {
   std::wstring statusMessage;
   if (m_szAudioDeviceDisplayName[0] != L'\0') {
     statusMessage = m_szAudioDeviceDisplayName;
   }
-  else if (g_plugin.m_szAudioDeviceDisplayName[0] != L'\0') {
-    statusMessage = g_plugin.m_szAudioDeviceDisplayName;
+  else if (g_engine.m_szAudioDeviceDisplayName[0] != L'\0') {
+    statusMessage = g_engine.m_szAudioDeviceDisplayName;
   }
-  else if (g_plugin.m_szAudioDevice[0] != L'\0') {
-    statusMessage = g_plugin.m_szAudioDevice;
+  else if (g_engine.m_szAudioDevice[0] != L'\0') {
+    statusMessage = g_engine.m_szAudioDevice;
   }
 
   int effectiveType = m_nAudioDeviceActiveType;
@@ -278,11 +280,11 @@ void CPlugin::AddNotificationAudioDevice() {
     AddNotification(statusMessage.data());
   }
   else {
-    AddNotification(g_plugin.m_szAudioDeviceDisplayName);
+    AddNotification(g_engine.m_szAudioDeviceDisplayName);
   }
 }
 
-void CPlugin::AddError(wchar_t* szMsg, float fDuration, int category, bool bBold) {
+void Engine::AddError(wchar_t* szMsg, float fDuration, int category, bool bBold) {
   DebugLogW(szMsg);
   if (category == ERR_NOTIFY)
     ClearErrors(category);
@@ -299,7 +301,7 @@ void CPlugin::AddError(wchar_t* szMsg, float fDuration, int category, bool bBold
   m_errors.push_back(x);
 }
 
-void CPlugin::AddNotificationColored(wchar_t* szMsg, float time, DWORD color) {
+void Engine::AddNotificationColored(wchar_t* szMsg, float time, DWORD color) {
   DebugLogW(szMsg);
   ClearErrors(ERR_NOTIFY);
 
@@ -314,7 +316,7 @@ void CPlugin::AddNotificationColored(wchar_t* szMsg, float time, DWORD color) {
   m_errors.push_back(x);
 }
 
-void CPlugin::ClearErrors(int category)  // 0=all categories
+void Engine::ClearErrors(int category)  // 0=all categories
 {
   int N = m_errors.size();
   for (int i = 0; i < N; i++)
@@ -325,7 +327,7 @@ void CPlugin::ClearErrors(int category)  // 0=all categories
     }
 }
 
-void CPlugin::MyRenderUI(
+void Engine::MyRenderUI(
   int* upper_left_corner_y,  // increment me!
   int* upper_right_corner_y, // increment me!
   int* lower_left_corner_y,  // decrement me!
@@ -1640,3 +1642,5 @@ void CPlugin::MyRenderUI(
   }
 }
 
+
+} // namespace mdrop

@@ -1,13 +1,13 @@
 /*
   Plugin module: Shader Compilation & Caching
-  Extracted from plugin.cpp for maintainability.
+  Extracted from engine.cpp for maintainability.
   Contains: VShaderInfo, PShaderInfo, CShaderParams, RecompileVShader, RecompilePShader,
             LoadShaders, CreateDX12PresetPSOs, LoadShaderFromMemory, GenWarpPShaderText,
             GenCompPShaderText, SaveShaderBytecodeToFile, LoadShaderBytecodeFromFile, crc32
 */
 
-#include "plugin.h"
-#include "plugin_helpers.h"
+#include "engine.h"
+#include "engine_helpers.h"
 #include "utility.h"
 #include "support.h"
 #include "resource.h"
@@ -20,7 +20,9 @@
 #include <cstdint>
 #include <fstream>
 
-extern CPlugin g_plugin;
+namespace mdrop {
+
+extern Engine g_engine;
 
 void VShaderInfo::Clear() {
   SafeRelease(ptr);
@@ -164,7 +166,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
       }
 #if (NUM_BLUR_TEX >= 2)
       else if (!wcscmp(L"blur1", szRootName)) {
-        m_texture_bindings[cd.RegisterIndex].texptr = g_plugin.m_lpBlur[1];
+        m_texture_bindings[cd.RegisterIndex].texptr = g_engine.m_lpBlur[1];
         m_texcode[cd.RegisterIndex] = TEX_BLUR1;
         if (!bWrapFilterSpecified) { // when sampling blur textures, default is CLAMP
           m_texture_bindings[cd.RegisterIndex].bWrap = false;
@@ -174,7 +176,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
 #endif
 #if (NUM_BLUR_TEX >= 4)
       else if (!wcscmp(L"blur2", szRootName)) {
-        m_texture_bindings[cd.RegisterIndex].texptr = g_plugin.m_lpBlur[3];
+        m_texture_bindings[cd.RegisterIndex].texptr = g_engine.m_lpBlur[3];
         m_texcode[cd.RegisterIndex] = TEX_BLUR2;
         if (!bWrapFilterSpecified) { // when sampling blur textures, default is CLAMP
           m_texture_bindings[cd.RegisterIndex].bWrap = false;
@@ -184,7 +186,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
 #endif
 #if (NUM_BLUR_TEX >= 6)
       else if (!wcscmp(L"blur3", szRootName)) {
-        m_texture_bindings[cd.RegisterIndex].texptr = g_plugin.m_lpBlur[5];
+        m_texture_bindings[cd.RegisterIndex].texptr = g_engine.m_lpBlur[5];
         m_texcode[cd.RegisterIndex] = TEX_BLUR3;
         if (!bWrapFilterSpecified) { // when sampling blur textures, default is CLAMP
           m_texture_bindings[cd.RegisterIndex].bWrap = false;
@@ -194,7 +196,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
 #endif
 #if (NUM_BLUR_TEX >= 8)
       else if (!wcscmp("blur4", szRootName)) {
-        m_texture_bindings[cd.RegisterIndex].texptr = g_plugin.m_lpBlur[7];
+        m_texture_bindings[cd.RegisterIndex].texptr = g_engine.m_lpBlur[7];
         m_texcode[cd.RegisterIndex] = TEX_BLUR4;
         if (!bWrapFilterSpecified) { // when sampling blur textures, default is CLAMP
           m_texture_bindings[cd.RegisterIndex].bWrap = false;
@@ -204,7 +206,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
 #endif
 #if (NUM_BLUR_TEX >= 10)
       else if (!wcscmp("blur5", szRootName)) {
-        m_texture_bindings[cd.RegisterIndex].texptr = g_plugin.m_lpBlur[9];
+        m_texture_bindings[cd.RegisterIndex].texptr = g_engine.m_lpBlur[9];
         m_texcode[cd.RegisterIndex] = TEX_BLUR5;
         if (!bWrapFilterSpecified) { // when sampling blur textures, default is CLAMP
           m_texture_bindings[cd.RegisterIndex].bWrap = false;
@@ -214,7 +216,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
 #endif
 #if (NUM_BLUR_TEX >= 12)
       else if (!wcscmp("blur6", szRootName)) {
-        m_texture_bindings[cd.RegisterIndex].texptr = g_plugin.m_lpBlur[11];
+        m_texture_bindings[cd.RegisterIndex].texptr = g_engine.m_lpBlur[11];
         m_texcode[cd.RegisterIndex] = TEX_BLUR6;
         if (!bWrapFilterSpecified) { // when sampling blur textures, default is CLAMP
           m_texture_bindings[cd.RegisterIndex].bWrap = false;
@@ -263,14 +265,14 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
         // see if <szRootName>.tga or .jpg has already been loaded.
         //   (if so, grab a pointer to it)
         //   (if NOT, create & load it).
-        int N = g_plugin.m_textures.size();
+        int N = g_engine.m_textures.size();
         for (int n = 0; n < N; n++) {
-          if (!wcscmp(g_plugin.m_textures[n].texname, szRootName)) {
+          if (!wcscmp(g_engine.m_textures[n].texname, szRootName)) {
             // found a match - texture was already loaded
-            m_texture_bindings[cd.RegisterIndex].texptr = g_plugin.m_textures[n].texptr;
-            m_texture_bindings[cd.RegisterIndex].dx12SrvIndex = g_plugin.m_textures[n].dx12Tex.srvIndex;
+            m_texture_bindings[cd.RegisterIndex].texptr = g_engine.m_textures[n].texptr;
+            m_texture_bindings[cd.RegisterIndex].dx12SrvIndex = g_engine.m_textures[n].dx12Tex.srvIndex;
             // also bump its age down to zero! (for cache mgmt)
-            g_plugin.m_textures[n].nAge = g_plugin.m_nPresetsLoadedTotal;
+            g_engine.m_textures[n].nAge = g_engine.m_nPresetsLoadedTotal;
             break;
           }
         }
@@ -297,7 +299,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
                 continue;
           }
 
-          if (!g_plugin.GetDevice()) {
+          if (!g_engine.GetDevice()) {
             // DX12 path: load via WIC
             wchar_t szFilename[MAX_PATH];
             bool found = false;
@@ -307,15 +309,15 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
               DebugLogA(dbg);
             }
             for (int z = 0; z < texture_exts_count; z++) {
-              swprintf(szFilename, L"%stextures\\%s.%s", g_plugin.m_szMilkdrop2Path, szRootName, texture_exts[z].c_str());
+              swprintf(szFilename, L"%stextures\\%s.%s", g_engine.m_szMilkdrop2Path, szRootName, texture_exts[z].c_str());
               if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
-                swprintf(szFilename, L"%s%s.%s", g_plugin.m_szPresetDir, szRootName, texture_exts[z].c_str());
+                swprintf(szFilename, L"%s%s.%s", g_engine.m_szPresetDir, szRootName, texture_exts[z].c_str());
                 if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
                   // Check for textures\ sibling of preset directory
                   bool siblingFound = false;
                   {
                     wchar_t siblingTexDir[MAX_PATH];
-                    wcscpy_s(siblingTexDir, MAX_PATH, g_plugin.m_szPresetDir);
+                    wcscpy_s(siblingTexDir, MAX_PATH, g_engine.m_szPresetDir);
                     int len = (int)wcslen(siblingTexDir);
                     if (len > 0 && siblingTexDir[len - 1] == L'\\') siblingTexDir[--len] = 0;
                     wchar_t* lastSlash = wcsrchr(siblingTexDir, L'\\');
@@ -328,7 +330,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
                   if (!siblingFound) {
                     // Search fallback paths (paths already have trailing backslash)
                     bool fbFound = false;
-                    for (auto& fbPath : g_plugin.m_fallbackPaths) {
+                    for (auto& fbPath : g_engine.m_fallbackPaths) {
                       swprintf(szFilename, L"%s%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
                       if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) { fbFound = true; break; }
                     }
@@ -336,13 +338,13 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
                   }
                 }
               }
-              x.dx12Tex = g_plugin.m_lpDX->LoadTextureFromFile(szFilename);
+              x.dx12Tex = g_engine.m_lpDX->LoadTextureFromFile(szFilename);
               if (x.dx12Tex.resource) {
                 x.w = x.dx12Tex.width;
                 x.h = x.dx12Tex.height;
                 x.d = 1;
                 x.bEvictable = true;
-                x.nAge = g_plugin.m_nPresetsLoadedTotal;
+                x.nAge = g_engine.m_nPresetsLoadedTotal;
                 x.nSizeInBytes = x.w * x.h * 4 + 16384;
                 found = true;
                 char dbg[512];
@@ -356,22 +358,22 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
             if (!found) {
               wchar_t buf[2048], title[64];
               swprintf(buf, wasabiApiLangString(IDS_COULD_NOT_LOAD_TEXTURE_X), szRootName, szExtsWithSlashes);
-              g_plugin.dumpmsg(buf);
+              g_engine.dumpmsg(buf);
               {
                 char dbg[512];
                 sprintf(dbg, "CacheParams: texture NOT found: '%ls' (base='%ls', preset='%ls', %d fallback paths)",
-                        szRootName, g_plugin.m_szMilkdrop2Path, g_plugin.m_szPresetDir,
-                        (int)g_plugin.m_fallbackPaths.size());
+                        szRootName, g_engine.m_szMilkdrop2Path, g_engine.m_szPresetDir,
+                        (int)g_engine.m_fallbackPaths.size());
                 DebugLogA(dbg);
               }
               if (bHardErrors)
-                MessageBoxW(g_plugin.GetPluginWindow(), buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
+                MessageBoxW(g_engine.GetPluginWindow(), buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
               else
-                g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
+                g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
               continue;
             }
 
-            g_plugin.m_textures.push_back(x);
+            g_engine.m_textures.push_back(x);
             m_texture_bindings[cd.RegisterIndex].dx12SrvIndex = x.dx12Tex.srvIndex;
           } else {
             // DX9 path: original D3DX texture loading
@@ -381,29 +383,29 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
             while (1) {
               int nTexturesCached = 0;
               int nBytesCached = 0;
-              int N = g_plugin.m_textures.size();
+              int N = g_engine.m_textures.size();
               for (int i = 0; i < N; i++)
-                if (g_plugin.m_textures[i].bEvictable && g_plugin.m_textures[i].texptr) {
-                  nBytesCached += g_plugin.m_textures[i].nSizeInBytes;
+                if (g_engine.m_textures[i].bEvictable && g_engine.m_textures[i].texptr) {
+                  nBytesCached += g_engine.m_textures[i].nSizeInBytes;
                   nTexturesCached++;
                 }
-              if (nTexturesCached < g_plugin.m_nMaxImages &&
-                nBytesCached < g_plugin.m_nMaxBytes)
+              if (nTexturesCached < g_engine.m_nMaxImages &&
+                nBytesCached < g_engine.m_nMaxBytes)
                 break;
-              if (!g_plugin.EvictSomeTexture())
+              if (!g_engine.EvictSomeTexture())
                 break;
             }
 
             //load the texture
             wchar_t szFilename[MAX_PATH];
             for (int z = 0; z < texture_exts_count; z++) {
-              swprintf(szFilename, L"%stextures\\%s.%s", g_plugin.m_szMilkdrop2Path, szRootName, texture_exts[z].c_str());
+              swprintf(szFilename, L"%stextures\\%s.%s", g_engine.m_szMilkdrop2Path, szRootName, texture_exts[z].c_str());
               if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
-                swprintf(szFilename, L"%s%s.%s", g_plugin.m_szPresetDir, szRootName, texture_exts[z].c_str());
+                swprintf(szFilename, L"%s%s.%s", g_engine.m_szPresetDir, szRootName, texture_exts[z].c_str());
                 if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
                   // Search fallback paths (paths already have trailing backslash)
                   bool fbFound = false;
-                  for (auto& fbPath : g_plugin.m_fallbackPaths) {
+                  for (auto& fbPath : g_engine.m_fallbackPaths) {
                     swprintf(szFilename, L"%s%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
                     if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) { fbFound = true; break; }
                   }
@@ -413,14 +415,14 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
               D3DXIMAGE_INFO desc;
 
               while (1) {
-                HRESULT hr = D3DXCreateTextureFromFileExW(g_plugin.GetDevice(),
+                HRESULT hr = D3DXCreateTextureFromFileExW(g_engine.GetDevice(),
                   szFilename,
                   D3DX_DEFAULT_NONPOW2, D3DX_DEFAULT_NONPOW2,
                   D3DX_DEFAULT, 0, D3DFMT_UNKNOWN, D3DPOOL_DEFAULT,
                   D3DX_DEFAULT, D3DX_DEFAULT, 0, &desc, NULL,
                   (IDirect3DTexture9**)&x.texptr);
                 if (hr == D3DERR_OUTOFVIDEOMEMORY || hr == E_OUTOFMEMORY) {
-                  if (g_plugin.EvictSomeTexture())
+                  if (g_engine.EvictSomeTexture())
                     continue;
                 }
                 if (hr == D3D_OK) {
@@ -428,7 +430,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
                   x.h = desc.Height;
                   x.d = desc.Depth;
                   x.bEvictable = true;
-                  x.nAge = g_plugin.m_nPresetsLoadedTotal;
+                  x.nAge = g_engine.m_nPresetsLoadedTotal;
                   int nPixels = desc.Width * desc.Height * max(1, desc.Depth);
                   int BitsPerPixel = GetDX9TexFormatBitsPerPixel(desc.Format);
                   x.nSizeInBytes = nPixels * BitsPerPixel / 8 + 16384;
@@ -440,15 +442,15 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
             if (!x.texptr) {
               wchar_t buf[2048], title[64];
               swprintf(buf, wasabiApiLangString(IDS_COULD_NOT_LOAD_TEXTURE_X), szRootName, szExtsWithSlashes);
-              g_plugin.dumpmsg(buf);
+              g_engine.dumpmsg(buf);
               if (bHardErrors)
-                MessageBoxW(g_plugin.GetPluginWindow(), buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
+                MessageBoxW(g_engine.GetPluginWindow(), buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
               else
-                g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
+                g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
               continue;
             }
 
-            g_plugin.m_textures.push_back(x);
+            g_engine.m_textures.push_back(x);
             m_texture_bindings[cd.RegisterIndex].texptr = x.texptr;
           }
         }
@@ -529,15 +531,15 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
 
           // see if <szRootName>.tga or .jpg has already been loaded.
           bool bTexFound = false;
-          int N = g_plugin.m_textures.size();
+          int N = g_engine.m_textures.size();
           for (int n = 0; n < N; n++) {
-            if (!wcscmp(g_plugin.m_textures[n].texname, szRootName)) {
+            if (!wcscmp(g_engine.m_textures[n].texname, szRootName)) {
               // found a match - texture was loaded
               TexSizeParamInfo y;
               y.texname = szRootName; //for debugging
               y.texsize_param = h;
-              y.w = g_plugin.m_textures[n].w;
-              y.h = g_plugin.m_textures[n].h;
+              y.w = g_engine.m_textures[n].w;
+              y.h = g_engine.m_textures[n].h;
               texsize_params.push_back(y);
 
               bTexFound = true;
@@ -545,12 +547,12 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
             }
           }
 
-          if (!bTexFound && g_plugin.GetDevice()) {
+          if (!bTexFound && g_engine.GetDevice()) {
             // Only warn when DX9 device is available — in DX12 mode, noise textures
             // are not created so texsize_noise_* can't be resolved, which is expected.
             wchar_t buf[1024];
             swprintf(buf, wasabiApiLangString(IDS_UNABLE_TO_RESOLVE_TEXSIZE_FOR_A_TEXTURE_NOT_IN_USE), cd.Name);
-            g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
+            g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
           }
         }
         else if (cd.Name[0] == '_' && cd.Name[1] == 'c') {
@@ -573,7 +575,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
 
 //----------------------------------------------------------------------
 
-bool CPlugin::RecompileVShader(const char* szShadersText, VShaderInfo* si, int shaderType, bool bHardErrors, bool bCompileOnly) {
+bool Engine::RecompileVShader(const char* szShadersText, VShaderInfo* si, int shaderType, bool bHardErrors, bool bCompileOnly) {
   si->Clear();
 
   char ver[16];
@@ -595,7 +597,7 @@ bool CPlugin::RecompileVShader(const char* szShadersText, VShaderInfo* si, int s
   return true;
 }
 
-bool CPlugin::RecompilePShader(const char* szShadersText, PShaderInfo* si, int shaderType, bool bHardErrors, int PSVersion, bool bCompileOnly) {
+bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int shaderType, bool bHardErrors, int PSVersion, bool bCompileOnly) {
   assert(m_nMaxPSVersion > 0);
 
   si->Clear();
@@ -637,7 +639,7 @@ bool CPlugin::RecompilePShader(const char* szShadersText, PShaderInfo* si, int s
   return true;
 }
 
-bool CPlugin::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompileOnly) {
+bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompileOnly) {
   if (m_nMaxPSVersion <= 0) {
     DebugLogA("DX12: LoadShaders: m_nMaxPSVersion <= 0, skipping");
     return true;
@@ -696,7 +698,7 @@ bool CPlugin::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bComp
   return true;
 }
 
-void CPlugin::CreateDX12PresetPSOs() {
+void Engine::CreateDX12PresetPSOs() {
   if (!m_lpDX || !m_lpDX->m_device.Get() || !m_lpDX->m_rootSignature.Get())
     return;
 
@@ -849,7 +851,7 @@ static void FixShadowedBuiltins(char* szShaderText) {
   free(tmp);
 }
 
-bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char* szProfile,
+bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char* szProfile,
   LPD3DXCONSTANTTABLE* ppConstTable, void** ppShader, int shaderType, bool bHardErrors, bool compileOnly,
   LPD3DXBUFFER* ppBytecodeOut) {
 
@@ -1188,7 +1190,7 @@ bool CPlugin::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, cha
   return true;
 }
 
-void CPlugin::GenWarpPShaderText(char* szShaderText, float decay, bool bWrap) {
+void Engine::GenWarpPShaderText(char* szShaderText, float decay, bool bWrap) {
   // find the pixel shader body and replace it with custom code.
 
   lstrcpy(szShaderText, m_szDefaultWarpPShaderText);
@@ -1212,7 +1214,7 @@ void CPlugin::GenWarpPShaderText(char* szShaderText, float decay, bool bWrap) {
   p += sprintf(p, "}%c", LF);
 }
 
-void CPlugin::GenCompPShaderText(char* szShaderText, float brightness, float ve_alpha, float ve_zoom, int ve_orient, float hue_shader, bool bBrighten, bool bDarken, bool bSolarize, bool bInvert) {
+void Engine::GenCompPShaderText(char* szShaderText, float brightness, float ve_alpha, float ve_zoom, int ve_orient, float hue_shader, bool bBrighten, bool bDarken, bool bSolarize, bool bInvert) {
   // find the pixel shader body and replace it with custom code.
 
   lstrcpy(szShaderText, m_szDefaultCompPShaderText);
@@ -1254,7 +1256,7 @@ void CPlugin::GenCompPShaderText(char* szShaderText, float brightness, float ve_
   p += sprintf(p, "}%c", LF);
 }
 
-void CPlugin::SaveShaderBytecodeToFile(ID3DXBuffer* pShaderByteCode, uint32_t checksum, char* prefix) {
+void Engine::SaveShaderBytecodeToFile(ID3DXBuffer* pShaderByteCode, uint32_t checksum, char* prefix) {
   if (!pShaderByteCode || !checksum) return;
 
   // Ensure the "cache" directory exists
@@ -1277,7 +1279,7 @@ void CPlugin::SaveShaderBytecodeToFile(ID3DXBuffer* pShaderByteCode, uint32_t ch
   }
 }
 
-ID3DXBuffer* CPlugin::LoadShaderBytecodeFromFile(uint32_t checksum, char* prefix) {
+ID3DXBuffer* Engine::LoadShaderBytecodeFromFile(uint32_t checksum, char* prefix) {
   ID3DXBuffer* pBuffer = nullptr;
 
   std::ostringstream filePath;
@@ -1300,7 +1302,7 @@ ID3DXBuffer* CPlugin::LoadShaderBytecodeFromFile(uint32_t checksum, char* prefix
   return pBuffer;
 }
 
-uint32_t CPlugin::crc32(const char* data, size_t length) {
+uint32_t Engine::crc32(const char* data, size_t length) {
   uint32_t crc = 0xFFFFFFFF;
   for (size_t i = 0; i < length; ++i) {
     crc ^= static_cast<uint8_t>(data[i]);
@@ -1314,3 +1316,5 @@ uint32_t CPlugin::crc32(const char* data, size_t length) {
   return ~crc;
 }
 
+
+} // namespace mdrop

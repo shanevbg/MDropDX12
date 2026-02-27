@@ -554,7 +554,7 @@ SPOUT :
           dxcontext.h
 
          - Set application to use Spout DX9 mode
-         - Add function : IDirect3D9Ex* CPluginShell::GetDX9object()
+         - Add function : IDirect3D9Ex* EngineShell::GetDX9object()
          - OpenSender - set Spout to use the application DX9EX object and device
          - Use new surface copy function WriteDX9surface rather than CPU pixel copy.
   05.10.19   - Lock resolution to 1920x1080
@@ -595,8 +595,8 @@ SPOUT :
 
 */
 
-#include "plugin.h"
-#include "plugin_helpers.h"
+#include "engine.h"
+#include "engine_helpers.h"
 #include "utility.h"
 #include "support.h"
 #include "resource.h"
@@ -617,6 +617,8 @@ SPOUT :
 #pragma comment(lib, "dwmapi.lib")
 #define FRAND ((rand() % 7381)/7380.0f)
 #define clamp(value, min, max) ((value) < (min) ? (min) : ((value) > (max) ? (max) : (value)))
+
+namespace mdrop {
 
 int ToggleFPSNumPressed = 7;			// Default is Unlimited FPS.
 int HardcutMode = 0;
@@ -648,6 +650,8 @@ uint64_t LastSentMDropDX12Message = 0;
 #pragma comment(lib, "propsys.lib")
 //
 
+} // namespace mdrop (temporarily close for C-linkage stubs)
+
 void NSEEL_HOSTSTUB_EnterMutex() {}
 void NSEEL_HOSTSTUB_LeaveMutex() {}
 
@@ -657,6 +661,8 @@ void NSEEL_VM_resetvars(NSEEL_VMCTX ctx) {
   NSEEL_VM_remove_all_nonreg_vars(ctx);
 }
 #endif
+
+namespace mdrop {
 
 // note: these must match layouts in support.h!!
 D3DVERTEXELEMENT9 g_MyVertDecl[] =
@@ -683,11 +689,11 @@ D3DVERTEXELEMENT9 g_SpriteVertDecl[] =
 };
 
 //extern CSoundData*   pg_sound;	// declared in main.cpp
-extern CPlugin g_plugin;		// declared in main.cpp (note: was 'pg')
-extern CShaderParamsList global_CShaderParams_master_list; // defined in plugin_shaders.cpp
+extern Engine g_engine;		// declared in Milkdrop2PcmVisualizer.cpp
+extern CShaderParamsList global_CShaderParams_master_list; // defined in engine_shaders.cpp
 
 //----------------------------------------------------------------------
-// Settings types, enums, IDC_MW_*, WM_MW_* now in plugin_helpers.h
+// Settings types, enums, IDC_MW_*, WM_MW_* now in engine_helpers.h
 
 SettingDesc g_settingsDesc[] = {
   { L"Preset Directory",       ST_PATH,     SET_PRESET_DIR,       0, 0, 0,       L"Settings",  L"szPresetDir" },
@@ -706,9 +712,11 @@ SettingDesc g_settingsDesc[] = {
   { L"Spout Output",           ST_BOOL,     SET_SPOUT,            0, 0, 0,       L"Settings",  L"bSpoutOut" },
 };
 
-// from support.cpp:
+} // namespace mdrop (close for cross-namespace externs)
+// from support.cpp (global namespace):
 extern bool g_bDebugOutput;
 extern bool g_bDumpFileCleared;
+namespace mdrop {
 
 // for __UpdatePresetList:
 volatile HANDLE g_hThread;  // only r/w from our MAIN thread
@@ -716,7 +724,7 @@ volatile bool g_bThreadAlive; // set true by MAIN thread, and set false upon exi
 volatile int  g_bThreadShouldQuit;  // set by MAIN thread to flag 2nd thread that it wants it to exit.
 CRITICAL_SECTION g_cs;
 
-// IsAlphabetChar, IsAlphanumericChar, IsNumericChar now in plugin_helpers.h
+// IsAlphabetChar, IsAlphanumericChar, IsNumericChar now in engine_helpers.h
 
 const unsigned char LC2UC[256] = {
   0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,
@@ -739,14 +747,14 @@ const unsigned char LC2UC[256] = {
 
 bool ReadFileToString(const wchar_t* szBaseFilename, char* szDestText, int nMaxBytes, bool bConvertLFsToSpecialChar) {
   wchar_t szFile[MAX_PATH];
-  swprintf(szFile, L"%s%s", g_plugin.m_szMilkdrop2Path, szBaseFilename);
+  swprintf(szFile, L"%s%s", g_engine.m_szMilkdrop2Path, szBaseFilename);
 
   // read in all chars.  Replace char combos:  { 13;  13+10;  10 } with LINEFEED_CONTROL_CHAR, if bConvertLFsToSpecialChar is true.
   FILE* f = _wfopen(szFile, L"rb");
   if (!f) {
     wchar_t buf[1024], title[64];
     swprintf(buf, wasabiApiLangString(IDS_UNABLE_TO_READ_DATA_FILE_X), szFile);
-    g_plugin.dumpmsg(buf);
+    g_engine.dumpmsg(buf);
     MessageBoxW(NULL, buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
     return false;
   }
@@ -780,61 +788,61 @@ bool ReadFileToString(const wchar_t* szBaseFilename, char* szDestText, int nMaxB
 
 // these callback functions are called by menu.cpp whenever the user finishes editing an eval_ expression.
 void OnUserEditedPerFrame(LPARAM param1, LPARAM param2) {
-  g_plugin.m_pState->RecompileExpressions(RECOMPILE_PRESET_CODE, 0);
+  g_engine.m_pState->RecompileExpressions(RECOMPILE_PRESET_CODE, 0);
 }
 
 void OnUserEditedPerPixel(LPARAM param1, LPARAM param2) {
-  g_plugin.m_pState->RecompileExpressions(RECOMPILE_PRESET_CODE, 0);
+  g_engine.m_pState->RecompileExpressions(RECOMPILE_PRESET_CODE, 0);
 }
 
 void OnUserEditedPresetInit(LPARAM param1, LPARAM param2) {
-  g_plugin.m_pState->RecompileExpressions(RECOMPILE_PRESET_CODE, 1);
+  g_engine.m_pState->RecompileExpressions(RECOMPILE_PRESET_CODE, 1);
 }
 
 void OnUserEditedWavecode(LPARAM param1, LPARAM param2) {
-  g_plugin.m_pState->RecompileExpressions(RECOMPILE_WAVE_CODE, 0);
+  g_engine.m_pState->RecompileExpressions(RECOMPILE_WAVE_CODE, 0);
 }
 
 void OnUserEditedWavecodeInit(LPARAM param1, LPARAM param2) {
-  g_plugin.m_pState->RecompileExpressions(RECOMPILE_WAVE_CODE, 1);
+  g_engine.m_pState->RecompileExpressions(RECOMPILE_WAVE_CODE, 1);
 }
 
 void OnUserEditedShapecode(LPARAM param1, LPARAM param2) {
-  g_plugin.m_pState->RecompileExpressions(RECOMPILE_SHAPE_CODE, 0);
+  g_engine.m_pState->RecompileExpressions(RECOMPILE_SHAPE_CODE, 0);
 }
 
 void OnUserEditedShapecodeInit(LPARAM param1, LPARAM param2) {
-  g_plugin.m_pState->RecompileExpressions(RECOMPILE_SHAPE_CODE, 1);
+  g_engine.m_pState->RecompileExpressions(RECOMPILE_SHAPE_CODE, 1);
 }
 
 void OnUserEditedWarpShaders(LPARAM param1, LPARAM param2) {
-  g_plugin.m_bNeedRescanTexturesDir = true;
-  g_plugin.ClearErrors(ERR_PRESET);
-  if (g_plugin.m_nMaxPSVersion == 0)
+  g_engine.m_bNeedRescanTexturesDir = true;
+  g_engine.ClearErrors(ERR_PRESET);
+  if (g_engine.m_nMaxPSVersion == 0)
     return;
-  if (!g_plugin.RecompilePShader(g_plugin.m_pState->m_szWarpShadersText, &g_plugin.m_shaders.warp, SHADER_WARP, false, g_plugin.m_pState->m_nWarpPSVersion, false)) {
+  if (!g_engine.RecompilePShader(g_engine.m_pState->m_szWarpShadersText, &g_engine.m_shaders.warp, SHADER_WARP, false, g_engine.m_pState->m_nWarpPSVersion, false)) {
     // switch to fallback
-    if (g_plugin.m_fallbackShaders_ps.warp.ptr) g_plugin.m_fallbackShaders_ps.warp.ptr->AddRef();
-    if (g_plugin.m_fallbackShaders_ps.warp.CT) g_plugin.m_fallbackShaders_ps.warp.CT->AddRef();
-    if (g_plugin.m_fallbackShaders_ps.warp.bytecodeBlob) g_plugin.m_fallbackShaders_ps.warp.bytecodeBlob->AddRef();
-    g_plugin.m_shaders.warp = g_plugin.m_fallbackShaders_ps.warp;
+    if (g_engine.m_fallbackShaders_ps.warp.ptr) g_engine.m_fallbackShaders_ps.warp.ptr->AddRef();
+    if (g_engine.m_fallbackShaders_ps.warp.CT) g_engine.m_fallbackShaders_ps.warp.CT->AddRef();
+    if (g_engine.m_fallbackShaders_ps.warp.bytecodeBlob) g_engine.m_fallbackShaders_ps.warp.bytecodeBlob->AddRef();
+    g_engine.m_shaders.warp = g_engine.m_fallbackShaders_ps.warp;
   }
-  g_plugin.CreateDX12PresetPSOs();
+  g_engine.CreateDX12PresetPSOs();
 }
 
 void OnUserEditedCompShaders(LPARAM param1, LPARAM param2) {
-  g_plugin.m_bNeedRescanTexturesDir = true;
-  g_plugin.ClearErrors(ERR_PRESET);
-  if (g_plugin.m_nMaxPSVersion == 0)
+  g_engine.m_bNeedRescanTexturesDir = true;
+  g_engine.ClearErrors(ERR_PRESET);
+  if (g_engine.m_nMaxPSVersion == 0)
     return;
-  if (!g_plugin.RecompilePShader(g_plugin.m_pState->m_szCompShadersText, &g_plugin.m_shaders.comp, SHADER_COMP, false, g_plugin.m_pState->m_nCompPSVersion, false)) {
+  if (!g_engine.RecompilePShader(g_engine.m_pState->m_szCompShadersText, &g_engine.m_shaders.comp, SHADER_COMP, false, g_engine.m_pState->m_nCompPSVersion, false)) {
     // switch to fallback
-    if (g_plugin.m_fallbackShaders_ps.comp.ptr) g_plugin.m_fallbackShaders_ps.comp.ptr->AddRef();
-    if (g_plugin.m_fallbackShaders_ps.comp.CT) g_plugin.m_fallbackShaders_ps.comp.CT->AddRef();
-    if (g_plugin.m_fallbackShaders_ps.comp.bytecodeBlob) g_plugin.m_fallbackShaders_ps.comp.bytecodeBlob->AddRef();
-    g_plugin.m_shaders.comp = g_plugin.m_fallbackShaders_ps.comp;
+    if (g_engine.m_fallbackShaders_ps.comp.ptr) g_engine.m_fallbackShaders_ps.comp.ptr->AddRef();
+    if (g_engine.m_fallbackShaders_ps.comp.CT) g_engine.m_fallbackShaders_ps.comp.CT->AddRef();
+    if (g_engine.m_fallbackShaders_ps.comp.bytecodeBlob) g_engine.m_fallbackShaders_ps.comp.bytecodeBlob->AddRef();
+    g_engine.m_shaders.comp = g_engine.m_fallbackShaders_ps.comp;
   }
-  g_plugin.CreateDX12PresetPSOs();
+  g_engine.CreateDX12PresetPSOs();
 }
 
 // Modify the help screen text here.
@@ -852,7 +860,7 @@ int g_szHelp_W = 0;
 
 //----------------------------------------------------------------------
 
-void CPlugin::OverrideDefaults() {
+void Engine::OverrideDefaults() {
   // Here, you have the option of overriding the "default defaults"
   //   for the stuff on tab 1 of the config panel, replacing them
   //   with custom defaults for your plugin.
@@ -905,8 +913,8 @@ void CPlugin::OverrideDefaults() {
 
 //----------------------------------------------------------------------
 // Preset directory auto-descend helpers — must be defined before MyPreInitialize
-void CPlugin::MyPreInitialize() {
-  // Initialize EVERY data member you've added to CPlugin here;
+void Engine::MyPreInitialize() {
+  // Initialize EVERY data member you've added to Engine here;
   //   these will be the default values.
   // If you want to initialize any of your variables with random values
   //   (using rand()), be sure to seed the random number generator first!
@@ -1147,7 +1155,7 @@ void CPlugin::MyPreInitialize() {
 
 //----------------------------------------------------------------------
 
-void CPlugin::MyReadConfig() {
+void Engine::MyReadConfig() {
   // Read the user's settings from the .INI file.
   // If you've added any controls to the config panel, read their value in
   //   from the .INI file here.
@@ -1388,7 +1396,7 @@ void CPlugin::MyReadConfig() {
 
 //----------------------------------------------------------------------
 
-void CPlugin::MyWriteConfig() {
+void Engine::MyWriteConfig() {
   // Write the user's settings to the .INI file.
   // This gets called only when the user runs the config panel and hits OK.
   // If you've added any controls to the config panel, write their value out
@@ -1525,7 +1533,7 @@ void CPlugin::MyWriteConfig() {
   WritePrivateProfileIntW(m_nHeavyPresetMaxInstances, L"HeavyPresetMaxInstances", pIni, L"Milkwave");
 }
 
-void CPlugin::SaveWindowSizeAndPosition(HWND hwnd) {
+void Engine::SaveWindowSizeAndPosition(HWND hwnd) {
   RECT rect;
   if (GetWindowRect(hwnd, &rect)) {
     m_WindowX = rect.left;
@@ -1600,7 +1608,7 @@ void StripComments(char* str) {
   *dest++ = 0;
 }
 
-int CPlugin::AllocateMyNonDx9Stuff() {
+int Engine::AllocateMyNonDx9Stuff() {
   // This gets called only once, when your plugin is actually launched.
   // If only the config panel is launched, this does NOT get called.
   //   (whereas MyPreInitialize() still does).
@@ -1673,7 +1681,7 @@ void CancelThread(int max_wait_time_ms) {
   g_hThread = INVALID_HANDLE_VALUE;
 }
 
-void CPlugin::CleanUpMyNonDx9Stuff() {
+void Engine::CleanUpMyNonDx9Stuff() {
   // This gets called only once, when your plugin exits.
   // Be sure to clean up any objects here that were
   //   created/initialized in AllocateMyNonDx9Stuff.
@@ -1738,7 +1746,7 @@ int GetNearestPow2Size(int w, int h) {
   return log2size;
 }
 
-int CPlugin::AllocateMyDX9Stuff() {
+int Engine::AllocateMyDX9Stuff() {
   // (...aka OnUserResizeWindow)
   // (...aka OnToggleFullscreen)
 
@@ -2824,7 +2832,7 @@ DWORD dwCubicInterpolate(DWORD y0, DWORD y1, DWORD y2, DWORD y3, float t) {
 
 //----------------------------------------------------------------------
 
-void CPlugin::CleanUpMyDX9Stuff(int final_cleanup) {
+void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
   // Clean up all your DX9 and D3DX textures, fonts, buffers, etc. here.
   // EVERYTHING CREATED IN ALLOCATEMYDX9STUFF() SHOULD BE CLEANED UP HERE.
   // The input parameter, 'final_cleanup', will be 0 if this is
@@ -3002,7 +3010,7 @@ void CPlugin::CleanUpMyDX9Stuff(int final_cleanup) {
 //----------------------------------------------------------------------
 //----------------------------------------------------------------------
 
-void CPlugin::MyRenderFn(int redraw) {
+void Engine::MyRenderFn(int redraw) {
 
   EnterCriticalSection(&g_cs);
 
@@ -3240,13 +3248,13 @@ void CPlugin::MyRenderFn(int redraw) {
     // Prefer renderer/backbuffer size if the renderer uses a different internal resolution
     int targetW = clientW;
     int targetH = clientH;
-    if (g_plugin.d3dPp.BackBufferWidth > 0 && g_plugin.d3dPp.BackBufferHeight > 0) {
-      targetW = static_cast<int>(g_plugin.d3dPp.BackBufferWidth);
-      targetH = static_cast<int>(g_plugin.d3dPp.BackBufferHeight);
+    if (g_engine.d3dPp.BackBufferWidth > 0 && g_engine.d3dPp.BackBufferHeight > 0) {
+      targetW = static_cast<int>(g_engine.d3dPp.BackBufferWidth);
+      targetH = static_cast<int>(g_engine.d3dPp.BackBufferHeight);
     }
-    else if (g_plugin.m_WindowWidth > 0 && g_plugin.m_WindowHeight > 0) {
-      targetW = g_plugin.m_WindowWidth;
-      targetH = g_plugin.m_WindowHeight;
+    else if (g_engine.m_WindowWidth > 0 && g_engine.m_WindowHeight > 0) {
+      targetW = g_engine.m_WindowWidth;
+      targetH = g_engine.m_WindowHeight;
     }
     if (targetW <= 1) targetW = 1;
     if (targetH <= 1) targetH = 1;
@@ -3542,3 +3550,5 @@ void DrawOwnerButton(DRAWITEMSTRUCT* pDIS, bool bDark,
   if (hOldFont) SelectObject(hdc, hOldFont);
 }
 
+
+} // namespace mdrop

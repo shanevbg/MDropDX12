@@ -1,12 +1,12 @@
 /*
   Plugin module: Window Proc & Keyboard Input
-  Extracted from plugin.cpp for maintainability.
+  Extracted from engine.cpp for maintainability.
   Contains: MyWindowProc, HandleRegularKey, WaitString editing,
             window management (always-on-top, opacity, transparency)
 */
 
-#include "plugin.h"
-#include "plugin_helpers.h"
+#include "engine.h"
+#include "engine_helpers.h"
 #include "utility.h"
 #include "support.h"
 #include "resource.h"
@@ -24,7 +24,9 @@
 #define FRAND ((rand() % 7381)/7380.0f)
 #define clamp(value, min, max) ((value) < (min) ? (min) : ((value) > (max) ? (max) : (value)))
 
-extern CPlugin g_plugin;
+namespace mdrop {
+
+extern Engine g_engine;
 extern int ToggleFPSNumPressed;
 extern int HardcutMode;
 extern float timetick;
@@ -174,7 +176,7 @@ int mystrcmpiW(const wchar_t* s1, const wchar_t* s2) {
     return (LC2UC[s1[i]] < LC2UC[s2[i]]) ? -1 : 1;
 }
 
-void CPlugin::ToggleAlwaysOnTop(HWND hwnd) {
+void Engine::ToggleAlwaysOnTop(HWND hwnd) {
 
   RECT rect;
   GetWindowRect(hwnd, &rect);
@@ -212,7 +214,7 @@ void ToggleTransparency(HWND hwnd) {
   SetWindowPos(hwnd, NULL, 0, 0, 0, 0, SWP_DRAWFRAME | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED); // Redraws the window to fix the transparency mode issue for Windows 7, 8 and 8.1.
   if (TranspaMode) {
     SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), 255, LWA_COLORKEY);
-    g_plugin.fOpacity = 1.0f;
+    g_engine.fOpacity = 1.0f;
     DragAcceptFiles(hwnd, TRUE);
   }
   else {
@@ -221,9 +223,9 @@ void ToggleTransparency(HWND hwnd) {
   }
 }
 
-void CPlugin::SetOpacity(HWND hwnd) {
+void Engine::SetOpacity(HWND hwnd) {
   if (IsBorderlessFullscreen(hwnd)) {
-    g_plugin.m_WindowWatermarkModeOpacity = fOpacity;
+    g_engine.m_WindowWatermarkModeOpacity = fOpacity;
   }
 
   // Retrieve the current extended window style
@@ -265,7 +267,7 @@ void CPlugin::SetOpacity(HWND hwnd) {
   int display = (int)std::ceil(100 * fOpacity);
   wchar_t buf[1024];
   swprintf(buf, 64, L"Opacity: %d%%", display); // Use %d for integers
-  g_plugin.AddNotification(buf);
+  g_engine.AddNotification(buf);
 
   SendMessageToMDropDX12Remote((L"OPACITY=" + std::to_wstring(display)).c_str());
 }
@@ -279,29 +281,29 @@ void ToggleWindowOpacity(HWND hwnd, bool bDown) {
   int height = rect.bottom - rect.top;
 
   float changeVal = 0.1f;
-  if (g_plugin.fOpacity < 0.09 || (g_plugin.fOpacity <= 0.1 && bDown)) {
+  if (g_engine.fOpacity < 0.09 || (g_engine.fOpacity <= 0.1 && bDown)) {
     changeVal = 0.01f;
   }
   else {
     changeVal = 0.05f;
   }
   if (bDown) {
-    g_plugin.fOpacity -= changeVal;
+    g_engine.fOpacity -= changeVal;
   }
   else {
-    g_plugin.fOpacity += changeVal;
+    g_engine.fOpacity += changeVal;
   }
 
-  if (g_plugin.fOpacity < 0.01f)
-    g_plugin.fOpacity = 0.01f;
-  else if (g_plugin.fOpacity > 1.0f)
-    g_plugin.fOpacity = 1.0f;
+  if (g_engine.fOpacity < 0.01f)
+    g_engine.fOpacity = 0.01f;
+  else if (g_engine.fOpacity > 1.0f)
+    g_engine.fOpacity = 1.0f;
 
   // Set the opacity of the window
-  g_plugin.SetOpacity(hwnd);
+  g_engine.SetOpacity(hwnd);
 }
 
-bool CPlugin::IsBorderlessFullscreen(HWND hWnd) {
+bool Engine::IsBorderlessFullscreen(HWND hWnd) {
   // Check if the window is borderless fullscreen
   RECT workArea;
   MONITORINFO monitorInfo = { sizeof(MONITORINFO) };
@@ -352,17 +354,17 @@ void LoadPresetFilesViaDragAndDrop(WPARAM wParam) {
   //if (MAX_PATH < 5 || wcsicmp(convertedFileName + MAX_PATH - 5, L".milk") != 0)
   std::string GetFilename = szDroppedPresetName;
   if (GetFilename.substr(GetFilename.find_last_of(".") + 1) == "milk") //from https://stackoverflow.com/a/51999
-    g_plugin.LoadPreset(convertedFileName, 0.0f);
+    g_engine.LoadPreset(convertedFileName, 0.0f);
   else {
     wchar_t buf[1024];
     swprintf(buf, L"Error: Failed to load dropped preset file: %s", convertedFileName);
-    g_plugin.AddError(buf, 5.0f, ERR_NOTIFY, true);
+    g_engine.AddError(buf, 5.0f, ERR_NOTIFY, true);
   }
   DragFinish(hDrop);
 }
 //----------------------------------------------------------------------
 
-LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam) {
+LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam) {
   // You can handle Windows messages here while the plugin is running,
   //   such as mouse events (WM_MOUSEMOVE/WM_LBUTTONDOWN), keypresses
   //   (WK_KEYDOWN/WM_CHAR), and so on.
@@ -1218,7 +1220,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
           else if (m_UI_mode == UI_CHANGEDIR) {
             //m_fShowUserMessageUntilThisTime = GetTime();	// if there was an error message already, clear it
 
-            bool bSuccess = ChangePresetDir(m_waitstring.szText, g_plugin.m_szPresetDir);
+            bool bSuccess = ChangePresetDir(m_waitstring.szText, g_engine.m_szPresetDir);
             if (bSuccess) {
 
               // set current preset index to -1 because current preset is no longer in the list
@@ -1681,7 +1683,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
 
     case 'S':
       if (bCtrlHeldDown) {
-        g_plugin.SaveCurrentPresetToQuicksave(bShiftHeldDown);
+        g_engine.SaveCurrentPresetToQuicksave(bShiftHeldDown);
         return 0;
       }
       break;
@@ -1731,7 +1733,7 @@ LRESULT CPlugin::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lP
   return 0;
 }
 
-int CPlugin::HandleRegularKey(WPARAM wParam) {
+int Engine::HandleRegularKey(WPARAM wParam) {
   // here we handle all the normal keys for milkdrop-
   // these are the hotkeys that are used when you're not
   // in the middle of editing a string, navigating a menu, etc.
@@ -2183,7 +2185,7 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
 
   case '*':
     ReadCustomMessages();
-    g_plugin.AddNotification(L"Messages reloaded");
+    g_engine.AddNotification(L"Messages reloaded");
     m_nNumericInputDigits = 0;
     m_nNumericInputNum = 0;
     return 0;
@@ -2198,7 +2200,7 @@ int CPlugin::HandleRegularKey(WPARAM wParam) {
   return 1;
 }
 
-void CPlugin::WaitString_NukeSelection() {
+void Engine::WaitString_NukeSelection() {
   if (m_waitstring.bActive &&
     m_waitstring.nSelAnchorPos != -1) {
     // nuke selection.  note: start & end are INCLUSIVE.
@@ -2224,7 +2226,7 @@ void CPlugin::WaitString_NukeSelection() {
   }
 }
 
-void CPlugin::WaitString_Cut() {
+void Engine::WaitString_Cut() {
   if (m_waitstring.bActive &&
     m_waitstring.nSelAnchorPos != -1) {
     WaitString_Copy();
@@ -2232,7 +2234,7 @@ void CPlugin::WaitString_Cut() {
   }
 }
 
-void CPlugin::WaitString_Copy() {
+void Engine::WaitString_Copy() {
   if (m_waitstring.bActive &&
     m_waitstring.nSelAnchorPos != -1) {
     // note: start & end are INCLUSIVE.
@@ -2262,7 +2264,7 @@ void CPlugin::WaitString_Copy() {
   }
 }
 
-void CPlugin::WaitString_Paste() {
+void Engine::WaitString_Paste() {
   // NOTE: if there is a selection, it is wiped out, and replaced with the clipboard contents.
 
   if (m_waitstring.bActive) {
@@ -2319,7 +2321,7 @@ void CPlugin::WaitString_Paste() {
   }
 }
 
-void CPlugin::WaitString_SeekLeftWord() {
+void Engine::WaitString_SeekLeftWord() {
   // move to beginning of prior word
   if (m_waitstring.bDisplayAsCode) {
     char* ptr = (char*)m_waitstring.szText;
@@ -2342,7 +2344,7 @@ void CPlugin::WaitString_SeekLeftWord() {
   }
 }
 
-void CPlugin::WaitString_SeekRightWord() {
+void Engine::WaitString_SeekRightWord() {
   // move to beginning of next word
 
   //testing  lotsa   stuff
@@ -2372,7 +2374,7 @@ void CPlugin::WaitString_SeekRightWord() {
   }
 }
 
-int CPlugin::WaitString_GetCursorColumn() {
+int Engine::WaitString_GetCursorColumn() {
   if (m_waitstring.bDisplayAsCode) {
     int column = 0;
     char* ptr = (char*)m_waitstring.szText;
@@ -2387,7 +2389,7 @@ int CPlugin::WaitString_GetCursorColumn() {
   }
 }
 
-int	CPlugin::WaitString_GetLineLength() {
+int	Engine::WaitString_GetLineLength() {
   int line_start = m_waitstring.nCursorPos - WaitString_GetCursorColumn();
   int line_length = 0;
 
@@ -2406,22 +2408,22 @@ int	CPlugin::WaitString_GetLineLength() {
   return line_length;
 }
 
-void CPlugin::WaitString_SeekUpOneLine() {
-  int column = g_plugin.WaitString_GetCursorColumn();
+void Engine::WaitString_SeekUpOneLine() {
+  int column = g_engine.WaitString_GetCursorColumn();
 
   if (column != m_waitstring.nCursorPos) {
     // seek to very end of previous line (cursor will be at the semicolon)
     m_waitstring.nCursorPos -= column + 1;
 
-    int new_column = g_plugin.WaitString_GetCursorColumn();
+    int new_column = g_engine.WaitString_GetCursorColumn();
 
     if (new_column > column)
       m_waitstring.nCursorPos -= (new_column - column);
   }
 }
 
-void CPlugin::WaitString_SeekDownOneLine() {
-  int column = g_plugin.WaitString_GetCursorColumn();
+void Engine::WaitString_SeekDownOneLine() {
+  int column = g_engine.WaitString_GetCursorColumn();
   int newpos = m_waitstring.nCursorPos;
 
   char* ptr = (char*)m_waitstring.szText;
@@ -2440,3 +2442,5 @@ void CPlugin::WaitString_SeekDownOneLine() {
   }
 }
 
+
+} // namespace mdrop

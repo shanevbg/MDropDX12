@@ -1,12 +1,12 @@
 /*
   Plugin module: Messages, Sprites, Remote Communication & Audio
-  Extracted from plugin.cpp for maintainability.
+  Extracted from engine.cpp for maintainability.
   Contains: Custom messages, supertexts, sprites, song title animations,
             remote communication, screenshots, audio analysis, misc utilities
 */
 
-#include "plugin.h"
-#include "plugin_helpers.h"
+#include "engine.h"
+#include "engine_helpers.h"
 #include "utility.h"
 #include "AutoCharFn.h"
 #include "support.h"
@@ -32,9 +32,11 @@
 
 #define FRAND ((rand() % 7381)/7380.0f)
 
-extern CPlugin g_plugin;
+namespace mdrop {
 
-void CPlugin::PopulateMsgListBox(HWND hList) {
+extern Engine g_engine;
+
+void Engine::PopulateMsgListBox(HWND hList) {
   if (!hList) return;
   SendMessage(hList, LB_RESETCONTENT, 0, 0);
   for (int i = 0; i < m_nMsgAutoplayCount; i++) {
@@ -47,7 +49,7 @@ void CPlugin::PopulateMsgListBox(HWND hList) {
   }
 }
 
-void CPlugin::BuildMsgPlaybackOrder() {
+void Engine::BuildMsgPlaybackOrder() {
   m_nMsgAutoplayCount = 0;
   for (int i = 0; i < MAX_CUSTOM_MESSAGES; i++) {
     if (m_CustomMessage[i].szText[0]) {
@@ -56,7 +58,7 @@ void CPlugin::BuildMsgPlaybackOrder() {
   }
 }
 
-void CPlugin::UpdateMsgPreview(HWND hSettingsWnd, int sel) {
+void Engine::UpdateMsgPreview(HWND hSettingsWnd, int sel) {
   if (sel >= 0 && sel < m_nMsgAutoplayCount) {
     int idx = m_nMsgAutoplayOrder[sel];
     int fontID = m_CustomMessage[idx].nFont;
@@ -75,7 +77,7 @@ void CPlugin::UpdateMsgPreview(HWND hSettingsWnd, int sel) {
   }
 }
 
-void CPlugin::WriteCustomMessages() {
+void Engine::WriteCustomMessages() {
   // Write font definitions
   for (int n = 0; n < MAX_CUSTOM_MESSAGE_FONTS; n++) {
     wchar_t section[32];
@@ -158,7 +160,7 @@ void CPlugin::WriteCustomMessages() {
   }
 }
 
-void CPlugin::SaveMsgAutoplaySettings() {
+void Engine::SaveMsgAutoplaySettings() {
   wchar_t* pIni = GetConfigIniFile();
   wchar_t val[32];
 
@@ -198,7 +200,7 @@ void CPlugin::SaveMsgAutoplaySettings() {
   }
 }
 
-void CPlugin::LoadMsgAutoplaySettings() {
+void Engine::LoadMsgAutoplaySettings() {
   wchar_t* pIni = GetConfigIniFile();
 
   m_bMsgAutoplay = GetPrivateProfileIntW(L"Milkwave", L"MsgAutoplay", 0, pIni) != 0;
@@ -238,7 +240,7 @@ void CPlugin::LoadMsgAutoplaySettings() {
   }
 }
 
-void CPlugin::ScheduleNextAutoMessage() {
+void Engine::ScheduleNextAutoMessage() {
   if (!m_bMsgAutoplay || m_nMsgAutoplayCount == 0) {
     m_fNextAutoMsgTime = -1.0f;
     return;
@@ -251,7 +253,7 @@ void CPlugin::ScheduleNextAutoMessage() {
 
 // Message edit dialog procedure
 struct MsgEditDlgData {
-  CPlugin*    plugin;
+  Engine*    plugin;
   int         msgIndex;
   bool        isNew;
   HWND        hDlgWnd;
@@ -276,7 +278,7 @@ COLORREF MsgEditDlgData::s_acrCustColors[16] = {};
 
 static void UpdateMsgEditFontPreview(MsgEditDlgData* data) {
   if (!data || !data->hDlgWnd) return;
-  CPlugin* p = data->plugin;
+  Engine* p = data->plugin;
   int fontID = data->nFont;
   if (fontID < 0) fontID = 0;
   if (fontID >= MAX_CUSTOM_MESSAGE_FONTS) fontID = MAX_CUSTOM_MESSAGE_FONTS - 1;
@@ -352,7 +354,7 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
       return 0;
     }
     if (id == IDC_MSGEDIT_CHOOSE_FONT && code == BN_CLICKED) {
-      CPlugin* p = data->plugin;
+      Engine* p = data->plugin;
       int fontID = data->nFont;
       if (fontID < 0) fontID = 0;
       if (fontID >= MAX_CUSTOM_MESSAGE_FONTS) fontID = MAX_CUSTOM_MESSAGE_FONTS - 1;
@@ -395,7 +397,7 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
       return 0;
     }
     if (id == IDC_MSGEDIT_CHOOSE_COLOR && code == BN_CLICKED) {
-      CPlugin* p = data->plugin;
+      Engine* p = data->plugin;
       int fontID = data->nFont;
       if (fontID < 0) fontID = 0;
       if (fontID >= MAX_CUSTOM_MESSAGE_FONTS) fontID = MAX_CUSTOM_MESSAGE_FONTS - 1;
@@ -430,7 +432,7 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
     if (pDIS->CtlType == ODT_BUTTON) {
       if ((int)pDIS->CtlID == IDC_MSGEDIT_COLOR_SWATCH && data) {
         // Draw color swatch
-        CPlugin* p = data->plugin;
+        Engine* p = data->plugin;
         int fontID = data->nFont;
         if (fontID < 0) fontID = 0;
         if (fontID >= MAX_CUSTOM_MESSAGE_FONTS) fontID = MAX_CUSTOM_MESSAGE_FONTS - 1;
@@ -444,7 +446,7 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
         return TRUE;
       }
       if (data && data->plugin) {
-        CPlugin* p = data->plugin;
+        Engine* p = data->plugin;
         DrawOwnerButton(pDIS, p->m_bSettingsDarkTheme,
           p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
         return TRUE;
@@ -496,7 +498,7 @@ static LRESULT CALLBACK MsgEditWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
   return DefWindowProcW(hWnd, msg, wParam, lParam);
 }
 
-bool CPlugin::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
+bool Engine::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
   // Register window class (once)
   static bool registered = false;
   static const wchar_t* WND_CLASS = L"MDropDX12MsgEdit";
@@ -769,7 +771,7 @@ bool CPlugin::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
 // ======== Message Overrides Dialog ========
 
 struct MsgOverridesDlgData {
-  CPlugin*    plugin;
+  Engine*    plugin;
   HWND        hDlgWnd;
   bool        bResult;
   bool        bDone;
@@ -840,7 +842,7 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
   case WM_DRAWITEM: {
     DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
     if (pDIS && pDIS->CtlType == ODT_BUTTON && data && data->plugin) {
-      CPlugin* p = data->plugin;
+      Engine* p = data->plugin;
       bool bIsCheckbox = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheckbox");
       if (bIsCheckbox) {
         DrawOwnerCheckbox(pDIS, p->m_bSettingsDarkTheme,
@@ -904,7 +906,7 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
   return DefWindowProcW(hWnd, msg, wParam, lParam);
 }
 
-bool CPlugin::ShowMsgOverridesDialog(HWND hParent) {
+bool Engine::ShowMsgOverridesDialog(HWND hParent) {
   // Register window class (once)
   static bool registered = false;
   static const wchar_t* WND_CLASS = L"MDropDX12MsgOverrides";
@@ -1066,7 +1068,7 @@ bool CPlugin::ShowMsgOverridesDialog(HWND hParent) {
   return data.bResult;
 }
 
-void CPlugin::ReadCustomMessages() {
+void Engine::ReadCustomMessages() {
   int n;
 
   // First, clear all old data
@@ -1169,7 +1171,7 @@ void CPlugin::ReadCustomMessages() {
   }
 }
 
-void CPlugin::LaunchCustomMessage(int nMsgNum) {
+void Engine::LaunchCustomMessage(int nMsgNum) {
   if (nMsgNum > 99)
     nMsgNum = 99;
 
@@ -1273,7 +1275,7 @@ void CPlugin::LaunchCustomMessage(int nMsgNum) {
 
 }
 
-void CPlugin::LaunchSongTitleAnim(int supertextIndex) {
+void Engine::LaunchSongTitleAnim(int supertextIndex) {
 
   wchar_t debugMsg[128];
   swprintf(debugMsg, sizeof(debugMsg) / sizeof(debugMsg[0]), L"LaunchSongTitleAnim: supertextIndex=%d\n", supertextIndex);
@@ -1307,7 +1309,7 @@ LPCWSTR ConvertToLPCWSTR(const std::wstring& wstr) {
   return wstr.c_str();
 }
 
-void CPlugin::LaunchMessage(wchar_t* sMessage) {
+void Engine::LaunchMessage(wchar_t* sMessage) {
   if (wcsncmp(sMessage, L"MSG|", 4) == 0) {
 
     std::wstring message(sMessage + 4); // Remove "MSG|"
@@ -1601,8 +1603,8 @@ void CPlugin::LaunchMessage(wchar_t* sMessage) {
       wcscpy_s(sNewPath, sPath.c_str());
       // ensure it is zero-terminated
       sNewPath[MAX_PATH - 1] = L'\0';
-      if (wcscmp(sNewPath, g_plugin.m_szPresetDir) != 0) {
-        g_plugin.ChangePresetDir(sNewPath, g_plugin.m_szPresetDir);
+      if (wcscmp(sNewPath, g_engine.m_szPresetDir) != 0) {
+        g_engine.ChangePresetDir(sNewPath, g_engine.m_szPresetDir);
       }
     }
 
@@ -1636,9 +1638,9 @@ void CPlugin::LaunchMessage(wchar_t* sMessage) {
       newRequestType = 0;
     }
     m_nAudioDeviceRequestType = newRequestType;
-    wcscpy_s(g_plugin.m_szAudioDevicePrevious, g_plugin.m_szAudioDevice);
-    g_plugin.m_nAudioDevicePreviousType = g_plugin.m_nAudioDeviceActiveType;
-    wcscpy(g_plugin.m_szAudioDevice, message.c_str());
+    wcscpy_s(g_engine.m_szAudioDevicePrevious, g_engine.m_szAudioDevice);
+    g_engine.m_nAudioDevicePreviousType = g_engine.m_nAudioDeviceActiveType;
+    wcscpy(g_engine.m_szAudioDevice, message.c_str());
     bool isRenderDevice = true;
     if (newRequestType == 1) {
       isRenderDevice = false;
@@ -1646,7 +1648,7 @@ void CPlugin::LaunchMessage(wchar_t* sMessage) {
     else if (newRequestType == 2) {
       isRenderDevice = true;
     }
-    g_plugin.SetAudioDeviceDisplayName(message.c_str(), isRenderDevice);
+    g_engine.SetAudioDeviceDisplayName(message.c_str(), isRenderDevice);
     // Restart audio
     m_nAudioLoopState = 1;
   }
@@ -1674,7 +1676,7 @@ void CPlugin::LaunchMessage(wchar_t* sMessage) {
     m_RemotePresetLink = std::stoi(message);
   }
   else if (wcsncmp(sMessage, L"QUICKSAVE", 9) == 0) {
-    g_plugin.SaveCurrentPresetToQuicksave(false);
+    g_engine.SaveCurrentPresetToQuicksave(false);
   }
   else if (wcsncmp(sMessage, L"CONFIG", 6) == 0) {
     ReadConfig();
@@ -1691,71 +1693,71 @@ void CPlugin::LaunchMessage(wchar_t* sMessage) {
     ClearErrors(ERR_MSG_BOTTOM_EXTRA_2);
     ClearErrors(ERR_MSG_BOTTOM_EXTRA_3);
     // Send text to appear at the bottom first, assuming a bottom corner is used
-    g_plugin.AddError(L"Finally the Album", g_plugin.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_3, false);
-    g_plugin.AddError(L"Here goes the Title", g_plugin.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_2, false);
-    g_plugin.AddError(L"This is the Artist", g_plugin.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_1, false);
-    if (!g_plugin.m_bShowPresetInfo) g_plugin.m_bShowPresetInfo = true;
-    g_plugin.AddNotification(L"This is a notification");
+    g_engine.AddError(L"Finally the Album", g_engine.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_3, false);
+    g_engine.AddError(L"Here goes the Title", g_engine.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_2, false);
+    g_engine.AddError(L"This is the Artist", g_engine.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_1, false);
+    if (!g_engine.m_bShowPresetInfo) g_engine.m_bShowPresetInfo = true;
+    g_engine.AddNotification(L"This is a notification");
   }
   else if (wcsncmp(sMessage, L"CLEARPRESET", 11) == 0) {
     ClearPreset();
   }
   else if (wcsncmp(sMessage, L"CLEARSPRITES", 12) == 0) {
-    g_plugin.KillAllSprites();
+    g_engine.KillAllSprites();
   }
   else if (wcsncmp(sMessage, L"CLEARTEXTS", 10) == 0) {
-    g_plugin.KillAllSupertexts();
+    g_engine.KillAllSupertexts();
   }
   else if (wcsncmp(sMessage, L"VAR_TIME=", 9) == 0) {
     std::wstring message(sMessage + 9);
-    g_plugin.m_timeFactor = std::stof(message);
+    g_engine.m_timeFactor = std::stof(message);
   }
   else if (wcsncmp(sMessage, L"VAR_FRAME=", 10) == 0) {
     std::wstring message(sMessage + 10);
-    g_plugin.m_frameFactor = std::stof(message);
+    g_engine.m_frameFactor = std::stof(message);
   }
   else if (wcsncmp(sMessage, L"VAR_FPS=", 8) == 0) {
     std::wstring message(sMessage + 8);
-    g_plugin.m_fpsFactor = std::stof(message);
+    g_engine.m_fpsFactor = std::stof(message);
   }
   else if (wcsncmp(sMessage, L"VAR_INTENSITY=", 14) == 0) {
     std::wstring message(sMessage + 14);
-    g_plugin.m_VisIntensity = std::stof(message);
+    g_engine.m_VisIntensity = std::stof(message);
   }
   else if (wcsncmp(sMessage, L"VAR_SHIFT=", 10) == 0) {
     std::wstring message(sMessage + 10);
-    g_plugin.m_VisShift = std::stof(message);
+    g_engine.m_VisShift = std::stof(message);
   }
   else if (wcsncmp(sMessage, L"VAR_VERSION=", 12) == 0) {
     std::wstring message(sMessage + 12);
-    g_plugin.m_VisVersion = std::stof(message);
+    g_engine.m_VisVersion = std::stof(message);
   }
   else if (wcsncmp(sMessage, L"COL_HUE=", 8) == 0) {
     std::wstring message(sMessage + 8);
-    g_plugin.m_ColShiftHue = std::stof(message);
+    g_engine.m_ColShiftHue = std::stof(message);
   }
   else if (wcsncmp(sMessage, L"HUE_AUTO=", 9) == 0) {
-    g_plugin.m_AutoHue = (sMessage[9] == L'1');
+    g_engine.m_AutoHue = (sMessage[9] == L'1');
   }
   else if (wcsncmp(sMessage, L"HUE_AUTO_SECONDS=", 17) == 0) {
     std::wstring message(sMessage + 17);
-    g_plugin.m_AutoHueSeconds = std::stof(message);
+    g_engine.m_AutoHueSeconds = std::stof(message);
   }
   else if (wcsncmp(sMessage, L"COL_SATURATION=", 15) == 0) {
     std::wstring message(sMessage + 15);
-    g_plugin.m_ColShiftSaturation = std::stof(message);
+    g_engine.m_ColShiftSaturation = std::stof(message);
   }
   else if (wcsncmp(sMessage, L"COL_BRIGHTNESS=", 15) == 0) {
     std::wstring message(sMessage + 15);
-    g_plugin.m_ColShiftBrightness = std::stof(message);
+    g_engine.m_ColShiftBrightness = std::stof(message);
   }
   else if (wcsncmp(sMessage, L"VAR_QUALITY=", 12) == 0) {
     std::wstring message(sMessage + 12);
-    g_plugin.m_fRenderQuality = std::stof(message);
+    g_engine.m_fRenderQuality = std::stof(message);
     ResetBufferAndFonts();
   }
   else if (wcsncmp(sMessage, L"VAR_AUTO=", 9) == 0) {
-    g_plugin.bQualityAuto = (sMessage[9] == L'1');
+    g_engine.bQualityAuto = (sMessage[9] == L'1');
     ResetBufferAndFonts();
   }
   else if (wcsncmp(sMessage, L"SPOUT_ACTIVE=", 13) == 0) {
@@ -1789,38 +1791,38 @@ void CPlugin::LaunchMessage(wchar_t* sMessage) {
   }
 }
 
-void CPlugin::SendPresetChangedInfoToMDropDX12Remote() {
+void Engine::SendPresetChangedInfoToMDropDX12Remote() {
   std::wstring msg = L"PRESET=" + std::wstring(m_szCurrentPresetFile);
   SendMessageToMDropDX12Remote(msg.c_str(), true);
   SendPresetWaveInfoToMDropDX12Remote();
 }
 
-void CPlugin::SendPresetWaveInfoToMDropDX12Remote() {
-  std::wstring msg = L"WAVE|COLORR=" + std::to_wstring(static_cast<int>(std::ceil(g_plugin.m_pState->m_fWaveR.eval(-1) * 255)))
-    + L"|COLORG=" + std::to_wstring(static_cast<int>(std::ceil(g_plugin.m_pState->m_fWaveG.eval(-1) * 255)))
-    + L"|COLORB=" + std::to_wstring(static_cast<int>(std::ceil(g_plugin.m_pState->m_fWaveB.eval(-1) * 255)))
-    + L"|ALPHA=" + std::to_wstring(g_plugin.m_pState->m_fWaveAlpha.eval(-1))
-    + L"|MODE=" + std::to_wstring(static_cast<int>(g_plugin.m_pState->m_nWaveMode))
-    + L"|PUSHX=" + std::to_wstring(g_plugin.m_pState->m_fXPush.eval(-1))
-    + L"|PUSHY=" + std::to_wstring(g_plugin.m_pState->m_fYPush.eval(-1))
-    + L"|ZOOM=" + std::to_wstring(g_plugin.m_pState->m_fZoom.eval(-1))
-    + L"|WARP=" + std::to_wstring(g_plugin.m_pState->m_fWarpAmount.eval(-1))
-    + L"|ROTATION=" + std::to_wstring(g_plugin.m_pState->m_fRot.eval(-1))
-    + L"|DECAY=" + std::to_wstring(g_plugin.m_pState->m_fDecay.eval(-1))
-    + L"|SCALE=" + std::to_wstring(g_plugin.m_pState->m_fWaveScale.eval(-1))
-    + L"|ECHO=" + std::to_wstring(g_plugin.m_pState->m_fVideoEchoZoom.eval(-1))
-    + L"|BRIGHTEN=" + (g_plugin.m_pState->m_bBrighten ? L"1" : L"0")
-    + L"|DARKEN=" + (g_plugin.m_pState->m_bDarken ? L"1" : L"0")
-    + L"|SOLARIZE=" + (g_plugin.m_pState->m_bSolarize ? L"1" : L"0")
-    + L"|INVERT=" + (g_plugin.m_pState->m_bInvert ? L"1" : L"0")
-    + L"|ADDITIVE=" + (g_plugin.m_pState->m_bAdditiveWaves ? L"1" : L"0")
-    + L"|DOTTED=" + (g_plugin.m_pState->m_bWaveDots ? L"1" : L"0")
-    + L"|THICK=" + (g_plugin.m_pState->m_bWaveThick ? L"1" : L"0")
-    + L"|VOLALPHA=" + (g_plugin.m_pState->m_bModWaveAlphaByVolume ? L"1" : L"0");
+void Engine::SendPresetWaveInfoToMDropDX12Remote() {
+  std::wstring msg = L"WAVE|COLORR=" + std::to_wstring(static_cast<int>(std::ceil(g_engine.m_pState->m_fWaveR.eval(-1) * 255)))
+    + L"|COLORG=" + std::to_wstring(static_cast<int>(std::ceil(g_engine.m_pState->m_fWaveG.eval(-1) * 255)))
+    + L"|COLORB=" + std::to_wstring(static_cast<int>(std::ceil(g_engine.m_pState->m_fWaveB.eval(-1) * 255)))
+    + L"|ALPHA=" + std::to_wstring(g_engine.m_pState->m_fWaveAlpha.eval(-1))
+    + L"|MODE=" + std::to_wstring(static_cast<int>(g_engine.m_pState->m_nWaveMode))
+    + L"|PUSHX=" + std::to_wstring(g_engine.m_pState->m_fXPush.eval(-1))
+    + L"|PUSHY=" + std::to_wstring(g_engine.m_pState->m_fYPush.eval(-1))
+    + L"|ZOOM=" + std::to_wstring(g_engine.m_pState->m_fZoom.eval(-1))
+    + L"|WARP=" + std::to_wstring(g_engine.m_pState->m_fWarpAmount.eval(-1))
+    + L"|ROTATION=" + std::to_wstring(g_engine.m_pState->m_fRot.eval(-1))
+    + L"|DECAY=" + std::to_wstring(g_engine.m_pState->m_fDecay.eval(-1))
+    + L"|SCALE=" + std::to_wstring(g_engine.m_pState->m_fWaveScale.eval(-1))
+    + L"|ECHO=" + std::to_wstring(g_engine.m_pState->m_fVideoEchoZoom.eval(-1))
+    + L"|BRIGHTEN=" + (g_engine.m_pState->m_bBrighten ? L"1" : L"0")
+    + L"|DARKEN=" + (g_engine.m_pState->m_bDarken ? L"1" : L"0")
+    + L"|SOLARIZE=" + (g_engine.m_pState->m_bSolarize ? L"1" : L"0")
+    + L"|INVERT=" + (g_engine.m_pState->m_bInvert ? L"1" : L"0")
+    + L"|ADDITIVE=" + (g_engine.m_pState->m_bAdditiveWaves ? L"1" : L"0")
+    + L"|DOTTED=" + (g_engine.m_pState->m_bWaveDots ? L"1" : L"0")
+    + L"|THICK=" + (g_engine.m_pState->m_bWaveThick ? L"1" : L"0")
+    + L"|VOLALPHA=" + (g_engine.m_pState->m_bModWaveAlphaByVolume ? L"1" : L"0");
   SendMessageToMDropDX12Remote(msg.c_str(), true);
 }
 
-void CPlugin::SendSettingsInfoToMDropDX12Remote() {
+void Engine::SendSettingsInfoToMDropDX12Remote() {
   std::wstring msg = L"SETTINGS|ACTIVE=" + std::wstring(bSpoutOut ? L"1" : L"0")
     + L"|FIXEDSIZE=" + std::wstring(bSpoutFixedSize ? L"1" : L"0")
     + L"|FIXEDWIDTH=" + std::to_wstring(nSpoutFixedWidth)
@@ -1832,12 +1834,12 @@ void CPlugin::SendSettingsInfoToMDropDX12Remote() {
   SendMessageToMDropDX12Remote(msg.c_str(), true);
 }
 
-void CPlugin::CaptureScreenshot() {
+void Engine::CaptureScreenshot() {
   wchar_t filename[MAX_PATH];
   CaptureScreenshotWithFilename(filename, MAX_PATH);
 }
 
-bool CPlugin::CaptureScreenshotWithFilename(wchar_t* outFilename, size_t outFilenameSize) {
+bool Engine::CaptureScreenshotWithFilename(wchar_t* outFilename, size_t outFilenameSize) {
   // Build filename from current preset name
   wchar_t presetName[MAX_PATH] = L"unknown";
   if (m_szCurrentPresetFile[0]) {
@@ -1884,7 +1886,7 @@ bool CPlugin::CaptureScreenshotWithFilename(wchar_t* outFilename, size_t outFile
   return true;
 }
 
-void CPlugin::SetWaveParamsFromMessage(std::wstring& message) {
+void Engine::SetWaveParamsFromMessage(std::wstring& message) {
   std::wstringstream ss(message);
   std::wstring token;
   std::map<std::wstring, std::wstring> params;
@@ -1900,80 +1902,80 @@ void CPlugin::SetWaveParamsFromMessage(std::wstring& message) {
   }
 
   if (params.find(L"MODE") != params.end()) {
-    g_plugin.m_pState->m_nWaveMode = std::stoi(params[L"MODE"]);
+    g_engine.m_pState->m_nWaveMode = std::stoi(params[L"MODE"]);
   }
   if (params.find(L"ALPHA") != params.end()) {
-    g_plugin.m_pState->m_fWaveAlpha = std::stof(params[L"ALPHA"]);
+    g_engine.m_pState->m_fWaveAlpha = std::stof(params[L"ALPHA"]);
   }
   if (params.find(L"COLORR") != params.end()) {
     int colR = std::stoi(params[L"COLORR"]);
     float colRf = colR / 255.0f;
-    g_plugin.m_pState->m_fWaveR = colRf;
-    g_plugin.m_pState->m_fMvR = colRf;
+    g_engine.m_pState->m_fWaveR = colRf;
+    g_engine.m_pState->m_fMvR = colRf;
   }
   if (params.find(L"COLORG") != params.end()) {
     int colG = std::stoi(params[L"COLORG"]);
     float colGf = colG / 255.0f;
-    g_plugin.m_pState->m_fWaveG = colGf;
-    g_plugin.m_pState->m_fMvG = colGf;
+    g_engine.m_pState->m_fWaveG = colGf;
+    g_engine.m_pState->m_fMvG = colGf;
   }
   if (params.find(L"COLORB") != params.end()) {
     int colB = std::stoi(params[L"COLORB"]);
     float colBf = colB / 255.0f;
-    g_plugin.m_pState->m_fWaveB = colBf;
-    g_plugin.m_pState->m_fMvB = colBf;
+    g_engine.m_pState->m_fWaveB = colBf;
+    g_engine.m_pState->m_fMvB = colBf;
   }
   if (params.find(L"PUSHX") != params.end()) {
-    g_plugin.m_pState->m_fXPush = std::stof(params[L"PUSHX"]);
+    g_engine.m_pState->m_fXPush = std::stof(params[L"PUSHX"]);
   }
   if (params.find(L"PUSHY") != params.end()) {
-    g_plugin.m_pState->m_fYPush = std::stof(params[L"PUSHY"]);
+    g_engine.m_pState->m_fYPush = std::stof(params[L"PUSHY"]);
   }
   if (params.find(L"ZOOM") != params.end()) {
-    g_plugin.m_pState->m_fZoom = std::stof(params[L"ZOOM"]);
+    g_engine.m_pState->m_fZoom = std::stof(params[L"ZOOM"]);
   }
   if (params.find(L"WARP") != params.end()) {
-    g_plugin.m_pState->m_fWarpAmount = std::stof(params[L"WARP"]);
+    g_engine.m_pState->m_fWarpAmount = std::stof(params[L"WARP"]);
   }
   if (params.find(L"ROTATION") != params.end()) {
-    g_plugin.m_pState->m_fRot = std::stof(params[L"ROTATION"]);
+    g_engine.m_pState->m_fRot = std::stof(params[L"ROTATION"]);
   }
   if (params.find(L"DECAY") != params.end()) {
-    g_plugin.m_pState->m_fDecay = std::stof(params[L"DECAY"]);
+    g_engine.m_pState->m_fDecay = std::stof(params[L"DECAY"]);
   }
   if (params.find(L"SCALE") != params.end()) {
-    g_plugin.m_pState->m_fWaveScale = std::stof(params[L"SCALE"]);
+    g_engine.m_pState->m_fWaveScale = std::stof(params[L"SCALE"]);
   }
   if (params.find(L"ECHO") != params.end()) {
-    g_plugin.m_pState->m_fVideoEchoZoom = std::stof(params[L"ECHO"]);
+    g_engine.m_pState->m_fVideoEchoZoom = std::stof(params[L"ECHO"]);
   }
   if (params.find(L"BRIGHTEN") != params.end()) {
-    g_plugin.m_pState->m_bBrighten = params[L"BRIGHTEN"] == L"1";
+    g_engine.m_pState->m_bBrighten = params[L"BRIGHTEN"] == L"1";
   }
   if (params.find(L"DARKEN") != params.end()) {
-    g_plugin.m_pState->m_bDarken = params[L"DARKEN"] == L"1";
+    g_engine.m_pState->m_bDarken = params[L"DARKEN"] == L"1";
   }
   if (params.find(L"SOLARIZE") != params.end()) {
-    g_plugin.m_pState->m_bSolarize = params[L"SOLARIZE"] == L"1";
+    g_engine.m_pState->m_bSolarize = params[L"SOLARIZE"] == L"1";
   }
   if (params.find(L"INVERT") != params.end()) {
-    g_plugin.m_pState->m_bInvert = params[L"INVERT"] == L"1";
+    g_engine.m_pState->m_bInvert = params[L"INVERT"] == L"1";
   }
   if (params.find(L"ADDITIVE") != params.end()) {
-    g_plugin.m_pState->m_bAdditiveWaves = params[L"ADDITIVE"] == L"1";
+    g_engine.m_pState->m_bAdditiveWaves = params[L"ADDITIVE"] == L"1";
   }
   if (params.find(L"DOTTED") != params.end()) {
-    g_plugin.m_pState->m_bWaveDots = params[L"DOTTED"] == L"1";
+    g_engine.m_pState->m_bWaveDots = params[L"DOTTED"] == L"1";
   }
   if (params.find(L"THICK") != params.end()) {
-    g_plugin.m_pState->m_bWaveThick = params[L"THICK"] == L"1";
+    g_engine.m_pState->m_bWaveThick = params[L"THICK"] == L"1";
   }
   if (params.find(L"VOLALPHA") != params.end()) {
-    g_plugin.m_pState->m_bModWaveAlphaByVolume = params[L"VOLALPHA"] == L"1";
+    g_engine.m_pState->m_bModWaveAlphaByVolume = params[L"VOLALPHA"] == L"1";
   }
 }
 
-bool CPlugin::LaunchSprite(int nSpriteNum, int nSlot) {
+bool Engine::LaunchSprite(int nSpriteNum, int nSlot) {
   char initcode[8192], code[8192], sectionA[64];
   char szTemp[8192];
   wchar_t img[512], section[64];
@@ -2109,7 +2111,7 @@ bool CPlugin::LaunchSprite(int nSpriteNum, int nSlot) {
   return (ret & TEXMGR_ERROR_MASK) ? false : true;
 }
 
-void CPlugin::KillSprite(int iSlot) {
+void Engine::KillSprite(int iSlot) {
   m_texmgr.KillTex(iSlot);
 }
 
@@ -2161,7 +2163,7 @@ Cleanup:
   return hr;
 }
 
-int CPlugin::GetNextFreeSupertextIndex() {
+int Engine::GetNextFreeSupertextIndex() {
   int index = 0;
   for (int i = 0; i < NUM_SUPERTEXTS; i++) {
     if (m_supertexts[i].fStartTime == -1.0f) {
@@ -2174,7 +2176,7 @@ int CPlugin::GetNextFreeSupertextIndex() {
   return index;
 }
 
-void CPlugin::DoCustomSoundAnalysis() {
+void Engine::DoCustomSoundAnalysis() {
   //Now uses configurations via beatdrop.ini, don't modify here.
     //Bass
   int BASS_MIN = m_nBassStart;
@@ -2315,7 +2317,7 @@ void CPlugin::DoCustomSoundAnalysis() {
 }
 
 
-void CPlugin::GetSongTitle(wchar_t* szSongTitle, int nSize) {
+void Engine::GetSongTitle(wchar_t* szSongTitle, int nSize) {
   //if (playbackService &&
   //    playbackService->GetPlaybackState() == musik::core::sdk::PlaybackStopped)
   //{
@@ -2329,8 +2331,8 @@ void CPlugin::GetSongTitle(wchar_t* szSongTitle, int nSize) {
 // SPOUT initialization function
 // Initializes OpenGL and a Spout sender
 //
-bool CPlugin::OpenSender(unsigned int width, unsigned int height) {
-  SpoutLogNotice("CPlugin::OpenSender(%d, %d)", width, height);
+bool Engine::OpenSender(unsigned int width, unsigned int height) {
+  SpoutLogNotice("Engine::OpenSender(%d, %d)", width, height);
 
   // Close existing sender
   if (bInitialized) spoutsender.ReleaseDX9sender();
@@ -2354,7 +2356,7 @@ bool CPlugin::OpenSender(unsigned int width, unsigned int height) {
 
 } // end OpenSender
 
-void CPlugin::OpenMDropDX12Remote() {
+void Engine::OpenMDropDX12Remote() {
   HWND hwnd = FindWindowW(NULL, L"MDropDX12 Remote");
   if (hwnd) {
     // Bring the window to the front  
@@ -2371,17 +2373,17 @@ void CPlugin::OpenMDropDX12Remote() {
     ZeroMemory(&pi, sizeof(pi));
 
     if (!CreateProcessW(L"MDropDX12Remote.exe", NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-      g_plugin.AddError(L"Could not start MDropDX12 Remote", 3.0f, ERR_MISC, false);
+      g_engine.AddError(L"Could not start MDropDX12 Remote", 3.0f, ERR_MISC, false);
     }
     else {
-      g_plugin.AddNotification(L"Starting MDropDX12 Remote");
+      g_engine.AddNotification(L"Starting MDropDX12 Remote");
       CloseHandle(pi.hProcess);
       CloseHandle(pi.hThread);
     }
   }
 }
 
-void CPlugin::SetAudioDeviceDisplayName(const wchar_t* displayName, bool isRenderDevice) {
+void Engine::SetAudioDeviceDisplayName(const wchar_t* displayName, bool isRenderDevice) {
   m_nAudioDeviceActiveType = isRenderDevice ? 2 : 1;
 
   if (displayName == nullptr) {
@@ -2423,7 +2425,7 @@ void CPlugin::SetAudioDeviceDisplayName(const wchar_t* displayName, bool isRende
   wcsncpy_s(m_szAudioDeviceDisplayName, MAX_PATH, sanitized.c_str(), _TRUNCATE);
 }
 
-void CPlugin::SetAMDFlag() {
+void Engine::SetAMDFlag() {
   if (m_AMDDetectionMode == 0) {
     m_IsAMD = is_amd_ati();
   }
@@ -2435,15 +2437,15 @@ void CPlugin::SetAMDFlag() {
   }
 }
 
-int CPlugin::GetPresetCount() { return m_nPresets; }
-int CPlugin::GetCurrentPresetIndex() { return m_nCurrentPreset; }
-const wchar_t* CPlugin::GetPresetName(int idx) {
+int Engine::GetPresetCount() { return m_nPresets; }
+int Engine::GetCurrentPresetIndex() { return m_nCurrentPreset; }
+const wchar_t* Engine::GetPresetName(int idx) {
   if (idx >= 0 && idx < m_nPresets)
     return m_presets[idx].szFilename.c_str();
   return L"";
 }
 
-bool CPlugin::CheckDX9DLL() {
+bool Engine::CheckDX9DLL() {
   // Try to load the DLL manually
   HMODULE hD3DX = LoadLibrary(TEXT("D3DX9_43.dll"));
 
@@ -2461,7 +2463,7 @@ bool CPlugin::CheckDX9DLL() {
 // Test for DirectX installation and warn if not installed
 //
 // Registry method only works for DirectX 9 and lower but that is OK
-bool CPlugin::CheckForDirectX9c() {
+bool Engine::CheckForDirectX9c() {
 
   // HKLM\Software\Microsoft\DirectX\Version should be 4.09.00.0904
   // handy information : http://en.wikipedia.org/wiki/DirectX
@@ -2488,7 +2490,7 @@ bool CPlugin::CheckForDirectX9c() {
   return false;
 }
 
-void CPlugin::ShowDirectXMissingMessage() {
+void Engine::ShowDirectXMissingMessage() {
   if (MessageBoxA(NULL,
     "Could not initialize DirectX 9.\n\nPlease install the DirectX End-User Legacy Runtimes.\n\nOpen Download-Website now?",
     "MDropDX12 Visualizer", MB_YESNO | MB_SETFOREGROUND | MB_TOPMOST) == IDYES) {
@@ -2497,8 +2499,8 @@ void CPlugin::ShowDirectXMissingMessage() {
   }
 }
 
-// Spout functions - originally interleaved in plugin.cpp
-int CPlugin::ToggleSpout() {
+// Spout functions - originally interleaved in engine.cpp
+int Engine::ToggleSpout() {
   bSpoutChanged = true; // write config on exit
   bSpoutOut = !bSpoutOut;
   if (bSpoutOut) {
@@ -2523,7 +2525,7 @@ int CPlugin::ToggleSpout() {
   return 0;
 }
 
-int CPlugin::SetSpoutFixedSize(bool toggleSwitch, bool showNotifications) {
+int Engine::SetSpoutFixedSize(bool toggleSwitch, bool showNotifications) {
   bSpoutChanged = true; // write config on exit
   if (toggleSwitch) {
     bSpoutFixedSize = !bSpoutFixedSize;
@@ -2565,3 +2567,5 @@ int CPlugin::SetSpoutFixedSize(bool toggleSwitch, bool showNotifications) {
 
 //----------------------------------------------------------------------
 
+
+} // namespace mdrop

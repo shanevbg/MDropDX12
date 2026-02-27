@@ -30,11 +30,12 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "texmgr.h"
 #include "../ns-eel2-shim/ns-eel.h"
 #include "support.h"
-#include "plugin.h"
+#include "engine.h"
 #include "utility.h"
 #include "dxcontext.h"
 #include <wincodec.h>
 #include <vector>
+using namespace mdrop;
 
 texmgr::texmgr() {}
 

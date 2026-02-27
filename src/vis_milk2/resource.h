@@ -1,6 +1,6 @@
 //{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ generated include file.
-// Used by plugin.rc
+// Used by engine.rc
 //
 #define IDS_ABOUT_STRING                1
 #define IDS_SZ_MENU_NAV_TOOLTIP         2
@@ -94,7 +94,7 @@
 #define IDS_MENU_SMOOTH                 117
 #define IDS_MENU_SMOOTH_TT              118
 #define IDS_MENU_MYSTERY_PARAMETER      119
-#define IDI_PLUGIN_ICON                 120
+#define IDI_ENGINE_ICON                 120
 #define IDS_MENU_MYSTERY_PARAMETER_TT   120
 #define IDS_MENU_POSITION_X             121
 #define IDS_MENU_POSITION_X_TT          122

@@ -29,14 +29,15 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "state.h"		// for CBlendableFloat - fix this
 #include "menu.h"
-#include "plugin.h"
+#include "engine.h"
 #include "wasabi.h"
 #include <stdio.h>
 #include <math.h>
 #include <assert.h>
 #include "resource.h"
+using namespace mdrop;
 
-extern CPlugin g_plugin;		// declared in main.cpp
+namespace mdrop { extern Engine g_engine; }
 
 //----------------------------------------
 
@@ -196,7 +197,7 @@ void CMilkMenu::AddItem(wchar_t* szName, void* var, MENUITEMTYPE type, wchar_t* 
   // set its attributes
   wcsncpy(pLastItem->m_szName, szName, 64);
   wcsncpy(pLastItem->m_szToolTip, szToolTip, 1024);
-  pLastItem->m_var_offset = (size_t)var - (size_t)(g_plugin.m_pState);
+  pLastItem->m_var_offset = (size_t)var - (size_t)(g_engine.m_pState);
   pLastItem->m_type = type;
   pLastItem->m_fMin = min;
   pLastItem->m_fMax = max;
@@ -217,14 +218,14 @@ void CMilkMenu::AddItem(wchar_t* szName, void* var, MENUITEMTYPE type, wchar_t* 
 void MyMenuTextOut(eFontIndex font_index, wchar_t* str, DWORD color, RECT* pRect, int bCalcRect, RECT* pCalcRect) {
   if (bCalcRect) {
     RECT t = *pRect;
-    pRect->top += g_plugin.m_text.DrawTextW(g_plugin.GetFont(font_index), str, -1, &t, DT_SINGLELINE | DT_END_ELLIPSIS | DT_CALCRECT, 0xFFFFFFFF, false);
+    pRect->top += g_engine.m_text.DrawTextW(g_engine.GetFont(font_index), str, -1, &t, DT_SINGLELINE | DT_END_ELLIPSIS | DT_CALCRECT, 0xFFFFFFFF, false);
     pCalcRect->bottom += t.bottom - t.top;
     //if (pCalcRect->bottom > pRect->bottom)
     //    pCalcRect->bottom = pRect->bottom;
     pCalcRect->right = max(pCalcRect->right, pCalcRect->left + t.right - t.left);
   }
   else {
-    pRect->top += g_plugin.m_text.DrawTextW(g_plugin.GetFont(font_index), str, -1, pRect, DT_SINGLELINE | DT_END_ELLIPSIS, color, false);
+    pRect->top += g_engine.m_text.DrawTextW(g_engine.GetFont(font_index), str, -1, pRect, DT_SINGLELINE | DT_END_ELLIPSIS, color, false);
   }
 }
 
@@ -245,7 +246,7 @@ void CMilkMenu::DrawMenu(RECT rect, int xR, int yB, int bCalcRect, RECT* pCalcRe
   }
 
   if (!m_bEditingCurSel) {
-    int nLines = (rect.bottom - rect.top - PLAYLIST_INNER_MARGIN * 2) / g_plugin.GetFontHeight(SIMPLE_FONT) - 1;	// save 1 line for the tooltip
+    int nLines = (rect.bottom - rect.top - PLAYLIST_INNER_MARGIN * 2) / g_engine.GetFontHeight(SIMPLE_FONT) - 1;	// save 1 line for the tooltip
     if (nLines < 1) return;
     int nStart = (m_nCurSel / nLines) * nLines;
 
@@ -254,15 +255,15 @@ void CMilkMenu::DrawMenu(RECT rect, int xR, int yB, int bCalcRect, RECT* pCalcRe
     int i;
     for (i = 0; i < m_nChildMenus; i++) {
       if (i >= nStart && i < nStart + nLines) {
-        //rect.top += g_plugin.GetFont(SIMPLE_FONT)->DrawText(m_ppChildMenu[i]->m_szMenuName, -1, pRect, DT_SINGLELINE | DT_END_ELLIPSIS, (i == m_nCurSel) ? MENU_HILITE_COLOR : MENU_COLOR);
+        //rect.top += g_engine.GetFont(SIMPLE_FONT)->DrawText(m_ppChildMenu[i]->m_szMenuName, -1, pRect, DT_SINGLELINE | DT_END_ELLIPSIS, (i == m_nCurSel) ? MENU_HILITE_COLOR : MENU_COLOR);
         if (m_ppChildMenu[i]->IsEnabled()) {
           MyMenuTextOut(SIMPLE_FONT, m_ppChildMenu[i]->m_szMenuName, (i == m_nCurSel) ? MENU_HILITE_COLOR : MENU_COLOR, &rect, bCalcRect, pCalcRect);
           nLinesDrawn++;
         }
 
-        if (g_plugin.m_bShowMenuToolTips && i == m_nCurSel && !bCalcRect) {
+        if (g_engine.m_bShowMenuToolTips && i == m_nCurSel && !bCalcRect) {
           // tooltip:
-          g_plugin.DrawTooltip(wasabiApiLangString(IDS_SZ_MENU_NAV_TOOLTIP), xR, yB);
+          g_engine.DrawTooltip(wasabiApiLangString(IDS_SZ_MENU_NAV_TOOLTIP), xR, yB);
         }
       }
     }
@@ -276,7 +277,7 @@ void CMilkMenu::DrawMenu(RECT rect, int xR, int yB, int bCalcRect, RECT* pCalcRe
         continue;
       }
 
-      size_t addr = pItem->m_var_offset + (size_t)g_plugin.m_pState;
+      size_t addr = pItem->m_var_offset + (size_t)g_engine.m_pState;
       if (i >= nStart) {
         wchar_t szItemText[256];
         switch (pItem->m_type) {
@@ -295,9 +296,9 @@ void CMilkMenu::DrawMenu(RECT rect, int xR, int yB, int bCalcRect, RECT* pCalcRe
         if (i == m_nCurSel) {
           MyMenuTextOut(SIMPLE_FONT, szItemText, MENU_HILITE_COLOR, &rect, bCalcRect, pCalcRect);
 
-          if (g_plugin.m_bShowMenuToolTips && !bCalcRect) {
+          if (g_engine.m_bShowMenuToolTips && !bCalcRect) {
             // tooltip:
-            g_plugin.DrawTooltip(pItem->m_szToolTip, xR, yB);
+            g_engine.DrawTooltip(pItem->m_szToolTip, xR, yB);
           }
         }
         else {
@@ -317,7 +318,7 @@ void CMilkMenu::DrawMenu(RECT rect, int xR, int yB, int bCalcRect, RECT* pCalcRe
     CMilkMenuItem* pItem = m_pFirstChildItem;
     for (int i = m_nChildMenus; i < m_nCurSel; i++)
       pItem = pItem->m_pNext;
-    size_t addr = pItem->m_var_offset + (size_t)g_plugin.m_pState;
+    size_t addr = pItem->m_var_offset + (size_t)g_engine.m_pState;
 
     wchar_t buf[256];
 
@@ -345,8 +346,8 @@ void CMilkMenu::DrawMenu(RECT rect, int xR, int yB, int bCalcRect, RECT* pCalcRe
     MyMenuTextOut(SIMPLE_FONT, buf, MENU_HILITE_COLOR, &rect, bCalcRect, pCalcRect);
 
     // tooltip:
-    if (g_plugin.m_bShowMenuToolTips && !bCalcRect) {
-      g_plugin.DrawTooltip(pItem->m_szToolTip, xR, yB);
+    if (g_engine.m_bShowMenuToolTips && !bCalcRect) {
+      g_engine.DrawTooltip(pItem->m_szToolTip, xR, yB);
     }
   }
 }
@@ -358,7 +359,7 @@ void CMilkMenu::OnWaitStringAccept(wchar_t* szNewString) {
   CMilkMenuItem* pItem = m_pFirstChildItem;
   for (int i = m_nChildMenus; i < m_nCurSel; i++)
     pItem = pItem->m_pNext;
-  size_t addr = pItem->m_var_offset + (size_t)g_plugin.m_pState;
+  size_t addr = pItem->m_var_offset + (size_t)g_engine.m_pState;
 
   assert(pItem->m_type == MENUITEMTYPE_STRING);
 
@@ -371,7 +372,7 @@ void CMilkMenu::OnWaitStringAccept(wchar_t* szNewString) {
   }
 
   // remember the last cursor position
-  pItem->m_nLastCursorPos = g_plugin.m_waitstring.nCursorPos;
+  pItem->m_nLastCursorPos = g_engine.m_waitstring.nCursorPos;
 }
 
 //----------------------------------------
@@ -422,15 +423,15 @@ LRESULT CMilkMenu::HandleKeydown(HWND hwnd, UINT message, WPARAM wParam, LPARAM 
       return 0; // we processed (or absorbed) the key
 
     case VK_ESCAPE:
-      g_plugin.m_UI_mode = UI_REGULAR;
+      g_engine.m_UI_mode = UI_REGULAR;
       return 0; // we processed (or absorbed) the key
 
     case VK_BACK:
     case VK_LEFT:
       if (m_pParentMenu)
-        g_plugin.m_pCurMenu = m_pParentMenu;
+        g_engine.m_pCurMenu = m_pParentMenu;
       else
-        g_plugin.m_UI_mode = UI_REGULAR;		// exit the menu
+        g_engine.m_UI_mode = UI_REGULAR;		// exit the menu
       return 0; // we processed (or absorbed) the key
 
     case VK_RETURN:
@@ -438,12 +439,12 @@ LRESULT CMilkMenu::HandleKeydown(HWND hwnd, UINT message, WPARAM wParam, LPARAM 
     case VK_SPACE:
       if (m_nCurSel < m_nChildMenus) {
         // go to sub-menu
-        g_plugin.m_pCurMenu = m_ppChildMenu[m_nCurSel];
+        g_engine.m_pCurMenu = m_ppChildMenu[m_nCurSel];
       }
       else {
         // find the item
         CMilkMenuItem* pItem = GetCurItem();
-        size_t addr = pItem->m_var_offset + (size_t)g_plugin.m_pState;
+        size_t addr = pItem->m_var_offset + (size_t)g_engine.m_pState;
 
         float fTemp;
 
@@ -451,27 +452,27 @@ LRESULT CMilkMenu::HandleKeydown(HWND hwnd, UINT message, WPARAM wParam, LPARAM 
 
         switch (pItem->m_type) {
         case MENUITEMTYPE_UIMODE:
-          g_plugin.m_UI_mode = (ui_mode)pItem->m_wParam;
+          g_engine.m_UI_mode = (ui_mode)pItem->m_wParam;
 
-          if (g_plugin.m_UI_mode == UI_IMPORT_WAVE ||
-            g_plugin.m_UI_mode == UI_EXPORT_WAVE ||
-            g_plugin.m_UI_mode == UI_IMPORT_SHAPE ||
-            g_plugin.m_UI_mode == UI_EXPORT_SHAPE) {
-            g_plugin.m_bPresetLockedByCode = true;
+          if (g_engine.m_UI_mode == UI_IMPORT_WAVE ||
+            g_engine.m_UI_mode == UI_EXPORT_WAVE ||
+            g_engine.m_UI_mode == UI_IMPORT_SHAPE ||
+            g_engine.m_UI_mode == UI_EXPORT_SHAPE) {
+            g_engine.m_bPresetLockedByCode = true;
 
             // enter WaitString mode
-            g_plugin.m_waitstring.bActive = true;
-            g_plugin.m_waitstring.bFilterBadChars = false;
-            g_plugin.m_waitstring.bDisplayAsCode = false;
-            g_plugin.m_waitstring.nSelAnchorPos = -1;
-            g_plugin.m_waitstring.nMaxLen = min(sizeof(g_plugin.m_waitstring.szText) - 1, MAX_PATH - wcslen(g_plugin.GetPresetDir()) - 6);	// 6 for the extension + null char.    We set this because win32 LoadFile, MoveFile, etc. barf if the path+filename+ext are > MAX_PATH chars.
-            swprintf(g_plugin.m_waitstring.szText, L"%sfile.dat", g_plugin.m_szPresetDir);
-            if (g_plugin.m_UI_mode == UI_IMPORT_WAVE || g_plugin.m_UI_mode == UI_IMPORT_SHAPE)
-              wasabiApiLangString(IDS_LOAD_FROM_FILE, g_plugin.m_waitstring.szPrompt, 512);
+            g_engine.m_waitstring.bActive = true;
+            g_engine.m_waitstring.bFilterBadChars = false;
+            g_engine.m_waitstring.bDisplayAsCode = false;
+            g_engine.m_waitstring.nSelAnchorPos = -1;
+            g_engine.m_waitstring.nMaxLen = min(sizeof(g_engine.m_waitstring.szText) - 1, MAX_PATH - wcslen(g_engine.GetPresetDir()) - 6);	// 6 for the extension + null char.    We set this because win32 LoadFile, MoveFile, etc. barf if the path+filename+ext are > MAX_PATH chars.
+            swprintf(g_engine.m_waitstring.szText, L"%sfile.dat", g_engine.m_szPresetDir);
+            if (g_engine.m_UI_mode == UI_IMPORT_WAVE || g_engine.m_UI_mode == UI_IMPORT_SHAPE)
+              wasabiApiLangString(IDS_LOAD_FROM_FILE, g_engine.m_waitstring.szPrompt, 512);
             else
-              wasabiApiLangString(IDS_SAVE_TO_FILE, g_plugin.m_waitstring.szPrompt, 512);
-            g_plugin.m_waitstring.szToolTip[0] = 0;
-            g_plugin.m_waitstring.nCursorPos = wcslen(g_plugin.m_waitstring.szText);	// set the starting edit position
+              wasabiApiLangString(IDS_SAVE_TO_FILE, g_engine.m_waitstring.szPrompt, 512);
+            g_engine.m_waitstring.szToolTip[0] = 0;
+            g_engine.m_waitstring.nCursorPos = wcslen(g_engine.m_waitstring.szText);	// set the starting edit position
           }
           break;
         case MENUITEMTYPE_BOOL:
@@ -499,20 +500,20 @@ LRESULT CMilkMenu::HandleKeydown(HWND hwnd, UINT message, WPARAM wParam, LPARAM 
         case MENUITEMTYPE_STRING:
           // enter waitstring mode.  ***This function will cease to receive keyboard input
           // while the string is being edited***
-          g_plugin.m_UI_mode = UI_EDIT_MENU_STRING;
-          g_plugin.m_waitstring.bActive = true;
-          g_plugin.m_waitstring.bFilterBadChars = false;
-          g_plugin.m_waitstring.bDisplayAsCode = true;
-          g_plugin.m_waitstring.nSelAnchorPos = -1;
-          g_plugin.m_waitstring.nMaxLen = pItem->m_wParam ? pItem->m_wParam : 8190;
-          g_plugin.m_waitstring.nMaxLen = min(g_plugin.m_waitstring.nMaxLen, sizeof(g_plugin.m_waitstring.szText) - 16);
-          //lstrcpyW(g_plugin.m_waitstring.szText, (wchar_t *)addr);
-          lstrcpyA((char*)g_plugin.m_waitstring.szText, (char*)addr);
-          swprintf(g_plugin.m_waitstring.szPrompt, wasabiApiLangString(IDS_ENTER_THE_NEW_STRING), pItem->m_szName);
-          lstrcpyW(g_plugin.m_waitstring.szToolTip, pItem->m_szToolTip);
-          g_plugin.m_waitstring.nCursorPos = strlen/*wcslen*/((char*)g_plugin.m_waitstring.szText);
-          if (pItem->m_nLastCursorPos < g_plugin.m_waitstring.nCursorPos)
-            g_plugin.m_waitstring.nCursorPos = pItem->m_nLastCursorPos;
+          g_engine.m_UI_mode = UI_EDIT_MENU_STRING;
+          g_engine.m_waitstring.bActive = true;
+          g_engine.m_waitstring.bFilterBadChars = false;
+          g_engine.m_waitstring.bDisplayAsCode = true;
+          g_engine.m_waitstring.nSelAnchorPos = -1;
+          g_engine.m_waitstring.nMaxLen = pItem->m_wParam ? pItem->m_wParam : 8190;
+          g_engine.m_waitstring.nMaxLen = min(g_engine.m_waitstring.nMaxLen, sizeof(g_engine.m_waitstring.szText) - 16);
+          //lstrcpyW(g_engine.m_waitstring.szText, (wchar_t *)addr);
+          lstrcpyA((char*)g_engine.m_waitstring.szText, (char*)addr);
+          swprintf(g_engine.m_waitstring.szPrompt, wasabiApiLangString(IDS_ENTER_THE_NEW_STRING), pItem->m_szName);
+          lstrcpyW(g_engine.m_waitstring.szToolTip, pItem->m_szToolTip);
+          g_engine.m_waitstring.nCursorPos = strlen/*wcslen*/((char*)g_engine.m_waitstring.szText);
+          if (pItem->m_nLastCursorPos < g_engine.m_waitstring.nCursorPos)
+            g_engine.m_waitstring.nCursorPos = pItem->m_nLastCursorPos;
           break;
           /*
           case MENUITEMTYPE_OSC:
@@ -539,7 +540,7 @@ LRESULT CMilkMenu::HandleKeydown(HWND hwnd, UINT message, WPARAM wParam, LPARAM 
     CMilkMenuItem* pItem = m_pFirstChildItem;
     for (int i = m_nChildMenus; i < m_nCurSel; i++)
       pItem = pItem->m_pNext;
-    size_t addr = pItem->m_var_offset + (size_t)g_plugin.m_pState;
+    size_t addr = pItem->m_var_offset + (size_t)g_engine.m_pState;
 
     switch (wParam) {
     case VK_ESCAPE:		// exit Edit mode & restore original value

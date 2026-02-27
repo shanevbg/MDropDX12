@@ -27,8 +27,8 @@ IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISI
 OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#ifndef __NULLSOFT_DX9_PLUGIN_SHELL_H__
-#define __NULLSOFT_DX9_PLUGIN_SHELL_H__ 1
+#ifndef MDROP_ENGINE_SHELL_H
+#define MDROP_ENGINE_SHELL_H 1
 
 #include "shell_defines.h"
 #include "dxcontext.h"
@@ -46,6 +46,8 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #define TIME_HIST_SLOTS 128     // # of slots used if fps > 60.  half this many if fps==30.
 #define MAX_SONGS_PER_PAGE 40
+
+namespace mdrop {
 
 typedef struct td_fontinfo {
   wchar_t szFace[256];
@@ -68,7 +70,7 @@ typedef struct {
   float fSpectrum[2][NUM_FREQUENCIES];    // NUM_FREQUENCIES samples for each channel (note: NUM_FREQUENCIES is declared in shell_defines.h)
 } td_soundinfo;                             // ...range is 0 Hz to 22050 Hz, evenly spaced.
 
-class CPluginShell {
+class EngineShell {
 public:
   // GET METHODS
   // ------------------------------------------------------------
@@ -169,7 +171,7 @@ protected:
 
   // CONFIG PANEL SETTINGS
   // ------------------------------------------------------------
-  // *** only read/write these values during CPlugin::OverrideDefaults! ***
+  // *** only read/write these values during Engine::OverrideDefaults! ***
   int          m_start_fullscreen;        // 0 or 1
   int          m_start_desktop;           // 0 or 1
   int          m_fake_fullscreen_mode;    // 0 or 1
@@ -211,7 +213,7 @@ protected:
   virtual LRESULT MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam) = 0;
   virtual void OnAltK() {}; // doesn't *have* to be implemented
   virtual void SetAMDFlag() = 0;
-  // Preset list accessors for RenderPlaylist() — override in CPlugin
+  // Preset list accessors for RenderPlaylist() — override in Engine
   virtual int  GetPresetCount() { return 0; }
   virtual int  GetCurrentPresetIndex() { return -1; }
   virtual const wchar_t* GetPresetName(int idx) { return L""; }
@@ -300,8 +302,8 @@ private:
   int   m_align_weights_ready;
 
 public:
-  CPluginShell();
-  ~CPluginShell();
+  EngineShell();
+  ~EngineShell();
 
   // called by vis.cpp, on behalf of Winamp:
   int  PluginPreInitialize(HWND hWinampWnd, HINSTANCE hWinampInstance);
@@ -440,5 +442,7 @@ public:
   int nSpoutFixedHeight = 720;
   bool bQualityAuto = false;
 };
+
+} // namespace mdrop
 
 #endif

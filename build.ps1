@@ -43,7 +43,7 @@ Write-Host "Target   : $Target"
 Write-Host ""
 
 # ── 3. Run the build ───────────────────────────────────────────────────────────
-$project = Join-Path $PSScriptRoot "src\vis_milk2\plugin.vcxproj"
+$project = Join-Path $PSScriptRoot "src\vis_milk2\engine.vcxproj"
 
 & $msbuild $project `
     /t:$Target `

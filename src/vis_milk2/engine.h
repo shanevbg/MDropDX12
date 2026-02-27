@@ -27,8 +27,8 @@ IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISI
 OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#ifndef __NULLSOFT_DX9_EXAMPLE_PLUGIN_H__
-#define __NULLSOFT_DX9_EXAMPLE_PLUGIN_H__ 1
+#ifndef MDROP_ENGINE_H
+#define MDROP_ENGINE_H 1
 
 // =========================================================
 // SPOUT
@@ -36,7 +36,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <io.h> // for file existence check
 // =========================================================
 
-#include "pluginshell.h"
+#include "engineshell.h"
 #include "md_defines.h"
 #include "menu.h"
 #include "support.h"
@@ -53,6 +53,8 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //#include <core/sdk/IPlaybackService.h>
 
 extern "C" int (*warand)(void);
+
+namespace mdrop {
 
 typedef enum { TEX_DISK, TEX_VS, TEX_BLUR0, TEX_BLUR1, TEX_BLUR2, TEX_BLUR3, TEX_BLUR4, TEX_BLUR5, TEX_BLUR6, TEX_BLUR_LAST } tex_code;
 typedef enum { UI_REGULAR, UI_MENU, UI_LOAD, UI_LOAD_DEL, UI_LOAD_RENAME, UI_SAVEAS, UI_SAVE_OVERWRITE, UI_EDIT_MENU_STRING, UI_CHANGEDIR, UI_IMPORT_WAVE, UI_EXPORT_WAVE, UI_IMPORT_SHAPE, UI_EXPORT_SHAPE, UI_UPGRADE_PIXEL_SHADER, UI_MASHUP, UI_SETTINGS } ui_mode;
@@ -289,7 +291,7 @@ typedef struct {
 typedef std::vector<PresetInfo> PresetList;
 
 
-class CPlugin : public CPluginShell {
+class Engine : public EngineShell {
 public:
   MDropDX12* mdropdx12;
   //====[ 1. members added to create this specific example plugin: ]================================================
@@ -959,5 +961,7 @@ public:
   int SetSpoutFixedSize(bool toggleSwitch, bool showNotifications);
   virtual void OnAltK();
 };
+
+} // namespace mdrop
 
 #endif

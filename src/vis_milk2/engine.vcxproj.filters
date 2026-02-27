@@ -40,13 +40,13 @@
     <ClCompile Include="milkdropfs.cpp">
       <Filter>library\sources</Filter>
     </ClCompile>
-    <ClCompile Include="plugin.cpp">
+    <ClCompile Include="engine.cpp">
       <Filter>library\sources</Filter>
     </ClCompile>
     <ClCompile Include="menu.cpp">
       <Filter>library\sources</Filter>
     </ClCompile>
-    <ClCompile Include="pluginshell.cpp">
+    <ClCompile Include="engineshell.cpp">
       <Filter>library\sources</Filter>
     </ClCompile>
     <ClCompile Include="utility.cpp">
@@ -117,7 +117,7 @@
     <ClInclude Include="resource.h">
       <Filter>library\headers</Filter>
     </ClInclude>
-    <ClInclude Include="pluginshell.h">
+    <ClInclude Include="engineshell.h">
       <Filter>library\headers</Filter>
     </ClInclude>
     <ClInclude Include="fft.h">
@@ -135,7 +135,7 @@
     <ClInclude Include="menu.h">
       <Filter>library\headers</Filter>
     </ClInclude>
-    <ClInclude Include="plugin.h">
+    <ClInclude Include="engine.h">
       <Filter>library\headers</Filter>
     </ClInclude>
     <ClInclude Include="state.h">
@@ -219,7 +219,7 @@
     </None>
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="plugin.rc">
+    <ResourceCompile Include="engine.rc">
       <Filter>library\resources</Filter>
     </ResourceCompile>
   </ItemGroup>
@@ -227,7 +227,7 @@
     <Xml Include="manifest.xml" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="plugin_icon.ico">
+    <Image Include="engine_icon.ico">
       <Filter>library\resources</Filter>
     </Image>
   </ItemGroup>

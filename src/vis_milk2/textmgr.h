@@ -129,7 +129,7 @@ protected:
   // DX context reference
   DXContext*    m_lpDX;
   int           m_nFonts;
-  void*         m_pFontInfo;    // borrowed pointer to CPluginShell::m_fontinfo[]
+  void*         m_pFontInfo;    // borrowed pointer to mdrop::EngineShell::m_fontinfo[]
 
   // Font atlases (one per font slot)
   FontAtlas     m_atlases[MAX_TEXT_FONTS];

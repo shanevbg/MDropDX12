@@ -30,7 +30,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "state.h"
 #include "support.h"
 #include "../ns-eel2-shim/ns-eel.h"
-#include "plugin.h"
+#include "engine.h"
 #include "utility.h"
 #include <windows.h>
 #include <locale.h>
@@ -38,8 +38,9 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <vector>
 #include <assert.h>
 #include "wasabi.h"
+using namespace mdrop;
 
-extern CPlugin g_plugin;		// declared in main.cpp
+namespace mdrop { extern Engine g_engine; }
 
 #define FRAND ((rand() % 7381)/7380.0f)
 
@@ -1287,17 +1288,17 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
     nCompPSVersionInFile = 0;
   }
   else if (nMilkdropPresetVersion == 200) {
-    if (g_plugin.m_IsAMD)
-      nWarpPSVersionInFile = g_plugin.m_nMaxPSVersion_DX9;
+    if (g_engine.m_IsAMD)
+      nWarpPSVersionInFile = g_engine.m_nMaxPSVersion_DX9;
     else
       nWarpPSVersionInFile = GetFastInt("PSVERSION", 2, f);
 
     nCompPSVersionInFile = nWarpPSVersionInFile;
   }
   else {
-    if (g_plugin.m_IsAMD) {
-      nWarpPSVersionInFile = g_plugin.m_nMaxPSVersion_DX9;
-      nCompPSVersionInFile = g_plugin.m_nMaxPSVersion_DX9;
+    if (g_engine.m_IsAMD) {
+      nWarpPSVersionInFile = g_engine.m_nMaxPSVersion_DX9;
+      nCompPSVersionInFile = g_engine.m_nMaxPSVersion_DX9;
     }
     else {
       nWarpPSVersionInFile = GetFastInt("PSVERSION_WARP", 2, f);
@@ -1419,7 +1420,7 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
     }
     if (!m_szWarpShadersText[0]) {
       DebugLogA("DIAG Import warp: EMPTY - falling back to GenWarpPShaderText");
-      g_plugin.GenWarpPShaderText(m_szWarpShadersText, m_fDecay.eval(-1), m_bTexWrap);
+      g_engine.GenWarpPShaderText(m_szWarpShadersText, m_fDecay.eval(-1), m_bTexWrap);
     }
     m_nWarpPSVersion = nWarpPSVersionInFile;
   }
@@ -1443,7 +1444,7 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
     }
     if (!m_szCompShadersText[0]) {
       DebugLogA("DIAG Import comp: EMPTY - falling back to GenCompPShaderText");
-      g_plugin.GenCompPShaderText(m_szCompShadersText, m_fGammaAdj.eval(-1), m_fVideoEchoAlpha.eval(-1), m_fVideoEchoZoom.eval(-1), m_nVideoEchoOrientation, m_fShader.eval(-1), m_bBrighten, m_bDarken, m_bSolarize, m_bInvert);
+      g_engine.GenCompPShaderText(m_szCompShadersText, m_fGammaAdj.eval(-1), m_fVideoEchoAlpha.eval(-1), m_fVideoEchoZoom.eval(-1), m_nVideoEchoOrientation, m_fShader.eval(-1), m_bBrighten, m_bDarken, m_bSolarize, m_bInvert);
     }
     m_nCompPSVersion = nCompPSVersionInFile;
   }
@@ -1452,23 +1453,23 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
   // U + 2191
   boolean autoUpdate = false;
   if (nMilkdropPresetVersion > 100) {
-    if (m_nWarpPSVersion < g_plugin.m_MinPSVersionConfig) {
-      m_nWarpPSVersion = g_plugin.m_MinPSVersionConfig;
+    if (m_nWarpPSVersion < g_engine.m_MinPSVersionConfig) {
+      m_nWarpPSVersion = g_engine.m_MinPSVersionConfig;
       autoUpdate = true;
     }
-    else if (m_nWarpPSVersion > g_plugin.m_MaxPSVersionConfig) {
-      m_nWarpPSVersion = g_plugin.m_MaxPSVersionConfig;
+    else if (m_nWarpPSVersion > g_engine.m_MaxPSVersionConfig) {
+      m_nWarpPSVersion = g_engine.m_MaxPSVersionConfig;
     }
-    if (m_nCompPSVersion < g_plugin.m_MinPSVersionConfig) {
-      m_nCompPSVersion = g_plugin.m_MinPSVersionConfig;
+    if (m_nCompPSVersion < g_engine.m_MinPSVersionConfig) {
+      m_nCompPSVersion = g_engine.m_MinPSVersionConfig;
       autoUpdate = true;
     }
-    else if (m_nCompPSVersion > g_plugin.m_MaxPSVersionConfig) {
-      m_nCompPSVersion = g_plugin.m_MaxPSVersionConfig;
+    else if (m_nCompPSVersion > g_engine.m_MaxPSVersionConfig) {
+      m_nCompPSVersion = g_engine.m_MaxPSVersionConfig;
     }
   }
 
-  if (autoUpdate && g_plugin.m_ShowUpArrowInDescriptionIfPSMinVersionForced) {
+  if (autoUpdate && g_engine.m_ShowUpArrowInDescriptionIfPSMinVersionForced) {
     // Prepend the Unicode up arrow (U+2191) and a blank space to m_szDesc
     wchar_t temp[512];
     wcsncpy_s(temp, m_szDesc, _countof(temp)); // Copy the current content of m_szDesc to a temporary buffer
@@ -1487,11 +1488,11 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
 
 void CState::GenDefaultWarpShader() {
   if (m_nWarpPSVersion > 0)
-    g_plugin.GenWarpPShaderText(m_szWarpShadersText, m_fDecay.eval(-1), m_bTexWrap);
+    g_engine.GenWarpPShaderText(m_szWarpShadersText, m_fDecay.eval(-1), m_bTexWrap);
 }
 void CState::GenDefaultCompShader() {
   if (m_nCompPSVersion > 0)
-    g_plugin.GenCompPShaderText(m_szCompShadersText, m_fGammaAdj.eval(-1), m_fVideoEchoAlpha.eval(-1), m_fVideoEchoZoom.eval(-1), m_nVideoEchoOrientation, m_fShader.eval(-1), m_bBrighten, m_bDarken, m_bSolarize, m_bInvert);
+    g_engine.GenCompPShaderText(m_szCompShadersText, m_fGammaAdj.eval(-1), m_fVideoEchoAlpha.eval(-1), m_fVideoEchoZoom.eval(-1), m_nVideoEchoOrientation, m_fShader.eval(-1), m_bBrighten, m_bDarken, m_bSolarize, m_bInvert);
 }
 
 void CState::FreeVarsAndCode(bool bFree) {
@@ -1690,7 +1691,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
 #ifndef _NO_EXPR_
   {
     // clear any old error msg.:
-    //g_plugin.m_fShowUserMessageUntilThisTime = g_plugin.GetTime();
+    //g_engine.m_fShowUserMessageUntilThisTime = g_engine.GetTime();
 
     char buf[MAX_BIGSTRING_LEN * 3];
 
@@ -1707,7 +1708,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
           DebugLogA(dbg);
           wchar_t buf[1024];
           swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_PRESET_INIT_CODE), m_szDesc);
-          g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
+          g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
 
           for (int vi = 0; vi < NUM_Q_VAR; vi++)
             q_values_after_init_code[vi] = 0;
@@ -1716,7 +1717,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
         else {
           // now execute the code, save the values of q1..q32, and clean up the code!
 
-          g_plugin.LoadPerFrameEvallibVars(g_plugin.m_pState);
+          g_engine.LoadPerFrameEvallibVars(g_engine.m_pState);
 
           NSEEL_code_execute(pf_codehandle_init);
 
@@ -1739,7 +1740,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
           DebugLogA(dbg);
           wchar_t buf[1024];
           swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_PER_FRAME_CODE), m_szDesc);
-          g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
+          g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
         }
       }
 
@@ -1753,7 +1754,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
           DebugLogA(dbg);
           wchar_t buf[1024];
           swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_PER_VERTEX_CODE), m_szDesc);
-          g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
+          g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
         }
       }
 
@@ -1771,7 +1772,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
             if (!(codehandle_temp = NSEEL_code_compile(m_wave[i].m_pf_eel, buf))) {
               wchar_t buf[1024];
               swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_WAVE_X_INIT_CODE), m_szDesc, i);
-              g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
+              g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
 
               for (int vi = 0; vi < NUM_Q_VAR; vi++)
                 *m_wave[i].var_pf_q[vi] = q_values_after_init_code[vi];
@@ -1781,7 +1782,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
             else {
               // now execute the code, save the values of t1..t8, and clean up the code!
 
-              g_plugin.LoadCustomWavePerFrameEvallibVars(g_plugin.m_pState, i);
+              g_engine.LoadCustomWavePerFrameEvallibVars(g_engine.m_pState, i);
               // note: q values at this point will actually be same as
               //       q_values_after_init_code[], since no per-frame code
               //       has actually been executed yet!
@@ -1805,7 +1806,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
           if (!(m_wave[i].m_pf_codehandle = NSEEL_code_compile(m_wave[i].m_pf_eel, buf))) {
             wchar_t buf[1024];
             swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_WAVE_X_PER_FRAME_CODE), m_szDesc, i);
-            g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
+            g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
           }
 #endif
         }
@@ -1816,7 +1817,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
           if (!(m_wave[i].m_pp_codehandle = NSEEL_code_compile(m_wave[i].m_pp_eel, buf))) {
             wchar_t buf[1024];
             swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_WAVE_X_PER_POINT_CODE), m_szDesc, i);
-            g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
+            g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
           }
         }
       }
@@ -1833,7 +1834,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
             if (!(codehandle_temp = NSEEL_code_compile(m_shape[i].m_pf_eel, buf))) {
               wchar_t buf[1024];
               swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_SHAPE_X_INIT_CODE), m_szDesc, i);
-              g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
+              g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
 
               for (int vi = 0; vi < NUM_Q_VAR; vi++)
                 *m_shape[i].var_pf_q[vi] = q_values_after_init_code[vi];
@@ -1843,7 +1844,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
             else {
               // now execute the code, save the values of q1..q8, and clean up the code!
 
-              g_plugin.LoadCustomShapePerFrameEvallibVars(g_plugin.m_pState, i, 0);
+              g_engine.LoadCustomShapePerFrameEvallibVars(g_engine.m_pState, i, 0);
               // note: q values at this point will actually be same as
               //       q_values_after_init_code[], since no per-frame code
               //       has actually been executed yet!
@@ -1867,7 +1868,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
           if (!(m_shape[i].m_pf_codehandle = NSEEL_code_compile(m_shape[i].m_pf_eel, buf))) {
             wchar_t buf[1024];
             swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_SHAPE_X_PER_FRAME_CODE), m_szDesc, i);
-            g_plugin.AddError(buf, 6.0f, ERR_PRESET, true);
+            g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
           }
 #endif
         }
@@ -1881,9 +1882,9 @@ void CState::RecompileExpressions(int flags, int bReInit) {
         #ifndef _NO_EXPR_
           if ( ! (m_shape[i].m_pp_codehandle = compileCode(buf)))
           {
-            sprintf(g_plugin.m_szUserMessage, "warning: preset \"%s\": error in shape %d per-point code", m_szDesc, i);
-            g_plugin.m_fShowUserMessageUntilThisTime = g_plugin.GetTime() + 6.0f;
-                    g_plugin.m_bUserMessageIsError = true;
+            sprintf(g_engine.m_szUserMessage, "warning: preset \"%s\": error in shape %d per-point code", m_szDesc, i);
+            g_engine.m_fShowUserMessageUntilThisTime = g_engine.GetTime() + 6.0f;
+                    g_engine.m_bUserMessageIsError = true;
           }
         #endif
             resetVars(NULL);
