@@ -101,18 +101,18 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Help screen | ✅ | ✅ | ✅ |
 | Notifications | ✅ | ✅ | ✅ |
 | CPU/GPU monitoring | ❌ | ✅ | ❌ |
-| Save screenshot (Ctrl+X) | ❌ | ✅ | ❌ |
+| Save screenshot (Ctrl+X) | ♻️ | ✅ | ❌ |
 
 ## Text & Messages
 
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
-| Custom text messages (from Remote) | ❌ | ✅ | ❌ |
-| Font/color customization | ❌ | ✅ | ❌ |
-| Multiple simultaneous messages | ❌ | ✅ | ❌ |
-| Message positioning (start/end coords) | ❌ | ✅ | ❌ |
-| Background box for text | ❌ | ✅ | ❌ |
-| Fade-out / burn-in timing | ❌ | ✅ | ❌ |
+| Custom text messages (from Remote) | ♻️ | ✅ | ❌ |
+| Font/color customization | ♻️ | ✅ | ❌ |
+| Multiple simultaneous messages | ♻️ | ✅ | ❌ |
+| Message positioning (start/end coords) | ♻️ | ✅ | ❌ |
+| Background box for text | ♻️ | ✅ | ❌ |
+| Fade-out / burn-in timing | ♻️ | ✅ | ❌ |
 | Script file commands | ❌ | ✅ | ❌ |
 
 ## Color & Visual Effects
@@ -120,7 +120,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
 | Hue/Saturation/Brightness shifting | ✅ | ✅ | ❌ |
-| Auto hue cycling | ❌ | ✅ | ❌ |
+| Auto hue cycling | ♻️ | ✅ | ❌ |
 | Brighten/darken/solarize/invert | ✅ | ✅ | ✅ |
 | Custom preset vars (vis_intensity, vis_shift, vis_version) | ✅ | ✅ | ❌ |
 | colshift_hue preset variable | ✅ | ✅ | ❌ |
@@ -141,7 +141,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | ------- | --------- | -------- | --------- |
 | Custom shapes (per_frame/per_point) | ✅ | ✅ | ✅ |
 | Custom waves (per_frame/per_point) | ✅ | ✅ | ✅ |
-| Live wave manipulation | ❌ | ✅ | ❌ |
+| Live wave manipulation | ♻️ | ✅ | ❌ |
 | Mouse interaction mode (Ctrl+M) | ❌ | ✅ | ❌ |
 | Expanded variable ranges | ❌ | ❌ | ✅ |
 
@@ -165,8 +165,8 @@ Comparison of three MilkDrop-based music visualizer projects.
 
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
-| Milkwave Remote compatibility | ❌ (planned) | ✅ (built-in) | ❌ |
-| WM_COPYDATA IPC protocol | ❌ (planned) | ✅ | ❌ |
+| Milkwave Remote compatibility | ♻️ | ✅ (built-in) | ❌ |
+| WM_COPYDATA IPC protocol | ♻️ | ✅ | ❌ |
 | Tabbed Remote UI | ❌ | ✅ | ❌ |
 | Button panel | ❌ | ✅ | ❌ |
 
@@ -223,3 +223,30 @@ MilkDrop3 supports `.milk2` files which contain two presets blended together wit
 ### Feature Overlap
 
 Many features listed under Milkwave (text messages, MIDI, media integration, wave manipulation, scripts) are **Remote-side features** that send commands to the Visualizer via IPC. Once MDropDX12 supports the WM_COPYDATA protocol, these features would become available through Milkwave Remote without needing to be reimplemented in MDropDX12 itself.
+
+### ♻️ Features Implemented via IPC (Milkwave Remote)
+
+Features marked ♻️ are implemented through the WM_COPYDATA IPC protocol and believed to be working with Milkwave Remote. MDropDX12 runs a dedicated hidden IPC window on a separate thread that receives commands non-blockingly from Milkwave Remote (or any WM_COPYDATA sender). The window title is configurable in Settings → Remote tab.
+
+**Supported IPC commands** (32 of 34 Milkwave commands handled):
+
+- `MSG|` — Full text message system (text, font, size, position, color, fade, burn-in, background box, animation)
+- `AMP|` — Audio amplification (left/right channels)
+- `PRESET=` — Load preset by path/filename
+- `WAVE|` — Live wave parameter manipulation
+- `DEVICE=` — Audio device switching (input/output)
+- `OPACITY=` — Window transparency
+- `STATE` — State query (reports opacity, preset, settings back to Remote)
+- `LINK=` — Remote preset link toggle
+- `QUICKSAVE` — Save current preset to Quicksave folder
+- `CONFIG` / `SETTINGS` — Reload configuration
+- `VAR_TIME=` / `VAR_FRAME=` / `VAR_FPS=` — Time/frame/FPS factors
+- `VAR_INTENSITY=` / `VAR_SHIFT=` / `VAR_VERSION=` — Visual parameters
+- `COL_HUE=` / `HUE_AUTO=` / `HUE_AUTO_SECONDS=` — Hue shifting + auto cycling
+- `COL_SATURATION=` / `COL_BRIGHTNESS=` — Color adjustments
+- `VAR_QUALITY=` / `VAR_AUTO=` — Render quality control
+- `SPOUT_ACTIVE=` / `SPOUT_FIXEDSIZE=` / `SPOUT_RESOLUTION=` — Spout output control
+- `CAPTURE` — Screenshot capture
+- `CLEARPRESET` / `CLEARSPRITES` / `CLEARTEXTS` / `TESTFONTS` — Utility commands
+
+**Not yet handled**: `VIDEOINPUT=`, `SPOUTINPUT=`
