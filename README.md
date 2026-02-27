@@ -1,4 +1,4 @@
-﻿MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geisswerks.com/milkdrop/) visualizer engine, with GPU-accelerated text rendering, an in-app settings UI, and broad preset compatibility improvements. Compatible with [Milkwave](https://github.com/shanevbg/Milkwave) Remote for extended control features.
+﻿MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geisswerks.com/milkdrop/) visualizer engine, with GPU-accelerated text rendering, an in-app settings UI, and broad preset compatibility improvements. Works with [Milkwave](https://github.com/shanevbg/Milkwave) Remote via WM_COPYDATA IPC for extended control (messaging, wave manipulation, screenshots, and more).
 
 [**Click here**](https://github.com/shanevbg/MDropDX12/releases/latest) to get the latest version.
 
@@ -7,12 +7,19 @@
 ## Visualizer Features
 
 * DirectX 12 rendering backend with GPU-accelerated Direct2D text overlay
-* In-app Settings window (F2) with dark theme, preset browser, resource viewer, and fallback texture paths
+* In-app Settings window (F2) with dark theme, 8-tab UI (General, Visual, Colors, Sound, Files, Messages, About, Remote)
+* Preset browser with filtering, tagging, and subdirectory navigation
+* Milkwave Remote IPC compatibility — non-blocking hidden window receives 32+ commands via WM_COPYDATA
+* Configurable window titles for Remote discovery (Settings → Remote tab)
+* Save Screenshot from Settings UI with file dialog, or via IPC `CAPTURE` command
+* TDR recovery and GPU protection with automatic device restart
+* Async shader compilation — non-blocking preset transitions, no render stalls
 * Display current track information and artwork from Spotify, YouTube or other media sources playing on your PC
 * Change preset on track change
 * Set window transparency, borderless, and clickthrough ("watermark mode")
 * HLSL variable shadowing fix for improved preset compatibility
 * 3D volume texture support (noisevol_lq/noisevol_hq)
+* Fallback texture search paths, Random Textures Directory, and resource viewer
 * 40 shader-based presets created for MDropDX12
 * Over 5000 presets from skilled artists (more presets [here](https://github.com/projectM-visualizer/projectm?tab=readme-ov-file#presets))
 * Improved window handling, input methods and stability
@@ -110,7 +117,7 @@
 
 | Key | Action | Status |
 | --- | ------ | ------ |
-| Ctrl+X | Save screenshot to /capture folder | ✅ |
+| Ctrl+X | Save screenshot to /capture folder (also via Settings → Remote or IPC) | ✅ |
 | T/t | Song title animation | ❌ Not rendering in DX12 |
 | Ctrl+T | Kill custom messages/song titles | ❌ No effect (nothing to kill) |
 
@@ -141,7 +148,7 @@ For a chronological list of MDropDX12 releases and features, read the [Changes](
 
 * Windows 11 64-bit or higher
 * DirectX 12 compatible GPU
-* [Milkwave](https://github.com/shanevbg/Milkwave) (optional, for remote control features)
+* [Milkwave](https://github.com/shanevbg/Milkwave) (optional — configure window titles in Settings → Remote tab for IPC discovery)
 
 ## Support
 

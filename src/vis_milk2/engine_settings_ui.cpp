@@ -1070,6 +1070,60 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
+    // Remote tab: Save Screenshot
+    if (id == IDC_MW_IPC_CAPTURE && code == BN_CLICKED) {
+      // Build a suggested filename from current preset + timestamp
+      wchar_t presetName[MAX_PATH] = L"screenshot";
+      if (p->m_szCurrentPresetFile[0]) {
+        wchar_t* fn = wcsrchr(p->m_szCurrentPresetFile, L'\\');
+        fn = fn ? fn + 1 : p->m_szCurrentPresetFile;
+        wcsncpy_s(presetName, fn, _TRUNCATE);
+        wchar_t* ext = wcsrchr(presetName, L'.');
+        if (ext) *ext = L'\0';
+        for (wchar_t* c = presetName; *c; c++)
+          if (*c == L'/' || *c == L':' || *c == L'*' || *c == L'?' || *c == L'"' || *c == L'<' || *c == L'>' || *c == L'|')
+            *c = L'_';
+      }
+      SYSTEMTIME st; GetLocalTime(&st);
+      wchar_t suggestedName[MAX_PATH];
+      swprintf_s(suggestedName, L"%04d%02d%02d-%02d%02d%02d-%s.png",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, presetName);
+
+      // Remember last directory (static persists across calls)
+      static wchar_t sLastDir[MAX_PATH] = {};
+      if (sLastDir[0] == L'\0') {
+        // Default to capture\ subdirectory
+        swprintf_s(sLastDir, L"%scapture\\", p->m_szBaseDir);
+        CreateDirectoryW(sLastDir, NULL);
+      }
+
+      wchar_t filePath[MAX_PATH];
+      wcsncpy_s(filePath, suggestedName, _TRUNCATE);
+
+      OPENFILENAMEW ofn = {};
+      ofn.lStructSize = sizeof(ofn);
+      ofn.hwndOwner = hWnd;
+      ofn.lpstrFilter = L"PNG Image (*.png)\0*.png\0All Files (*.*)\0*.*\0";
+      ofn.lpstrFile = filePath;
+      ofn.nMaxFile = MAX_PATH;
+      ofn.lpstrInitialDir = sLastDir;
+      ofn.lpstrDefExt = L"png";
+      ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+      ofn.lpstrTitle = L"Save Screenshot";
+
+      if (GetSaveFileNameW(&ofn)) {
+        // Remember directory for next time
+        wcsncpy_s(sLastDir, filePath, _TRUNCATE);
+        wchar_t* lastSlash = wcsrchr(sLastDir, L'\\');
+        if (lastSlash) lastSlash[1] = L'\0';
+
+        // Set screenshot path and request capture on render thread
+        wcsncpy_s(p->m_screenshotPath, filePath, _TRUNCATE);
+        p->m_bScreenshotRequested = true;
+      }
+      return 0;
+    }
+
     // Messages tab listbox selection (different notification code)
     if (id == IDC_MW_MSG_LIST && code == LBN_SELCHANGE) {
       int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
@@ -2061,10 +2115,12 @@ void Engine::BuildSettingsControls() {
   PAGE_CTRL(7, CreateLabel(hw, L"(empty = \"MDropDX12 Remote\"  |  e.g. \"Milkwave Remote\")", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
   y += lineH + gap;
 
-  // Apply button
+  // Apply button + Capture Screenshot button
   {
     int applyW = MulDiv(150, lineH, 26);
     PAGE_CTRL(7, CreateBtn(hw, L"Apply && Restart IPC", IDC_MW_IPC_APPLY, x, y, applyW, lineH, hFont, false));
+    int captureW = MulDiv(130, lineH, 26);
+    PAGE_CTRL(7, CreateBtn(hw, L"Save Screenshot...", IDC_MW_IPC_CAPTURE, x + applyW + 8, y, captureW, lineH, hFont, false));
     y += lineH + gap + 8;
   }
 

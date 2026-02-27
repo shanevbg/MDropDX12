@@ -212,6 +212,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_IPC_REMOTE_HINT      2126  // Label: hint for remote title
 #define IDC_MW_IPC_MSG_GROUP        2127  // GroupBox: "Last message: HH:MM:SS"
 #define IDC_MW_IPC_MSG_TEXT         2128  // Read-only Edit: message content
+#define IDC_MW_IPC_CAPTURE          2129  // Button: Save Screenshot
 
 #define IDT_IPC_MONITOR             10001 // Timer ID for IPC message polling
 
