@@ -740,11 +740,30 @@ void CPlugin::RenderFrame(int bRedraw) {
           }
         }
 
-        // Autoplay custom messages (managed via Messages tab)
-        if (m_bMsgAutoplay && m_nMsgAutoplayCount > 0 &&
-          m_fNextAutoMsgTime > 0 && GetTime() >= m_fNextAutoMsgTime &&
+        // Legacy random spawn Custom Message (when autoplay off)
+        if (!m_bMsgAutoplay && m_fTimeBetweenRandomCustomMsgs > 0 &&
           !m_supertexts[i].bRedrawSuperText &&
           GetTime() >= m_supertexts[i].fStartTime + m_supertexts[i].fDuration + 1.0f / GetFps()) {
+          int n = GetNumToSpawn(GetTime(), fDeltaT, 1.0f / m_fTimeBetweenRandomCustomMsgs, 0.5f, m_nCustMsgsSpawned);
+          if (n > 0) {
+            LaunchCustomMessage(-1);
+            m_nCustMsgsSpawned += n;
+          }
+        }
+      }
+
+      // Autoplay custom messages (managed via Messages tab)
+      // Moved outside per-slot loop to support concurrent messages via m_nMsgMaxOnScreen
+      if (m_bMsgAutoplay && m_nMsgAutoplayCount > 0 &&
+        m_fNextAutoMsgTime > 0 && GetTime() >= m_fNextAutoMsgTime) {
+        int nActiveCustomMsgs = 0;
+        for (int j = 0; j < NUM_SUPERTEXTS; j++) {
+          if (!m_supertexts[j].bIsSongTitle &&
+              m_supertexts[j].fStartTime >= 0 &&
+              GetTime() < m_supertexts[j].fStartTime + m_supertexts[j].fDuration + m_supertexts[j].fFadeOutTime)
+            nActiveCustomMsgs++;
+        }
+        if (nActiveCustomMsgs < m_nMsgMaxOnScreen) {
           int msgIdx;
           if (m_bMsgSequential) {
             if (m_nNextSequentialMsg >= m_nMsgAutoplayCount)
@@ -755,16 +774,6 @@ void CPlugin::RenderFrame(int bRedraw) {
           }
           LaunchCustomMessage(msgIdx);
           ScheduleNextAutoMessage();
-        }
-        // Legacy random spawn Custom Message (when autoplay off)
-        else if (!m_bMsgAutoplay && m_fTimeBetweenRandomCustomMsgs > 0 &&
-          !m_supertexts[i].bRedrawSuperText &&
-          GetTime() >= m_supertexts[i].fStartTime + m_supertexts[i].fDuration + 1.0f / GetFps()) {
-          int n = GetNumToSpawn(GetTime(), fDeltaT, 1.0f / m_fTimeBetweenRandomCustomMsgs, 0.5f, m_nCustMsgsSpawned);
-          if (n > 0) {
-            LaunchCustomMessage(-1);
-            m_nCustMsgsSpawned += n;
-          }
         }
       }
 

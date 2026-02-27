@@ -852,6 +852,19 @@ static SettingDesc g_settingsDesc[] = {
 #define IDC_MSGEDIT_CANCEL      2113
 #define IDC_MSGEDIT_COLOR_SWATCH 2114
 
+// Message Overrides Dialog controls
+#define IDC_MSGOVERRIDE_RAND_FONT     4000
+#define IDC_MSGOVERRIDE_RAND_COLOR    4001
+#define IDC_MSGOVERRIDE_RAND_SIZE     4002
+#define IDC_MSGOVERRIDE_RAND_EFFECTS  4003
+#define IDC_MSGOVERRIDE_SIZE_MIN      4004
+#define IDC_MSGOVERRIDE_SIZE_MAX      4005
+#define IDC_MSGOVERRIDE_MAX_ONSCREEN  4006
+#define IDC_MSGOVERRIDE_OK            4007
+#define IDC_MSGOVERRIDE_CANCEL        4008
+#define IDC_MW_MSG_OVERRIDES          4009   // "Overrides" button on Messages tab
+#define IDC_MW_MSG_PLAY               4010   // "Play/Stop" toggle button on Messages tab
+
 #define IDC_RV_LISTVIEW         3001   // ListView in resource viewer
 #define IDC_RV_COPY_PATH        3002   // "Copy Path" button
 #define IDC_RV_REFRESH          3003   // "Refresh" button
@@ -10507,6 +10520,7 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         return 0;
       case IDC_MW_MSG_AUTOPLAY:
         p->m_bMsgAutoplay = bChecked;
+        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_MSG_PLAY), bChecked ? L"Stop" : L"Play");
         if (bChecked)
           p->ScheduleNextAutoMessage();
         else
@@ -10681,6 +10695,21 @@ LRESULT CALLBACK CPlugin::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         } else {
           MessageBoxW(hWnd, L"No text found on clipboard (or all slots full).", L"Messages", MB_OK);
         }
+        return 0;
+      }
+      case IDC_MW_MSG_PLAY: {
+        p->m_bMsgAutoplay = !p->m_bMsgAutoplay;
+        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_MSG_PLAY), p->m_bMsgAutoplay ? L"Stop" : L"Play");
+        CheckDlgButton(hWnd, IDC_MW_MSG_AUTOPLAY, p->m_bMsgAutoplay ? BST_CHECKED : BST_UNCHECKED);
+        if (p->m_bMsgAutoplay)
+          p->ScheduleNextAutoMessage();
+        else
+          p->m_fNextAutoMsgTime = -1.0f;
+        p->SaveMsgAutoplaySettings();
+        return 0;
+      }
+      case IDC_MW_MSG_OVERRIDES: {
+        p->ShowMsgOverridesDialog(hWnd);
         return 0;
       }
       }
@@ -11522,12 +11551,15 @@ void CPlugin::BuildSettingsControls() {
     PAGE_CTRL(5, CreateBtn(hw, L"Edit", IDC_MW_MSG_EDIT, bx, y, 40, lineH, hFont));
     bx += 40 + btnGap;
     PAGE_CTRL(5, CreateBtn(hw, L"Delete", IDC_MW_MSG_DELETE, bx, y, 50, lineH, hFont));
+    bx += 50 + btnGap;
+    PAGE_CTRL(5, CreateBtn(hw, m_bMsgAutoplay ? L"Stop" : L"Play", IDC_MW_MSG_PLAY, bx, y, 50, lineH, hFont));
   }
   y += lineH + gap;
 
   PAGE_CTRL(5, CreateBtn(hw, L"Reload from File", IDC_MW_MSG_RELOAD, x, y, 130, lineH, hFont));
   PAGE_CTRL(5, CreateBtn(hw, L"Paste", IDC_MW_MSG_PASTE, x + 134, y, 55, lineH, hFont));
   PAGE_CTRL(5, CreateBtn(hw, L"Open INI", IDC_MW_MSG_OPENINI, x + 193, y, 70, lineH, hFont));
+  PAGE_CTRL(5, CreateBtn(hw, L"Overrides", IDC_MW_MSG_OVERRIDES, x + 267, y, 75, lineH, hFont));
   y += lineH + gap + 4;
 
   // Autoplay controls
@@ -11724,12 +11756,14 @@ void CPlugin::LayoutSettingsControls() {
     moveCtrl(IDC_MW_MSG_DOWN, bx, y, arrowW, lineH); bx += arrowW + btnGap;
     moveCtrl(IDC_MW_MSG_ADD, bx, y, 40, lineH); bx += 40 + btnGap;
     moveCtrl(IDC_MW_MSG_EDIT, bx, y, 40, lineH); bx += 40 + btnGap;
-    moveCtrl(IDC_MW_MSG_DELETE, bx, y, 50, lineH);
+    moveCtrl(IDC_MW_MSG_DELETE, bx, y, 50, lineH); bx += 50 + btnGap;
+    moveCtrl(IDC_MW_MSG_PLAY, bx, y, 50, lineH);
     y += lineH + gap;
-    // Reload + Paste + Open INI
+    // Reload + Paste + Open INI + Overrides
     moveCtrl(IDC_MW_MSG_RELOAD, x, y, 130, lineH);
     moveCtrl(IDC_MW_MSG_PASTE, x + 134, y, 55, lineH);
     moveCtrl(IDC_MW_MSG_OPENINI, x + 193, y, 70, lineH);
+    moveCtrl(IDC_MW_MSG_OVERRIDES, x + 267, y, 75, lineH);
     y += lineH + gap + 4;
     // Checkboxes
     moveCtrl(IDC_MW_MSG_AUTOPLAY, x, y, rw, lineH);
@@ -15493,6 +15527,22 @@ void CPlugin::SaveMsgAutoplaySettings() {
   swprintf(val, 32, L"%d", m_bMessageAutoSize ? 1 : 0);
   WritePrivateProfileStringW(L"Milkwave", L"MessageAutoSize", val, pIni);
 
+  // Save override settings
+  swprintf(val, 32, L"%d", m_bMsgOverrideRandomFont ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideRandomFont", val, pIni);
+  swprintf(val, 32, L"%d", m_bMsgOverrideRandomColor ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideRandomColor", val, pIni);
+  swprintf(val, 32, L"%d", m_bMsgOverrideRandomSize ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideRandomSize", val, pIni);
+  swprintf(val, 32, L"%d", m_bMsgOverrideRandomEffects ? 1 : 0);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideRandomEffects", val, pIni);
+  swprintf(val, 32, L"%d", m_nMsgOverrideSizeMin);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideSizeMin", val, pIni);
+  swprintf(val, 32, L"%d", m_nMsgOverrideSizeMax);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideSizeMax", val, pIni);
+  swprintf(val, 32, L"%d", m_nMsgMaxOnScreen);
+  WritePrivateProfileStringW(L"Milkwave", L"MsgMaxOnScreen", val, pIni);
+
   // Save playback order
   swprintf(val, 32, L"%d", m_nMsgAutoplayCount);
   WritePrivateProfileStringW(L"MsgOrder", L"Count", val, pIni);
@@ -15512,6 +15562,20 @@ void CPlugin::LoadMsgAutoplaySettings() {
   m_fMsgAutoplayInterval = GetPrivateProfileFloatW(L"Milkwave", L"MsgAutoplayInterval", 30.0f, pIni);
   m_fMsgAutoplayJitter = GetPrivateProfileFloatW(L"Milkwave", L"MsgAutoplayJitter", 5.0f, pIni);
   m_bMessageAutoSize = GetPrivateProfileIntW(L"Milkwave", L"MessageAutoSize", 0, pIni) != 0;
+
+  // Load override settings
+  m_bMsgOverrideRandomFont = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomFont", 0, pIni) != 0;
+  m_bMsgOverrideRandomColor = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomColor", 0, pIni) != 0;
+  m_bMsgOverrideRandomSize = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomSize", 0, pIni) != 0;
+  m_bMsgOverrideRandomEffects = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomEffects", 0, pIni) != 0;
+  m_nMsgOverrideSizeMin = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideSizeMin", 10, pIni);
+  m_nMsgOverrideSizeMax = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideSizeMax", 40, pIni);
+  m_nMsgMaxOnScreen = GetPrivateProfileIntW(L"Milkwave", L"MsgMaxOnScreen", 1, pIni);
+  if (m_nMsgOverrideSizeMin < 5) m_nMsgOverrideSizeMin = 5;
+  if (m_nMsgOverrideSizeMax > 50) m_nMsgOverrideSizeMax = 50;
+  if (m_nMsgOverrideSizeMin >= m_nMsgOverrideSizeMax) m_nMsgOverrideSizeMin = m_nMsgOverrideSizeMax - 1;
+  if (m_nMsgMaxOnScreen < 1) m_nMsgMaxOnScreen = 1;
+  if (m_nMsgMaxOnScreen > NUM_SUPERTEXTS) m_nMsgMaxOnScreen = NUM_SUPERTEXTS;
 
   // Load playback order (if saved); otherwise use default order
   int count = GetPrivateProfileIntW(L"MsgOrder", L"Count", 0, pIni);
@@ -16036,6 +16100,288 @@ bool CPlugin::ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew) {
   return data.bResult;
 }
 
+// ======== Message Overrides Dialog ========
+
+struct MsgOverridesDlgData {
+  CPlugin*    plugin;
+  HWND        hDlgWnd;
+  bool        bResult;
+  bool        bDone;
+
+  // Working copies
+  bool        bRandomFont;
+  bool        bRandomColor;
+  bool        bRandomSize;
+  bool        bRandomEffects;
+  int         nSizeMin;
+  int         nSizeMax;
+  int         nMaxOnScreen;
+};
+
+static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+  MsgOverridesDlgData* data = (MsgOverridesDlgData*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+  switch (msg) {
+  case WM_COMMAND: {
+    int id = LOWORD(wParam);
+    int code = HIWORD(wParam);
+
+    // Owner-drawn checkbox toggle
+    if (code == BN_CLICKED) {
+      HWND hCtrl = (HWND)lParam;
+      bool bIsCheckbox = (bool)(intptr_t)GetPropW(hCtrl, L"IsCheckbox");
+      if (bIsCheckbox) {
+        bool wasChecked = (bool)(intptr_t)GetPropW(hCtrl, L"Checked");
+        SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)(wasChecked ? 0 : 1));
+        InvalidateRect(hCtrl, NULL, TRUE);
+      }
+    }
+
+    if (id == IDC_MSGOVERRIDE_OK && code == BN_CLICKED) {
+      wchar_t buf[32];
+      data->bRandomFont = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_FONT), L"Checked");
+      data->bRandomColor = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_COLOR), L"Checked");
+      data->bRandomSize = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_SIZE), L"Checked");
+      data->bRandomEffects = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_EFFECTS), L"Checked");
+
+      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SIZE_MIN), buf, 32);
+      data->nSizeMin = _wtoi(buf);
+      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SIZE_MAX), buf, 32);
+      data->nSizeMax = _wtoi(buf);
+      GetWindowTextW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_MAX_ONSCREEN), buf, 32);
+      data->nMaxOnScreen = _wtoi(buf);
+
+      // Clamp values
+      if (data->nSizeMin < 5) data->nSizeMin = 5;
+      if (data->nSizeMax > 50) data->nSizeMax = 50;
+      if (data->nSizeMin >= data->nSizeMax) data->nSizeMin = data->nSizeMax - 1;
+      if (data->nSizeMin < 5) { data->nSizeMin = 5; data->nSizeMax = 6; }
+      if (data->nMaxOnScreen < 1) data->nMaxOnScreen = 1;
+      if (data->nMaxOnScreen > NUM_SUPERTEXTS) data->nMaxOnScreen = NUM_SUPERTEXTS;
+
+      data->bResult = true;
+      data->bDone = true;
+      return 0;
+    }
+    if (id == IDC_MSGOVERRIDE_CANCEL && code == BN_CLICKED) {
+      data->bResult = false;
+      data->bDone = true;
+      return 0;
+    }
+    break;
+  }
+
+  case WM_DRAWITEM: {
+    DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
+    if (pDIS && pDIS->CtlType == ODT_BUTTON && data && data->plugin) {
+      CPlugin* p = data->plugin;
+      bool bIsCheckbox = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheckbox");
+      if (bIsCheckbox) {
+        DrawOwnerCheckbox(pDIS, p->m_bSettingsDarkTheme,
+          p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
+      } else {
+        DrawOwnerButton(pDIS, p->m_bSettingsDarkTheme,
+          p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
+      }
+      return TRUE;
+    }
+    break;
+  }
+
+  case WM_CTLCOLOREDIT:
+  case WM_CTLCOLORLISTBOX:
+    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsCtrlBg) {
+      SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
+      SetBkColor((HDC)wParam, data->plugin->m_colSettingsCtrlBg);
+      return (LRESULT)data->plugin->m_hBrSettingsCtrlBg;
+    }
+    break;
+
+  case WM_CTLCOLORSTATIC:
+    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsBg) {
+      SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
+      SetBkColor((HDC)wParam, data->plugin->m_colSettingsBg);
+      return (LRESULT)data->plugin->m_hBrSettingsBg;
+    }
+    break;
+
+  case WM_CTLCOLORBTN:
+    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme && data->plugin->m_hBrSettingsBg) {
+      SetTextColor((HDC)wParam, data->plugin->m_colSettingsText);
+      SetBkColor((HDC)wParam, data->plugin->m_colSettingsBg);
+      return (LRESULT)data->plugin->m_hBrSettingsBg;
+    }
+    break;
+
+  case WM_ERASEBKGND:
+    if (data && data->plugin && data->plugin->m_bSettingsDarkTheme) {
+      RECT rc; GetClientRect(hWnd, &rc);
+      HBRUSH hBr = CreateSolidBrush(data->plugin->m_colSettingsBg);
+      FillRect((HDC)wParam, &rc, hBr);
+      DeleteObject(hBr);
+      return 1;
+    }
+    break;
+
+  case WM_CLOSE:
+    if (data) { data->bResult = false; data->bDone = true; }
+    return 0;
+
+  case WM_KEYDOWN:
+    if (wParam == VK_ESCAPE && data) { data->bResult = false; data->bDone = true; return 0; }
+    if (wParam == VK_RETURN && data) {
+      SendMessage(hWnd, WM_COMMAND, MAKEWPARAM(IDC_MSGOVERRIDE_OK, BN_CLICKED), 0);
+      return 0;
+    }
+    break;
+  }
+  return DefWindowProcW(hWnd, msg, wParam, lParam);
+}
+
+bool CPlugin::ShowMsgOverridesDialog(HWND hParent) {
+  // Register window class (once)
+  static bool registered = false;
+  static const wchar_t* WND_CLASS = L"MDropDX12MsgOverrides";
+  if (!registered) {
+    WNDCLASSEXW wc = { sizeof(wc) };
+    wc.lpfnWndProc = MsgOverridesWndProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    wc.lpszClassName = WND_CLASS;
+    RegisterClassExW(&wc);
+    registered = true;
+  }
+
+  // Initialize working copy from current settings
+  MsgOverridesDlgData data = {};
+  data.plugin = this;
+  data.bResult = false;
+  data.bDone = false;
+  data.bRandomFont = m_bMsgOverrideRandomFont;
+  data.bRandomColor = m_bMsgOverrideRandomColor;
+  data.bRandomSize = m_bMsgOverrideRandomSize;
+  data.bRandomEffects = m_bMsgOverrideRandomEffects;
+  data.nSizeMin = m_nMsgOverrideSizeMin;
+  data.nSizeMax = m_nMsgOverrideSizeMax;
+  data.nMaxOnScreen = m_nMsgMaxOnScreen;
+
+  // Size the window
+  int clientW = 350, clientH = 280;
+  DWORD dwStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
+  DWORD dwExStyle = WS_EX_DLGMODALFRAME;
+  RECT rcSize = { 0, 0, clientW, clientH };
+  AdjustWindowRectEx(&rcSize, dwStyle, FALSE, dwExStyle);
+  int dlgW = rcSize.right - rcSize.left;
+  int dlgH = rcSize.bottom - rcSize.top;
+
+  // Center on parent
+  RECT rcParent;
+  GetWindowRect(hParent, &rcParent);
+  HMONITOR hMon = MonitorFromWindow(hParent, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO mi = { sizeof(mi) };
+  GetMonitorInfo(hMon, &mi);
+  int px = rcParent.left + (rcParent.right - rcParent.left - dlgW) / 2;
+  int py = rcParent.top + (rcParent.bottom - rcParent.top - dlgH) / 2;
+  if (px < mi.rcWork.left) px = mi.rcWork.left;
+  if (py < mi.rcWork.top) py = mi.rcWork.top;
+  if (px + dlgW > mi.rcWork.right) px = mi.rcWork.right - dlgW;
+  if (py + dlgH > mi.rcWork.bottom) py = mi.rcWork.bottom - dlgH;
+
+  HWND hDlg = CreateWindowExW(dwExStyle,
+    WND_CLASS, L"Message Overrides", dwStyle,
+    px, py, dlgW, dlgH, hParent, NULL, GetModuleHandle(NULL), NULL);
+  if (!hDlg) return false;
+
+  data.hDlgWnd = hDlg;
+  SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)&data);
+
+  HFONT hFont = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+    DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+  int margin = 16, rw = clientW - margin * 2;
+  int y = 14;
+  wchar_t buf[32];
+
+  // Checkboxes
+  CreateCheck(hDlg, L"Randomize font face", IDC_MSGOVERRIDE_RAND_FONT, margin, y, rw, 22, hFont, data.bRandomFont, true);
+  y += 26;
+  CreateCheck(hDlg, L"Randomize color", IDC_MSGOVERRIDE_RAND_COLOR, margin, y, rw, 22, hFont, data.bRandomColor, true);
+  y += 26;
+  CreateCheck(hDlg, L"Randomize effects (bold/italic)", IDC_MSGOVERRIDE_RAND_EFFECTS, margin, y, rw, 22, hFont, data.bRandomEffects, true);
+  y += 26;
+  CreateCheck(hDlg, L"Randomize size", IDC_MSGOVERRIDE_RAND_SIZE, margin, y, rw, 22, hFont, data.bRandomSize, true);
+  y += 28;
+
+  // Size min/max
+  int lblW2 = 70, editW2 = 50;
+  CreateLabel(hDlg, L"Min size:", margin + 20, y + 2, lblW2, 20, hFont);
+  swprintf(buf, 32, L"%d", data.nSizeMin);
+  CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_SIZE_MIN, margin + 20 + lblW2, y, editW2, 22, hFont, 0);
+  CreateLabel(hDlg, L"Max size:", margin + 20 + lblW2 + editW2 + 16, y + 2, lblW2, 20, hFont);
+  swprintf(buf, 32, L"%d", data.nSizeMax);
+  CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_SIZE_MAX, margin + 20 + lblW2 * 2 + editW2 + 16, y, editW2, 22, hFont, 0);
+  y += 28;
+
+  CreateLabel(hDlg, L"(min \x2265 5, max \x2264 50)", margin + 20, y, rw, 18, hFont);
+  y += 26;
+
+  // Max on screen
+  CreateLabel(hDlg, L"Max messages on screen:", margin, y + 2, 170, 20, hFont);
+  swprintf(buf, 32, L"%d", data.nMaxOnScreen);
+  CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_MAX_ONSCREEN, margin + 174, y, 40, 22, hFont, 0);
+  CreateLabel(hDlg, L"(1-10)", margin + 220, y + 2, 50, 20, hFont);
+  y += 36;
+
+  // OK / Cancel
+  int btnW = 80, btnH = 28;
+  CreateBtn(hDlg, L"OK", IDC_MSGOVERRIDE_OK, clientW / 2 - btnW - 10, y, btnW, btnH, hFont);
+  CreateBtn(hDlg, L"Cancel", IDC_MSGOVERRIDE_CANCEL, clientW / 2 + 10, y, btnW, btnH, hFont);
+
+  // Show dialog and make parent modal
+  ShowWindow(hDlg, SW_SHOW);
+  UpdateWindow(hDlg);
+  EnableWindow(hParent, FALSE);
+
+  // Local message loop
+  MSG msg2;
+  while (!data.bDone && GetMessage(&msg2, NULL, 0, 0)) {
+    if (msg2.message == WM_KEYDOWN && msg2.wParam == VK_TAB) {
+      HWND hNext = GetNextDlgTabItem(hDlg, GetFocus(), GetKeyState(VK_SHIFT) < 0);
+      if (hNext) SetFocus(hNext);
+      continue;
+    }
+    if (msg2.message == WM_KEYDOWN && msg2.wParam == VK_ESCAPE) {
+      data.bResult = false;
+      data.bDone = true;
+      break;
+    }
+    TranslateMessage(&msg2);
+    DispatchMessage(&msg2);
+  }
+
+  // Cleanup
+  EnableWindow(hParent, TRUE);
+  SetForegroundWindow(hParent);
+  DestroyWindow(hDlg);
+  if (hFont) DeleteObject(hFont);
+
+  // Apply if OK
+  if (data.bResult) {
+    m_bMsgOverrideRandomFont = data.bRandomFont;
+    m_bMsgOverrideRandomColor = data.bRandomColor;
+    m_bMsgOverrideRandomSize = data.bRandomSize;
+    m_bMsgOverrideRandomEffects = data.bRandomEffects;
+    m_nMsgOverrideSizeMin = data.nSizeMin;
+    m_nMsgOverrideSizeMax = data.nSizeMax;
+    m_nMsgMaxOnScreen = data.nMaxOnScreen;
+    SaveMsgAutoplaySettings();
+  }
+
+  return data.bResult;
+}
+
 void CPlugin::ReadCustomMessages() {
   int n;
 
@@ -16206,23 +16552,34 @@ void CPlugin::LaunchCustomMessage(int nMsgNum) {
     if (m_supertexts[nextFreeSupertextIndex].nColorG > 255) m_supertexts[nextFreeSupertextIndex].nColorG = 255;
     if (m_supertexts[nextFreeSupertextIndex].nColorB > 255) m_supertexts[nextFreeSupertextIndex].nColorB = 255;
 
-    // fix &'s for display:
-    /*
-    {
-      int pos = 0;
-      int len = lstrlen(m_supertext[nextFreeSupertextIndex].szText);
-      while (m_supertext[nextFreeSupertextIndex].szText[pos] && pos<255)
-      {
-        if (m_supertext[nextFreeSupertextIndex].szText[pos] == '&')
-        {
-          for (int x=len; x>=pos; x--)
-            m_supertext[nextFreeSupertextIndex].szText[x+1] = m_supertext[nextFreeSupertextIndex].szText[x];
-          len++;
-          pos++;
-        }
-        pos++;
+    // Apply global randomization overrides
+    if (m_bMsgOverrideRandomFont) {
+      int candidates[MAX_CUSTOM_MESSAGE_FONTS], nCandidates = 0;
+      for (int f = 0; f < MAX_CUSTOM_MESSAGE_FONTS; f++)
+        if (m_CustomMessageFont[f].szFace[0])
+          candidates[nCandidates++] = f;
+      if (nCandidates > 0) {
+        int pick = candidates[rand() % nCandidates];
+        lstrcpyW(m_supertexts[nextFreeSupertextIndex].nFontFace, m_CustomMessageFont[pick].szFace);
       }
-    }*/
+    }
+    if (m_bMsgOverrideRandomColor) {
+      int pick = rand() % MAX_CUSTOM_MESSAGE_FONTS;
+      m_supertexts[nextFreeSupertextIndex].nColorR = m_CustomMessageFont[pick].nColorR;
+      m_supertexts[nextFreeSupertextIndex].nColorG = m_CustomMessageFont[pick].nColorG;
+      m_supertexts[nextFreeSupertextIndex].nColorB = m_CustomMessageFont[pick].nColorB;
+      if (m_supertexts[nextFreeSupertextIndex].nColorR < 0) m_supertexts[nextFreeSupertextIndex].nColorR = 255;
+      if (m_supertexts[nextFreeSupertextIndex].nColorG < 0) m_supertexts[nextFreeSupertextIndex].nColorG = 255;
+      if (m_supertexts[nextFreeSupertextIndex].nColorB < 0) m_supertexts[nextFreeSupertextIndex].nColorB = 255;
+    }
+    if (m_bMsgOverrideRandomEffects) {
+      m_supertexts[nextFreeSupertextIndex].bBold = (rand() % 2) != 0;
+      m_supertexts[nextFreeSupertextIndex].bItal = (rand() % 2) != 0;
+    }
+    if (m_bMsgOverrideRandomSize) {
+      float range = (float)(m_nMsgOverrideSizeMax - m_nMsgOverrideSizeMin);
+      m_supertexts[nextFreeSupertextIndex].fFontSize = m_nMsgOverrideSizeMin + range * ((rand() % 1000) / 1000.0f);
+    }
 
     m_supertexts[nextFreeSupertextIndex].fStartTime = GetTime();
 

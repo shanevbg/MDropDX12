@@ -836,6 +836,7 @@ public:
   void        NavigatePresetDirInto(HWND hSettingsWnd, int sel);
   static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
   // Messages tab
+  bool        ShowMsgOverridesDialog(HWND hParent);
   void        PopulateMsgListBox(HWND hList);
   void        BuildMsgPlaybackOrder();
   void        WriteCustomMessages();
@@ -899,6 +900,15 @@ public:
   int     m_nNextSequentialMsg = 0;           // index into playback order
   int     m_nMsgAutoplayOrder[MAX_CUSTOM_MESSAGES]; // playback order array
   int     m_nMsgAutoplayCount = 0;            // active messages in order
+
+  // Message overrides (Overrides modal)
+  bool    m_bMsgOverrideRandomFont = false;
+  bool    m_bMsgOverrideRandomColor = false;
+  bool    m_bMsgOverrideRandomSize = false;
+  bool    m_bMsgOverrideRandomEffects = false;  // randomize bold/italic
+  int     m_nMsgOverrideSizeMin = 10;           // min random size (floor: 5)
+  int     m_nMsgOverrideSizeMax = 40;           // max random size (ceiling: 50)
+  int     m_nMsgMaxOnScreen = 1;                // max concurrent messages (1..NUM_SUPERTEXTS)
 
   // Resource Viewer
   HWND        m_hResourceWnd = NULL;
