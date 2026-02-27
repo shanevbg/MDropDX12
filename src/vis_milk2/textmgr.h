@@ -117,6 +117,14 @@ public:
 
   bool IsD2DReady() const { return m_ready; }
 
+  // Returns the actual atlas line height for the given font index.
+  // This matches what DrawTextW returns, unlike the font creation size parameter.
+  int GetAtlasLineHeight(int fontIdx) const {
+    if (fontIdx >= 0 && fontIdx < m_nFonts && m_atlases[fontIdx].valid)
+      return (int)(m_atlases[fontIdx].lineHeight + 0.99f);
+    return 0;
+  }
+
 protected:
   ID3D12Device*  m_lpDevice;
   void*          m_lpTextSurface;

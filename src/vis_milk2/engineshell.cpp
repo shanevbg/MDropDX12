@@ -272,7 +272,12 @@ char* EngineShell::GetConfigIniFileA() {
 }
 int  EngineShell::GetFontHeight(eFontIndex idx) {
   if (idx >= 0 && idx < NUM_BASIC_FONTS + NUM_EXTRA_FONTS) {
-    // Use absolute value since nSize may be negative (CreateFontW convention)
+    // Prefer actual atlas line height (tm.tmHeight) — this matches what DrawTextW
+    // returns for layout, avoiding mismatch between estimated and actual line spacing.
+    int atlasH = m_text.GetAtlasLineHeight(idx);
+    if (atlasH > 0)
+      return atlasH;
+    // Fallback before atlas is built
     int sz = abs((int)m_fontinfo[idx].nSize);
     if (IsSpoutActiveAndFixed()) {
       return sz;
@@ -607,6 +612,21 @@ int EngineShell::AllocateDX9Stuff() {
     AllocateFonts();
     if (m_fix_slow_text)
       AllocateTextSurface();
+
+    // Build font atlas textures BEFORE dynamic render targets so their SRV/binding
+    // slots are below the baseline and won't be reclaimed by ResetDynamicDescriptors().
+    if (m_bEnableD2DText && !m_text.IsD2DReady()) {
+      m_text.Finish();
+      m_text.Init(GetDX12Device(), nullptr, 1);
+      if (m_lpDX) {
+        if (m_lpDX->m_commandQueue)
+          m_lpDX->WaitForGpu();
+        m_text.InitDX12(m_lpDX, m_font, NUM_BASIC_FONTS + NUM_EXTRA_FONTS, m_fontinfo);
+        // Advance baseline past font atlas slots so they survive resize reclamation
+        m_lpDX->m_srvSlotBaseline = m_lpDX->m_nextFreeSrvSlot;
+        m_lpDX->m_rtvSlotBaseline = m_lpDX->m_nextFreeRtvSlot;
+      }
+    }
   }
 
   int ret = AllocateMyDX9Stuff();
@@ -614,20 +634,6 @@ int EngineShell::AllocateDX9Stuff() {
   // invalidate various 'caches' here:
   m_playlist_top_idx = -1;    // invalidating playlist cache forces recompute of playlist width
   //m_icon_list.clear();      // clear desktop mode icon list, so it has to read the bitmaps back in
-
-  if (!m_vj_mode && m_bEnableD2DText) {
-    if (!m_text.IsD2DReady()) {
-      // First init — build font atlas textures for sprite-based text rendering
-      m_text.Finish();
-      m_text.Init(GetDX12Device(), nullptr, 1);
-      if (m_lpDX) {
-        if (m_lpDX->m_commandQueue)
-          m_lpDX->WaitForGpu();
-        m_text.InitDX12(m_lpDX, m_font, NUM_BASIC_FONTS + NUM_EXTRA_FONTS, m_fontinfo);
-      }
-    }
-    // Font atlases persist across resize — no re-wrapping needed
-  }
 
   // Start debug overlay thread (transparent layered window for FPS/debug info)
   if (m_lpDX && !m_overlay.IsAlive()) {
@@ -2827,6 +2833,18 @@ void EngineShell::ResetBufferAndFonts() {
   if (newW != 0 && newH != 0) {
     CleanUpFonts();
     AllocateFonts();
+    // Rebuild font atlas textures (CleanUpFonts destroys them)
+    if (m_bEnableD2DText && !m_text.IsD2DReady()) {
+      m_text.Finish();
+      m_text.Init(GetDX12Device(), nullptr, 1);
+      if (m_lpDX) {
+        if (m_lpDX->m_commandQueue)
+          m_lpDX->WaitForGpu();
+        m_text.InitDX12(m_lpDX, m_font, NUM_BASIC_FONTS + NUM_EXTRA_FONTS, m_fontinfo);
+        m_lpDX->m_srvSlotBaseline = m_lpDX->m_nextFreeSrvSlot;
+        m_lpDX->m_rtvSlotBaseline = m_lpDX->m_nextFreeRtvSlot;
+      }
+    }
   }
 }
 } // namespace mdrop

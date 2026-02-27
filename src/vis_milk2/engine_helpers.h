@@ -201,6 +201,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_GPU_SKIP_HEAVY       2103
 #define IDC_MW_GPU_HEAVY_THRESHOLD  2104
 #define IDC_MW_GPU_RELOAD_PRESET    2105
+#define IDC_MW_RESTART_RENDER       2106
 
 #define IDC_MW_MSG_PLAY             4010   // "Play/Stop" toggle button on Messages tab
 

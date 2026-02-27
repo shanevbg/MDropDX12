@@ -529,6 +529,12 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
+    if (id == IDC_MW_RESTART_RENDER && code == BN_CLICKED) {
+      HWND hw = p->GetPluginWindow();
+      if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
+      return 0;
+    }
+
     if (id == IDC_MW_RESET_VISUAL && code == BN_CLICKED) {
       p->fOpacity = 1.0f;
       p->m_fRenderQuality = 1.0f;
@@ -1716,6 +1722,7 @@ void Engine::BuildSettingsControls() {
   y += lineH + gap + 4;
 
   PAGE_CTRL(1, CreateBtn(hw, L"Reload Preset", IDC_MW_GPU_RELOAD_PRESET, x, y, MulDiv(110, lineH, 26), lineH, hFont));
+  PAGE_CTRL(1, CreateBtn(hw, L"Restart Render", IDC_MW_RESTART_RENDER, x + MulDiv(120, lineH, 26), y, MulDiv(120, lineH, 26), lineH, hFont));
 
   // ====== PAGE 2: Colors (created hidden) ======
   y = tabTop + 10;
