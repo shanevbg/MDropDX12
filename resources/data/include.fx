@@ -187,12 +187,15 @@ sampler2D sampler_pw_main : register(s4) = sampler_state
 #define sampler_PW_main sampler_pw_main
 
 // built-in noise textures:
-sampler2D sampler_noise_lq : register(s5);
-sampler2D sampler_noise_lq_lite : register(s6);
-sampler2D sampler_noise_mq : register(s7);
-sampler2D sampler_noise_hq : register(s8);
-sampler3D sampler_noisevol_lq : register(s9);
-sampler3D sampler_noisevol_hq : register(s10);
+// No register(sN) annotations — all use LINEAR+WRAP (the default static sampler mode).
+// The compiler auto-assigns slots only for noise textures actually referenced by each shader,
+// leaving more room for user texture samplers (sampler_rand00..N) within the SM5.0 limit of 16.
+sampler2D sampler_noise_lq;
+sampler2D sampler_noise_lq_lite;
+sampler2D sampler_noise_mq;
+sampler2D sampler_noise_hq;
+sampler3D sampler_noisevol_lq;
+sampler3D sampler_noisevol_hq;
 float4 texsize_noise_lq;
 float4 texsize_noise_lq_lite;
 float4 texsize_noise_mq;
@@ -201,9 +204,9 @@ float4 texsize_noisevol_lq;
 float4 texsize_noisevol_hq;
 
 // procedural blur textures:
-sampler2D sampler_blur1 : register(s13);
-sampler2D sampler_blur2 : register(s14);
-sampler2D sampler_blur3 : register(s15);
+sampler2D sampler_blur1 : register(s11);
+sampler2D sampler_blur2 : register(s12);
+sampler2D sampler_blur3 : register(s13);
 
 float3 shiftHSV(float3 c)
 {
