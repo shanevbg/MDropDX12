@@ -1,8 +1,4 @@
-﻿MDropDX12 is:
-- **MDropDX12 Visualizer**:
-    A ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geisswerks.com/milkdrop/) visualizer engine, with GPU-accelerated text rendering, an in-app settings UI, and broad preset compatibility improvements
-- **MDropDX12 Remote**:
-    A standalone window to do things like sending messages (either directly by typing or from a script file), load and change presets, send common key combinations using buttons and more
+﻿MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geisswerks.com/milkdrop/) visualizer engine, with GPU-accelerated text rendering, an in-app settings UI, and broad preset compatibility improvements. Compatible with [Milkwave](https://github.com/shanevbg/Milkwave) Remote for extended control features.
 
 [**Click here**](https://github.com/shanevbg/MDropDX12/releases/latest) to get the latest version.
 
@@ -20,56 +16,116 @@
 * 40 shader-based presets created for MDropDX12
 * Over 5000 presets from skilled artists (more presets [here](https://github.com/projectM-visualizer/projectm?tab=readme-ov-file#presets))
 * Improved window handling, input methods and stability
-* Use independently or in combination with MDropDX12 Remote
+* Use independently or with [Milkwave](https://github.com/shanevbg/Milkwave) Remote for extended control (messaging, MIDI, shader conversion, wave manipulation, and more)
 
-## Remote Features
+## Keyboard Shortcuts
 
-* Customizable interface - show only what you need
-* Send common key combinations using buttons
-* Set audio device (in- or output) without restarting Visualizer
-* Amplify virtual audio signal to make Visualizer more (or less) responsive
-* Tabbed interface with hideable top and bottom panel
+### Window & Display
 
-![MDropDX12 3 Tabs](https://github.com/user-attachments/assets/a244f59b-8070-4314-be2d-ceb3259b33c5)
+| Key | Action | Status |
+| --- | ------ | ------ |
+| Alt+Enter | Toggle fullscreen (or double-click) | ✅ |
+| Alt+S | Toggle multi-monitor stretch | ✅ |
+| Shift+Up/Down | Increase/decrease window opacity | ✅ |
+| F1 | Show/hide help (2 pages) | ✅ |
+| F2 | Toggle borderless window | ✅ |
+| Ctrl+F2 | Reset window | ✅ |
+| Ctrl+Shift+F2 | Set window to fixed dimensions from config | ✅ |
+| F4 | Show/hide preset info | ✅ |
+| F5 | Show/hide FPS | ✅ |
+| F6 | Show/hide rating | ✅ |
+| F7 | Always on top | ✅ |
+| F9 | Toggle clickthrough mode | ✅ |
+| Ctrl+F9 | Toggle windowed fullscreen | ✅ |
+| Ctrl+Shift+F9 | Toggle watermark mode (windowed clickthrough fullscreen) | ✅ |
+| F12 | Transparency mode (remove black background) | ✅ |
+| Ctrl+F12 | Toggle black mode (no preset rendering) | ✅ |
+| N | Show per-frame debug monitor | ✅ |
+| Escape | Close menu / exit app (with confirmation) | ✅ |
 
-* Preset tagging
-  - Tag your presets with any number of words of your choice
-  - Dynamic buttons for your most used tags
-  - Load preset lists based on tags
-  - Saved in human-readable json file for easy sharing or backup
-* Messaging
-  - Send text to Visualizer window
-  - Display multiple messages at once
-  - Set color, font size, position and other parameters
-  - Move text around using start and end coordinates
-  - Save parameter definitions as named styles for quick access
-  - Send messages, parameters, presets and other commands automatically from a script file at configurable intervals based on BPM setting (see script-default.txt)
-* Shader code conversion
-  - Convert GLSL shader code to HLSL
-  - Preview converted code in the Visualizer instantly
-  - Load shader definitions from Shadertoy files
-* Wave manipulation
-  - Clear current preset and start with a plain wave
-  - Set wave type, zoom, warp, rotation etc. in the running preset
-  - Quicksave manipulated presets to a new file
-* Font manipulation
-  - Customize display of song information, preset name and notifications
-  - Change and preview font face, style and size instantly
-* MIDI automation
-  - Assign up to 50 actions to your MIDI controller
-  - Select/change presets, send messages, trigger sprites, start external programs etc.
-  - Trigger command chains from script
-* Settings
-  - Change internal time, FPS and frame counters to slow down or speed up some presets
-  - Adjust "Intensity", "Shift" and "Version" live for supported presets (eg. MDropDX12s shader presets)
-  - Shift color output (Hue, Saturation, Brightness) live for all presets
-  - Control Spout output behaviour
-  - Adjust render quality to improve performance and/or pixellize output
-  - Quick access to configuration files
+### Presets
 
-There are many tooltips explaining all features when you hover over the form elements. Clicking the "Autoplay" button on the Message tab will run the default script file, demonstrating many MDropDX12 features.
+| Key | Action | Status |
+| --- | ------ | ------ |
+| Space | Soft cut to next random preset | ✅ |
+| H | Hard cut to next preset | ✅ |
+| Backspace | Go back to previous preset | ✅ |
+| \` / ~ | Lock/unlock current preset | ✅ |
+| Scroll Lock | Lock preset + toggle playlist | ✅ |
+| R | Toggle random/sequential order | ✅ |
+| L | Open preset browser | ✅ |
+| M | Show/hide preset-editing menu | ✅ |
+| S | Save preset as... | ✅ |
+| Ctrl+S | Quicksave to /presets/Quicksave | ✅ |
+| Ctrl+Shift+S | Quicksave to /presets/Quicksave2 | ✅ |
+| +/- | Increase/decrease preset rating | ✅ |
+| Mouse wheel | Next/previous preset | ✅ |
 
-If you have any questions, don't be afraid to [ask for support](#support)!
+### Shaders & Effects
+
+| Key | Action | Status |
+| --- | ------ | ------ |
+| A | Random mini-mashup (Ctrl/Shift variants) | ✅ |
+| ! | Randomize warp shader | ✅ |
+| @ | Randomize comp shader | ✅ |
+| D/d | Cycle shader locks (comp/warp/both/none) | ✅ |
+| F11 | Cycle inject effect (off/brighten/darken/solarize/invert) | ✅ |
+| Shift+F11 | Cycle hard cut mode (13 audio-reactive modes) | ✅ |
+
+### Preset Parameters (live tweaking)
+
+| Key | Action | Status |
+| --- | ------ | ------ |
+| W/w | Wave mode +/- | ✅ |
+| E/e | Wave alpha +/- | ✅ |
+| J/j | Wave scale +/- | ✅ |
+| I/i | Zoom +/- | ✅ |
+| U/u | Warp scale +/- | ✅ |
+| O/o | Warp amount +/- | ✅ |
+| G/g | Gamma +/- | ✅ |
+| B/b | Brightness +/- | ✅ |
+| \[/\] | X push +/- | ✅ |
+| {/} | Y push +/- | ✅ |
+| </> | Rotation +/- | ✅ |
+| P/p | Video echo alpha +/- | ❌ Video echo not implemented in DX12 |
+| Q/q | Video echo zoom +/- | ❌ Video echo not implemented in DX12 |
+| F/f | Video echo orientation | ❌ Video echo not implemented in DX12 |
+
+### Audio & Settings
+
+| Key | Action | Status |
+| --- | ------ | ------ |
+| F3 | Cycle FPS limit (30/60/90/120/144/240/360/unlimited) | ✅ |
+| Ctrl+F3 | Display current FPS setting | ✅ |
+| F8 / Ctrl+L | Open Settings window | ✅ |
+| Ctrl+D | Set audio device to default | ✅ |
+| Ctrl+Shift+D | Display current audio device | ✅ |
+| Ctrl+M | Toggle mouse interaction mode | ✅ |
+| Ctrl+Q | Double render quality | ✅ |
+| Ctrl+Shift+Q | Halve render quality (pixelize) | ✅ |
+| Ctrl+H | Shift hue (Shift+ reverses) | ✅ |
+| F10 / Ctrl+Z | Toggle Spout output (Shift+ sets fixed resolution) | ✅ |
+
+### Screenshots & Media
+
+| Key | Action | Status |
+| --- | ------ | ------ |
+| Ctrl+X | Save screenshot to /capture folder | ✅ |
+| T/t | Song title animation | ❌ Not rendering in DX12 |
+| Ctrl+T | Kill custom messages/song titles | ❌ No effect (nothing to kill) |
+
+### Sprites & Custom Messages
+
+| Key | Action | Status |
+| --- | ------ | ------ |
+| K | Toggle sprite/message input mode | ✅ Handler works |
+| 00-99 | Launch sprite or custom message | ⚠️ Sprites render; custom messages need testing |
+| \* | Reload custom_messages.ini | ✅ |
+| Delete | Kill newest sprite/message | ✅ |
+| Shift+Delete | Kill oldest sprite/message | ✅ |
+| Ctrl+Shift+Delete | Kill all sprites/messages | ✅ |
+| Ctrl+K | Kill all sprites | ✅ |
+| Shift+K | Enter sprite kill mode | ✅ |
 
 ## History
 
@@ -85,7 +141,7 @@ For a chronological list of MDropDX12 releases and features, read the [Changes](
 
 * Windows 11 64-bit or higher
 * DirectX 12 compatible GPU
-* [Microsoft .NET Desktop Runtime 8](https://dotnet.microsoft.com/en-us/download/dotnet/8.0) (for Remote)
+* [Milkwave](https://github.com/shanevbg/Milkwave) (optional, for remote control features)
 
 ## Support
 
@@ -118,9 +174,7 @@ If you believe you or someone else should be mentioned here, please let me know.
 
 [license]: #license
 
-MDropDX12 Remote is licensed under the [Attribution-NonCommercial 4.0 International License](https://creativecommons.org/licenses/by-nc/4.0/), meaning you may not use the material for commercial purposes. See LICENSE.txt for details.
-
-MDropDX12 Visualizer (as a BeatDrop fork) is licensed under the [3-Clause BSD License](https://opensource.org/licenses/BSD-3-Clause) with the exception of where otherwise noted. See LICENSE.txt for details.
+MDropDX12 (as a BeatDrop fork) is licensed under the [3-Clause BSD License](https://opensource.org/licenses/BSD-3-Clause) with the exception of where otherwise noted. See LICENSE.txt for details.
 
 Although the original Matthew van Eerde's [loopback-capture](https://github.com/mvaneerde/blog) project didn't explicitly state the license, the author has been kind enough to provide a license clarification [here](
 https://blogs.msdn.microsoft.com/matthew_van_eerde/2014/11/05/draining-the-wasapi-capture-buffer-fully/). All changes in this repository to the original Matthew's code are published either under the terms of BSD license or the license provided by original author.
