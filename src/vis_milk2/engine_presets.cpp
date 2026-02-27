@@ -1591,94 +1591,58 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
   if (!wcscmp(m_pState->m_szDesc, INVALID_PRESET_DESC))
     fBlendTime = 0;
 
-  if (fBlendTime == 0) {
-    // do it all NOW!
-    if (szPresetFilename != m_szCurrentPresetFile) //[sic]
-      lstrcpyW(m_szCurrentPresetFile, szPresetFilename);
+  // All loads go through the async background thread path.
+  // Import + shader compilation run off the render thread so the current
+  // preset keeps rendering without stutter. When the thread finishes,
+  // LoadPresetTick() detects it and does an instant hard-cut or blended swap.
 
-    // Log which preset is now actively rendering (helps diagnose GPU TDR crashes)
-    {
-      const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
-      if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
-      name = name ? name + 1 : m_szCurrentPresetFile;
-      char dbg[512];
-      sprintf(dbg, "Render: Active preset: %ls", name);
-      DebugLogA(dbg);
-    }
-
-    CState* temp = m_pState;
-    m_pState = m_pOldState;
-    m_pOldState = temp;
-
-    DWORD ApplyFlags = STATE_ALL;
-    ApplyFlags ^= (m_bWarpShaderLock ? STATE_WARP : 0);
-    ApplyFlags ^= (m_bCompShaderLock ? STATE_COMP : 0);
-
-    m_pState->Import(m_szCurrentPresetFile, GetTime(), m_pOldState, ApplyFlags);
-
-    if (fBlendTime >= 0.001f) {
-      RandomizeBlendPattern();
-      m_pState->StartBlendFrom(m_pOldState, GetTime(), fBlendTime);
-    }
-
-    m_fPresetStartTime = GetTime();
-    m_fNextPresetTime = -1.0f;		// flags UpdateTime() to recompute this
-
-    // release stuff from m_OldShaders, then move m_shaders to m_OldShaders, then load the new shaders.
-    m_OldShaders.warp.Clear();
-    m_OldShaders.comp.Clear();
-    m_OldShaders = m_shaders;
-    // Null out m_shaders' COM pointers WITHOUT releasing — ownership transferred to m_OldShaders.
-    m_shaders.warp.ptr = NULL;
-    m_shaders.warp.CT = NULL;
-    m_shaders.warp.bytecodeBlob = NULL;
-    m_shaders.warp.params.Clear();
-    m_shaders.comp.ptr = NULL;
-    m_shaders.comp.CT = NULL;
-    m_shaders.comp.bytecodeBlob = NULL;
-    m_shaders.comp.params.Clear();
-
-    LoadShaders(&m_shaders, m_pState, false, false);
-    CreateDX12PresetPSOs();
-    NumTotalPresetsLoaded++;
-    OnFinishedLoadingPreset();
-  }
-  else {
-    // DX12: async preset loading on a background thread.
-    // Import + shader compilation run off the main thread so the current
-    // preset keeps rendering without stutter. When the thread finishes,
-    // LoadPresetTick() detects it and does an instant hard-cut swap.
-
-    // If a previous load is still running, wait for it first
-    if (m_presetLoadThread.joinable()) {
+  // If a previous load is still running, try to finish it quickly.
+  // If it's stuck in D3DCompile, detach it and start fresh.
+  if (m_presetLoadThread.joinable()) {
+    HANDLE h = (HANDLE)m_presetLoadThread.native_handle();
+    DWORD wait = WaitForSingleObject(h, 100); // ~6 frames at 60fps
+    if (wait == WAIT_TIMEOUT) {
+      // Thread is stuck in D3DCompile — detach it. The generation check
+      // in the lambda will prevent it from signaling ready.
+      m_presetLoadThread.detach();
+      // Null out COM pointers the old thread may have partially written.
+      // This leaks a small amount of bytecode — acceptable for rare slow-shader cases.
+      m_NewShaders.warp.ptr = NULL; m_NewShaders.warp.CT = NULL; m_NewShaders.warp.bytecodeBlob = NULL;
+      m_NewShaders.comp.ptr = NULL; m_NewShaders.comp.CT = NULL; m_NewShaders.comp.bytecodeBlob = NULL;
+      DebugLogA("Preset load: detaching stale compilation thread (D3DCompile stall)");
+    } else {
       m_presetLoadThread.join();
-      m_bPresetLoadReady = false;
     }
-
-    m_NewShaders.warp.Clear();
-    m_NewShaders.comp.Clear();
-
-    m_nLoadingPreset = 1;  // signals "load in progress" to the rest of the code
     m_bPresetLoadReady = false;
-    m_fLoadingPresetBlendTime = fBlendTime;
-    lstrcpyW(m_szLoadingPreset, szPresetFilename);
-    NumTotalPresetsLoaded++;
-
-    // Capture values the thread needs (avoid reading member vars from bg thread)
-    float loadTime = GetTime();
-    DWORD ApplyFlags = STATE_ALL;
-    ApplyFlags ^= (m_bWarpShaderLock ? STATE_WARP : 0);
-    ApplyFlags ^= (m_bCompShaderLock ? STATE_COMP : 0);
-
-    m_presetLoadThread = std::thread([this, loadTime, ApplyFlags]() {
-      // Import preset (parses .milk file, compiles NSEEL expressions)
-      m_pNewState->Import(m_szLoadingPreset, loadTime, m_pOldState, ApplyFlags);
-      // Compile both warp + comp pixel shaders (D3DCompile — the expensive part)
-      LoadShaders(&m_NewShaders, m_pNewState, false, false);
-      // Signal main thread that we're ready for the swap
-      m_bPresetLoadReady.store(true);
-    });
   }
+
+  m_NewShaders.warp.Clear();
+  m_NewShaders.comp.Clear();
+
+  m_nLoadingPreset = 1;  // signals "load in progress" to the rest of the code
+  m_bPresetLoadReady = false;
+  m_fLoadingPresetBlendTime = fBlendTime;
+  lstrcpyW(m_szLoadingPreset, szPresetFilename);
+  m_fLoadStartTime = GetTime();
+  NumTotalPresetsLoaded++;
+
+  // Capture values the thread needs (avoid reading member vars from bg thread)
+  float loadTime = GetTime();
+  DWORD ApplyFlags = STATE_ALL;
+  ApplyFlags ^= (m_bWarpShaderLock ? STATE_WARP : 0);
+  ApplyFlags ^= (m_bCompShaderLock ? STATE_COMP : 0);
+
+  uint64_t myGeneration = ++m_nLoadGeneration;
+  m_presetLoadThread = std::thread([this, loadTime, ApplyFlags, myGeneration]() {
+    // Import preset (parses .milk file, compiles NSEEL expressions)
+    m_pNewState->Import(m_szLoadingPreset, loadTime, m_pOldState, ApplyFlags);
+    // Compile both warp + comp pixel shaders (D3DCompile — the expensive part)
+    LoadShaders(&m_NewShaders, m_pNewState, false, false);
+    // Only signal ready if we're still the current generation
+    // (a newer load may have started and detached us)
+    if (m_nLoadGeneration.load() == myGeneration)
+      m_bPresetLoadReady.store(true);
+  });
 }
 
 void Engine::OnFinishedLoadingPreset() {
@@ -1787,11 +1751,17 @@ void Engine::PostMessageToMDropDX12Remote(UINT msg) {
 }
 
 void Engine::LoadPresetTick() {
-  if (m_nLoadingPreset > 0 && m_bPresetLoadReady.load()) {
+  if (m_nLoadingPreset <= 0)
+    return;
+
+  if (m_bPresetLoadReady.load()) {
     // Background thread finished — join it and apply the preset
     if (m_presetLoadThread.joinable())
       m_presetLoadThread.join();
     m_bPresetLoadReady = false;
+
+    // Clear the "Compiling..." notification
+    ClearErrors(ERR_NOTIFY);
 
     // Apply the preset: swap state pointers
     lstrcpyW(m_szCurrentPresetFile, m_szLoadingPreset);
@@ -1802,8 +1772,9 @@ void Engine::LoadPresetTick() {
       const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
       if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
       name = name ? name + 1 : m_szCurrentPresetFile;
+      float elapsed = GetTime() - m_fLoadStartTime;
       char dbg[512];
-      sprintf(dbg, "Render: Active preset: %ls", name);
+      sprintf(dbg, "Render: Active preset: %ls (compiled in %.1f ms)", name, elapsed * 1000.0f);
       DebugLogA(dbg);
     }
 
@@ -1815,10 +1786,16 @@ void Engine::LoadPresetTick() {
     m_pState = m_pNewState;
     m_pNewState = temp;
 
-    // DX12: hard cut — no smooth blend. StartBlendFrom copies needed
-    // state values (old wave mode, etc.) then we immediately disable blending.
-    m_pState->StartBlendFrom(m_pOldState, GetTime(), 0);
-    m_pState->m_bBlending = false;
+    // Apply blend or hard-cut based on the requested blend time
+    if (m_fLoadingPresetBlendTime >= 0.001f) {
+      RandomizeBlendPattern();
+      m_pState->StartBlendFrom(m_pOldState, GetTime(), m_fLoadingPresetBlendTime);
+    } else {
+      // Hard cut — StartBlendFrom copies needed state values (old wave mode, etc.)
+      // then we immediately disable blending.
+      m_pState->StartBlendFrom(m_pOldState, GetTime(), 0);
+      m_pState->m_bBlending = false;
+    }
 
     m_fPresetStartTime = GetTime();
     m_fNextPresetTime = -1.0f;		// flags UpdateTime() to recompute this
@@ -1846,7 +1823,65 @@ void Engine::LoadPresetTick() {
     // would destroy them while the current frame's command list still references them.
     m_bDX12PSOsDirty = true;
     OnFinishedLoadingPreset();
+    return;
   }
+
+  // Compilation still in progress — show feedback for slow compilations
+  float elapsed = GetTime() - m_fLoadStartTime;
+  if (elapsed > 1.0f && m_nLoadingPreset == 1) {
+    // Upgrade to "compiling" state so we only show this once
+    m_nLoadingPreset = 2;
+    wchar_t buf[256];
+    const wchar_t* name = wcsrchr(m_szLoadingPreset, L'\\');
+    if (!name) name = wcsrchr(m_szLoadingPreset, L'/');
+    name = name ? name + 1 : m_szLoadingPreset;
+    swprintf(buf, 256, L"Compiling shader: %.80s", name);
+    AddError(buf, 30.0f, ERR_NOTIFY, true);
+  }
+
+  // Check for timeout
+  if (elapsed > m_fShaderCompileTimeout) {
+    char dbg[256];
+    sprintf(dbg, "Preset load: compilation timeout (%.1f sec), skipping preset", elapsed);
+    DebugLogA(dbg);
+
+    // Abandon the stuck thread
+    if (m_presetLoadThread.joinable())
+      m_presetLoadThread.detach();
+
+    m_nLoadingPreset = 0;
+    m_bPresetLoadReady = false;
+    m_NewShaders.warp.Clear();
+    m_NewShaders.comp.Clear();
+
+    ClearErrors(ERR_NOTIFY);
+    AddError(L"Shader compile timed out \u2014 skipping preset", 4.0f, ERR_NOTIFY, true);
+
+    // Try next preset (will start a new async load)
+    NextPreset(m_fLoadingPresetBlendTime);
+  }
+}
+
+bool Engine::WaitForPendingLoad(DWORD timeoutMs) {
+  // Wait for the current async load to complete and apply it.
+  // Used by sequential-load hotkeys (!, @, A) that need one load to finish
+  // before starting the next. Returns true if the load completed, false on timeout.
+  if (m_nLoadingPreset <= 0)
+    return true; // nothing pending
+
+  if (!m_presetLoadThread.joinable())
+    return false;
+
+  HANDLE h = (HANDLE)m_presetLoadThread.native_handle();
+  DWORD wait = WaitForSingleObject(h, timeoutMs);
+  if (wait == WAIT_TIMEOUT)
+    return false; // still compiling — caller should skip subsequent loads
+
+  // Thread finished — apply it
+  m_presetLoadThread.join();
+  m_bPresetLoadReady = true; // ensure LoadPresetTick sees it as ready
+  LoadPresetTick();
+  return true;
 }
 
 void Engine::SeekToPreset(wchar_t cStartChar) {

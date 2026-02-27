@@ -1100,6 +1100,10 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   }
   if (pShaderByteCode == NULL) {
     DebugLogA("DX12: LoadShaderFromMemory: compiling shader with D3DCompile...");
+    LARGE_INTEGER compileStart, compileEnd, compileFreq;
+    QueryPerformanceFrequency(&compileFreq);
+    QueryPerformanceCounter(&compileStart);
+
     HRESULT hresult = D3DXCompileShader(
       szShaderText,
       len,
@@ -1112,10 +1116,17 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
       &m_pShaderCompileErrors,
       ppConstTable);
 
+    QueryPerformanceCounter(&compileEnd);
+    double compileMs = (double)(compileEnd.QuadPart - compileStart.QuadPart) * 1000.0 / (double)compileFreq.QuadPart;
+
     {
       char dbg[256];
-      sprintf(dbg, "DX12: LoadShaderFromMemory: D3DCompile returned hr=0x%08X bytecode=%p CT=%p", (unsigned)hresult, (void*)pShaderByteCode, (void*)*ppConstTable);
+      sprintf(dbg, "DX12: D3DCompile: hr=0x%08X  %.1f ms  profile=%s  textLen=%d", (unsigned)hresult, compileMs, szProfile, len);
       DebugLogA(dbg);
+      if (compileMs > 500.0) {
+        sprintf(dbg, "DX12: D3DCompile: SLOW shader compilation (%.1f ms)", compileMs);
+        DebugLogA(dbg);
+      }
     }
 
     if (D3D_OK != hresult) {

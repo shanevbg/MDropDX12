@@ -1890,28 +1890,34 @@ int Engine::HandleRegularKey(WPARAM wParam) {
     SendPresetWaveInfoToMDropDX12Remote();
     return 0; // we processed (or absorbed) the key
   case '!':
-    // randomize warp shader
+    // randomize warp shader — load random preset (keep comp), then reload original (keep warp)
   {
     bool bWarpLock = m_bWarpShaderLock;
     wchar_t szOldPreset[MAX_PATH];
     lstrcpyW(szOldPreset, m_szCurrentPresetFile);
     m_bWarpShaderLock = false;
     LoadRandomPreset(0.0f);
-    m_bWarpShaderLock = true;
-    LoadPreset(szOldPreset, 0.0f);
+    if (WaitForPendingLoad(3000)) {
+      m_bWarpShaderLock = true;
+      LoadPreset(szOldPreset, 0.0f);
+      WaitForPendingLoad(3000);
+    }
     m_bWarpShaderLock = bWarpLock;
   }
   break;
   case '@':
-    // randomize comp shader
+    // randomize comp shader — load random preset (keep warp), then reload original (keep comp)
   {
     bool bCompLock = m_bCompShaderLock;
     wchar_t szOldPreset[MAX_PATH];
     lstrcpyW(szOldPreset, m_szCurrentPresetFile);
     m_bCompShaderLock = false;
     LoadRandomPreset(0.0f);
-    m_bCompShaderLock = true;
-    LoadPreset(szOldPreset, 0.0f);
+    if (WaitForPendingLoad(3000)) {
+      m_bCompShaderLock = true;
+      LoadPreset(szOldPreset, 0.0f);
+      WaitForPendingLoad(3000);
+    }
     m_bCompShaderLock = bCompLock;
   }
   break;
@@ -1928,10 +1934,15 @@ int Engine::HandleRegularKey(WPARAM wParam) {
       bool bWarpLock = m_bWarpShaderLock;
       m_bCompShaderLock = false; m_bWarpShaderLock = false;
       LoadRandomPreset(0.0f);
-      m_bCompShaderLock = true; m_bWarpShaderLock = false;
-      LoadRandomPreset(0.0f);
-      m_bCompShaderLock = false; m_bWarpShaderLock = true;
-      LoadRandomPreset(0.0f);
+      if (WaitForPendingLoad(3000)) {
+        m_bCompShaderLock = true; m_bWarpShaderLock = false;
+        LoadRandomPreset(0.0f);
+        if (WaitForPendingLoad(3000)) {
+          m_bCompShaderLock = false; m_bWarpShaderLock = true;
+          LoadRandomPreset(0.0f);
+          WaitForPendingLoad(3000);
+        }
+      }
       m_bCompShaderLock = bCompLock;
       m_bWarpShaderLock = bWarpLock;
     }

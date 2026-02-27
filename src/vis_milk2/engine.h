@@ -516,6 +516,9 @@ public:
   float   m_fLoadingPresetBlendTime;
   std::thread        m_presetLoadThread;      // background thread for async shader compilation
   std::atomic<bool>  m_bPresetLoadReady{false}; // set by bg thread when Import + shaders are done
+  std::atomic<uint64_t> m_nLoadGeneration{0}; // incremented each load; bg thread checks before signaling
+  float   m_fLoadStartTime = 0;              // GetTime() when async load began (for timeout)
+  float   m_fShaderCompileTimeout = 8.0f;    // seconds before auto-skipping a stuck compilation
   int     m_nPresetsLoadedTotal; //important for texture eviction age-tracking...
   CState	m_state_DO_NOT_USE[3];	// do not use; use pState and pOldState instead.
   ui_mode	m_UI_mode;				// can be UI_REGULAR, UI_LOAD, UI_SAVEHOW, or UI_SAVEAS
@@ -764,6 +767,7 @@ public:
   bool        ParseMilk2File(const wchar_t* szPath, wchar_t* outTemp1, wchar_t* outTemp2, int& outMixType, float& outProgress, int& outDirection);
   void        LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime);
   void        LoadPresetTick();
+  bool        WaitForPendingLoad(DWORD timeoutMs = 3000); // waits for bg thread, applies via LoadPresetTick
   void        FindValidPresetDir();
   wchar_t* GetMsgIniFile() { return m_szMsgIniFile; };
   wchar_t* GetPresetDir() { return m_szPresetDir; };

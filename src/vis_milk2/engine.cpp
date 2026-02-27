@@ -1342,6 +1342,8 @@ void Engine::MyReadConfig() {
   m_bSkipHeavyPresets = GetPrivateProfileBoolW(L"Milkwave", L"SkipHeavyPresets", m_bSkipHeavyPresets, pIni);
   m_nHeavyPresetMaxInstances = GetPrivateProfileIntW(L"Milkwave", L"HeavyPresetMaxInstances", m_nHeavyPresetMaxInstances, pIni);
   if (m_nHeavyPresetMaxInstances < 64) m_nHeavyPresetMaxInstances = 64;
+  m_fShaderCompileTimeout = GetPrivateProfileFloatW(L"Milkwave", L"ShaderCompileTimeout", m_fShaderCompileTimeout, pIni);
+  if (m_fShaderCompileTimeout < 2.0f) m_fShaderCompileTimeout = 2.0f;
 
   m_WindowBorderless = GetPrivateProfileBoolW(L"Milkwave", L"WindowBorderless", m_WindowBorderless, pIni);
   m_bAlwaysOnTop = GetPrivateProfileBoolW(L"Milkwave", L"WindowAlwaysOnTop", m_bAlwaysOnTop, pIni);
@@ -1531,6 +1533,7 @@ void Engine::MyWriteConfig() {
   WritePrivateProfileIntW(m_nInstanceScaleBaseWidth, L"InstanceScaleBaseWidth", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_bSkipHeavyPresets, L"SkipHeavyPresets", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_nHeavyPresetMaxInstances, L"HeavyPresetMaxInstances", pIni, L"Milkwave");
+  WritePrivateProfileFloatW(m_fShaderCompileTimeout, L"ShaderCompileTimeout", pIni, L"Milkwave");
 }
 
 void Engine::SaveWindowSizeAndPosition(HWND hwnd) {
