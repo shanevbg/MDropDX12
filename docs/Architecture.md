@@ -14,7 +14,21 @@ DX9Ex relied on the driver to manage GPU memory, resource transitions, and synch
 
 ### Reduced Driver Overhead
 
-DX9 drivers performed significant behind-the-scenes work on every API call — state validation, hazard tracking, and implicit synchronization. DX12 moves this responsibility to the application, resulting in lower per-frame CPU cost. For a visualizer running at 60+ FPS with continuous shader execution, this matters.
+DX9 drivers performed significant behind-the-scenes work on every API call — state validation, hazard tracking, and implicit synchronization. DX12 moves this responsibility to the application. For a visualizer running at 60+ FPS with continuous shader execution, the cumulative savings are substantial.
+
+**Pipeline State Objects.** In DX9, every draw call required the driver to validate dozens of individual state settings — blend mode, rasterizer state, depth/stencil, shader pairs, input layout, and more. The driver maintained an internal state machine and re-validated consistency on each draw. MDropDX12 bakes all of this into immutable Pipeline State Objects at initialization time. At draw time, a single `SetPipelineState()` call replaces what was previously 50+ individual state-setting calls, all pre-validated.
+
+**Command list batching.** DX9 validated every `DrawPrimitive()` call individually as it was issued. MDropDX12 records all draw calls into a single command list per frame and submits the entire list to the GPU in one `ExecuteCommandLists()` call. The warp pass alone records over 200 mesh draw calls — all batched with no per-draw driver validation. The GPU processes the entire pre-recorded sequence without CPU intervention.
+
+**Explicit resource barriers.** DX9 drivers implicitly tracked when textures were being read versus written, and silently inserted GPU stalls when hazards were detected. This hazard tracking ran on every draw call, hidden from the application. MDropDX12 instead places explicit resource barriers at render pass boundaries — transitioning VS[0] to shader-readable before the warp pass, VS[1] to render-target, and so on. The GPU sees the full data dependency graph upfront and can pipeline operations without hidden stalls.
+
+**Descriptor heap binding.** In DX9, each `SetTexture()` call required the driver to validate the texture format against shader expectations, update internal binding tables, and check sampler compatibility. With 16 texture slots used across multiple render passes, this added up to thousands of validation operations per frame. MDropDX12 pre-allocates a single GPU-visible descriptor heap at startup, copies texture descriptors into per-frame binding blocks once, and sets one descriptor table per render pass — replacing thousands of individual binding calls with a handful of bulk operations.
+
+**Static samplers.** DX9 required separate `SetSamplerState()` calls to configure filtering, address mode, and anisotropy for each texture slot on each draw. MDropDX12 compiles all 16 sampler configurations into the root signature at initialization — wrap samplers for most slots, clamp samplers for blur textures. At draw time, there are zero sampler state calls.
+
+**Fence-based frame synchronization.** DX9's `Present()` blocked the CPU until the GPU finished rendering. MDropDX12 uses per-frame fence values and double-buffered command allocators. The CPU signals a fence after submitting each frame, then begins preparing the next frame immediately. It only waits if the GPU is still using the target backbuffer. This lets the CPU stay one frame ahead of the GPU instead of idling during GPU work.
+
+The net effect is that per-frame driver overhead drops from thousands of validation operations to a small number of explicit, pre-validated commands — freeing CPU time for audio processing, expression evaluation, and shader compilation.
 
 ### Modern Shader Compilation
 
