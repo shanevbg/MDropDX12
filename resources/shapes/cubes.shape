@@ -1,0 +1,64 @@
+shapecode_0_enabled=1
+shapecode_0_sides=3
+shapecode_0_additive=0
+shapecode_0_thickOutline=0
+shapecode_0_textured=0
+shapecode_0_num_inst=726
+shapecode_0_x=0.500
+shapecode_0_y=0.500
+shapecode_0_rad=0.11264
+shapecode_0_ang=0.00000
+shapecode_0_tex_ang=0.00000
+shapecode_0_tex_zoom=1.21795
+shapecode_0_r=1.000
+shapecode_0_g=1.000
+shapecode_0_b=0.000
+shapecode_0_a=1.000
+shapecode_0_r2=1.000
+shapecode_0_g2=1.000
+shapecode_0_b2=0.000
+shapecode_0_a2=1.000
+shapecode_0_border_r=1.000
+shapecode_0_border_g=1.000
+shapecode_0_border_b=1.000
+shapecode_0_border_a=0.000
+shape_0_per_frame1=i1=instance;    sa=i1/726;    i=(i1/6)%121;
+shape_0_per_frame2=t=-.2*time;     pi=3.1416;
+shape_0_per_frame3=
+shape_0_per_frame4=
+shape_0_per_frame5=c1=(i>=1);      c2=(i>=4)/2;    c3=(i>=13)/4;    c4=(i>=40)/8;
+shape_0_per_frame6=t1= 2*pi*i/3;   t2= t1/3;       t3= t2/3;        t4= t3/3;
+shape_0_per_frame7=p2= (i%3)/2.87;      p3= -p2+(i%9)/(3*2.87);     p4= -p2-p3+(i%27)/(9*2.87); 
+shape_0_per_frame8=
+shape_0_per_frame9=x1= sin(t1+t);        y1=cos(t1+t);
+shape_0_per_frame10=x2= sin(t2+p2+t);     y2=cos(t2+p2+t);
+shape_0_per_frame11=x3= sin(t3+p3+t);     y3=cos(t3+p3+t);
+shape_0_per_frame12=x4= sin(t4+p4+t);     y4=cos(t4+p4+t);
+shape_0_per_frame13=
+shape_0_per_frame14=
+shape_0_per_frame15=z6=.3+ .2*sin(t);
+shape_0_per_frame16=x6 = z6* (c1*x1 + c2*x2 + c3*x3 + c4*x4) ;
+shape_0_per_frame17=y6 = z6* (c1*y1 + c2*y2 + c3*y3 + c4*y4) ;
+shape_0_per_frame18=
+shape_0_per_frame19=r6 = z6* (2-c1-c2-c3-c4);
+shape_0_per_frame20=
+shape_0_per_frame21=d=sqrt(x6*x6+y6*y6);
+shape_0_per_frame22=
+shape_0_per_frame23=t7=2*pi*121*sa + 1.57 + t; 
+shape_0_per_frame24=
+shape_0_per_frame25=z7= (.385+.195*sin(.3*t))*r6;
+shape_0_per_frame26=x7=z7*sin(t7);    y7=z7*cos(t7);
+shape_0_per_frame27=
+shape_0_per_frame28=
+shape_0_per_frame29=x= .5 + (x6+x7)/q6 ;     y= .5 + y6+y7; 
+shape_0_per_frame30=
+shape_0_per_frame31=rad = 2.01*z7;       ang=pi/4+t7;
+shape_0_per_frame32=
+shape_0_per_frame33=
+shape_0_per_frame34=p5 = .2+.4*( 9*p3+i1/2)%3;   
+shape_0_per_frame35=p6 = 1-.1*i%10;
+shape_0_per_frame36=p7 = .6+.4*sin(100*d-time);
+shape_0_per_frame37=
+shape_0_per_frame38=r= p5*p6*p7;    r2=r;
+shape_0_per_frame39=g= r*r;         g2=g;
+shape_0_per_frame40=b= g*g;         b2=b;

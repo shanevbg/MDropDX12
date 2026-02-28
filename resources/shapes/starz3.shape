@@ -1,0 +1,53 @@
+shapecode_0_enabled=1
+shapecode_0_sides=20
+shapecode_0_additive=1
+shapecode_0_thickOutline=1
+shapecode_0_textured=0
+shapecode_0_num_inst=444
+shapecode_0_x=0.800
+shapecode_0_y=0.500
+shapecode_0_rad=0.12821
+shapecode_0_ang=0.00000
+shapecode_0_tex_ang=0.00000
+shapecode_0_tex_zoom=5.42791
+shapecode_0_r=0.000
+shapecode_0_g=0.000
+shapecode_0_b=1.000
+shapecode_0_a=0.200
+shapecode_0_r2=0.000
+shapecode_0_g2=0.000
+shapecode_0_b2=0.500
+shapecode_0_a2=0.000
+shapecode_0_border_r=1.000
+shapecode_0_border_g=1.000
+shapecode_0_border_b=1.000
+shapecode_0_border_a=0.000
+shape_0_init1=i=0;
+shape_0_init2=loop (1024,
+shape_0_init3=  z=rand(1)+.1;
+shape_0_init4=  megabuf(i+2) = z;
+shape_0_init5=  megabuf(i)  = (rand(1)-0.5)/z;
+shape_0_init6=  megabuf(i+1)= (rand(1)-.5)/z;
+shape_0_init7=i+=3;);
+shape_0_per_frame1=i=instance;
+shape_0_per_frame2=k1 = i/num_inst;
+shape_0_per_frame3=zmax = 4;
+shape_0_per_frame4=speed=.25;
+shape_0_per_frame5=
+shape_0_per_frame6=z=megabuf(3*i+2);
+shape_0_per_frame7=x = megabuf(3*i)/z+.5;
+shape_0_per_frame8=y = megabuf(3*i+1)/z*reg32+0.5;
+shape_0_per_frame9=
+shape_0_per_frame10=rad = .022/(z*zmax/2)*reg32 ;
+shape_0_per_frame11=
+shape_0_per_frame12=out=(x>1)||(x<0)||(y>1)||(y<0)||(z<0);
+shape_0_per_frame13=if (out,
+shape_0_per_frame14=  megabuf(3*i)= (rand(2)-1); //x
+shape_0_per_frame15=  megabuf(3*i+1)=(rand(2)-1); //y
+shape_0_per_frame16=  megabuf(3*i+2)=1;
+shape_0_per_frame17=,
+shape_0_per_frame18=  megabuf(i*3+2)-=speed/fps;
+shape_0_per_frame19=);
+shape_0_per_frame20=
+shape_0_per_frame21=a=1-pow(z,4);
+shape_0_per_frame22=a*=0.9;

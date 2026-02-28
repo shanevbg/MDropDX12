@@ -1,0 +1,27 @@
+shapecode_0_enabled=1
+shapecode_0_sides=12
+shapecode_0_additive=1
+shapecode_0_thickOutline=0
+shapecode_0_textured=0
+shapecode_0_num_inst=2
+shapecode_0_x=0.490
+shapecode_0_y=0.500
+shapecode_0_rad=0.09902
+shapecode_0_ang=0.00000
+shapecode_0_tex_ang=0.00000
+shapecode_0_tex_zoom=4.36077
+shapecode_0_r=1.000
+shapecode_0_g=0.000
+shapecode_0_b=0.000
+shapecode_0_a=1.000
+shapecode_0_r2=0.000
+shapecode_0_g2=0.000
+shapecode_0_b2=0.000
+shapecode_0_a2=0.000
+shapecode_0_border_r=1.000
+shapecode_0_border_g=1.000
+shapecode_0_border_b=1.000
+shapecode_0_border_a=0.000
+shape_0_per_frame1=x = rand(1000)/1000;
+shape_0_per_frame2=y = rand(1000)/1000;
+shape_0_per_frame3=ang = rand(150)/100;
