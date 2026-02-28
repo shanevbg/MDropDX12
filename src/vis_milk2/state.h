@@ -38,7 +38,9 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "d3dx9compat.h" // replaces <d3dx9math.h>; provides D3DXVECTOR3 etc. for DX9→DX12 migration
 
 //#include "evallib/eval.h"
-#include "../ns-eel2-shim/ns-eel.h"
+#include "../ns-eel2/ns-eel.h"
+// NSEEL_VM_resetvars: not in WDL ns-eel2 API, implemented in engine.cpp
+void NSEEL_VM_resetvars(NSEEL_VMCTX ctx);
 #include "md_defines.h"
 
 // flags for CState::RecompileExpressions():

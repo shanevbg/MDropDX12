@@ -36,7 +36,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define D3D_DEBUG_INFO  // declare this before including d3d9.h
 #endif
 #include <d3d9.h>
-#include "../ns-eel2-shim/ns-eel.h"
+#include "../ns-eel2/ns-eel.h"
 #include "md_defines.h"
 #include "dx12helpers.h"  // DX12Texture
 

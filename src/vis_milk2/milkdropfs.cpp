@@ -39,7 +39,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "support.h"
 //#include "evallib\eval.h"		// for math. expr. eval - thanks Francis! (in SourceOffSite, it's the 'vis_avs\evallib' project.)
 //#include "evallib\compiler.h"
-#include "../ns-eel2-shim/ns-eel.h"
+#include "../ns-eel2/ns-eel.h"
 #include "utility.h"
 #include <assert.h>
 #include <math.h>
@@ -1037,7 +1037,7 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
 
         wchar_t debugMsg[128];
         swprintf(debugMsg, sizeof(debugMsg) / sizeof(debugMsg[0]), L"RenderFrame: fTimeAfterFullDuration=%.2f\n", fTimeAfterFullDuration);
-        DebugLogW(debugMsg);
+        DebugLogW(debugMsg, LOG_VERBOSE);
 
         if (fTimeAfterFullDuration >= m_supertexts[i].fBurnTime) {
           m_supertexts[i].fStartTime = -1.0f;	// 'off' state
@@ -1738,7 +1738,7 @@ void mdrop::Engine::DX12_BlurPasses()
             m_nHighestBlurTexUsedThisFrame, passes,
             m_dx12BlurPSO[0] ? "OK" : "NULL", m_dx12BlurPSO[1] ? "OK" : "NULL",
             m_dx12Blur[1].srvIndex, m_dx12Blur[3].srvIndex);
-    DebugLogA(dbg);
+    DebugLogA(dbg, LOG_VERBOSE);
   }
 
   if (passes == 0)
@@ -1834,7 +1834,7 @@ void mdrop::Engine::DX12_BlurPasses()
               srctexsize.x, srctexsize.y, srctexsize.z, srctexsize.w,
               fscale_now, fbias_now,
               pCT ? static_cast<DX12ConstantTable*>(pCT)->GetShadowSize() : 0);
-      DebugLogA(dbg);
+      DebugLogA(dbg, LOG_VERBOSE);
     }
 
     if (i % 2 == 0) {
@@ -1972,16 +1972,16 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
                 cp->m_texcode[4], cp->m_texcode[5], cp->m_texcode[6], cp->m_texcode[7],
                 cp->m_texcode[8], cp->m_texcode[9], cp->m_texcode[10], cp->m_texcode[11],
                 cp->m_texcode[12], cp->m_texcode[13], cp->m_texcode[14], cp->m_texcode[15]);
-        DebugLogA(dbg);
+        DebugLogA(dbg, LOG_VERBOSE);
         sprintf(dbg, "DIAG CompBindings slots:   [%u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u]",
                 compSlots[0], compSlots[1], compSlots[2], compSlots[3],
                 compSlots[4], compSlots[5], compSlots[6], compSlots[7],
                 compSlots[8], compSlots[9], compSlots[10], compSlots[11],
                 compSlots[12], compSlots[13], compSlots[14], compSlots[15]);
-        DebugLogA(dbg);
+        DebugLogA(dbg, LOG_VERBOSE);
         sprintf(dbg, "DIAG CompBindings blur SRVs: blur[1].srv=%u blur[3].srv=%u blur[5].srv=%u VS[1].srv=%u",
                 m_dx12Blur[1].srvIndex, m_dx12Blur[3].srvIndex, m_dx12Blur[5].srvIndex, m_dx12VS[1].srvIndex);
-        DebugLogA(dbg);
+        DebugLogA(dbg, LOG_VERBOSE);
       }
       // Log warp shader's m_texcode
       {
@@ -1992,13 +1992,13 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
                 wp->m_texcode[4], wp->m_texcode[5], wp->m_texcode[6], wp->m_texcode[7],
                 wp->m_texcode[8], wp->m_texcode[9], wp->m_texcode[10], wp->m_texcode[11],
                 wp->m_texcode[12], wp->m_texcode[13], wp->m_texcode[14], wp->m_texcode[15]);
-        DebugLogA(dbg);
+        DebugLogA(dbg, LOG_VERBOSE);
         sprintf(dbg, "DIAG WarpBindings slots:   [%u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u]",
                 warpSlots[0], warpSlots[1], warpSlots[2], warpSlots[3],
                 warpSlots[4], warpSlots[5], warpSlots[6], warpSlots[7],
                 warpSlots[8], warpSlots[9], warpSlots[10], warpSlots[11],
                 warpSlots[12], warpSlots[13], warpSlots[14], warpSlots[15]);
-        DebugLogA(dbg);
+        DebugLogA(dbg, LOG_VERBOSE);
       }
     }
 
@@ -2018,7 +2018,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
               m_dx12WarpPSO ? "PRESET" : "FALLBACK",
               (m_shaders.warp.CT != nullptr) ? "yes" : "no",
               (float)(*m_pState->var_pf_decay));
-      DebugLogA(dbg);
+      DebugLogA(dbg, LOG_VERBOSE);
     }
 
     // Bind warp shader constant buffer
@@ -2198,7 +2198,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     }
   }
 
-  DebugLogA("DX12: RenderWarpAndComposite done");
+  DebugLogA("DX12: RenderWarpAndComposite done", LOG_VERBOSE);
 }
 
 // Forward declaration — defined later in this file
@@ -3354,7 +3354,7 @@ void mdrop::Engine::DX12_DrawCustomShapes() {
     char dbg[512];
     sprintf(dbg, "DX12 Shapes: drawn=%d visible=%d firstAlpha=%.3f firstColor=0x%08X",
             diag_shapesDrawn, diag_shapesVisible, diag_firstVisibleAlpha, diag_firstVisibleColor);
-    DebugLogA(dbg);
+    DebugLogA(dbg, LOG_VERBOSE);
   }
 }
 

@@ -652,15 +652,11 @@ uint64_t LastSentMDropDX12Message = 0;
 
 } // namespace mdrop (temporarily close for C-linkage stubs)
 
-void NSEEL_HOSTSTUB_EnterMutex() {}
-void NSEEL_HOSTSTUB_LeaveMutex() {}
-
-#ifdef NS_EEL2
+// NSEEL_VM_resetvars: compatibility wrapper (not in WDL ns-eel2 API)
 void NSEEL_VM_resetvars(NSEEL_VMCTX ctx) {
   NSEEL_VM_freeRAM(ctx);
   NSEEL_VM_remove_all_nonreg_vars(ctx);
 }
-#endif
 
 namespace mdrop {
 
@@ -1320,6 +1316,7 @@ void Engine::MyReadConfig() {
   m_ShaderPrecompileOnStartup = GetPrivateProfileBoolW(L"Milkwave", L"ShaderPrecompileOnStartup", m_ShaderPrecompileOnStartup, pIni);
   m_CheckDirectXOnStartup = GetPrivateProfileBoolW(L"Milkwave", L"CheckDirectXOnStartup", m_CheckDirectXOnStartup, pIni);
   m_LogLevel = GetPrivateProfileIntW(L"Milkwave", L"LogLevel", m_LogLevel, pIni);
+  DebugLogSetLevel(m_LogLevel); // apply log level to DebugLog system
   GetPrivateProfileStringW(L"Milkwave", L"WindowTitle", L"", m_szWindowTitle, 256, pIni);
   GetPrivateProfileStringW(L"Milkwave", L"RemoteWindowTitle", L"", m_szRemoteWindowTitle, 256, pIni);
 
@@ -2348,8 +2345,8 @@ int Engine::AllocateMyDX9Stuff() {
                               "main", "ps_5_0",
                               D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY, 0, &psBlob, &pErrors);
       if (FAILED(hr)) {
-        if (pErrors) { DebugLogA((const char*)pErrors->GetBufferPointer()); pErrors->Release(); }
-        DebugLogA("DX12: Inject effect PSO: PS compile FAILED");
+        if (pErrors) { DebugLogA((const char*)pErrors->GetBufferPointer(), LOG_ERROR); pErrors->Release(); }
+        DebugLogA("DX12: Inject effect PSO: PS compile FAILED", LOG_ERROR);
       } else {
         if (pErrors) pErrors->Release();
         m_pInjectEffectPSO = DX12CreatePresetPSO(

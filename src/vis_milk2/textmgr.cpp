@@ -99,7 +99,7 @@ void CTextManager::InitDX12(DXContext* lpDX, HFONT* pFonts, int nFonts, void* pF
     if (!BuildFontAtlas(i)) {
       char buf[128];
       sprintf(buf, "CTextManager: BuildFontAtlas(%d) failed\n", i);
-      DebugLogA(buf);
+      DebugLogA(buf, LOG_ERROR);
     }
   }
 
@@ -261,7 +261,7 @@ bool CTextManager::BuildFontAtlas(int fontIdx) {
   if (!atlas.texture.IsValid()) {
     char buf[128];
     sprintf(buf, "CTextManager: CreateTextureFromPixels failed for font %d", fontIdx);
-    DebugLogA(buf);
+    DebugLogA(buf, LOG_ERROR);
     return false;
   }
 
@@ -273,7 +273,7 @@ bool CTextManager::BuildFontAtlas(int fontIdx) {
   char buf[256];
   sprintf(buf, "CTextManager: Font %d atlas built: %dx%d cells=%dx%d lineH=%.0f",
     fontIdx, atlasW, atlasH, cellW, cellH, atlas.lineHeight);
-  DebugLogA(buf);
+  DebugLogA(buf, LOG_VERBOSE);
 
   return true;
 }

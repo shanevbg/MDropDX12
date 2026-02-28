@@ -2512,6 +2512,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 
     // Initialize debug log (rotates debug.log → debug.prev.log)
     DebugLogInit(g_engine.m_szBaseDir);
+    DebugLogSetLevel(g_engine.m_LogLevel); // apply INI log level immediately
 
     DebugLogW(found ? L"BaseDir resolved (resources found)" : L"BaseDir resolved (resources NOT found)");
     DebugLogW(g_engine.m_szBaseDir);

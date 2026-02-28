@@ -115,7 +115,7 @@
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ns-eel2;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;USE_VIS_HDR_HWND;STRSAFE_NO_DEPRECATE;NSEEL_REENTRANT_EXECUTION;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
@@ -139,7 +139,7 @@
       <Culture>0x0409</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;projectM_eval.lib;projectM_ns-eel2.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>..\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
@@ -177,7 +177,7 @@
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ns-eel2;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_NODEBUG;_WINDOWS;USE_VIS_HDR_HWND;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -200,7 +200,7 @@
       <Culture>0x0409</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;projectM_eval.lib;projectM_ns-eel2.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>..\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -234,7 +234,7 @@
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ns-eel2;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_WIN64;NDEBUG;_WINDOWS;USE_VIS_HDR_HWND;STRSAFE_NO_DEPRECATE;NSEEL_REENTRANT_EXECUTION;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
@@ -258,7 +258,7 @@
       <Culture>0x0409</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;projectM_eval.lib;projectM_ns-eel2.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>..\..\src\ns-eel2\asm-nseel-x64.obj;windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>..\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
@@ -296,7 +296,7 @@
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ns-eel2;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_WIN64;_NODEBUG;_WINDOWS;USE_VIS_HDR_HWND;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -319,7 +319,7 @@
       <Culture>0x0409</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;projectM_eval.lib;projectM_ns-eel2.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>..\..\src\ns-eel2\asm-nseel-x64.obj;windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>..\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -374,6 +374,29 @@
     <ClCompile Include="overlay.cpp" />
     <ClCompile Include="utility.cpp" />
     <ClCompile Include="wasabi.cpp" />
+    <!-- ns-eel2: native JIT expression evaluator (WDL) -->
+    <ClCompile Include="..\ns-eel2\nseel-compiler.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-cfunc.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-eval.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-ram.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-caltab.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-lextab.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-yylex.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-host.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\audio\cleanup.h" />
@@ -382,7 +405,11 @@
     <ClInclude Include="..\audio\log.h" />
     <ClInclude Include="..\audio\loopback-capture.h" />
     <ClInclude Include="..\audio\prefs.h" />
-    <ClInclude Include="..\ns-eel2-shim\ns-eel.h" />
+    <ClInclude Include="..\ns-eel2\ns-eel.h" />
+    <ClInclude Include="..\ns-eel2\ns-eel-int.h" />
+    <ClInclude Include="..\ns-eel2\ns-eel-addfuncs.h" />
+    <ClInclude Include="..\ns-eel2\glue_x86_64_sse.h" />
+    <ClInclude Include="..\ns-eel2\glue_x86.h" />
     <!-- SpoutDX9 headers: kept for Phase 1; Phase 5 TODO: replace with Spout2 DX12 headers -->
     <ClInclude Include="..\spoutDX9\SpoutCommon.h" />
     <ClInclude Include="..\spoutDX9\SpoutCopy.h" />

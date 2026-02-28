@@ -1312,7 +1312,7 @@ int EngineShell::PluginRender(unsigned char* pWaveL, unsigned char* pWaveR)//, u
     char dbg[512];
     sprintf(dbg, "TDR Recovery: Device lost detected (hr=0x%08X) — signaling recovery",
             (unsigned)m_lpDX->m_lastErr);
-    DebugLogA(dbg);
+    DebugLogA(dbg, LOG_ERROR);
     m_bDeviceRecoveryPending = true;
     return false;  // signal caller to attempt recovery
   }
@@ -1452,7 +1452,7 @@ void EngineShell::DrawAndDisplay(int redraw) {
         m_lpDX->m_commandList->ResourceBarrier(1, &barrier);
       } else {
         screenshotReadback.Reset();
-        DebugLogA("DX12: Failed to create screenshot readback buffer");
+        DebugLogA("DX12: Failed to create screenshot readback buffer", LOG_ERROR);
       }
     }
 

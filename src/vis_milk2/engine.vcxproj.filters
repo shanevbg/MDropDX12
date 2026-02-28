@@ -103,6 +103,30 @@
     <ClCompile Include="AMDDetection.cpp">
       <Filter>library\sources</Filter>
     </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-compiler.c">
+      <Filter>library\ns-eel</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-cfunc.c">
+      <Filter>library\ns-eel</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-eval.c">
+      <Filter>library\ns-eel</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-ram.c">
+      <Filter>library\ns-eel</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-caltab.c">
+      <Filter>library\ns-eel</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-lextab.c">
+      <Filter>library\ns-eel</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-yylex.c">
+      <Filter>library\ns-eel</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-host.cpp">
+      <Filter>library\ns-eel</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="wasabi.h">
@@ -177,7 +201,19 @@
     <ClInclude Include="..\spoutDX9\SpoutUtils.h">
       <Filter>spoutDX9</Filter>
     </ClInclude>
-    <ClInclude Include="..\ns-eel2-shim\ns-eel.h">
+    <ClInclude Include="..\ns-eel2\ns-eel.h">
+      <Filter>library\ns-eel</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ns-eel2\ns-eel-int.h">
+      <Filter>library\ns-eel</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ns-eel2\ns-eel-addfuncs.h">
+      <Filter>library\ns-eel</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ns-eel2\glue_x86_64_sse.h">
+      <Filter>library\ns-eel</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ns-eel2\glue_x86.h">
       <Filter>library\ns-eel</Filter>
     </ClInclude>
     <ClInclude Include="mdropdx12.h">

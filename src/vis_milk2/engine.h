@@ -47,7 +47,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <array>
 #include <thread>
 #include <atomic>
-#include "../ns-eel2-shim/ns-eel.h"
+#include "../ns-eel2/ns-eel.h"
 #include "mdropdx12.h"
 
 //#include <core/sdk/IPlaybackService.h>
@@ -507,7 +507,7 @@ public:
   bool    m_ShaderCaching = true;
   bool    m_ShaderPrecompileOnStartup = true;
   bool    m_CheckDirectXOnStartup = true;
-  int     m_LogLevel = 1; // 0 = Off, 1 = Error, 2 = Info
+  int     m_LogLevel = 1; // 0 = Off, 1 = Error, 2 = Info, 3 = Verbose
   bool    m_ShowLockSymbol = true;
   float   m_fAnimTime;
   float   m_fStartTime;

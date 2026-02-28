@@ -309,7 +309,7 @@ void COverlayThread::ThreadFunc() {
         m_bAlive.store(false, std::memory_order_release);
         ReleaseDIB();
         DestroyOverlayWindow();
-        DebugLogA("COverlayThread: SEH exception caught, overlay disabled");
+        DebugLogA("COverlayThread: SEH exception caught, overlay disabled", LOG_ERROR);
     }
 }
 

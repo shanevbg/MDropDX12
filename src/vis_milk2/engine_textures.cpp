@@ -483,7 +483,7 @@ bool Engine::EvictSomeTexture() {
       }
     char buf[1024];
     sprintf(buf, "evicting at %d textures, %.1f MB\n", nEvictableFiles, nEvictableBytes * 0.000001f);
-    DebugLogA(buf);
+    DebugLogA(buf, LOG_VERBOSE);
   }
 #endif
 

@@ -15,7 +15,7 @@ static bool CompileShaderFromString(const char* src, const char* entryPoint, con
                              entryPoint, target, flags, 0, ppBlob, &pErrors);
     if (FAILED(hr)) {
         if (pErrors) {
-            DebugLogA((const char*)pErrors->GetBufferPointer());
+            DebugLogA((const char*)pErrors->GetBufferPointer(), LOG_ERROR);
             pErrors->Release();
         }
         return false;
@@ -210,15 +210,15 @@ bool DX12CreatePipelines(ID3D12Device* device, ID3D12RootSignature* rootSig,
     // Must use ENABLE_BACKWARDS_COMPATIBILITY to match the PS compiled by D3DXCompileShader shim,
     // otherwise VS/PS get different hardware register assignments for the same semantics.
     if (!CompileShaderFromString(g_szWarpVS, "main", "vs_5_0", &g_pWarpVSBlob, D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY)) {
-        DebugLogA("DX12: Failed to compile warp VS");
+        DebugLogA("DX12: Failed to compile warp VS", LOG_ERROR);
         return false;
     }
     if (!CompileShaderFromString(g_szCompVS, "main", "vs_5_0", &g_pCompVSBlob, D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY)) {
-        DebugLogA("DX12: Failed to compile comp VS");
+        DebugLogA("DX12: Failed to compile comp VS", LOG_ERROR);
         return false;
     }
     if (!CompileShaderFromString(g_szBlurVS, "main", "vs_5_0", &g_pBlurVSBlob, D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY)) {
-        DebugLogA("DX12: Failed to compile blur VS");
+        DebugLogA("DX12: Failed to compile blur VS", LOG_ERROR);
         return false;
     }
 
@@ -260,7 +260,7 @@ ComPtr<ID3D12PipelineState> DX12CreatePresetPSO(
                     }
                     sprintf(dbg, "DIAG PSO Reflect[%u]: Name='%s' Type=%s BindPoint=%u BindCount=%u",
                             i, rbd.Name ? rbd.Name : "(null)", typeStr, rbd.BindPoint, rbd.BindCount);
-                    DebugLogA(dbg);
+                    DebugLogA(dbg, LOG_VERBOSE);
                 }
 
                 if (*pMainTexSlotOut == UINT_MAX && rbd.Type == D3D_SIT_TEXTURE) {
@@ -313,7 +313,7 @@ ComPtr<ID3D12PipelineState> DX12CreatePresetPSO(
     if (FAILED(hr)) {
         char buf[80];
         sprintf_s(buf, "DX12: CreateGraphicsPipelineState FAILED hr=0x%08X\n", (unsigned)hr);
-        DebugLogA(buf);
+        DebugLogA(buf, LOG_ERROR);
         return nullptr;
     }
     return pso;

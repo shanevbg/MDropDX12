@@ -85,7 +85,7 @@ void Engine::LoadRandomPreset(float fBlendTime) {
     wchar_t buf[1024];
     swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILE_FOUND_IN_X_MILK), m_szPresetDir);
     AddError(buf, 6.0f, ERR_MISC, true);
-    DebugLogA("ERROR: No preset files found in preset directory");
+    DebugLogA("ERROR: No preset files found in preset directory", LOG_ERROR);
 
     if (m_UI_mode == UI_REGULAR || m_UI_mode == UI_MENU) {
       m_UI_mode = UI_LOAD;
@@ -1465,7 +1465,7 @@ void Engine::LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime) 
     {
       wchar_t dbgBuf[MAX_PATH + 64];
       swprintf_s(dbgBuf, L"LoadMilk2Preset: failed to parse %s", szPresetFilename);
-      DebugLogW(dbgBuf);
+      DebugLogW(dbgBuf, LOG_VERBOSE);
     }
     return;
   }
@@ -1552,7 +1552,7 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
 
     wchar_t fullPath[MAX_PATH];
     GetFullPathNameW(szPresetFilename, MAX_PATH, fullPath, NULL);
-    DebugLogW(fullPath);
+    DebugLogW(fullPath, LOG_VERBOSE);
 
     wchar_t buf[1024];
     swprintf(buf, wasabiApiLangString(IDS_ERROR_PRESET_NOT_FOUND_X), fullPath);
@@ -1609,7 +1609,7 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
       // This leaks a small amount of bytecode — acceptable for rare slow-shader cases.
       m_NewShaders.warp.ptr = NULL; m_NewShaders.warp.CT = NULL; m_NewShaders.warp.bytecodeBlob = NULL;
       m_NewShaders.comp.ptr = NULL; m_NewShaders.comp.CT = NULL; m_NewShaders.comp.bytecodeBlob = NULL;
-      DebugLogA("Preset load: detaching stale compilation thread (D3DCompile stall)");
+      DebugLogA("Preset load: detaching stale compilation thread (D3DCompile stall)", LOG_ERROR);
     } else {
       m_presetLoadThread.join();
     }

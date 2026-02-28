@@ -795,10 +795,10 @@ void* GetTextResource(UINT id, int no_fallback) {
 // Debug log — writes timestamped messages to debug.log in the base directory.
 // DebugLogInit rotates debug.log → debug.prev.log (keeps only current + last run).
 // ---------------------------------------------------------------------------
-#ifdef _DEBUG
 static FILE* g_debugLogFile = nullptr;
 static CRITICAL_SECTION g_debugLogCS;
 static bool g_debugLogReady = false;
+static int g_debugLogLevel = LOG_INFO; // default: show errors + info
 
 void DebugLogInit(const wchar_t* baseDir) {
   InitializeCriticalSection(&g_debugLogCS);
@@ -825,8 +825,14 @@ void DebugLogInit(const wchar_t* baseDir) {
   }
 }
 
-void DebugLogW(const wchar_t* msg) {
+void DebugLogSetLevel(int level) {
+  g_debugLogLevel = level;
+}
+
+void DebugLogW(const wchar_t* msg, int level) {
   if (!msg || !msg[0])
+    return;
+  if (level > g_debugLogLevel)
     return;
 
   // Always send to debugger (DebugView / VS Output)
@@ -850,11 +856,12 @@ void DebugLogW(const wchar_t* msg) {
   LeaveCriticalSection(&g_debugLogCS);
 }
 
-void DebugLogA(const char* msg) {
+void DebugLogA(const char* msg, int level) {
   if (!msg || !msg[0])
+    return;
+  if (level > g_debugLogLevel)
     return;
   wchar_t buf[2048];
   MultiByteToWideChar(CP_ACP, 0, msg, -1, buf, 2048);
-  DebugLogW(buf);
+  DebugLogW(buf, level);
 }
-#endif // _DEBUG

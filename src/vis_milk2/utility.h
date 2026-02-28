@@ -91,14 +91,14 @@ intptr_t myOpenURL(HWND hwnd, wchar_t* loc);
 
 // Debug log — writes timestamped messages to debug.log in the base directory.
 // DebugLogInit rotates debug.log → debug.prev.log (keeps only current + last run).
-#ifdef _DEBUG
+// Log levels: 0=Off, 1=Error, 2=Info (default), 3=Verbose
+#define LOG_ERROR   1
+#define LOG_INFO    2
+#define LOG_VERBOSE 3
+
 void DebugLogInit(const wchar_t* baseDir);
-void DebugLogW(const wchar_t* msg);
-void DebugLogA(const char* msg);
-#else
-#define DebugLogInit(baseDir) ((void)0)
-#define DebugLogW(msg) ((void)0)
-#define DebugLogA(msg) ((void)0)
-#endif
+void DebugLogSetLevel(int level);
+void DebugLogW(const wchar_t* msg, int level = LOG_INFO);
+void DebugLogA(const char* msg, int level); // default (= LOG_INFO) is in d3dx9compat.h (included above)
 
 #endif

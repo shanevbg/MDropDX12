@@ -95,7 +95,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
   {
     char dbg[256];
     sprintf(dbg, "DX12: CacheParams: %u constants", d.Constants);
-    DebugLogA(dbg);
+    DebugLogA(dbg, LOG_VERBOSE);
   }
 
   // pass 1: find all the samplers (and texture bindings).
@@ -107,7 +107,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
     {
       char dbg[256];
       sprintf(dbg, "DX12: CacheParams pass1: [%u] Name=%s RegSet=%d RegIdx=%d", i, cd.Name ? cd.Name : "(null)", cd.RegisterSet, cd.RegisterIndex);
-      DebugLogA(dbg);
+      DebugLogA(dbg, LOG_VERBOSE);
     }
 
     // cd.Name          = VS_Sampler
@@ -306,7 +306,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
             {
               char dbg[512];
               sprintf(dbg, "CacheParams: searching for texture '%ls'", szRootName);
-              DebugLogA(dbg);
+              DebugLogA(dbg, LOG_VERBOSE);
             }
             for (int z = 0; z < texture_exts_count; z++) {
               swprintf(szFilename, L"%stextures\\%s.%s", g_engine.m_szMilkdrop2Path, szRootName, texture_exts[z].c_str());
@@ -349,7 +349,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
                 found = true;
                 char dbg[512];
                 sprintf(dbg, "CacheParams: loaded texture '%ls' from '%ls'", szRootName, szFilename);
-                DebugLogA(dbg);
+                DebugLogA(dbg, LOG_VERBOSE);
                 break;
               }
               // WIC couldn't decode this format (e.g. .dds) — try next extension
@@ -364,7 +364,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
                 sprintf(dbg, "CacheParams: texture NOT found: '%ls' (base='%ls', preset='%ls', %d fallback paths)",
                         szRootName, g_engine.m_szMilkdrop2Path, g_engine.m_szPresetDir,
                         (int)g_engine.m_fallbackPaths.size());
-                DebugLogA(dbg);
+                DebugLogA(dbg, LOG_VERBOSE);
               }
               if (bHardErrors)
                 MessageBoxW(g_engine.GetPluginWindow(), buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
@@ -458,7 +458,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
     }
   }
 
-  DebugLogA("DX12: CacheParams: pass 1 done, entering pass 2");
+  DebugLogA("DX12: CacheParams: pass 1 done, entering pass 2", LOG_VERBOSE);
 
   // pass 2: bind all the float4's.  "texsize_XYZ" params will be filled out via knowledge of loaded texture sizes.
   for (UINT i = 0; i < d.Constants; i++) {
@@ -469,7 +469,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
     {
       char dbg[256];
       sprintf(dbg, "DX12: CacheParams pass2: [%u] Name=%s RegSet=%d Class=%d", i, cd.Name ? cd.Name : "(null)", cd.RegisterSet, cd.Class);
-      DebugLogA(dbg);
+      DebugLogA(dbg, LOG_VERBOSE);
     }
 
     if (cd.RegisterSet == D3DXRS_FLOAT4) {
@@ -570,7 +570,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
     }
   }
 
-  DebugLogA("DX12: CacheParams: pass 2 done, returning");
+  DebugLogA("DX12: CacheParams: pass 2 done, returning", LOG_VERBOSE);
 }
 
 //----------------------------------------------------------------------
@@ -623,11 +623,11 @@ bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int sh
   }
 
   if (!LoadShaderFromMemory(szShadersText, "PS", ver, &si->CT, (void**)&si->ptr, shaderType, bHardErrors, bCompileOnly, &si->bytecodeBlob)) {
-    DebugLogA("DX12: RecompilePShader: LoadShaderFromMemory FAILED");
+    DebugLogA("DX12: RecompilePShader: LoadShaderFromMemory FAILED", LOG_ERROR);
     return false;
   }
 
-  DebugLogA("DX12: RecompilePShader: LoadShaderFromMemory OK, entering CacheParams...");
+  DebugLogA("DX12: RecompilePShader: LoadShaderFromMemory OK, entering CacheParams...", LOG_VERBOSE);
 
   if (!bCompileOnly) {
     // Track down texture & float4 param bindings for this shader.
@@ -635,13 +635,13 @@ bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int sh
     si->params.CacheParams(si->CT, bHardErrors);
   }
 
-  DebugLogA("DX12: RecompilePShader: CacheParams done, returning true");
+  DebugLogA("DX12: RecompilePShader: CacheParams done, returning true", LOG_VERBOSE);
   return true;
 }
 
 bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompileOnly) {
   if (m_nMaxPSVersion <= 0) {
-    DebugLogA("DX12: LoadShaders: m_nMaxPSVersion <= 0, skipping");
+    DebugLogA("DX12: LoadShaders: m_nMaxPSVersion <= 0, skipping", LOG_VERBOSE);
     return true;
   }
 
@@ -650,7 +650,7 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
     char dbg[256];
     sprintf(dbg, "DX12: LoadShaders: warp.ptr=%p warp.CT=%p nWarpPSVersion=%d nMaxPS=%d",
             (void*)sh->warp.ptr, (void*)sh->warp.CT, pState->m_nWarpPSVersion, m_nMaxPSVersion);
-    DebugLogA(dbg);
+    DebugLogA(dbg, LOG_VERBOSE);
   }
   if (!sh->warp.ptr && !sh->warp.CT && pState->m_nWarpPSVersion > 0) {
     bool bOK = RecompilePShader(pState->m_szWarpShadersText, &sh->warp, SHADER_WARP, false, pState->m_nWarpPSVersion, bCompileOnly);
@@ -658,7 +658,7 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
       char dbg[256];
       sprintf(dbg, "DX12: LoadShaders warp: bOK=%d bytecodeBlob=%p CT=%p ptr=%p",
               bOK, (void*)sh->warp.bytecodeBlob, (void*)sh->warp.CT, (void*)sh->warp.ptr);
-      DebugLogA(dbg);
+      DebugLogA(dbg, LOG_VERBOSE);
     }
     if (!bOK) {
       // switch to fallback shader
@@ -676,7 +676,7 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
     char dbg[256];
     sprintf(dbg, "DX12: LoadShaders: comp.ptr=%p comp.CT=%p nCompPSVersion=%d",
             (void*)sh->comp.ptr, (void*)sh->comp.CT, pState->m_nCompPSVersion);
-    DebugLogA(dbg);
+    DebugLogA(dbg, LOG_VERBOSE);
   }
   if (!sh->comp.ptr && !sh->comp.CT && pState->m_nCompPSVersion > 0) {
     bool bOK = RecompilePShader(pState->m_szCompShadersText, &sh->comp, SHADER_COMP, false, pState->m_nCompPSVersion, bCompileOnly);
@@ -684,7 +684,7 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
       char dbg[256];
       sprintf(dbg, "DX12: LoadShaders comp: bOK=%d bytecodeBlob=%p CT=%p ptr=%p",
               bOK, (void*)sh->comp.bytecodeBlob, (void*)sh->comp.CT, (void*)sh->comp.ptr);
-      DebugLogA(dbg);
+      DebugLogA(dbg, LOG_VERBOSE);
     }
     if (!bOK) {
       // switch to fallback shader
@@ -737,9 +737,9 @@ void Engine::CreateDX12PresetPSOs() {
   {
     char dbg[256];
     sprintf(dbg, "DX12: Preset warp PSO: %s (mainTexSlot=%u)", m_dx12WarpPSO ? "OK" : "FALLBACK", m_warpMainTexSlot);
-    DebugLogA(dbg);
+    DebugLogA(dbg, LOG_VERBOSE);
     sprintf(dbg, "DX12: Preset comp PSO: %s (mainTexSlot=%u)", m_dx12CompPSO ? "OK" : "FALLBACK", m_compMainTexSlot);
-    DebugLogA(dbg);
+    DebugLogA(dbg, LOG_VERBOSE);
   }
 }
 
@@ -895,7 +895,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
     }
     sprintf(dbg, "DIAG LoadShader: type=%d(%s) origLen=%d text='%.300s'",
             shaderType, szWhichShader, origLen, preview);
-    DebugLogA(dbg);
+    DebugLogA(dbg, LOG_VERBOSE);
   }
 
   char szShaderText[128000];
@@ -982,7 +982,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
       char dbg[256];
       sprintf(dbg, "DIAG shader_body search: type=%d found=%d offsetFromStart=%d",
               shaderType, (*p != 0) ? 1 : 0, (int)(p - &szShaderText[shaderStartPos]));
-      DebugLogA(dbg);
+      DebugLogA(dbg, LOG_VERBOSE);
     }
 
     if (*p) {
@@ -1054,7 +1054,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   {
     char dbg[256];
     sprintf(dbg, "DX12: LoadShaderFromMemory: len=%d profile=%s fn=%s shaderType=%d", len, szProfile, szFn, shaderType);
-    DebugLogA(dbg);
+    DebugLogA(dbg, LOG_VERBOSE);
   }
 
   std::wstring wideShaderText = std::wstring(szShaderText, szShaderText + strlen(szShaderText));
@@ -1063,14 +1063,14 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   tempBuffer[32767] = L'\0'; // Null-terminate to avoid overflow.
   dumpmsg(tempBuffer); // Pass the non-const buffer to dumpmsg.
 
-  DebugLogA("DX12: LoadShaderFromMemory: after dumpmsg, computing checksum...");
+  DebugLogA("DX12: LoadShaderFromMemory: after dumpmsg, computing checksum...", LOG_VERBOSE);
 
   uint32_t checksum = crc32(szShaderText, len);
 
   {
     char dbg[256];
     sprintf(dbg, "DX12: LoadShaderFromMemory: checksum=0x%08X caching=%d", checksum, m_ShaderCaching);
-    DebugLogA(dbg);
+    DebugLogA(dbg, LOG_VERBOSE);
   }
 
   if (m_ShaderCaching) {
@@ -1078,12 +1078,12 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
     {
       char dbg[256];
       sprintf(dbg, "DX12: LoadShaderFromMemory: cache %s (bytecode=%p)", pShaderByteCode ? "HIT" : "MISS", (void*)pShaderByteCode);
-      DebugLogA(dbg);
+      DebugLogA(dbg, LOG_VERBOSE);
     }
   }
 
   if (pShaderByteCode != NULL && !compileOnly) {
-    DebugLogA("DX12: LoadShaderFromMemory: using cached bytecode, creating CT via D3DReflect...");
+    DebugLogA("DX12: LoadShaderFromMemory: using cached bytecode, creating CT via D3DReflect...", LOG_VERBOSE);
     // restore ConstTable from cached bytecode via D3DReflect
     *ppConstTable = DX12ConstantTable::CreateFromBytecode(
       pShaderByteCode->GetBufferPointer(),
@@ -1091,15 +1091,15 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
     if (!*ppConstTable) {
       // Stale cache: old SM3.0 bytecode that D3DReflect can't parse.
       // Discard and fall through to recompile as SM5.0.
-      DebugLogA("DX12: LoadShaderFromMemory: stale cache (D3DReflect failed), recompiling...");
+      DebugLogA("DX12: LoadShaderFromMemory: stale cache (D3DReflect failed), recompiling...", LOG_VERBOSE);
       pShaderByteCode->Release();
       pShaderByteCode = NULL;
     } else {
-      DebugLogA("DX12: LoadShaderFromMemory: CT from cache done");
+      DebugLogA("DX12: LoadShaderFromMemory: CT from cache done", LOG_VERBOSE);
     }
   }
   if (pShaderByteCode == NULL) {
-    DebugLogA("DX12: LoadShaderFromMemory: compiling shader with D3DCompile...");
+    DebugLogA("DX12: LoadShaderFromMemory: compiling shader with D3DCompile...", LOG_VERBOSE);
     LARGE_INTEGER compileStart, compileEnd, compileFreq;
     QueryPerformanceFrequency(&compileFreq);
     QueryPerformanceCounter(&compileStart);
@@ -1122,10 +1122,10 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
     {
       char dbg[256];
       sprintf(dbg, "DX12: D3DCompile: hr=0x%08X  %.1f ms  profile=%s  textLen=%d", (unsigned)hresult, compileMs, szProfile, len);
-      DebugLogA(dbg);
+      DebugLogA(dbg, LOG_VERBOSE);
       if (compileMs > 500.0) {
         sprintf(dbg, "DX12: D3DCompile: SLOW shader compilation (%.1f ms)", compileMs);
-        DebugLogA(dbg);
+        DebugLogA(dbg, LOG_VERBOSE);
       }
     }
 

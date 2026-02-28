@@ -374,7 +374,7 @@ void DXContext::ExecuteCommandList()
         char buf[256];
         sprintf(buf, "DX12: ExecuteCommandList: Close FAILED hr=0x%08X devRemoved=0x%08X",
                 (unsigned)hrClose, (unsigned)m_device->GetDeviceRemovedReason());
-        DebugLogA(buf);
+        DebugLogA(buf, LOG_ERROR);
     }
 
     ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
@@ -393,11 +393,11 @@ void DXContext::EndFrame()
     if (FAILED(hrPresent)) {
         char buf[256];
         sprintf(buf, "DX12: Present FAILED hr=0x%08X", (unsigned)hrPresent);
-        DebugLogA(buf);
+        DebugLogA(buf, LOG_ERROR);
         if (hrPresent == DXGI_ERROR_DEVICE_REMOVED || hrPresent == DXGI_ERROR_DEVICE_RESET) {
             HRESULT reason = m_device->GetDeviceRemovedReason();
             sprintf(buf, "DX12: Device removed reason: 0x%08X (TDR — GPU timeout or driver crash)", (unsigned)reason);
-            DebugLogA(buf);
+            DebugLogA(buf, LOG_ERROR);
             m_lastErr = hrPresent;
             m_ready = 0;
             return;
@@ -424,12 +424,12 @@ void DXContext::WaitForGpu()
         m_fence->SetEventOnCompletion(fenceValue, m_fenceEvent);
         DWORD result = WaitForSingleObjectEx(m_fenceEvent, 5000, FALSE);
         if (result == WAIT_TIMEOUT) {
-            DebugLogA("DX12: WaitForGpu TIMEOUT (5s) — possible GPU hang");
+            DebugLogA("DX12: WaitForGpu TIMEOUT (5s) — possible GPU hang", LOG_ERROR);
             HRESULT reason = m_device->GetDeviceRemovedReason();
             if (reason != S_OK) {
                 char buf[256];
                 sprintf(buf, "DX12: Device removed reason: 0x%08X", (unsigned)reason);
-                DebugLogA(buf);
+                DebugLogA(buf, LOG_ERROR);
             }
         }
     }
@@ -457,7 +457,7 @@ void DXContext::MoveToNextFrame()
             char buf[256];
             sprintf(buf, "DX12: MoveToNextFrame TIMEOUT (5s) target=%llu reason=0x%08X",
                     (unsigned long long)waitTarget, (unsigned)reason);
-            DebugLogA(buf);
+            DebugLogA(buf, LOG_ERROR);
         }
     }
 
@@ -599,7 +599,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE DXContext::AllocateRtv()
 D3D12_CPU_DESCRIPTOR_HANDLE DXContext::AllocateSrvCpu()
 {
     if (m_nextFreeSrvSlot >= DXC_MAX_SRV) {
-        DebugLogA("ERROR: SRV heap overflow in AllocateSrvCpu!");
+        DebugLogA("ERROR: SRV heap overflow in AllocateSrvCpu!", LOG_ERROR);
         assert(false && "SRV heap overflow");
         // Clamp to last valid slot to avoid out-of-bounds write
         D3D12_CPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
@@ -614,7 +614,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE DXContext::AllocateSrvCpu()
 D3D12_GPU_DESCRIPTOR_HANDLE DXContext::AllocateSrvGpu()
 {
     if (m_nextFreeSrvSlot >= DXC_MAX_SRV) {
-        DebugLogA("ERROR: SRV heap overflow in AllocateSrvGpu!");
+        DebugLogA("ERROR: SRV heap overflow in AllocateSrvGpu!", LOG_ERROR);
         assert(false && "SRV heap overflow");
         D3D12_GPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetGPUDescriptorHandleForHeapStart();
         handle.ptr += (SIZE_T)(DXC_MAX_SRV - 1) * m_srvDescriptorSize;
@@ -837,7 +837,7 @@ bool DXContext::CreateRootSignature()
     HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
                                               &signature, &error);
     if (FAILED(hr)) {
-        if (error) DebugLogA((const char*)error->GetBufferPointer());
+        if (error) DebugLogA((const char*)error->GetBufferPointer(), LOG_ERROR);
         return false;
     }
 
@@ -858,7 +858,7 @@ bool DXContext::CreateRootSignature()
     hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
                                       &blurSig, &blurErr);
     if (FAILED(hr)) {
-        if (blurErr) DebugLogA((const char*)blurErr->GetBufferPointer());
+        if (blurErr) DebugLogA((const char*)blurErr->GetBufferPointer(), LOG_ERROR);
         DebugLogA("DX12: WARNING - blur root signature serialization failed, using main root sig");
         m_blurRootSignature = m_rootSignature; // fallback
         return true;
@@ -927,7 +927,7 @@ void DXContext::DrawVertices(D3D12_PRIMITIVE_TOPOLOGY topology, const void* vert
         char buf[128];
         sprintf_s(buf, "DX12: Upload buffer exhausted! offset=%u + needed=%u > %u",
                   m_uploadBufferOffset[fi], totalBytes, UPLOAD_BUFFER_SIZE);
-        DebugLogA(buf);
+        DebugLogA(buf, LOG_ERROR);
         return;
     }
 
@@ -1259,7 +1259,7 @@ DX12Texture DXContext::CreateTextureFromPixels(const void* pixels, UINT width, U
     m_uploadFence->SetEventOnCompletion(m_uploadFenceValue, m_uploadFenceEvent);
     DWORD waitResult = WaitForSingleObjectEx(m_uploadFenceEvent, 5000, FALSE);
     if (waitResult == WAIT_TIMEOUT) {
-        DebugLogA("DX12: CreateTextureFromPixels TIMEOUT (5s) — possible GPU hang");
+        DebugLogA("DX12: CreateTextureFromPixels TIMEOUT (5s) — possible GPU hang", LOG_ERROR);
         tex.resource.Reset();
         return tex;
     }
@@ -1396,7 +1396,7 @@ DX12Texture DXContext::CreateVolumeTextureFromPixels(const void* pixels, UINT wi
     m_uploadFence->SetEventOnCompletion(m_uploadFenceValue, m_uploadFenceEvent);
     DWORD waitResult = WaitForSingleObjectEx(m_uploadFenceEvent, 5000, FALSE);
     if (waitResult == WAIT_TIMEOUT) {
-        DebugLogA("DX12: CreateVolumeTextureFromPixels TIMEOUT (5s) — possible GPU hang");
+        DebugLogA("DX12: CreateVolumeTextureFromPixels TIMEOUT (5s) — possible GPU hang", LOG_ERROR);
         tex.resource.Reset();
         return tex;
     }
@@ -1643,7 +1643,7 @@ bool DXContext::AllocateBlurBindings()
     char buf[128];
     sprintf(buf, "DX12: AllocateBlurBindings: base=%u (reserved %u slots)",
             m_blurBindingBase, DXC_FRAME_COUNT * MAX_BLUR_PASSES * BINDING_BLOCK_SIZE);
-    DebugLogA(buf);
+    DebugLogA(buf, LOG_VERBOSE);
     return true;
 }
 

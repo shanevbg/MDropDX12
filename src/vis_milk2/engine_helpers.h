@@ -216,6 +216,8 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_IPC_MSG_TEXT         2128  // Read-only Edit: message content
 #define IDC_MW_IPC_CAPTURE          2129  // Button: Save Screenshot
 #define IDC_MW_SPRITES_MESSAGES     2130  // ComboBox: Messages/Sprites mode (General tab)
+#define IDC_MW_DEBUG_LOG_LEVEL      2131  // Edit: Debug Log Level (0-3)
+#define IDC_MW_DEBUG_LOG_LEVEL_SPIN 2132  // UpDown spinner for log level
 
 #define IDT_IPC_MONITOR             10001 // Timer ID for IPC message polling
 

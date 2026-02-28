@@ -176,14 +176,14 @@ void Engine::SaveSettingToINI(int id) {
 }
 
 void Engine::OpenFolderPickerForPresetDir() {
-  DebugLogW(L"OpenFolderPicker: entering");
+  DebugLogW(L"OpenFolderPicker: entering", LOG_VERBOSE);
 
   // COM must be initialized on this thread for IFileDialog
   HRESULT hrCom = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
   {
     wchar_t dbg[128];
     swprintf(dbg, 128, L"OpenFolderPicker: CoInitializeEx hr=0x%08X", (unsigned)hrCom);
-    DebugLogW(dbg);
+    DebugLogW(dbg, LOG_VERBOSE);
   }
   if (FAILED(hrCom) && hrCom != RPC_E_CHANGED_MODE) {
     AddError(L"Failed to initialize COM for folder picker.", 4.0f, ERR_MISC, true);
@@ -195,28 +195,28 @@ void Engine::OpenFolderPickerForPresetDir() {
   {
     wchar_t dbg[128];
     swprintf(dbg, 128, L"OpenFolderPicker: CoCreateInstance hr=0x%08X", (unsigned)hr);
-    DebugLogW(dbg);
+    DebugLogW(dbg, LOG_VERBOSE);
   }
   if (SUCCEEDED(hr)) {
     DWORD dwOptions;
     pfd->GetOptions(&dwOptions);
     pfd->SetOptions(dwOptions | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
     pfd->SetTitle(L"Select Preset Directory (folder containing .milk files)");
-    DebugLogW(L"OpenFolderPicker: options set");
+    DebugLogW(L"OpenFolderPicker: options set", LOG_VERBOSE);
 
     IShellItem* psiFolder = NULL;
     if (SHCreateItemFromParsingName(m_szPresetDir, NULL, IID_PPV_ARGS(&psiFolder)) == S_OK) {
       pfd->SetFolder(psiFolder);
       psiFolder->Release();
-      DebugLogW(L"OpenFolderPicker: initial folder set");
+      DebugLogW(L"OpenFolderPicker: initial folder set", LOG_VERBOSE);
     }
 
-    DebugLogW(L"OpenFolderPicker: about to call Show(NULL)...");
+    DebugLogW(L"OpenFolderPicker: about to call Show(NULL)...", LOG_VERBOSE);
     hr = pfd->Show(NULL);  // NULL parent to avoid DX12 window interaction issues
     {
       wchar_t dbg[128];
       swprintf(dbg, 128, L"OpenFolderPicker: Show returned hr=0x%08X", (unsigned)hr);
-      DebugLogW(dbg);
+      DebugLogW(dbg, LOG_VERBOSE);
     }
     if (SUCCEEDED(hr)) {
       IShellItem* psi = NULL;
@@ -236,18 +236,18 @@ void Engine::OpenFolderPickerForPresetDir() {
           wchar_t notif[512];
           swprintf(notif, L"Preset directory: %s", m_szPresetDir);
           AddNotification(notif);
-          DebugLogW(L"OpenFolderPicker: preset dir updated");
+          DebugLogW(L"OpenFolderPicker: preset dir updated", LOG_VERBOSE);
         }
         psi->Release();
       }
     }
     pfd->Release();
-    DebugLogW(L"OpenFolderPicker: dialog released");
+    DebugLogW(L"OpenFolderPicker: dialog released", LOG_VERBOSE);
   }
 
   if (SUCCEEDED(hrCom))
     CoUninitialize();
-  DebugLogW(L"OpenFolderPicker: done");
+  DebugLogW(L"OpenFolderPicker: done", LOG_VERBOSE);
 }
 
 //----------------------------------------------------------------------
@@ -1265,6 +1265,15 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         lstrcpyW(p->m_szRemoteWindowTitle, tbuf);
         return 0;
       }
+      case IDC_MW_DEBUG_LOG_LEVEL: {
+        int val = _wtoi(buf);
+        if (val < 0) val = 0;
+        if (val > 3) val = 3;
+        p->m_LogLevel = val;
+        DebugLogSetLevel(val);
+        WritePrivateProfileIntW(val, L"LogLevel", p->GetConfigIniFile(), L"Milkwave");
+        return 0;
+      }
       }
     }
     break;
@@ -2131,6 +2140,27 @@ void Engine::BuildSettingsControls() {
   PAGE_CTRL(6, CreateLabel(hw, L"MilkDrop2-based music visualizer", x, y, rw, lineH, hFont, false));
   y += lineH + 4;
   PAGE_CTRL(6, CreateLabel(hw, L"DirectX 12 / Windows 11 64-bit", x, y, rw, lineH, hFont, false));
+  y += lineH + 12;
+
+  // Debug Log Level spin box
+  PAGE_CTRL(6, CreateLabel(hw, L"Debug Log Level:", x, y, lw, lineH, hFont, false));
+  {
+    wchar_t logBuf[16];
+    swprintf(logBuf, 16, L"%d", m_LogLevel);
+    HWND hEdit = CreateEdit(hw, logBuf, IDC_MW_DEBUG_LOG_LEVEL, x + lw + 4, y, 40, lineH, hFont, ES_NUMBER, false);
+    PAGE_CTRL(6, hEdit);
+    HWND hSpin = CreateWindowExW(0, UPDOWN_CLASSW, NULL,
+      WS_CHILD | UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS,
+      0, 0, 0, 0, hw, (HMENU)(INT_PTR)IDC_MW_DEBUG_LOG_LEVEL_SPIN,
+      GetModuleHandle(NULL), NULL);
+    if (hSpin) {
+      SendMessage(hSpin, UDM_SETBUDDY, (WPARAM)hEdit, 0);
+      SendMessage(hSpin, UDM_SETRANGE32, 0, 3); // 0=Off, 1=Error, 2=Info, 3=Verbose
+      SendMessage(hSpin, UDM_SETPOS32, 0, m_LogLevel);
+    }
+    PAGE_CTRL(6, hSpin);
+  }
+  PAGE_CTRL(6, CreateLabel(hw, L"0=Off  1=Error  2=Info  3=Verbose", x + lw + 50, y, rw - lw - 50, lineH, hFont, false));
 
   // ===== Remote tab (page 7) =====
   y = tabTop + 10;
