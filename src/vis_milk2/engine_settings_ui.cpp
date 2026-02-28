@@ -1189,6 +1189,15 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
+    // FPS Cap combo box selection
+    if (id == IDC_MW_FPS_CAP && code == CBN_SELCHANGE) {
+      int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
+      const int fpsValues[] = { 30, 60, 90, 120, 144, 240, 360, 720, 0 };
+      if (sel >= 0 && sel < 9)
+        p->SetFPSCap(fpsValues[sel]);
+      return 0;
+    }
+
     // Audio device combo box selection
     if (id == IDC_MW_AUDIO_DEVICE && code == CBN_SELCHANGE) {
       HWND hCombo = (HWND)lParam;
@@ -2618,6 +2627,25 @@ void Engine::BuildSettingsControls() {
   y += lineH + gap + 4;
 
   PAGE_CTRL(1, CreateCheck(hw, L"Enable VSync", IDC_MW_VSYNC_ENABLED, x, y, rw, lineH, hFont, m_bEnableVSync, false));
+  y += lineH + gap;
+
+  PAGE_CTRL(1, CreateLabel(hw, L"FPS Cap:", x, y, lw, lineH, hFont, false));
+  {
+    HWND hCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
+      WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL,
+      x + lw + 4, y, 120, lineH * 8, hw,
+      (HMENU)(INT_PTR)IDC_MW_FPS_CAP, GetModuleHandle(NULL), NULL);
+    if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    const wchar_t* fpsLabels[] = { L"30", L"60", L"90", L"120", L"144", L"240", L"360", L"720", L"Unlimited" };
+    const int fpsValues[] = { 30, 60, 90, 120, 144, 240, 360, 720, 0 };
+    int selIdx = 8; // default to Unlimited
+    for (int i = 0; i < 9; i++) {
+      SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)fpsLabels[i]);
+      if (fpsValues[i] == m_max_fps_fs) selIdx = i;
+    }
+    SendMessage(hCombo, CB_SETCURSEL, selIdx, 0);
+    PAGE_CTRL(1, hCombo);
+  }
   y += lineH + gap + 4;
 
   PAGE_CTRL(1, CreateBtn(hw, L"Reload Preset", IDC_MW_GPU_RELOAD_PRESET, x, y, MulDiv(110, lineH, 26), lineH, hFont));

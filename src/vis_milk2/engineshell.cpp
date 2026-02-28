@@ -2431,6 +2431,11 @@ LRESULT EngineShell::PluginShellWindowProc(HWND hWnd, unsigned uMsg, WPARAM wPar
   }
   break;
 
+  case WM_SYSKEYDOWN:
+    if (MyWindowProc(hWnd, uMsg, wParam, lParam) == 0)
+      return 0;
+    break;
+
   case WM_SYSCHAR:
     if ((wParam == 'k' || wParam == 'K')) {
       OnAltK();

@@ -37,6 +37,24 @@ extern int beatcount;
 extern bool TranspaMode;
 extern bool AutoLockedPreset;
 
+void Engine::SetFPSCap(int fps) {
+  m_max_fps_fs = fps;
+  m_max_fps_dm = fps;
+  m_max_fps_w = fps;
+  wchar_t* ini = GetConfigIniFile();
+  WritePrivateProfileIntW(fps, L"max_fps_fs", ini, L"Settings");
+  WritePrivateProfileIntW(fps, L"max_fps_dm", ini, L"Settings");
+  WritePrivateProfileIntW(fps, L"max_fps_w", ini, L"Settings");
+  if (m_hSettingsWnd && IsWindow(m_hSettingsWnd)) {
+    HWND hCombo = GetDlgItem(m_hSettingsWnd, IDC_MW_FPS_CAP);
+    if (hCombo) {
+      const int vals[] = { 30, 60, 90, 120, 144, 240, 360, 720, 0 };
+      for (int i = 0; i < 9; i++)
+        if (vals[i] == fps) { SendMessage(hCombo, CB_SETCURSEL, i, 0); break; }
+    }
+  }
+}
+
 void copyStringToClipboardA(const char* source) {
   int ok = OpenClipboard(NULL);
   if (!ok)
@@ -784,7 +802,15 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
       //return 0; // we processed (or absorbed) the key
     case VK_F3:
     {
-      if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
+      bool bCtrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+      bool bShift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+      if (bCtrl && bShift) {
+        // Ctrl+Shift+F3: reset FPS cap to 30
+        ToggleFPSNumPressed = 8;
+        SetFPSCap(30);
+        AddNotification(L"30 fps");
+      }
+      else if (bCtrl) {
         wchar_t buf[1024];
         if (m_max_fps_fs == 0) {
           swprintf(buf, L"Unlimited fps");
@@ -795,56 +821,12 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
         AddNotification(buf);
       }
       else {
-        ToggleFPSNumPressed++;
-        if (ToggleFPSNumPressed == 1) {
-          m_max_fps_fs = 60;
-          m_max_fps_dm = 60;
-          m_max_fps_w = 60;
-          AddNotification(L"60 fps");
-        }
-        else if (ToggleFPSNumPressed == 2) {
-          m_max_fps_fs = 90;
-          m_max_fps_dm = 90;
-          m_max_fps_w = 90;
-          AddNotification(L"90 fps");
-        }
-        else if (ToggleFPSNumPressed == 3) {
-          m_max_fps_fs = 120;
-          m_max_fps_dm = 120;
-          m_max_fps_w = 120;
-          AddNotification(L"120 fps");
-        }
-        else if (ToggleFPSNumPressed == 4) {
-          m_max_fps_fs = 144;
-          m_max_fps_dm = 144;
-          m_max_fps_w = 144;
-          AddNotification(L"144 fps");
-        }
-        else if (ToggleFPSNumPressed == 5) {
-          m_max_fps_fs = 240;
-          m_max_fps_dm = 240;
-          m_max_fps_w = 240;
-          AddNotification(L"240 fps");
-        }
-        else if (ToggleFPSNumPressed == 6) {
-          m_max_fps_fs = 360;
-          m_max_fps_dm = 360;
-          m_max_fps_w = 360;
-          AddNotification(L"360 fps");
-        }
-        else if (ToggleFPSNumPressed == 7) {
-          m_max_fps_fs = 0;
-          m_max_fps_dm = 0;
-          m_max_fps_w = 0;
-          AddNotification(L"Unlimited fps");
-        }
-        else if (ToggleFPSNumPressed == 8) {
-          ToggleFPSNumPressed = 0;
-          m_max_fps_fs = 30;
-          m_max_fps_dm = 30;
-          m_max_fps_w = 30;
-          AddNotification(L"30 fps");
-        }
+        static const int cycle[] = { 60, 90, 120, 144, 240, 360, 720, 0, 30 };
+        static const wchar_t* labels[] = { L"60 fps", L"90 fps", L"120 fps", L"144 fps",
+          L"240 fps", L"360 fps", L"720 fps", L"Unlimited fps", L"30 fps" };
+        ToggleFPSNumPressed = (ToggleFPSNumPressed + 1) % 9;
+        SetFPSCap(cycle[ToggleFPSNumPressed]);
+        AddNotification((wchar_t*)labels[ToggleFPSNumPressed]);
       }
     }
     return 0; // we processed (or absorbed) the key

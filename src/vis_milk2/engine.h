@@ -612,6 +612,7 @@ public:
 
 
   ErrorMsgList m_errors;
+  void SetFPSCap(int fps);
   void AddNotification(wchar_t* szMsg);
   void AddNotificationAudioDevice();
   void AddNotification(wchar_t* szMsg, float time);
