@@ -829,7 +829,7 @@ public:
   HWND        m_hSettingsWnd = NULL;
   HWND        m_hSettingsTab = NULL;       // Tab control
   int         m_nSettingsActivePage = 0;
-  std::vector<HWND> m_settingsPageCtrls[8]; // HWNDs per tab (General, Visual, Colors, Sound, Files, Messages, About, Remote)
+  std::vector<HWND> m_settingsPageCtrls[9]; // HWNDs per tab (General, Visual, Colors, Sound, Files, Messages, Sprites, Remote, About)
   HFONT       m_hSettingsFont = NULL;
   HFONT       m_hSettingsFontBold = NULL;
   int         m_lastSeenIPCSeq = 0;        // tracks last IPC message seq displayed in settings
@@ -863,6 +863,29 @@ public:
   void        ScheduleNextAutoMessage();
   void        UpdateMsgPreview(HWND hSettingsWnd, int sel);
   bool        ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew);
+
+  // Sprites tab (page 6)
+  struct SpriteEntry {
+    int          nIndex;           // [imgNN] number (0-99)
+    wchar_t      szImg[512];       // img= path
+    unsigned int nColorkey;        // colorkey hex value
+    std::string  szInitCode;       // init_N lines joined with \n
+    std::string  szFrameCode;      // code_N lines joined with \n
+  };
+  std::vector<SpriteEntry> m_spriteEntries;
+  int           m_nSpriteSelected = -1;
+  void*         m_hSpriteImageList = NULL; // HIMAGELIST (commctrl.h not included here)
+  HWND          m_hSpriteList = NULL;
+  void          LoadSpritesFromINI();
+  void          SaveSpritesToINI();
+  void          PopulateSpriteListView();
+  void          UpdateSpriteProperties(int sel);
+  void          SaveCurrentSpriteProperties();
+  HBITMAP       LoadThumbnailWIC(const wchar_t* szPath, int cx, int cy);
+
+  // Pending sprite launches (queued from message handlers, flushed during render when command list is open)
+  struct PendingSprite { int nSpriteNum; int nSlot; };
+  std::vector<PendingSprite> m_pendingSpriteLoads;
 
   // Settings window dark theme
   bool        m_bSettingsDarkTheme = true;   // Enable dark theme for settings window
@@ -925,8 +948,8 @@ public:
   bool    m_bMsgOverrideRandomColor = false;
   bool    m_bMsgOverrideRandomSize = false;
   bool    m_bMsgOverrideRandomEffects = false;  // randomize bold/italic
-  int     m_nMsgOverrideSizeMin = 10;           // min random size (floor: 5)
-  int     m_nMsgOverrideSizeMax = 40;           // max random size (ceiling: 50)
+  float   m_fMsgOverrideSizeMin = 10.0f;        // min random size (floor: 0.01)
+  float   m_fMsgOverrideSizeMax = 40.0f;        // max random size (ceiling: 100)
   int     m_nMsgMaxOnScreen = 1;                // max concurrent messages (1..NUM_SUPERTEXTS)
   // Animation overrides
   bool    m_bMsgOverrideRandomPos = false;

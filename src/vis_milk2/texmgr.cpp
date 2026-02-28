@@ -148,27 +148,47 @@ int texmgr::LoadTex(wchar_t* szFilename, int iSlot, char* szInitCode, char* szCo
 
     wcscpy(m_tex[iSlot].szFileName, szFilename);
 
-    if (!m_lpDX12 || !m_lpDX12->m_device || !m_lpDX12->m_commandList)
+    if (!m_lpDX12 || !m_lpDX12->m_device || !m_lpDX12->m_commandList) {
+      { wchar_t dbg[256]; swprintf(dbg, 256, L"LoadTex: EARLY EXIT dx12=%p dev=%p cmdList=%p",
+        m_lpDX12, m_lpDX12 ? m_lpDX12->m_device.Get() : nullptr,
+        m_lpDX12 ? m_lpDX12->m_commandList.Get() : nullptr); DebugLogW(dbg); }
       return TEXMGR_ERR_BADFILE;
+    }
 
     auto* dev = m_lpDX12->m_device.Get();
     auto* cmdList = m_lpDX12->m_commandList.Get();
+
+    // Ensure COM is initialized on this thread for WIC
+    // (render thread may not have COM initialized; S_FALSE means already initialized — both are fine)
+    HRESULT hrCom = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    bool bComOwner = (hrCom == S_OK); // only uninitialize if we were the one who initialized
+
+    { wchar_t dbg[512]; swprintf(dbg, 512, L"LoadTex: CoInitializeEx hr=0x%08X bComOwner=%d file=%s", (unsigned)hrCom, bComOwner, szFilename); DebugLogW(dbg); }
 
     // Load image via WIC
     IWICImagingFactory* pWIC = nullptr;
     HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
                                   IID_PPV_ARGS(&pWIC));
-    if (FAILED(hr) || !pWIC)
+    if (FAILED(hr) || !pWIC) {
+      { wchar_t dbg[256]; swprintf(dbg, 256, L"LoadTex: WIC factory FAILED hr=0x%08X", (unsigned)hr); DebugLogW(dbg); }
+      if (bComOwner) CoUninitialize();
       return TEXMGR_ERR_BADFILE;
+    }
 
     IWICBitmapDecoder* pDecoder = nullptr;
     hr = pWIC->CreateDecoderFromFilename(szFilename, nullptr, GENERIC_READ,
                                           WICDecodeMetadataCacheOnLoad, &pDecoder);
-    if (FAILED(hr) || !pDecoder) { pWIC->Release(); return TEXMGR_ERR_BADFILE; }
+    if (FAILED(hr) || !pDecoder) {
+      { wchar_t dbg[256]; swprintf(dbg, 256, L"LoadTex: CreateDecoder FAILED hr=0x%08X", (unsigned)hr); DebugLogW(dbg); }
+      pWIC->Release(); if (bComOwner) CoUninitialize(); return TEXMGR_ERR_BADFILE;
+    }
 
     IWICBitmapFrameDecode* pFrame = nullptr;
     hr = pDecoder->GetFrame(0, &pFrame);
-    if (FAILED(hr) || !pFrame) { pDecoder->Release(); pWIC->Release(); return TEXMGR_ERR_BADFILE; }
+    if (FAILED(hr) || !pFrame) {
+      { wchar_t dbg[256]; swprintf(dbg, 256, L"LoadTex: GetFrame FAILED hr=0x%08X", (unsigned)hr); DebugLogW(dbg); }
+      pDecoder->Release(); pWIC->Release(); if (bComOwner) CoUninitialize(); return TEXMGR_ERR_BADFILE;
+    }
 
     UINT imgW = 0, imgH = 0;
     pFrame->GetSize(&imgW, &imgH);
@@ -176,7 +196,7 @@ int texmgr::LoadTex(wchar_t* szFilename, int iSlot, char* szInitCode, char* szCo
     // Convert to 32-bit BGRA
     IWICFormatConverter* pConverter = nullptr;
     pWIC->CreateFormatConverter(&pConverter);
-    if (!pConverter) { pFrame->Release(); pDecoder->Release(); pWIC->Release(); return TEXMGR_ERR_BADFILE; }
+    if (!pConverter) { pFrame->Release(); pDecoder->Release(); pWIC->Release(); if (bComOwner) CoUninitialize(); return TEXMGR_ERR_BADFILE; }
 
     pConverter->Initialize(pFrame, GUID_WICPixelFormat32bppBGRA,
                            WICBitmapDitherTypeNone, nullptr, 0.0,
@@ -191,6 +211,7 @@ int texmgr::LoadTex(wchar_t* szFilename, int iSlot, char* szInitCode, char* szCo
     pFrame->Release();
     pDecoder->Release();
     pWIC->Release();
+    if (bComOwner) CoUninitialize();
 
     // Create DX12 texture
     D3D12_RESOURCE_DESC texDesc = {};

@@ -412,6 +412,15 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     LaunchCustomMessage((int)wParam);
     return 0;
 
+  case WM_MW_PUSH_SPRITE:
+    // Queue for next frame — LoadTex needs an open command list (BeginFrame)
+    m_pendingSpriteLoads.push_back({(int)wParam, (int)lParam});
+    return 0;
+
+  case WM_MW_KILL_SPRITE:
+    KillSprite((int)wParam);
+    return 0;
+
   case WM_MW_RESTART_IPC:
   {
     // Settings thread requested IPC restart with new title
@@ -1848,7 +1857,7 @@ int Engine::HandleRegularKey(WPARAM wParam) {
       if (m_nNumericInputMode == NUMERIC_INPUT_MODE_CUST_MSG)
         LaunchCustomMessage(m_nNumericInputNum);
       else if (m_nNumericInputMode == NUMERIC_INPUT_MODE_SPRITE)
-        LaunchSprite(m_nNumericInputNum, -1);
+        m_pendingSpriteLoads.push_back({m_nNumericInputNum, -1});
       else if (m_nNumericInputMode == NUMERIC_INPUT_MODE_SPRITE_KILL) {
         for (int x = 0; x < NUM_TEX; x++)
           if (m_texmgr.m_tex[x].nUserData == m_nNumericInputNum)

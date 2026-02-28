@@ -1478,19 +1478,49 @@ void EngineShell::DrawAndDisplay(int redraw) {
       m_bScreenshotRequested = false;
       m_lpDX->WaitForGpu();
 
+      {
+        wchar_t dbg[512];
+        swprintf_s(dbg, L"[CaptureScreenshot] Saving to: %s (%ux%u, pitch=%u)",
+                   m_screenshotPath, screenshotWidth, screenshotHeight,
+                   screenshotLayout.Footprint.RowPitch);
+        DebugLogW(dbg);
+      }
+
       void* pData = nullptr;
-      D3D12_RANGE readRange = { 0, (SIZE_T)(screenshotLayout.Footprint.RowPitch * screenshotHeight) };
-      HRESULT hr = screenshotReadback->Map(0, &readRange, &pData);
+      HRESULT hr = screenshotReadback->Map(0, nullptr, &pData);
+      if (FAILED(hr)) {
+        wchar_t msg[128];
+        swprintf_s(msg, 128, L"[CaptureScreenshot] Map failed: 0x%08X", hr);
+        DebugLogW(msg);
+      }
       if (SUCCEEDED(hr)) {
-        // Save as PNG via WIC
+        // Save as PNG via WIC (COM must be initialized on this thread)
+        hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        if (FAILED(hr) && hr != RPC_E_CHANGED_MODE && hr != S_FALSE) {
+          wchar_t msg[128];
+          swprintf_s(msg, 128, L"[CaptureScreenshot] CoInitializeEx failed: 0x%08X", hr);
+          DebugLogW(msg);
+        }
+        bool comInit = SUCCEEDED(hr) || hr == S_FALSE || hr == RPC_E_CHANGED_MODE;
+
         IWICImagingFactory* pFactory = nullptr;
         hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
                               IID_PPV_ARGS(&pFactory));
+        if (FAILED(hr)) {
+          wchar_t msg[128];
+          swprintf_s(msg, 128, L"[CaptureScreenshot] CoCreateInstance WIC failed: 0x%08X", hr);
+          DebugLogW(msg);
+        }
         if (SUCCEEDED(hr)) {
           IWICStream* pStream = nullptr;
           hr = pFactory->CreateStream(&pStream);
           if (SUCCEEDED(hr)) {
             hr = pStream->InitializeFromFilename(m_screenshotPath, GENERIC_WRITE);
+            if (FAILED(hr)) {
+              wchar_t msg[512];
+              swprintf_s(msg, 512, L"[CaptureScreenshot] InitializeFromFilename failed: 0x%08X path=%s", hr, m_screenshotPath);
+              DebugLogW(msg);
+            }
             if (SUCCEEDED(hr)) {
               IWICBitmapEncoder* pEncoder = nullptr;
               hr = pFactory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &pEncoder);
@@ -1523,6 +1553,8 @@ void EngineShell::DrawAndDisplay(int redraw) {
           }
           pFactory->Release();
         }
+        if (comInit)
+          CoUninitialize();
 
         D3D12_RANGE writeRange = { 0, 0 };
         screenshotReadback->Unmap(0, &writeRange);
@@ -1531,7 +1563,7 @@ void EngineShell::DrawAndDisplay(int redraw) {
           DebugLogW(L"[CaptureScreenshot] DX12 screenshot saved successfully");
         } else {
           wchar_t msg[128];
-          swprintf_s(msg, 128, L"[CaptureScreenshot] WIC save failed: 0x%08X\n", hr);
+          swprintf_s(msg, 128, L"[CaptureScreenshot] WIC save failed: 0x%08X", hr);
           DebugLogW(msg);
         }
       }

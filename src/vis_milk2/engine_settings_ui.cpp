@@ -11,6 +11,7 @@
 #include "support.h"
 #include "resource.h"
 #include "defines.h"
+#include "AutoCharFn.h"
 #include "shell_defines.h"
 #include "wasabi.h"
 #include <assert.h>
@@ -29,6 +30,8 @@
 #include <uxtheme.h>
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
+#include <wincodec.h>
+#pragma comment(lib, "windowscodecs.lib")
 #include <set>
 #include "Milkdrop2PcmVisualizer.h"
 
@@ -290,6 +293,29 @@ static LRESULT CALLBACK SettingsTabSubclassProc(
   return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
+// Try to convert an absolute path to a relative path (relative to content base or milkdrop2 dir).
+// If the file lives under one of those directories, returns the relative portion.
+// Otherwise returns the absolute path unchanged.
+static std::wstring MakeRelativeSpritePath(const wchar_t* szAbsPath,
+                                            const wchar_t* szContentBasePath,
+                                            const wchar_t* szMilkdrop2Path) {
+  if (!szAbsPath || !szAbsPath[0]) return L"";
+  // Already relative? Return as-is.
+  if (szAbsPath[1] != L':') return szAbsPath;
+
+  // Try content base path first, then milkdrop2 path
+  const wchar_t* bases[] = { szContentBasePath, szMilkdrop2Path };
+  for (auto base : bases) {
+    if (!base || !base[0]) continue;
+    size_t baseLen = wcslen(base);
+    if (_wcsnicmp(szAbsPath, base, baseLen) == 0) {
+      return szAbsPath + baseLen;
+    }
+  }
+  // Not under either base path — return absolute
+  return szAbsPath;
+}
+
 LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
   // Set GWLP_USERDATA on first message so dark theme painting works during creation
   if (uMsg == WM_NCCREATE) {
@@ -309,7 +335,9 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     if (p) {
       p->m_hSettingsWnd = NULL;
       p->m_hSettingsTab = NULL;
-      for (int i = 0; i < 8; i++) p->m_settingsPageCtrls[i].clear();
+      for (int i = 0; i < SETTINGS_NUM_PAGES; i++) p->m_settingsPageCtrls[i].clear();
+      if (p->m_hSpriteImageList) { ImageList_Destroy((HIMAGELIST)p->m_hSpriteImageList); p->m_hSpriteImageList = NULL; }
+      p->m_hSpriteList = NULL;
       if (p->m_hSettingsFont) { DeleteObject(p->m_hSettingsFont); p->m_hSettingsFont = NULL; }
       if (p->m_hSettingsFontBold) { DeleteObject(p->m_hSettingsFontBold); p->m_hSettingsFontBold = NULL; }
       p->CleanupSettingsThemeBrushes();
@@ -332,6 +360,16 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     if (pnm->idFrom == IDC_MW_TAB && pnm->code == TCN_SELCHANGE) {
       int sel = TabCtrl_GetCurSel(pnm->hwndFrom);
       if (p) p->ShowSettingsPage(sel);
+    }
+    // Sprite ListView selection change
+    if (p && pnm->idFrom == IDC_MW_SPR_LIST && pnm->code == LVN_ITEMCHANGED) {
+      NMLISTVIEW* pnmv = (NMLISTVIEW*)lParam;
+      if ((pnmv->uNewState & LVIS_SELECTED) && !(pnmv->uOldState & LVIS_SELECTED)) {
+        if (p->m_nSpriteSelected >= 0)
+          p->SaveCurrentSpriteProperties();
+        p->m_nSpriteSelected = pnmv->iItem;
+        p->UpdateSpriteProperties(pnmv->iItem);
+      }
     }
     return 0;
   }
@@ -1330,6 +1368,236 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       }
       }
     }
+
+    // ===== Sprites tab button handlers (BN_CLICKED) =====
+    if (code == BN_CLICKED) {
+      switch (id) {
+      case IDC_MW_SPR_ADD: {
+        // Drop TOPMOST so file dialog appears in front
+        SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+        IFileOpenDialog* pDlg = NULL;
+        HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pDlg));
+        if (SUCCEEDED(hr) && pDlg) {
+          COMDLG_FILTERSPEC filters[] = {
+            { L"Image Files", L"*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.dds;*.gif" },
+            { L"All Files", L"*.*" }
+          };
+          pDlg->SetFileTypes(2, filters);
+          pDlg->SetTitle(L"Add Sprite Image");
+          if (SUCCEEDED(pDlg->Show(hWnd))) {
+            IShellItem* pItem = NULL;
+            if (SUCCEEDED(pDlg->GetResult(&pItem))) {
+              LPWSTR pPath = NULL;
+              if (SUCCEEDED(pItem->GetDisplayName(SIGDN_FILESYSPATH, &pPath))) {
+                std::set<int> used;
+                for (auto& e : p->m_spriteEntries) used.insert(e.nIndex);
+                int newIdx = 0;
+                while (used.count(newIdx) && newIdx < 100) newIdx++;
+                if (newIdx < 100) {
+                  Engine::SpriteEntry entry = {};
+                  entry.nIndex = newIdx;
+                  // Convert to relative path when possible
+                  std::wstring relPath = MakeRelativeSpritePath(pPath, p->m_szContentBasePath, p->m_szMilkdrop2Path);
+                  wcscpy_s(entry.szImg, relPath.c_str());
+                  entry.nColorkey = 0;
+                  entry.szInitCode = "blendmode = 0;\r\nx = 0.5; y = 0.5;\r\nsx = 0.5; sy = 0.5; rot = 0;\r\nr = 1; g = 1; b = 1; a = 1;";
+                  p->m_spriteEntries.push_back(entry);
+                  p->PopulateSpriteListView();
+                  int newSel = (int)p->m_spriteEntries.size() - 1;
+                  ListView_SetItemState(p->m_hSpriteList, newSel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+                  ListView_EnsureVisible(p->m_hSpriteList, newSel, FALSE);
+                }
+                CoTaskMemFree(pPath);
+              }
+              pItem->Release();
+            }
+          }
+          pDlg->Release();
+        }
+        // Restore TOPMOST after dialog closes
+        SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        return 0;
+      }
+
+      case IDC_MW_SPR_IMPORT: {
+        SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+        IFileOpenDialog* pDlg = NULL;
+        HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pDlg));
+        if (SUCCEEDED(hr) && pDlg) {
+          DWORD options = 0;
+          pDlg->GetOptions(&options);
+          pDlg->SetOptions(options | FOS_PICKFOLDERS);
+          pDlg->SetTitle(L"Import Sprite Images from Folder");
+          if (SUCCEEDED(pDlg->Show(hWnd))) {
+            IShellItem* pItem = NULL;
+            if (SUCCEEDED(pDlg->GetResult(&pItem))) {
+              LPWSTR pFolder = NULL;
+              if (SUCCEEDED(pItem->GetDisplayName(SIGDN_FILESYSPATH, &pFolder))) {
+                std::set<int> used;
+                for (auto& e : p->m_spriteEntries) used.insert(e.nIndex);
+
+                const wchar_t* exts[] = { L"*.png", L"*.jpg", L"*.jpeg", L"*.bmp", L"*.tga", L"*.dds", L"*.gif" };
+                int added = 0;
+                for (const wchar_t* ext : exts) {
+                  wchar_t searchPath[MAX_PATH];
+                  swprintf(searchPath, MAX_PATH, L"%s\\%s", pFolder, ext);
+                  WIN32_FIND_DATAW fd;
+                  HANDLE hFind = FindFirstFileW(searchPath, &fd);
+                  if (hFind != INVALID_HANDLE_VALUE) {
+                    do {
+                      if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+                      int newIdx = 0;
+                      while (used.count(newIdx) && newIdx < 100) newIdx++;
+                      if (newIdx >= 100) break;
+
+                      Engine::SpriteEntry entry = {};
+                      entry.nIndex = newIdx;
+                      // Build absolute path, then convert to relative when possible
+                      wchar_t absPath[512];
+                      swprintf(absPath, 512, L"%s\\%s", pFolder, fd.cFileName);
+                      std::wstring relPath = MakeRelativeSpritePath(absPath, p->m_szContentBasePath, p->m_szMilkdrop2Path);
+                      wcscpy_s(entry.szImg, relPath.c_str());
+                      entry.nColorkey = 0;
+                      entry.szInitCode = "blendmode = 0;\r\nx = 0.5; y = 0.5;\r\nsx = 0.5; sy = 0.5; rot = 0;\r\nr = 1; g = 1; b = 1; a = 1;";
+                      p->m_spriteEntries.push_back(entry);
+                      used.insert(newIdx);
+                      added++;
+                    } while (FindNextFileW(hFind, &fd));
+                    FindClose(hFind);
+                  }
+                }
+                if (added > 0) p->PopulateSpriteListView();
+                CoTaskMemFree(pFolder);
+              }
+              pItem->Release();
+            }
+          }
+          pDlg->Release();
+        }
+        SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        return 0;
+      }
+
+      case IDC_MW_SPR_DELETE: {
+        if (p->m_nSpriteSelected >= 0 && p->m_nSpriteSelected < (int)p->m_spriteEntries.size()) {
+          p->m_spriteEntries.erase(p->m_spriteEntries.begin() + p->m_nSpriteSelected);
+          p->m_nSpriteSelected = -1;
+          p->PopulateSpriteListView();
+        }
+        return 0;
+      }
+
+      case IDC_MW_SPR_PUSH: {
+        if (p->m_nSpriteSelected >= 0 && p->m_nSpriteSelected < (int)p->m_spriteEntries.size()) {
+          p->SaveCurrentSpriteProperties();
+          p->SaveSpritesToINI();
+          // Flush INI cache to ensure file is written before render thread reads it
+          WritePrivateProfileStringW(NULL, NULL, NULL, p->m_szImgIniFile);
+
+          auto& entry = p->m_spriteEntries[p->m_nSpriteSelected];
+          int sprNum = entry.nIndex;
+          { wchar_t dbg[1024]; swprintf(dbg, 1024, L"Sprites: Push [img%02d] img=%s", sprNum, entry.szImg); DebugLogW(dbg); }
+          HWND hRender = p->GetPluginWindow();
+          if (hRender) PostMessage(hRender, WM_MW_PUSH_SPRITE, sprNum, -1);
+        }
+        return 0;
+      }
+
+      case IDC_MW_SPR_KILL: {
+        if (p->m_nSpriteSelected >= 0 && p->m_nSpriteSelected < (int)p->m_spriteEntries.size()) {
+          int sprNum = p->m_spriteEntries[p->m_nSpriteSelected].nIndex;
+          for (int s = 0; s < NUM_TEX; s++) {
+            if (p->m_texmgr.m_tex[s].pSurface && p->m_texmgr.m_tex[s].nUserData == sprNum) {
+              HWND hRender = p->GetPluginWindow();
+              if (hRender) PostMessage(hRender, WM_MW_KILL_SPRITE, s, 0);
+              break;
+            }
+          }
+        }
+        return 0;
+      }
+
+      case IDC_MW_SPR_KILLALL: {
+        HWND hRender = p->GetPluginWindow();
+        if (hRender) {
+          for (int s = 0; s < NUM_TEX; s++) {
+            if (p->m_texmgr.m_tex[s].pSurface)
+              PostMessage(hRender, WM_MW_KILL_SPRITE, s, 0);
+          }
+        }
+        return 0;
+      }
+
+      case IDC_MW_SPR_DEFAULTS: {
+        if (p->m_nSpriteSelected >= 0 && p->m_nSpriteSelected < (int)p->m_spriteEntries.size()) {
+          auto& e = p->m_spriteEntries[p->m_nSpriteSelected];
+          e.szInitCode = "blendmode = 0;\r\nx = 0.5; y = 0.5;\r\nsx = 0.5; sy = 0.5; rot = 0;\r\nr = 1; g = 1; b = 1; a = 1;";
+          e.szFrameCode.clear();
+          e.nColorkey = 0;
+          p->UpdateSpriteProperties(p->m_nSpriteSelected);
+        }
+        return 0;
+      }
+
+      case IDC_MW_SPR_SAVE: {
+        if (p->m_nSpriteSelected >= 0)
+          p->SaveCurrentSpriteProperties();
+        p->SaveSpritesToINI();
+        return 0;
+      }
+
+      case IDC_MW_SPR_RELOAD: {
+        p->m_nSpriteSelected = -1;
+        p->LoadSpritesFromINI();
+        p->PopulateSpriteListView();
+        return 0;
+      }
+
+      case IDC_MW_SPR_OPENINI: {
+        SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+        HINSTANCE hr = ShellExecuteW(NULL, L"open", p->m_szImgIniFile, NULL, NULL, SW_SHOWNORMAL);
+        if ((INT_PTR)hr <= 32)
+          ShellExecuteW(NULL, L"open", L"notepad.exe", p->m_szImgIniFile, NULL, SW_SHOWNORMAL);
+        SetTimer(hWnd, 9999, 500, NULL);
+        return 0;
+      }
+
+      case IDC_MW_SPR_IMG_BROWSE: {
+        if (p->m_nSpriteSelected < 0 || p->m_nSpriteSelected >= (int)p->m_spriteEntries.size()) return 0;
+        SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+        IFileOpenDialog* pDlg = NULL;
+        HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pDlg));
+        if (SUCCEEDED(hr) && pDlg) {
+          COMDLG_FILTERSPEC filters[] = {
+            { L"Image Files", L"*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.dds;*.gif" },
+            { L"All Files", L"*.*" }
+          };
+          pDlg->SetFileTypes(2, filters);
+          pDlg->SetTitle(L"Browse for Sprite Image");
+          if (SUCCEEDED(pDlg->Show(hWnd))) {
+            IShellItem* pItem = NULL;
+            if (SUCCEEDED(pDlg->GetResult(&pItem))) {
+              LPWSTR pPath = NULL;
+              if (SUCCEEDED(pItem->GetDisplayName(SIGDN_FILESYSPATH, &pPath))) {
+                // Convert to relative path when possible
+                std::wstring relPath = MakeRelativeSpritePath(pPath, p->m_szContentBasePath, p->m_szMilkdrop2Path);
+                wcscpy_s(p->m_spriteEntries[p->m_nSpriteSelected].szImg, relPath.c_str());
+                SetDlgItemTextW(hWnd, IDC_MW_SPR_IMG_PATH, relPath.c_str());
+                p->PopulateSpriteListView();
+                ListView_SetItemState(p->m_hSpriteList, p->m_nSpriteSelected, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+                CoTaskMemFree(pPath);
+              }
+              pItem->Release();
+            }
+          }
+          pDlg->Release();
+        }
+        SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        return 0;
+      }
+      } // end sprite BN_CLICKED switch
+    }
+
     break;
   }
 
@@ -1679,7 +1947,7 @@ void Engine::ApplySettingsDarkTheme() {
     SetWindowTheme(m_hSettingsTab, m_bSettingsDarkTheme ? L"" : NULL, m_bSettingsDarkTheme ? L"" : NULL);
   }
   // Child controls: use DarkMode_Explorer for native dark scrollbars on listboxes/combos
-  for (int page = 0; page < 7; page++) {
+  for (int page = 0; page < SETTINGS_NUM_PAGES; page++) {
     for (HWND hChild : m_settingsPageCtrls[page]) {
       if (!hChild || !IsWindow(hChild)) continue;
       SetWindowTheme(hChild, m_bSettingsDarkTheme ? L"DarkMode_Explorer" : NULL, NULL);
@@ -1695,7 +1963,9 @@ void Engine::BuildSettingsControls() {
   if (!hw) return;
 
   // Clear previous page control lists
-  for (int i = 0; i < 8; i++) m_settingsPageCtrls[i].clear();
+  for (int i = 0; i < SETTINGS_NUM_PAGES; i++) m_settingsPageCtrls[i].clear();
+  m_hSpriteList = NULL;
+  if (m_hSpriteImageList) { ImageList_Destroy((HIMAGELIST)m_hSpriteImageList); m_hSpriteImageList = NULL; }
 
   RECT rcWnd;
   GetClientRect(hw, &rcWnd);
@@ -1725,8 +1995,8 @@ void Engine::BuildSettingsControls() {
   SetWindowSubclass(m_hSettingsTab, SettingsTabSubclassProc, 1, (DWORD_PTR)this);
 
   // Insert tab pages (use TCM_INSERTITEMW explicitly — project is _MBCS, not UNICODE)
-  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"Sound", L"Files", L"Messages", L"About", L"Remote" };
-  for (int i = 0; i < 8; i++) {
+  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"Sound", L"Files", L"Messages", L"Sprites", L"Remote", L"About" };
+  for (int i = 0; i < SETTINGS_NUM_PAGES; i++) {
     TCITEMW ti = {};
     ti.mask = TCIF_TEXT;
     ti.pszText = (LPWSTR)tabNames[i];
@@ -2168,6 +2438,9 @@ void Engine::BuildSettingsControls() {
   }
   y += lineH + gap + 4;
 
+  PAGE_CTRL(5, CreateLabel(hw, L"Font size: 50 = normal, <50 = smaller, >50 = larger (0.01\x2013" L"100)", x, y, rw, lineH, hFont, false));
+  y += lineH + gap;
+
   // Autoplay controls
   PAGE_CTRL(5, CreateCheck(hw, L"Autoplay Messages", IDC_MW_MSG_AUTOPLAY, x, y, rw, lineH, hFont, m_bMsgAutoplay, false));
   y += lineH + 2;
@@ -2202,16 +2475,182 @@ void Engine::BuildSettingsControls() {
     PAGE_CTRL(5, hPrev);
   }
 
-  // ===== About tab (page 6) =====
+  // ===== Sprites tab (page 6) =====
+  // (built below after About/Remote to keep insertion order, but PAGE_CTRL(6,...) groups them)
   y = tabTop + 10;
 
-  PAGE_CTRL(6, CreateLabel(hw, L"MDropDX12", x, y, rw, 24, hFontBold, false));
+  PAGE_CTRL(6, CreateLabel(hw, L"Sprites (sprites.ini):", x, y, rw, lineH, hFontBold, false));
+  y += lineH + 2;
+
+  // ListView for sprite entries
+  {
+    int listH = 8 * lineH;
+    m_hSpriteList = CreateWindowExW(0, WC_LISTVIEWW, L"",
+      WS_CHILD | WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
+      x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_SPR_LIST,
+      GetModuleHandle(NULL), NULL);
+    ListView_SetExtendedListViewStyle(m_hSpriteList, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+
+    // Create ImageList for thumbnails (32x32)
+    m_hSpriteImageList = (void*)ImageList_Create(32, 32, ILC_COLOR32, 100, 10);
+    ListView_SetImageList(m_hSpriteList, (HIMAGELIST)m_hSpriteImageList, LVSIL_SMALL);
+
+    // Columns: #, Image, Path
+    LVCOLUMNW col = {};
+    col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
+    col.fmt = LVCFMT_LEFT; col.cx = 60; col.pszText = (LPWSTR)L"#";
+    SendMessageW(m_hSpriteList, LVM_INSERTCOLUMNW, 0, (LPARAM)&col);
+    col.cx = 160; col.pszText = (LPWSTR)L"Image";
+    SendMessageW(m_hSpriteList, LVM_INSERTCOLUMNW, 1, (LPARAM)&col);
+    col.cx = rw - 240; col.pszText = (LPWSTR)L"Path";
+    SendMessageW(m_hSpriteList, LVM_INSERTCOLUMNW, 2, (LPARAM)&col);
+
+    if (hFont) SendMessage(m_hSpriteList, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+    if (m_bSettingsDarkTheme) {
+      SetWindowTheme(m_hSpriteList, L"", L"");
+      ListView_SetBkColor(m_hSpriteList, m_colSettingsCtrlBg);
+      ListView_SetTextBkColor(m_hSpriteList, m_colSettingsCtrlBg);
+      ListView_SetTextColor(m_hSpriteList, m_colSettingsText);
+    }
+
+    LoadSpritesFromINI();
+    PopulateSpriteListView();
+
+    PAGE_CTRL(6, m_hSpriteList);
+  }
+  y += 8 * lineH + 4;
+
+  // Button row 1: Push, Kill, Kill All, Defaults
+  {
+    int bx = x, bg = 4;
+    int bw = MulDiv(55, lineH, 26), bwL = MulDiv(65, lineH, 26);
+    PAGE_CTRL(6, CreateBtn(hw, L"Push", IDC_MW_SPR_PUSH, bx, y, bw, lineH, hFont)); bx += bw + bg;
+    PAGE_CTRL(6, CreateBtn(hw, L"Kill", IDC_MW_SPR_KILL, bx, y, bw, lineH, hFont)); bx += bw + bg;
+    PAGE_CTRL(6, CreateBtn(hw, L"Kill All", IDC_MW_SPR_KILLALL, bx, y, bwL, lineH, hFont)); bx += bwL + bg;
+    PAGE_CTRL(6, CreateBtn(hw, L"Defaults", IDC_MW_SPR_DEFAULTS, bx, y, bwL, lineH, hFont));
+  }
+  y += lineH + gap;
+
+  // Button row 2: Add, Import Folder, Delete, Save, Reload, Open INI
+  {
+    int bx = x, bg = 4;
+    int bw1 = MulDiv(50, lineH, 26), bw2 = MulDiv(100, lineH, 26);
+    int bw3 = MulDiv(55, lineH, 26), bw4 = MulDiv(60, lineH, 26), bw5 = MulDiv(75, lineH, 26);
+    PAGE_CTRL(6, CreateBtn(hw, L"Add", IDC_MW_SPR_ADD, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
+    PAGE_CTRL(6, CreateBtn(hw, L"Import Folder", IDC_MW_SPR_IMPORT, bx, y, bw2, lineH, hFont)); bx += bw2 + bg;
+    PAGE_CTRL(6, CreateBtn(hw, L"Delete", IDC_MW_SPR_DELETE, bx, y, bw3, lineH, hFont)); bx += bw3 + bg;
+    PAGE_CTRL(6, CreateBtn(hw, L"Save", IDC_MW_SPR_SAVE, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
+    PAGE_CTRL(6, CreateBtn(hw, L"Reload", IDC_MW_SPR_RELOAD, bx, y, bw4, lineH, hFont)); bx += bw4 + bg;
+    PAGE_CTRL(6, CreateBtn(hw, L"Open INI", IDC_MW_SPR_OPENINI, bx, y, bw5, lineH, hFont));
+  }
+  y += lineH + gap + 4;
+
+  // Image path row
+  PAGE_CTRL(6, CreateLabel(hw, L"Image:", x, y, 50, lineH, hFont, false));
+  PAGE_CTRL(6, CreateEdit(hw, L"", IDC_MW_SPR_IMG_PATH, x + 54, y, rw - 124, lineH, hFont, ES_READONLY, false));
+  PAGE_CTRL(6, CreateBtn(hw, L"Browse", IDC_MW_SPR_IMG_BROWSE, x + rw - 65, y, 65, lineH, hFont));
+  y += lineH + 2;
+
+  // Properties row 1: Blend, X, Y
+  {
+    int col1 = x, col2 = x + rw / 3, col3 = x + 2 * rw / 3;
+    int editW = 50, labelW = 30;
+
+    PAGE_CTRL(6, CreateLabel(hw, L"Blend:", col1, y, 40, lineH, hFont, false));
+    HWND hBlend = CreateWindowExW(0, L"COMBOBOX", L"",
+      WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL,
+      col1 + 44, y, 110, 200, hw, (HMENU)(INT_PTR)IDC_MW_SPR_BLENDMODE,
+      GetModuleHandle(NULL), NULL);
+    if (hBlend && hFont) SendMessage(hBlend, WM_SETFONT, (WPARAM)hFont, TRUE);
+    const wchar_t* blendNames[] = { L"0: Blend", L"1: Decal", L"2: Additive", L"3: SrcColor", L"4: ColorKey" };
+    for (int i = 0; i < 5; i++) SendMessageW(hBlend, CB_ADDSTRING, 0, (LPARAM)blendNames[i]);
+    if (m_bSettingsDarkTheme) SetWindowTheme(hBlend, L"DarkMode_Explorer", NULL);
+    PAGE_CTRL(6, hBlend);
+
+    PAGE_CTRL(6, CreateLabel(hw, L"X:", col2, y, labelW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"0.5", IDC_MW_SPR_X, col2 + labelW, y, editW, lineH, hFont, 0, false));
+
+    PAGE_CTRL(6, CreateLabel(hw, L"Y:", col3, y, labelW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"0.5", IDC_MW_SPR_Y, col3 + labelW, y, editW, lineH, hFont, 0, false));
+  }
+  y += lineH + 2;
+
+  // Properties row 2: SX, SY, Rot
+  {
+    int col1 = x, col2 = x + rw / 3, col3 = x + 2 * rw / 3;
+    int editW = 50, labelW = 30;
+
+    PAGE_CTRL(6, CreateLabel(hw, L"SX:", col1, y, labelW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"1.0", IDC_MW_SPR_SX, col1 + labelW, y, editW, lineH, hFont, 0, false));
+
+    PAGE_CTRL(6, CreateLabel(hw, L"SY:", col2, y, labelW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"1.0", IDC_MW_SPR_SY, col2 + labelW, y, editW, lineH, hFont, 0, false));
+
+    PAGE_CTRL(6, CreateLabel(hw, L"Rot:", col3, y, labelW + 4, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"0", IDC_MW_SPR_ROT, col3 + labelW + 4, y, editW, lineH, hFont, 0, false));
+  }
+  y += lineH + 2;
+
+  // Properties row 3: R, G, B, A
+  {
+    int gap2 = 4, labelW2 = 16, editW = 40;
+    int cx = x;
+    PAGE_CTRL(6, CreateLabel(hw, L"R:", cx, y, labelW2, lineH, hFont, false)); cx += labelW2;
+    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_R, cx, y, editW, lineH, hFont, 0, false)); cx += editW + gap2;
+    PAGE_CTRL(6, CreateLabel(hw, L"G:", cx, y, labelW2, lineH, hFont, false)); cx += labelW2;
+    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_G, cx, y, editW, lineH, hFont, 0, false)); cx += editW + gap2;
+    PAGE_CTRL(6, CreateLabel(hw, L"B:", cx, y, labelW2, lineH, hFont, false)); cx += labelW2;
+    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_B, cx, y, editW, lineH, hFont, 0, false)); cx += editW + gap2;
+    PAGE_CTRL(6, CreateLabel(hw, L"A:", cx, y, labelW2, lineH, hFont, false)); cx += labelW2;
+    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_A, cx, y, editW, lineH, hFont, 0, false));
+  }
+  y += lineH + 2;
+
+  // Properties row 4: FlipX, FlipY, Burn, RepeatX, RepeatY, Colorkey
+  {
+    int cx = x;
+    PAGE_CTRL(6, CreateCheck(hw, L"FlipX", IDC_MW_SPR_FLIPX, cx, y, 55, lineH, hFont, false, false)); cx += 59;
+    PAGE_CTRL(6, CreateCheck(hw, L"FlipY", IDC_MW_SPR_FLIPY, cx, y, 55, lineH, hFont, false, false)); cx += 59;
+    PAGE_CTRL(6, CreateCheck(hw, L"Burn", IDC_MW_SPR_BURN, cx, y, 50, lineH, hFont, false, false)); cx += 54;
+    PAGE_CTRL(6, CreateLabel(hw, L"RepX:", cx, y, 40, lineH, hFont, false)); cx += 40;
+    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_REPEATX, cx, y, 35, lineH, hFont, 0, false)); cx += 39;
+    PAGE_CTRL(6, CreateLabel(hw, L"RepY:", cx, y, 40, lineH, hFont, false)); cx += 40;
+    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_REPEATY, cx, y, 35, lineH, hFont, 0, false)); cx += 39;
+    PAGE_CTRL(6, CreateLabel(hw, L"CK:", cx, y, 25, lineH, hFont, false)); cx += 25;
+    PAGE_CTRL(6, CreateEdit(hw, L"0x000000", IDC_MW_SPR_COLORKEY, cx, y, 70, lineH, hFont, 0, false));
+  }
+  y += lineH + gap;
+
+  // Init Code editor
+  PAGE_CTRL(6, CreateLabel(hw, L"Init", x, y, 30, lineH, hFont, false));
+  y += lineH;
+  {
+    int codeH = 4 * lineH;
+    PAGE_CTRL(6, CreateEdit(hw, L"", IDC_MW_SPR_INIT_CODE, x, y, rw, codeH, hFont,
+      ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL, false));
+  }
+  y += 4 * lineH + 4;
+
+  // Per-Frame Code editor
+  PAGE_CTRL(6, CreateLabel(hw, L"Per-Frame", x, y, 80, lineH, hFont, false));
+  y += lineH;
+  {
+    int codeH = 4 * lineH;
+    PAGE_CTRL(6, CreateEdit(hw, L"", IDC_MW_SPR_FRAME_CODE, x, y, rw, codeH, hFont,
+      ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL, false));
+  }
+
+  // ===== About tab (page 8) =====
+  y = tabTop + 10;
+
+  PAGE_CTRL(8, CreateLabel(hw, L"MDropDX12", x, y, rw, 24, hFontBold, false));
   y += 28;
 
   {
     wchar_t szVersion[128];
     swprintf(szVersion, 128, L"Version %d.%d-dev", INT_VERSION / 100, INT_SUBVERSION);
-    PAGE_CTRL(6, CreateLabel(hw, szVersion, x, y, rw, lineH, hFont, false));
+    PAGE_CTRL(8, CreateLabel(hw, szVersion, x, y, rw, lineH, hFont, false));
     y += lineH + 4;
   }
 
@@ -2221,22 +2660,22 @@ void Engine::BuildSettingsControls() {
     MultiByteToWideChar(CP_ACP, 0, __DATE__, -1, wDate, 32);
     MultiByteToWideChar(CP_ACP, 0, __TIME__, -1, wTime, 32);
     swprintf(szBuild, 128, L"Built: %s  %s", wDate, wTime);
-    PAGE_CTRL(6, CreateLabel(hw, szBuild, x, y, rw, lineH, hFont, false));
+    PAGE_CTRL(8, CreateLabel(hw, szBuild, x, y, rw, lineH, hFont, false));
     y += lineH + 4;
   }
 
-  PAGE_CTRL(6, CreateLabel(hw, L"MilkDrop2-based music visualizer", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(8, CreateLabel(hw, L"MilkDrop2-based music visualizer", x, y, rw, lineH, hFont, false));
   y += lineH + 4;
-  PAGE_CTRL(6, CreateLabel(hw, L"DirectX 12 / Windows 11 64-bit", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(8, CreateLabel(hw, L"DirectX 12 / Windows 11 64-bit", x, y, rw, lineH, hFont, false));
   y += lineH + 12;
 
   // Debug Log Level spin box
-  PAGE_CTRL(6, CreateLabel(hw, L"Debug Log Level:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(8, CreateLabel(hw, L"Debug Log Level:", x, y, lw, lineH, hFont, false));
   {
     wchar_t logBuf[16];
     swprintf(logBuf, 16, L"%d", m_LogLevel);
     HWND hEdit = CreateEdit(hw, logBuf, IDC_MW_DEBUG_LOG_LEVEL, x + lw + 4, y, 40, lineH, hFont, ES_NUMBER, false);
-    PAGE_CTRL(6, hEdit);
+    PAGE_CTRL(8, hEdit);
     HWND hSpin = CreateWindowExW(0, UPDOWN_CLASSW, NULL,
       WS_CHILD | UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS,
       0, 0, 0, 0, hw, (HMENU)(INT_PTR)IDC_MW_DEBUG_LOG_LEVEL_SPIN,
@@ -2246,9 +2685,9 @@ void Engine::BuildSettingsControls() {
       SendMessage(hSpin, UDM_SETRANGE32, 0, 3); // 0=Off, 1=Error, 2=Info, 3=Verbose
       SendMessage(hSpin, UDM_SETPOS32, 0, m_LogLevel);
     }
-    PAGE_CTRL(6, hSpin);
+    PAGE_CTRL(8, hSpin);
   }
-  PAGE_CTRL(6, CreateLabel(hw, L"0=Off  1=Error  2=Info  3=Verbose", x + lw + 50, y, rw - lw - 50, lineH, hFont, false));
+  PAGE_CTRL(8, CreateLabel(hw, L"0=Off  1=Error  2=Info  3=Verbose", x + lw + 50, y, rw - lw - 50, lineH, hFont, false));
 
   // ===== Remote tab (page 7) =====
   y = tabTop + 10;
@@ -2351,7 +2790,7 @@ void Engine::RefreshIPCList(HWND hSettingsWnd) {
 }
 
 void Engine::ShowSettingsPage(int page) {
-  for (int i = 0; i < 8; i++) {
+  for (int i = 0; i < SETTINGS_NUM_PAGES; i++) {
     if (i == page) {
       // Show + bring to top z-order so controls above resized siblings receive clicks
       for (HWND h : m_settingsPageCtrls[i])
@@ -2524,6 +2963,48 @@ void Engine::LayoutSettingsControls() {
     y += lineH + gap;
     // Preview
     moveCtrl(IDC_MW_MSG_PREVIEW, x, y, rw, lineH * 3);
+  }
+
+  // Stretch Sprites tab ListView to fill width
+  if (m_hSpriteList) {
+    RECT r; GetWindowRect(m_hSpriteList, &r);
+    MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+    MoveWindow(m_hSpriteList, r.left, r.top, rw, r.bottom - r.top, TRUE);
+    // Resize the Path column to fill remaining width
+    int col0w = (int)SendMessageW(m_hSpriteList, LVM_GETCOLUMNWIDTH, 0, 0);
+    int col1w = (int)SendMessageW(m_hSpriteList, LVM_GETCOLUMNWIDTH, 1, 0);
+    int col2w = rw - col0w - col1w - 4;
+    if (col2w > 50)
+      SendMessageW(m_hSpriteList, LVM_SETCOLUMNWIDTH, 2, col2w);
+  }
+  // Stretch sprite image path edit to fill width
+  {
+    HWND hPath = GetDlgItem(m_hSettingsWnd, IDC_MW_SPR_IMG_PATH);
+    HWND hBrowse = GetDlgItem(m_hSettingsWnd, IDC_MW_SPR_IMG_BROWSE);
+    if (hPath && hBrowse) {
+      RECT rp; GetWindowRect(hPath, &rp);
+      MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&rp, 2);
+      int browseW = 65;
+      int pathW = rw - (rp.left - rcDisplay.left) - browseW - 4;
+      if (pathW > 50) {
+        MoveWindow(hPath, rp.left, rp.top, pathW, rp.bottom - rp.top, TRUE);
+        RECT rb; GetWindowRect(hBrowse, &rb);
+        MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&rb, 2);
+        MoveWindow(hBrowse, rp.left + pathW + 4, rb.top, browseW, rb.bottom - rb.top, TRUE);
+      }
+    }
+  }
+  // Stretch sprite code editors to fill width
+  {
+    auto stretchEdit = [&](int id) {
+      HWND h = GetDlgItem(m_hSettingsWnd, id);
+      if (!h) return;
+      RECT r; GetWindowRect(h, &r);
+      MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+      MoveWindow(h, r.left, r.top, rw, r.bottom - r.top, TRUE);
+    };
+    stretchEdit(IDC_MW_SPR_INIT_CODE);
+    stretchEdit(IDC_MW_SPR_FRAME_CODE);
   }
 
   // Stretch Remote tab edit fields and list box to fill width
@@ -2835,7 +3316,9 @@ void Engine::RebuildSettingsFonts() {
     hChild = hNext;
   }
   m_hSettingsTab = NULL;
-  for (int i = 0; i < 8; i++) m_settingsPageCtrls[i].clear();
+  for (int i = 0; i < SETTINGS_NUM_PAGES; i++) m_settingsPageCtrls[i].clear();
+  m_hSpriteList = NULL;
+  if (m_hSpriteImageList) { ImageList_Destroy((HIMAGELIST)m_hSpriteImageList); m_hSpriteImageList = NULL; }
 
   // Rebuild all controls at the new font size
   // (BuildSettingsControls recreates fonts, tab, and all controls)
@@ -3479,6 +3962,331 @@ void Engine::PopulateResourceViewer() {
 
   // Sort: failed items first, then by type, name, path
   ListView_SortItemsEx(m_hResourceList, RV_SortCompare, (LPARAM)m_hResourceList);
+}
+
+//----------------------------------------------------------------------
+// Sprites Tab Functions
+//----------------------------------------------------------------------
+
+void Engine::LoadSpritesFromINI() {
+  m_spriteEntries.clear();
+  m_nSpriteSelected = -1;
+
+  for (int i = 0; i < 100; i++) {
+    wchar_t section[64];
+    swprintf(section, 64, L"img%02d", i);
+
+    wchar_t img[512] = {};
+    GetPrivateProfileStringW(section, L"img", L"", img, 511, m_szImgIniFile);
+    if (img[0] == 0) continue;
+
+    SpriteEntry entry = {};
+    entry.nIndex = i;
+    wcscpy_s(entry.szImg, img);
+
+    // Read colorkey (try colorkey_lo first for backwards compat, then colorkey)
+    entry.nColorkey = (unsigned int)GetPrivateProfileIntW(section, L"colorkey_lo", 0, m_szImgIniFile);
+    entry.nColorkey = (unsigned int)GetPrivateProfileIntW(section, L"colorkey", entry.nColorkey, m_szImgIniFile);
+
+    // Read init_N and code_N lines (same pattern as LaunchSprite)
+    char sectionA[64];
+    sprintf(sectionA, "img%02d", i);
+    char szTemp[8192];
+
+    for (int pass = 0; pass < 2; pass++) {
+      std::string& dest = (pass == 0) ? entry.szInitCode : entry.szFrameCode;
+      dest.clear();
+      for (int line = 1; ; line++) {
+        char key[32];
+        sprintf(key, pass == 0 ? "init_%d" : "code_%d", line);
+        GetPrivateProfileStringA(sectionA, key, "~!@#$", szTemp, 8192, AutoCharFn(m_szImgIniFile));
+        if (strcmp(szTemp, "~!@#$") == 0) break;
+        if (!dest.empty()) dest += "\r\n";
+        dest += szTemp;
+      }
+    }
+    m_spriteEntries.push_back(entry);
+  }
+}
+
+void Engine::SaveSpritesToINI() {
+  // Delete all [imgNN] sections first
+  for (int i = 0; i < 100; i++) {
+    wchar_t section[64];
+    swprintf(section, 64, L"img%02d", i);
+    WritePrivateProfileStringW(section, NULL, NULL, m_szImgIniFile);
+  }
+
+  // Write current entries
+  for (auto& e : m_spriteEntries) {
+    wchar_t section[64];
+    swprintf(section, 64, L"img%02d", e.nIndex);
+
+    WritePrivateProfileStringW(section, L"img", e.szImg, m_szImgIniFile);
+
+    if (e.nColorkey != 0) {
+      wchar_t ckBuf[32];
+      swprintf(ckBuf, 32, L"0x%06X", e.nColorkey);
+      WritePrivateProfileStringW(section, L"colorkey", ckBuf, m_szImgIniFile);
+    }
+
+    // Write init_N / code_N lines
+    char sectionA[64];
+    sprintf(sectionA, "img%02d", e.nIndex);
+
+    auto writeLines = [&](const std::string& code, const char* prefix) {
+      std::istringstream ss(code);
+      std::string line;
+      int n = 1;
+      while (std::getline(ss, line)) {
+        // Strip trailing \r if present (from \r\n in edit control)
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+        char key[32];
+        sprintf(key, "%s_%d", prefix, n++);
+        WritePrivateProfileStringA(sectionA, key, line.c_str(), AutoCharFn(m_szImgIniFile));
+      }
+    };
+    writeLines(e.szInitCode, "init");
+    writeLines(e.szFrameCode, "code");
+  }
+
+  // Flush INI cache to disk
+  WritePrivateProfileStringW(NULL, NULL, NULL, m_szImgIniFile);
+}
+
+HBITMAP Engine::LoadThumbnailWIC(const wchar_t* szPath, int cx, int cy) {
+  // Resolve relative path
+  wchar_t fullPath[MAX_PATH] = {};
+  if (szPath[0] && szPath[1] != L':') {
+    if (m_szContentBasePath[0]) {
+      swprintf(fullPath, MAX_PATH, L"%s%s", m_szContentBasePath, szPath);
+      if (GetFileAttributesW(fullPath) == INVALID_FILE_ATTRIBUTES)
+        swprintf(fullPath, MAX_PATH, L"%s%s", m_szMilkdrop2Path, szPath);
+    } else {
+      swprintf(fullPath, MAX_PATH, L"%s%s", m_szMilkdrop2Path, szPath);
+    }
+  } else {
+    wcscpy_s(fullPath, szPath);
+  }
+
+  if (GetFileAttributesW(fullPath) == INVALID_FILE_ATTRIBUTES)
+    return NULL;
+
+  IWICImagingFactory* pFactory = NULL;
+  HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pFactory));
+  if (FAILED(hr) || !pFactory) return NULL;
+
+  IWICBitmapDecoder* pDecoder = NULL;
+  hr = pFactory->CreateDecoderFromFilename(fullPath, NULL, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &pDecoder);
+  if (FAILED(hr) || !pDecoder) { pFactory->Release(); return NULL; }
+
+  IWICBitmapFrameDecode* pFrame = NULL;
+  pDecoder->GetFrame(0, &pFrame);
+  if (!pFrame) { pDecoder->Release(); pFactory->Release(); return NULL; }
+
+  IWICBitmapScaler* pScaler = NULL;
+  pFactory->CreateBitmapScaler(&pScaler);
+  if (!pScaler) { pFrame->Release(); pDecoder->Release(); pFactory->Release(); return NULL; }
+  pScaler->Initialize(pFrame, cx, cy, WICBitmapInterpolationModeLinear);
+
+  IWICFormatConverter* pConverter = NULL;
+  pFactory->CreateFormatConverter(&pConverter);
+  if (!pConverter) { pScaler->Release(); pFrame->Release(); pDecoder->Release(); pFactory->Release(); return NULL; }
+  pConverter->Initialize(pScaler, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, NULL, 0.0, WICBitmapPaletteTypeCustom);
+
+  BITMAPINFO bmi = {};
+  bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bmi.bmiHeader.biWidth = cx;
+  bmi.bmiHeader.biHeight = -cy;  // top-down
+  bmi.bmiHeader.biPlanes = 1;
+  bmi.bmiHeader.biBitCount = 32;
+  void* pvBits = NULL;
+  HBITMAP hBmp = CreateDIBSection(NULL, &bmi, DIB_RGB_COLORS, &pvBits, NULL, 0);
+  if (hBmp && pvBits)
+    pConverter->CopyPixels(NULL, cx * 4, cx * cy * 4, (BYTE*)pvBits);
+
+  pConverter->Release();
+  pScaler->Release();
+  pFrame->Release();
+  pDecoder->Release();
+  pFactory->Release();
+  return hBmp;
+}
+
+void Engine::PopulateSpriteListView() {
+  if (!m_hSpriteList) return;
+  ListView_DeleteAllItems(m_hSpriteList);
+  if (m_hSpriteImageList) ImageList_RemoveAll((HIMAGELIST)m_hSpriteImageList);
+
+  for (int i = 0; i < (int)m_spriteEntries.size(); i++) {
+    auto& e = m_spriteEntries[i];
+
+    // Load thumbnail
+    HBITMAP hBmp = LoadThumbnailWIC(e.szImg, 32, 32);
+    int imgIdx = -1;
+    if (hBmp) {
+      imgIdx = ImageList_Add((HIMAGELIST)m_hSpriteImageList, hBmp, NULL);
+      DeleteObject(hBmp);
+    }
+
+    // Insert item
+    wchar_t numBuf[16];
+    swprintf(numBuf, 16, L"img%02d", e.nIndex);
+    LVITEMW lvi = {};
+    lvi.mask = LVIF_TEXT | LVIF_IMAGE;
+    lvi.iItem = i;
+    lvi.iImage = imgIdx;
+    lvi.pszText = numBuf;
+    SendMessageW(m_hSpriteList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
+
+    // Filename column
+    const wchar_t* pName = wcsrchr(e.szImg, L'\\');
+    if (!pName) pName = wcsrchr(e.szImg, L'/');
+    pName = pName ? pName + 1 : e.szImg;
+    lvi.mask = LVIF_TEXT;
+    lvi.iSubItem = 1;
+    lvi.pszText = (LPWSTR)pName;
+    SendMessageW(m_hSpriteList, LVM_SETITEMW, 0, (LPARAM)&lvi);
+
+    // Full path column
+    lvi.iSubItem = 2;
+    lvi.pszText = e.szImg;
+    SendMessageW(m_hSpriteList, LVM_SETITEMW, 0, (LPARAM)&lvi);
+  }
+}
+
+void Engine::UpdateSpriteProperties(int sel) {
+  HWND hw = m_hSettingsWnd;
+  if (!hw || sel < 0 || sel >= (int)m_spriteEntries.size()) return;
+
+  auto& e = m_spriteEntries[sel];
+
+  SetDlgItemTextW(hw, IDC_MW_SPR_IMG_PATH, e.szImg);
+
+  // Parse init code for default variable values
+  // Defaults
+  double x = 0.5, y2 = 0.5, sx = 1.0, sy = 1.0, rot = 0.0;
+  double r = 1.0, g = 1.0, b = 1.0, a = 1.0;
+  int blendmode = 0;
+  bool flipx = false, flipy = false, burn = false;
+  double repeatx = 1.0, repeaty = 1.0;
+
+  // Simple parser: look for "varname = value" or "varname=value" in init code
+  auto parseVar = [&](const std::string& code, const char* name, double& val) {
+    size_t pos = 0;
+    std::string search = std::string(name) + "=";
+    std::string search2 = std::string(name) + " =";
+    while (pos < code.size()) {
+      size_t found = code.find(search, pos);
+      size_t found2 = code.find(search2, pos);
+      size_t f = std::string::npos;
+      if (found != std::string::npos && (found2 == std::string::npos || found <= found2)) f = found;
+      else f = found2;
+      if (f == std::string::npos) break;
+      // Find the value after =
+      size_t eq = code.find('=', f);
+      if (eq != std::string::npos) {
+        val = atof(code.c_str() + eq + 1);
+        return;
+      }
+      pos = f + 1;
+    }
+  };
+
+  parseVar(e.szInitCode, "x", x);
+  parseVar(e.szInitCode, "y", y2);
+  parseVar(e.szInitCode, "sx", sx);
+  parseVar(e.szInitCode, "sy", sy);
+  parseVar(e.szInitCode, "rot", rot);
+  parseVar(e.szInitCode, "r", r);
+  parseVar(e.szInitCode, "g", g);
+  parseVar(e.szInitCode, "b", b);
+  parseVar(e.szInitCode, "a", a);
+  parseVar(e.szInitCode, "repeatx", repeatx);
+  parseVar(e.szInitCode, "repeaty", repeaty);
+  double dBlend = 0; parseVar(e.szInitCode, "blendmode", dBlend); blendmode = (int)dBlend;
+  double dFlipx = 0; parseVar(e.szInitCode, "flipx", dFlipx); flipx = dFlipx != 0;
+  double dFlipy = 0; parseVar(e.szInitCode, "flipy", dFlipy); flipy = dFlipy != 0;
+  double dBurn = 0; parseVar(e.szInitCode, "burn", dBurn); burn = dBurn != 0;
+
+  wchar_t buf[64];
+  swprintf(buf, 64, L"%.3g", x); SetDlgItemTextW(hw, IDC_MW_SPR_X, buf);
+  swprintf(buf, 64, L"%.3g", y2); SetDlgItemTextW(hw, IDC_MW_SPR_Y, buf);
+  swprintf(buf, 64, L"%.3g", sx); SetDlgItemTextW(hw, IDC_MW_SPR_SX, buf);
+  swprintf(buf, 64, L"%.3g", sy); SetDlgItemTextW(hw, IDC_MW_SPR_SY, buf);
+  swprintf(buf, 64, L"%.3g", rot); SetDlgItemTextW(hw, IDC_MW_SPR_ROT, buf);
+  swprintf(buf, 64, L"%.3g", r); SetDlgItemTextW(hw, IDC_MW_SPR_R, buf);
+  swprintf(buf, 64, L"%.3g", g); SetDlgItemTextW(hw, IDC_MW_SPR_G, buf);
+  swprintf(buf, 64, L"%.3g", b); SetDlgItemTextW(hw, IDC_MW_SPR_B, buf);
+  swprintf(buf, 64, L"%.3g", a); SetDlgItemTextW(hw, IDC_MW_SPR_A, buf);
+  swprintf(buf, 64, L"%.3g", repeatx); SetDlgItemTextW(hw, IDC_MW_SPR_REPEATX, buf);
+  swprintf(buf, 64, L"%.3g", repeaty); SetDlgItemTextW(hw, IDC_MW_SPR_REPEATY, buf);
+  swprintf(buf, 64, L"0x%06X", e.nColorkey); SetDlgItemTextW(hw, IDC_MW_SPR_COLORKEY, buf);
+
+  SendDlgItemMessageW(hw, IDC_MW_SPR_BLENDMODE, CB_SETCURSEL, blendmode, 0);
+  CheckDlgButton(hw, IDC_MW_SPR_FLIPX, flipx ? BST_CHECKED : BST_UNCHECKED);
+  CheckDlgButton(hw, IDC_MW_SPR_FLIPY, flipy ? BST_CHECKED : BST_UNCHECKED);
+  CheckDlgButton(hw, IDC_MW_SPR_BURN, burn ? BST_CHECKED : BST_UNCHECKED);
+
+  // Set code editors - convert \n to \r\n for edit control
+  {
+    std::wstring wInit(e.szInitCode.begin(), e.szInitCode.end());
+    SetDlgItemTextW(hw, IDC_MW_SPR_INIT_CODE, wInit.c_str());
+  }
+  {
+    std::wstring wFrame(e.szFrameCode.begin(), e.szFrameCode.end());
+    SetDlgItemTextW(hw, IDC_MW_SPR_FRAME_CODE, wFrame.c_str());
+  }
+}
+
+void Engine::SaveCurrentSpriteProperties() {
+  HWND hw = m_hSettingsWnd;
+  if (!hw || m_nSpriteSelected < 0 || m_nSpriteSelected >= (int)m_spriteEntries.size()) return;
+
+  auto& e = m_spriteEntries[m_nSpriteSelected];
+
+  // Read image path (preserves relative or absolute as displayed)
+  GetDlgItemTextW(hw, IDC_MW_SPR_IMG_PATH, e.szImg, 511);
+
+  // Read colorkey
+  wchar_t buf[64];
+  GetDlgItemTextW(hw, IDC_MW_SPR_COLORKEY, buf, 64);
+  e.nColorkey = (unsigned int)wcstoul(buf, NULL, 16);
+
+  // Read init code from editor (preserve original code with custom variables/expressions)
+  {
+    int len = GetWindowTextLengthW(GetDlgItem(hw, IDC_MW_SPR_INIT_CODE));
+    if (len > 0) {
+      std::vector<wchar_t> wbuf(len + 1);
+      GetDlgItemTextW(hw, IDC_MW_SPR_INIT_CODE, wbuf.data(), len + 1);
+      std::string narrow;
+      for (wchar_t wc : wbuf) {
+        if (wc == 0) break;
+        narrow += (char)wc;
+      }
+      e.szInitCode = narrow;
+    } else {
+      e.szInitCode.clear();
+    }
+  }
+
+  // Read per-frame code from editor
+  {
+    int len = GetWindowTextLengthW(GetDlgItem(hw, IDC_MW_SPR_FRAME_CODE));
+    if (len > 0) {
+      std::vector<wchar_t> wbuf(len + 1);
+      GetDlgItemTextW(hw, IDC_MW_SPR_FRAME_CODE, wbuf.data(), len + 1);
+      std::string narrow;
+      for (wchar_t wc : wbuf) {
+        if (wc == 0) break;
+        narrow += (char)wc;
+      }
+      e.szFrameCode = narrow;
+    } else {
+      e.szFrameCode.clear();
+    }
+  }
 }
 
 //----------------------------------------------------------------------

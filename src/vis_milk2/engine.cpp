@@ -2642,12 +2642,12 @@ int Engine::AllocateMyDX9Stuff() {
         wasabiApiLangString(IDS_MILKDROP_ERROR, title, sizeof(title)), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
       return false;
     }
-
-    // -----------------
-
-    m_texmgr.Init(GetDevice());
-    m_texmgr.InitDX12(m_lpDX);
   }
+
+  // -----------------
+
+  m_texmgr.Init(GetDevice());
+  m_texmgr.InitDX12(m_lpDX);
 
   //dumpmsg("Init: mesh allocation");
   m_verts = new MYVERTEX[(m_nGridX + 1) * (m_nGridY + 1)];
@@ -3042,6 +3042,13 @@ void Engine::MyRenderFn(int redraw) {
   //   be zero, and you can draw a new frame.  The flag is
   //   used to force the desktop to repaint itself when
   //   running in desktop mode and Winamp is paused or stopped.
+
+  // Flush any queued sprite loads (must happen after BeginFrame opens the command list)
+  if (!m_pendingSpriteLoads.empty()) {
+    for (auto& ps : m_pendingSpriteLoads)
+      LaunchSprite(ps.nSpriteNum, ps.nSlot);
+    m_pendingSpriteLoads.clear();
+  }
 
   //   1. take care of timing/other paperwork/etc. for new frame
   if (!redraw) {

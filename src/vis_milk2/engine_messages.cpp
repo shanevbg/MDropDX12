@@ -219,9 +219,9 @@ void Engine::SaveMsgAutoplaySettings() {
   WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideRandomSize", val, pIni);
   swprintf(val, 32, L"%d", m_bMsgOverrideRandomEffects ? 1 : 0);
   WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideRandomEffects", val, pIni);
-  swprintf(val, 32, L"%d", m_nMsgOverrideSizeMin);
+  swprintf(val, 32, L"%.2f", m_fMsgOverrideSizeMin);
   WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideSizeMin", val, pIni);
-  swprintf(val, 32, L"%d", m_nMsgOverrideSizeMax);
+  swprintf(val, 32, L"%.2f", m_fMsgOverrideSizeMax);
   WritePrivateProfileStringW(L"Milkwave", L"MsgOverrideSizeMax", val, pIni);
   swprintf(val, 32, L"%d", m_nMsgMaxOnScreen);
   WritePrivateProfileStringW(L"Milkwave", L"MsgMaxOnScreen", val, pIni);
@@ -269,8 +269,13 @@ void Engine::LoadMsgAutoplaySettings() {
   m_bMsgOverrideRandomColor = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomColor", 0, pIni) != 0;
   m_bMsgOverrideRandomSize = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomSize", 0, pIni) != 0;
   m_bMsgOverrideRandomEffects = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomEffects", 0, pIni) != 0;
-  m_nMsgOverrideSizeMin = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideSizeMin", 10, pIni);
-  m_nMsgOverrideSizeMax = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideSizeMax", 40, pIni);
+  {
+    wchar_t tmp[32];
+    GetPrivateProfileStringW(L"Milkwave", L"MsgOverrideSizeMin", L"10", tmp, 32, pIni);
+    m_fMsgOverrideSizeMin = (float)_wtof(tmp);
+    GetPrivateProfileStringW(L"Milkwave", L"MsgOverrideSizeMax", L"40", tmp, 32, pIni);
+    m_fMsgOverrideSizeMax = (float)_wtof(tmp);
+  }
   m_nMsgMaxOnScreen = GetPrivateProfileIntW(L"Milkwave", L"MsgMaxOnScreen", 1, pIni);
   // Animation overrides
   m_bMsgOverrideRandomPos = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomPos", 0, pIni) != 0;
@@ -282,9 +287,9 @@ void Engine::LoadMsgAutoplaySettings() {
   // Color shifting overrides
   m_bMsgOverrideApplyHueShift = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideApplyHueShift", 0, pIni) != 0;
   m_bMsgOverrideRandomHue = GetPrivateProfileIntW(L"Milkwave", L"MsgOverrideRandomHue", 0, pIni) != 0;
-  if (m_nMsgOverrideSizeMin < 5) m_nMsgOverrideSizeMin = 5;
-  if (m_nMsgOverrideSizeMax > 50) m_nMsgOverrideSizeMax = 50;
-  if (m_nMsgOverrideSizeMin >= m_nMsgOverrideSizeMax) m_nMsgOverrideSizeMin = m_nMsgOverrideSizeMax - 1;
+  if (m_fMsgOverrideSizeMin < 0.01f) m_fMsgOverrideSizeMin = 0.01f;
+  if (m_fMsgOverrideSizeMax > 100.0f) m_fMsgOverrideSizeMax = 100.0f;
+  if (m_fMsgOverrideSizeMin >= m_fMsgOverrideSizeMax) m_fMsgOverrideSizeMin = m_fMsgOverrideSizeMax * 0.5f;
   if (m_nMsgMaxOnScreen < 1) m_nMsgMaxOnScreen = 1;
   if (m_nMsgMaxOnScreen > NUM_SUPERTEXTS) m_nMsgMaxOnScreen = NUM_SUPERTEXTS;
 
@@ -846,8 +851,8 @@ struct MsgOverridesDlgData {
   bool        bRandomColor;
   bool        bRandomSize;
   bool        bRandomEffects;
-  int         nSizeMin;
-  int         nSizeMax;
+  float       fSizeMin;
+  float       fSizeMax;
   int         nMaxOnScreen;
   // Animation overrides
   bool        bRandomPos;
@@ -898,17 +903,16 @@ static LRESULT CALLBACK MsgOverridesWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
       data->bRandomHue = (bool)(intptr_t)GetPropW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_RAND_HUE), L"Checked");
 
       GetWindowTextW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SIZE_MIN), buf, 32);
-      data->nSizeMin = _wtoi(buf);
+      data->fSizeMin = (float)_wtof(buf);
       GetWindowTextW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_SIZE_MAX), buf, 32);
-      data->nSizeMax = _wtoi(buf);
+      data->fSizeMax = (float)_wtof(buf);
       GetWindowTextW(GetDlgItem(hWnd, IDC_MSGOVERRIDE_MAX_ONSCREEN), buf, 32);
       data->nMaxOnScreen = _wtoi(buf);
 
       // Clamp values
-      if (data->nSizeMin < 5) data->nSizeMin = 5;
-      if (data->nSizeMax > 50) data->nSizeMax = 50;
-      if (data->nSizeMin >= data->nSizeMax) data->nSizeMin = data->nSizeMax - 1;
-      if (data->nSizeMin < 5) { data->nSizeMin = 5; data->nSizeMax = 6; }
+      if (data->fSizeMin < 0.01f) data->fSizeMin = 0.01f;
+      if (data->fSizeMax > 100.0f) data->fSizeMax = 100.0f;
+      if (data->fSizeMin >= data->fSizeMax) data->fSizeMin = data->fSizeMax * 0.5f;
       if (data->nMaxOnScreen < 1) data->nMaxOnScreen = 1;
       if (data->nMaxOnScreen > NUM_SUPERTEXTS) data->nMaxOnScreen = NUM_SUPERTEXTS;
 
@@ -1015,8 +1019,8 @@ bool Engine::ShowMsgOverridesDialog(HWND hParent) {
   data.bRandomColor = m_bMsgOverrideRandomColor;
   data.bRandomSize = m_bMsgOverrideRandomSize;
   data.bRandomEffects = m_bMsgOverrideRandomEffects;
-  data.nSizeMin = m_nMsgOverrideSizeMin;
-  data.nSizeMax = m_nMsgOverrideSizeMax;
+  data.fSizeMin = m_fMsgOverrideSizeMin;
+  data.fSizeMax = m_fMsgOverrideSizeMax;
   data.nMaxOnScreen = m_nMsgMaxOnScreen;
   data.bRandomPos = m_bMsgOverrideRandomPos;
   data.bRandomGrowth = m_bMsgOverrideRandomGrowth;
@@ -1095,14 +1099,14 @@ bool Engine::ShowMsgOverridesDialog(HWND hParent) {
   int lblW2 = MulDiv(70, dlgLineH, 20), editW2 = MulDiv(50, dlgLineH, 20);
   int indent = MulDiv(20, dlgLineH, 20);
   CreateLabel(hDlg, L"Min size:", margin + indent, y + 2, lblW2, smallH, hFont);
-  swprintf(buf, 32, L"%d", data.nSizeMin);
+  swprintf(buf, 32, L"%.2g", data.fSizeMin);
   CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_SIZE_MIN, margin + indent + lblW2, y, editW2, editH, hFont, 0);
   CreateLabel(hDlg, L"Max size:", margin + indent + lblW2 + editW2 + 16, y + 2, lblW2, smallH, hFont);
-  swprintf(buf, 32, L"%d", data.nSizeMax);
+  swprintf(buf, 32, L"%.2g", data.fSizeMax);
   CreateEdit(hDlg, buf, IDC_MSGOVERRIDE_SIZE_MAX, margin + indent + lblW2 * 2 + editW2 + 16, y, editW2, editH, hFont, 0);
   y += dlgLineH + 4;
 
-  CreateLabel(hDlg, L"(min \x2265 5, max \x2264 50)", margin + indent, y, rw, smallH, hFont);
+  CreateLabel(hDlg, L"(min \x2265 0.01, max \x2264 100, 50 = normal)", margin + indent, y, rw, smallH, hFont);
   y += dlgLineH + 2;
 
   // Max on screen
@@ -1176,8 +1180,8 @@ bool Engine::ShowMsgOverridesDialog(HWND hParent) {
     m_bMsgOverrideRandomColor = data.bRandomColor;
     m_bMsgOverrideRandomSize = data.bRandomSize;
     m_bMsgOverrideRandomEffects = data.bRandomEffects;
-    m_nMsgOverrideSizeMin = data.nSizeMin;
-    m_nMsgOverrideSizeMax = data.nSizeMax;
+    m_fMsgOverrideSizeMin = data.fSizeMin;
+    m_fMsgOverrideSizeMax = data.fSizeMax;
     m_nMsgMaxOnScreen = data.nMaxOnScreen;
     m_bMsgOverrideRandomPos = data.bRandomPos;
     m_bMsgOverrideRandomGrowth = data.bRandomGrowth;
@@ -1388,8 +1392,8 @@ void Engine::LaunchCustomMessage(int nMsgNum) {
       m_supertexts[nextFreeSupertextIndex].bItal = (rand() % 2) != 0;
     }
     if (m_bMsgOverrideRandomSize) {
-      float range = (float)(m_nMsgOverrideSizeMax - m_nMsgOverrideSizeMin);
-      m_supertexts[nextFreeSupertextIndex].fFontSize = m_nMsgOverrideSizeMin + range * ((rand() % 1000) / 1000.0f);
+      float range = m_fMsgOverrideSizeMax - m_fMsgOverrideSizeMin;
+      m_supertexts[nextFreeSupertextIndex].fFontSize = m_fMsgOverrideSizeMin + range * ((rand() % 1000) / 1000.0f);
     }
 
     // Animation overrides
@@ -2156,6 +2160,8 @@ bool Engine::LaunchSprite(int nSpriteNum, int nSlot) {
     return false;
   }
 
+  { wchar_t dbg[1024]; swprintf(dbg, 1024, L"LaunchSprite(%d): img=%s", nSpriteNum, img); DebugLogW(dbg); }
+
   if (img[1] != L':')// || img[2] != '\\')
   {
     // it's not in the form "x:\blah\billy.jpg" so prepend base path.
@@ -2170,6 +2176,8 @@ bool Engine::LaunchSprite(int nSpriteNum, int nSlot) {
       swprintf(img, L"%s%s", m_szMilkdrop2Path, temp);
     }
   }
+  { wchar_t dbg[1024]; swprintf(dbg, 1024, L"LaunchSprite(%d): resolved=%s exists=%d", nSpriteNum, img,
+            GetFileAttributesW(img) != INVALID_FILE_ATTRIBUTES); DebugLogW(dbg); }
 
   // 2. get color key
   //unsigned int ck_lo = (unsigned int)GetPrivateProfileInt(section, "colorkey_lo", 0x00000000, m_szImgIniFile);
@@ -2235,6 +2243,11 @@ bool Engine::LaunchSprite(int nSpriteNum, int nSlot) {
 
   int ret = m_texmgr.LoadTex(img, nSlot, initcode, code, GetTime(), GetFrame(), ck);
   m_texmgr.m_tex[nSlot].nUserData = nSpriteNum;
+
+  { wchar_t dbg[512]; swprintf(dbg, 512, L"LaunchSprite(%d): slot=%d ret=0x%X valid=%d pSurf=%p",
+    nSpriteNum, nSlot, ret,
+    m_texmgr.m_tex[nSlot].dx12Surface.IsValid() ? 1 : 0,
+    m_texmgr.m_tex[nSlot].pSurface); DebugLogW(dbg); }
 
   wchar_t buf[1024];
   switch (ret & TEXMGR_ERROR_MASK) {

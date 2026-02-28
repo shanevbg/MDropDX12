@@ -6029,6 +6029,20 @@ void mdrop::Engine::DrawUserSprites()	// from system memory, to back buffer.
   cmdList->SetDescriptorHeaps(1, heaps);
   cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
 
+  // One-time diagnostic: log active sprite slots
+  {
+    static int s_logCount = 0;
+    if (s_logCount < 30) {
+      int nActive = 0;
+      for (int i = 0; i < NUM_TEX; i++)
+        if (m_texmgr.m_tex[i].dx12Surface.IsValid()) nActive++;
+      if (nActive > 0) {
+        wchar_t dbg[256]; swprintf(dbg, 256, L"DrawUserSprites: %d active sprite(s)", nActive); DebugLogW(dbg);
+        s_logCount++;
+      }
+    }
+  }
+
   for (int iSlot = 0; iSlot < NUM_TEX; iSlot++) {
     if (m_texmgr.m_tex[iSlot].dx12Surface.IsValid()) {
       // set values of input variables:

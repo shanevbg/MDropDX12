@@ -271,6 +271,42 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MSGOVERRIDE_APPLY_HUE     4016
 #define IDC_MSGOVERRIDE_RAND_HUE      4017
 
+// Sprites tab control IDs (page 6)
+#define IDC_MW_SPR_LIST         5000
+#define IDC_MW_SPR_ADD          5001
+#define IDC_MW_SPR_DELETE       5002
+#define IDC_MW_SPR_IMPORT       5003
+#define IDC_MW_SPR_PUSH         5004
+#define IDC_MW_SPR_KILL         5005
+#define IDC_MW_SPR_SAVE         5006
+#define IDC_MW_SPR_OPENINI      5007
+#define IDC_MW_SPR_RELOAD       5008
+#define IDC_MW_SPR_IMG_PATH     5010
+#define IDC_MW_SPR_IMG_BROWSE   5011
+#define IDC_MW_SPR_BLENDMODE    5012
+#define IDC_MW_SPR_X            5013
+#define IDC_MW_SPR_Y            5014
+#define IDC_MW_SPR_SX           5015
+#define IDC_MW_SPR_SY           5016
+#define IDC_MW_SPR_ROT          5017
+#define IDC_MW_SPR_R            5018
+#define IDC_MW_SPR_G            5019
+#define IDC_MW_SPR_B            5020
+#define IDC_MW_SPR_A            5021
+#define IDC_MW_SPR_FLIPX        5022
+#define IDC_MW_SPR_FLIPY        5023
+#define IDC_MW_SPR_REPEATX      5024
+#define IDC_MW_SPR_REPEATY      5025
+#define IDC_MW_SPR_BURN         5026
+#define IDC_MW_SPR_COLORKEY     5027
+#define IDC_MW_SPR_INIT_CODE    5030
+#define IDC_MW_SPR_FRAME_CODE   5031
+#define IDC_MW_SPR_KILLALL      5036
+#define IDC_MW_SPR_DEFAULTS     5037
+
+// Settings page count
+#define SETTINGS_NUM_PAGES      9
+
 // Custom messages for thread-safe side effects (settings thread → render thread)
 #define WM_MW_SET_OPACITY       (WM_APP + 1)
 #define WM_MW_SET_ALWAYS_ON_TOP (WM_APP + 2)
@@ -282,6 +318,8 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_RESTART_DEVICE    (WM_APP + 8)
 #define WM_MW_IPC_MESSAGE       (WM_APP + 9)  // lParam = heap-allocated wchar_t* from IPC thread
 #define WM_MW_RESTART_IPC       (WM_APP + 10) // settings thread requests IPC window restart
+#define WM_MW_PUSH_SPRITE       (WM_APP + 11) // wParam = spriteNum, lParam = slot (-1=auto)
+#define WM_MW_KILL_SPRITE       (WM_APP + 12) // wParam = slot index
 
 // Milkwave Remote messages (sent via PostMessage from Milkwave Remote → IPC window → render window)
 #define WM_MW_NEXT_PRESET       (WM_APP + 100)
