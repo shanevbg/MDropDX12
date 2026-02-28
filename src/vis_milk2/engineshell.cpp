@@ -738,6 +738,10 @@ void EngineShell::OnUserResizeWindow() {
     // kiv: could we just resize when the *snapped* w/h changes?  slightly more ideal...
     if (m_lpDX->m_REAL_client_width != new_REAL_client_w || m_lpDX->m_REAL_client_height != new_REAL_client_h) {
 
+      // Save whether our window had focus before the rebuild
+      HWND hPluginWnd = GetPluginWindow();
+      bool wasForeground = (GetForegroundWindow() == hPluginWnd);
+
       //if (true) {
         //CleanUpVJStuff();
 
@@ -774,6 +778,10 @@ void EngineShell::OnUserResizeWindow() {
           m_lpDX->m_ready = false;   // flag to exit
           return;
       }*/
+
+      // Restore focus if our window was the foreground window before rebuild
+      if (wasForeground && hPluginWnd)
+        SetForegroundWindow(hPluginWnd);
     }
 
     // save the new window position:
