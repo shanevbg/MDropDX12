@@ -577,7 +577,11 @@ bool PickRandomTexture(const wchar_t* prefix, wchar_t* szRetTextureFilename)  //
     if (g_engine.m_szRandomTexDir[0])
       scanDir(g_engine.m_szRandomTexDir, texfiles);
 
-    // 2) Fallback paths (user's texture collection)
+    // 2) Content base path
+    if (texfiles.empty() && g_engine.m_szContentBasePath[0])
+      scanDir(g_engine.m_szContentBasePath, texfiles);
+
+    // 3) Fallback paths (user's texture collection)
     if (texfiles.empty()) {
       for (auto& fbPath : g_engine.m_fallbackPaths)
         scanDir(fbPath.c_str(), texfiles);

@@ -693,6 +693,46 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
+    if (id == IDC_MW_CONTENT_BASE_BROWSE && code == BN_CLICKED) {
+      IFileDialog* pfd = NULL;
+      HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd));
+      if (SUCCEEDED(hr)) {
+        DWORD opts;
+        pfd->GetOptions(&opts);
+        pfd->SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+        pfd->SetTitle(L"Select Content Base Path (textures, sprites, etc.)");
+        if (SUCCEEDED(pfd->Show(hWnd))) {
+          IShellItem* psi = NULL;
+          if (SUCCEEDED(pfd->GetResult(&psi))) {
+            PWSTR pszPath = NULL;
+            if (SUCCEEDED(psi->GetDisplayName(SIGDN_FILESYSPATH, &pszPath))) {
+              lstrcpynW(p->m_szContentBasePath, pszPath, MAX_PATH);
+              int len = lstrlenW(p->m_szContentBasePath);
+              if (len > 0 && p->m_szContentBasePath[len - 1] != L'\\') {
+                p->m_szContentBasePath[len] = L'\\';
+                p->m_szContentBasePath[len + 1] = 0;
+              }
+              SetWindowTextW(GetDlgItem(hWnd, IDC_MW_CONTENT_BASE_EDIT), p->m_szContentBasePath);
+              p->SaveFallbackPaths();
+              p->m_bNeedRescanTexturesDir = true;
+              CoTaskMemFree(pszPath);
+            }
+            psi->Release();
+          }
+        }
+        pfd->Release();
+      }
+      return 0;
+    }
+
+    if (id == IDC_MW_CONTENT_BASE_CLEAR && code == BN_CLICKED) {
+      p->m_szContentBasePath[0] = 0;
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_CONTENT_BASE_EDIT), L"");
+      p->SaveFallbackPaths();
+      p->m_bNeedRescanTexturesDir = true;
+      return 0;
+    }
+
     if (id == IDC_MW_RANDTEX_BROWSE && code == BN_CLICKED) {
       IFileDialog* pfd = NULL;
       HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd));
@@ -1989,12 +2029,38 @@ void Engine::BuildSettingsControls() {
   // ====== PAGE 4: Files (created hidden) ======
   y = tabTop + 10;
 
+  // Content Base Path (for textures, sprites, etc.)
+  {
+    HWND hLbl = CreateWindowExW(0, L"STATIC", L"Content Base Path (textures, sprites, etc.):",
+      WS_CHILD | SS_LEFT, x, y, rw, lineH, hw,
+      (HMENU)(INT_PTR)IDC_MW_CONTENT_BASE_LABEL, GetModuleHandle(NULL), NULL);
+    if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(4, hLbl);
+  }
+  y += lineH + 2;
+  {
+    HWND hEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", m_szContentBasePath,
+      WS_CHILD | ES_AUTOHSCROLL | ES_READONLY,
+      x, y, rw, lineH + 4, hw, (HMENU)(INT_PTR)IDC_MW_CONTENT_BASE_EDIT,
+      GetModuleHandle(NULL), NULL);
+    if (hEdit && hFont) SendMessage(hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(4, hEdit);
+  }
+  y += lineH + 6;
+  {
+    int bx = x, bg = 4;
+    int bw1 = MulDiv(80, lineH, 26), bw2 = MulDiv(60, lineH, 26);
+    PAGE_CTRL(4, CreateBtn(hw, L"Browse...", IDC_MW_CONTENT_BASE_BROWSE, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
+    PAGE_CTRL(4, CreateBtn(hw, L"Clear", IDC_MW_CONTENT_BASE_CLEAR, bx, y, bw2, lineH, hFont));
+  }
+  y += lineH + gap + 4;
+
   PAGE_CTRL(4, CreateLabel(hw, L"Fallback Search Paths:", x, y, rw, lineH, hFont, false));
   y += lineH + 2;
   {
     HWND hList = CreateWindowExW(0, L"LISTBOX", L"",
       WS_CHILD | WS_BORDER | WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_NOTIFY,
-      x, y, rw, 200, hw, (HMENU)(INT_PTR)IDC_MW_FILE_LIST,
+      x, y, rw, 120, hw, (HMENU)(INT_PTR)IDC_MW_FILE_LIST,
       GetModuleHandle(NULL), NULL);
     if (hList && hFont) SendMessage(hList, WM_SETFONT, (WPARAM)hFont, TRUE);
     // Populate from m_fallbackPaths
@@ -2002,7 +2068,7 @@ void Engine::BuildSettingsControls() {
       SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p.c_str());
     PAGE_CTRL(4, hList);
   }
-  y += 204;
+  y += 124;
   {
     int bx = x, bg = 4;
     int fbw = MulDiv(70, lineH, 26);
@@ -2687,6 +2753,9 @@ void Engine::SaveFallbackPaths() {
   // Random textures directory
   WritePrivateProfileStringW(L"FallbackPaths", L"RandomTexDir",
     m_szRandomTexDir[0] ? m_szRandomTexDir : NULL, pIni);
+  // Content base path
+  WritePrivateProfileStringW(L"FallbackPaths", L"ContentBasePath",
+    m_szContentBasePath[0] ? m_szContentBasePath : NULL, pIni);
 }
 
 void Engine::LoadFallbackPaths() {
@@ -2702,6 +2771,8 @@ void Engine::LoadFallbackPaths() {
   }
   // Random textures directory
   GetPrivateProfileStringW(L"FallbackPaths", L"RandomTexDir", L"", m_szRandomTexDir, MAX_PATH, pIni);
+  // Content base path
+  GetPrivateProfileStringW(L"FallbackPaths", L"ContentBasePath", L"", m_szContentBasePath, MAX_PATH, pIni);
 }
 
 // ====== Settings Fullscreen Awareness ======
@@ -3364,6 +3435,15 @@ void Engine::PopulateResourceViewer() {
             // Search random textures directory
             if (m_szRandomTexDir[0]) {
               swprintf(szTry, MAX_PATH, L"%s%s.%s", m_szRandomTexDir, szLookupName, texture_exts[z].c_str());
+              if (GetFileAttributesW(szTry) != 0xFFFFFFFF) {
+                lstrcpyW(szFullPath, szTry);
+                pathFound = true;
+                break;
+              }
+            }
+            // Search content base path
+            if (m_szContentBasePath[0]) {
+              swprintf(szTry, MAX_PATH, L"%s%s.%s", m_szContentBasePath, szLookupName, texture_exts[z].c_str());
               if (GetFileAttributesW(szTry) != 0xFFFFFFFF) {
                 lstrcpyW(szFullPath, szTry);
                 pathFound = true;

@@ -2158,10 +2158,17 @@ bool Engine::LaunchSprite(int nSpriteNum, int nSlot) {
 
   if (img[1] != L':')// || img[2] != '\\')
   {
-    // it's not in the form "x:\blah\billy.jpg" so prepend plugin dir path.
+    // it's not in the form "x:\blah\billy.jpg" so prepend base path.
+    // Try content base path first, then fall back to plugin dir path.
     wchar_t temp[512];
     wcscpy(temp, img);
-    swprintf(img, L"%s%s", m_szMilkdrop2Path, temp);
+    if (m_szContentBasePath[0]) {
+      swprintf(img, L"%s%s", m_szContentBasePath, temp);
+      if (GetFileAttributesW(img) == INVALID_FILE_ATTRIBUTES)
+        swprintf(img, L"%s%s", m_szMilkdrop2Path, temp);
+    } else {
+      swprintf(img, L"%s%s", m_szMilkdrop2Path, temp);
+    }
   }
 
   // 2. get color key

@@ -328,11 +328,18 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
                     }
                   }
                   if (!siblingFound) {
-                    // Search fallback paths (paths already have trailing backslash)
+                    // Search content base path first
                     bool fbFound = false;
-                    for (auto& fbPath : g_engine.m_fallbackPaths) {
-                      swprintf(szFilename, L"%s%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
-                      if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) { fbFound = true; break; }
+                    if (g_engine.m_szContentBasePath[0]) {
+                      swprintf(szFilename, L"%s%s.%s", g_engine.m_szContentBasePath, szRootName, texture_exts[z].c_str());
+                      if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) fbFound = true;
+                    }
+                    // Then search fallback paths (paths already have trailing backslash)
+                    if (!fbFound) {
+                      for (auto& fbPath : g_engine.m_fallbackPaths) {
+                        swprintf(szFilename, L"%s%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
+                        if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) { fbFound = true; break; }
+                      }
                     }
                     if (!fbFound) continue;
                   }
@@ -403,11 +410,18 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
               if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
                 swprintf(szFilename, L"%s%s.%s", g_engine.m_szPresetDir, szRootName, texture_exts[z].c_str());
                 if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
-                  // Search fallback paths (paths already have trailing backslash)
+                  // Search content base path first
                   bool fbFound = false;
-                  for (auto& fbPath : g_engine.m_fallbackPaths) {
-                    swprintf(szFilename, L"%s%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
-                    if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) { fbFound = true; break; }
+                  if (g_engine.m_szContentBasePath[0]) {
+                    swprintf(szFilename, L"%s%s.%s", g_engine.m_szContentBasePath, szRootName, texture_exts[z].c_str());
+                    if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) fbFound = true;
+                  }
+                  // Then search fallback paths (paths already have trailing backslash)
+                  if (!fbFound) {
+                    for (auto& fbPath : g_engine.m_fallbackPaths) {
+                      swprintf(szFilename, L"%s%s.%s", fbPath.c_str(), szRootName, texture_exts[z].c_str());
+                      if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) { fbFound = true; break; }
+                    }
                   }
                   if (!fbFound) continue;
                 }

@@ -220,6 +220,10 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_DEBUG_LOG_LEVEL_SPIN 2132  // UpDown spinner for log level
 #define IDC_MW_MSG_SHOW_MESSAGES   2133  // Checkbox: Enable Messages (Messages tab)
 #define IDC_MW_MSG_SHOW_SPRITES    2134  // Checkbox: Enable Sprites (Messages tab)
+#define IDC_MW_CONTENT_BASE_LABEL  2135  // Label: Content Base Path (Files tab)
+#define IDC_MW_CONTENT_BASE_EDIT   2136  // Edit: Content Base Path display (Files tab)
+#define IDC_MW_CONTENT_BASE_BROWSE 2137  // Button: Browse for Content Base Path
+#define IDC_MW_CONTENT_BASE_CLEAR  2138  // Button: Clear Content Base Path
 
 #define IDT_IPC_MONITOR             10001 // Timer ID for IPC message polling
 
