@@ -120,7 +120,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Message positioning (start/end coords) | ♻️ | ✅ | ❌ |
 | Background box for text | ♻️ | ✅ | ❌ |
 | Fade-out / burn-in timing | ♻️ | ✅ | ❌ |
-| Script file commands | ❌ | ✅ | ❌ |
+| Script file commands | ✅ | ✅ | ❌ |
 
 ## Color & Visual Effects
 
@@ -202,7 +202,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | ------- | --------- | -------- | --------- |
 | In-app settings window (F8) | ✅ | ✅ | ✅ |
 | Dark theme settings UI | ✅ | ❌ | ❌ |
-| Multi-tab settings (9 tabs) | ✅ | ✅ | ✅ |
+| Multi-tab settings (10 tabs) | ✅ | ✅ | ✅ |
 | Verbose logging (LogLevel=2) | ✅ | ✅ | ❌ |
 
 ## Expression Evaluation

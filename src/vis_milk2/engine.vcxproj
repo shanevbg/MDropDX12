@@ -362,6 +362,7 @@
     <ClCompile Include="engine_input.cpp" />
     <ClCompile Include="engine_messages.cpp" />
     <ClCompile Include="engine_presets.cpp" />
+    <ClCompile Include="engine_script.cpp" />
     <ClCompile Include="engine_rendering.cpp" />
     <ClCompile Include="engine_settings_ui.cpp" />
     <ClCompile Include="engine_shaders.cpp" />

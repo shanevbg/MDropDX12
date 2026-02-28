@@ -329,8 +329,19 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_SPRIMP_OK             5120
 #define IDC_SPRIMP_CANCEL         5121
 
+// Script tab control IDs (page 8 — before About)
+#define IDC_MW_SCRIPT_FILE      6001
+#define IDC_MW_SCRIPT_BROWSE    6002
+#define IDC_MW_SCRIPT_PLAY      6003
+#define IDC_MW_SCRIPT_STOP      6004
+#define IDC_MW_SCRIPT_BPM       6005
+#define IDC_MW_SCRIPT_BEATS     6006
+#define IDC_MW_SCRIPT_LIST      6007
+#define IDC_MW_SCRIPT_LOOP      6008
+#define IDC_MW_SCRIPT_LINE      6009
+
 // Settings page count
-#define SETTINGS_NUM_PAGES      9
+#define SETTINGS_NUM_PAGES      10
 
 // Custom messages for thread-safe side effects (settings thread → render thread)
 #define WM_MW_SET_OPACITY       (WM_APP + 1)

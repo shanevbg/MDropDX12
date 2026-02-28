@@ -1641,6 +1641,68 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
+    // Script tab: Browse
+    if (id == IDC_MW_SCRIPT_BROWSE && code == BN_CLICKED) {
+      wchar_t filePath[MAX_PATH] = L"";
+      OPENFILENAMEW ofn = {};
+      ofn.lStructSize = sizeof(ofn);
+      ofn.hwndOwner = hWnd;
+      ofn.lpstrFilter = L"Script Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
+      ofn.lpstrFile = filePath;
+      ofn.nMaxFile = MAX_PATH;
+      ofn.lpstrInitialDir = p->m_szBaseDir;
+      ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+      ofn.lpstrTitle = L"Open Script File";
+      if (GetOpenFileNameW(&ofn)) {
+        p->LoadScript(filePath);
+        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_SCRIPT_FILE), filePath);
+        // Populate listbox
+        HWND hList = GetDlgItem(hWnd, IDC_MW_SCRIPT_LIST);
+        if (hList) {
+          SendMessage(hList, LB_RESETCONTENT, 0, 0);
+          for (int i = 0; i < (int)p->m_script.lines.size(); i++)
+            SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_script.lines[i].c_str());
+        }
+      }
+      return 0;
+    }
+
+    // Script tab: Play
+    if (id == IDC_MW_SCRIPT_PLAY && code == BN_CLICKED) {
+      // Read BPM/Beats from UI before starting
+      wchar_t buf[64];
+      HWND hBpm = GetDlgItem(hWnd, IDC_MW_SCRIPT_BPM);
+      if (hBpm) { GetWindowTextW(hBpm, buf, 64); double v = _wtof(buf); if (v > 0) p->m_script.bpm = v; }
+      HWND hBeats = GetDlgItem(hWnd, IDC_MW_SCRIPT_BEATS);
+      if (hBeats) { GetWindowTextW(hBeats, buf, 64); int v = _wtoi(buf); if (v > 0) p->m_script.beats = v; }
+      p->StartScript();
+      return 0;
+    }
+
+    // Script tab: Stop
+    if (id == IDC_MW_SCRIPT_STOP && code == BN_CLICKED) {
+      p->StopScript();
+      return 0;
+    }
+
+    // Script tab: Loop checkbox
+    if (id == IDC_MW_SCRIPT_LOOP && code == BN_CLICKED) {
+      p->m_script.loop = (SendMessage((HWND)lParam, BM_GETCHECK, 0, 0) == BST_CHECKED);
+      return 0;
+    }
+
+    // Script tab: Listbox double-click to jump
+    if (id == IDC_MW_SCRIPT_LIST && code == LBN_DBLCLK) {
+      int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
+      if (sel >= 0 && sel < (int)p->m_script.lines.size()) {
+        p->m_script.currentLine = sel;
+        p->m_script.lastLineTime = p->GetTime();
+        p->ExecuteScriptLine(sel);
+        p->SyncScriptUI();
+      }
+      return 0;
+    }
+
     // Messages tab listbox selection (different notification code)
     if (id == IDC_MW_MSG_LIST && code == LBN_SELCHANGE) {
       int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
@@ -1752,6 +1814,16 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         wchar_t tbuf[256];
         GetWindowTextW((HWND)lParam, tbuf, 256);
         lstrcpyW(p->m_szRemoteWindowTitle, tbuf);
+        return 0;
+      }
+      case IDC_MW_SCRIPT_BPM: {
+        double v = _wtof(buf);
+        if (v > 0) p->m_script.bpm = v;
+        return 0;
+      }
+      case IDC_MW_SCRIPT_BEATS: {
+        int v = _wtoi(buf);
+        if (v > 0) p->m_script.beats = v;
         return 0;
       }
       }
@@ -2413,7 +2485,7 @@ void Engine::BuildSettingsControls() {
   SetWindowSubclass(m_hSettingsTab, SettingsTabSubclassProc, 1, (DWORD_PTR)this);
 
   // Insert tab pages (use TCM_INSERTITEMW explicitly — project is _MBCS, not UNICODE)
-  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"Sound", L"Files", L"Messages", L"Sprites", L"Remote", L"About" };
+  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"Sound", L"Files", L"Messages", L"Sprites", L"Remote", L"Script", L"About" };
   for (int i = 0; i < SETTINGS_NUM_PAGES; i++) {
     TCITEMW ti = {};
     ti.mask = TCIF_TEXT;
@@ -3115,16 +3187,61 @@ void Engine::BuildSettingsControls() {
       ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL, false));
   }
 
-  // ===== About tab (page 8) =====
+  // ===== Script tab (page 8) =====
   y = tabTop + 10;
 
-  PAGE_CTRL(8, CreateLabel(hw, L"MDropDX12", x, y, rw, 24, hFontBold, false));
+  // Script file path + Browse
+  PAGE_CTRL(8, CreateLabel(hw, L"Script File:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(8, CreateEdit(hw, L"", IDC_MW_SCRIPT_FILE, x + lw + 4, y, rw - lw - 4 - 80 - 4, lineH, hFont, ES_READONLY, false));
+  PAGE_CTRL(8, CreateBtn(hw, L"Browse...", IDC_MW_SCRIPT_BROWSE, x + rw - 80, y, 80, lineH, hFont, false));
+  y += lineH + gap;
+
+  // Play / Stop / Loop
+  {
+    int btnW = MulDiv(80, lineH, 26);
+    PAGE_CTRL(8, CreateBtn(hw, L"Play", IDC_MW_SCRIPT_PLAY, x, y, btnW, lineH, hFont, false));
+    PAGE_CTRL(8, CreateBtn(hw, L"Stop", IDC_MW_SCRIPT_STOP, x + btnW + 4, y, btnW, lineH, hFont, false));
+    PAGE_CTRL(8, CreateCheck(hw, L"Loop", IDC_MW_SCRIPT_LOOP, x + btnW * 2 + 12, y, 80, lineH, hFont, false, false));
+    y += lineH + gap;
+  }
+
+  // BPM + Beats
+  PAGE_CTRL(8, CreateLabel(hw, L"BPM:", x, y, 40, lineH, hFont, false));
+  PAGE_CTRL(8, CreateEdit(hw, L"120.0", IDC_MW_SCRIPT_BPM, x + 44, y, 70, lineH, hFont, 0, false));
+  PAGE_CTRL(8, CreateLabel(hw, L"Beats:", x + 130, y, 50, lineH, hFont, false));
+  PAGE_CTRL(8, CreateEdit(hw, L"4", IDC_MW_SCRIPT_BEATS, x + 184, y, 50, lineH, hFont, 0, false));
+  y += lineH + gap;
+
+  // Line status label (with ID for dynamic updates)
+  {
+    HWND hLineLabel = CreateWindowExW(0, L"STATIC", L"No script loaded",
+      WS_CHILD | SS_LEFT, x, y, rw, lineH, hw,
+      (HMENU)(INT_PTR)IDC_MW_SCRIPT_LINE, GetModuleHandle(NULL), NULL);
+    if (hLineLabel && hFont) SendMessage(hLineLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(8, hLineLabel);
+  }
+  y += lineH + gap;
+
+  // Script lines listbox
+  {
+    int listH = lineH * 14;
+    HWND hScriptList = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", NULL,
+      WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
+      x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_SCRIPT_LIST, GetModuleHandle(NULL), NULL);
+    if (hScriptList && hFont) SendMessage(hScriptList, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(8, hScriptList);
+  }
+
+  // ===== About tab (page 9) =====
+  y = tabTop + 10;
+
+  PAGE_CTRL(9, CreateLabel(hw, L"MDropDX12", x, y, rw, 24, hFontBold, false));
   y += 28;
 
   {
     wchar_t szVersion[128];
     swprintf(szVersion, 128, L"Version %d.%d-dev", INT_VERSION / 100, INT_SUBVERSION);
-    PAGE_CTRL(8, CreateLabel(hw, szVersion, x, y, rw, lineH, hFont, false));
+    PAGE_CTRL(9, CreateLabel(hw, szVersion, x, y, rw, lineH, hFont, false));
     y += lineH + 4;
   }
 
@@ -3134,29 +3251,29 @@ void Engine::BuildSettingsControls() {
     MultiByteToWideChar(CP_ACP, 0, __DATE__, -1, wDate, 32);
     MultiByteToWideChar(CP_ACP, 0, __TIME__, -1, wTime, 32);
     swprintf(szBuild, 128, L"Built: %s  %s", wDate, wTime);
-    PAGE_CTRL(8, CreateLabel(hw, szBuild, x, y, rw, lineH, hFont, false));
+    PAGE_CTRL(9, CreateLabel(hw, szBuild, x, y, rw, lineH, hFont, false));
     y += lineH + 4;
   }
 
-  PAGE_CTRL(8, CreateLabel(hw, L"MilkDrop2-based music visualizer", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(9, CreateLabel(hw, L"MilkDrop2-based music visualizer", x, y, rw, lineH, hFont, false));
   y += lineH + 4;
-  PAGE_CTRL(8, CreateLabel(hw, L"DirectX 12 / Windows 11 64-bit", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(9, CreateLabel(hw, L"DirectX 12 / Windows 11 64-bit", x, y, rw, lineH, hFont, false));
   y += lineH + 12;
 
   // Debug Log Level radio buttons
-  PAGE_CTRL(8, CreateLabel(hw, L"Debug Log Level:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(9, CreateLabel(hw, L"Debug Log Level:", x, y, lw, lineH, hFont, false));
   {
     int rx = x + lw + 4;
     int rbw = 80;
-    PAGE_CTRL(8, CreateRadio(hw, L"Off",     IDC_MW_LOGLEVEL_OFF,     rx,            y, rbw, lineH, hFont, m_LogLevel == 0, true,  false));
+    PAGE_CTRL(9, CreateRadio(hw, L"Off",     IDC_MW_LOGLEVEL_OFF,     rx,            y, rbw, lineH, hFont, m_LogLevel == 0, true,  false));
     rx += rbw;
-    PAGE_CTRL(8, CreateRadio(hw, L"Error",   IDC_MW_LOGLEVEL_ERROR,   rx,            y, rbw, lineH, hFont, m_LogLevel == 1, false, false));
+    PAGE_CTRL(9, CreateRadio(hw, L"Error",   IDC_MW_LOGLEVEL_ERROR,   rx,            y, rbw, lineH, hFont, m_LogLevel == 1, false, false));
     rx += rbw;
-    PAGE_CTRL(8, CreateRadio(hw, L"Warn",    IDC_MW_LOGLEVEL_WARN,    rx,            y, rbw, lineH, hFont, m_LogLevel == 2, false, false));
+    PAGE_CTRL(9, CreateRadio(hw, L"Warn",    IDC_MW_LOGLEVEL_WARN,    rx,            y, rbw, lineH, hFont, m_LogLevel == 2, false, false));
     rx += rbw;
-    PAGE_CTRL(8, CreateRadio(hw, L"Info",    IDC_MW_LOGLEVEL_INFO,    rx,            y, rbw, lineH, hFont, m_LogLevel == 3, false, false));
+    PAGE_CTRL(9, CreateRadio(hw, L"Info",    IDC_MW_LOGLEVEL_INFO,    rx,            y, rbw, lineH, hFont, m_LogLevel == 3, false, false));
     rx += rbw;
-    PAGE_CTRL(8, CreateRadio(hw, L"Verbose", IDC_MW_LOGLEVEL_VERBOSE, rx,            y, rbw, lineH, hFont, m_LogLevel == 4, false, false));
+    PAGE_CTRL(9, CreateRadio(hw, L"Verbose", IDC_MW_LOGLEVEL_VERBOSE, rx,            y, rbw, lineH, hFont, m_LogLevel == 4, false, false));
   }
 
   // ===== Remote tab (page 7) =====

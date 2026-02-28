@@ -1329,6 +1329,7 @@ int EngineShell::PluginRender(unsigned char* pWaveL, unsigned char* pWaveR)//, u
   AnalyzeNewSound(pWaveL, pWaveR);
   AlignWaves();
 
+  UpdateScript();
   DrawAndDisplay(0);
 
   EnforceMaxFPS();

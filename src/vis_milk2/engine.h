@@ -47,6 +47,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <array>
 #include <thread>
 #include <atomic>
+#include <string>
 #include "../ns-eel2/ns-eel.h"
 #include "mdropdx12.h"
 
@@ -55,6 +56,21 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 extern "C" int (*warand)(void);
 
 namespace mdrop {
+
+struct ScriptState {
+  std::vector<std::wstring> lines;  // parsed non-comment lines
+  int currentLine = -1;             // -1 = not playing
+  bool playing = false;
+  bool loop = false;
+  double bpm = 120.0;
+  int beats = 4;                    // beats before next line
+  double lastLineTime = 0.0;       // GetTime() when last line executed
+  // Default message style
+  std::wstring defaultFont = L"Arial";
+  int defaultSize = 20;
+  int defaultR = 255, defaultG = 255, defaultB = 255;
+  std::wstring filePath;            // current script file path
+};
 
 typedef enum { TEX_DISK, TEX_VS, TEX_BLUR0, TEX_BLUR1, TEX_BLUR2, TEX_BLUR3, TEX_BLUR4, TEX_BLUR5, TEX_BLUR6, TEX_BLUR_LAST } tex_code;
 typedef enum { UI_REGULAR, UI_MENU, UI_LOAD, UI_LOAD_DEL, UI_LOAD_RENAME, UI_SAVEAS, UI_SAVE_OVERWRITE, UI_EDIT_MENU_STRING, UI_CHANGEDIR, UI_IMPORT_WAVE, UI_EXPORT_WAVE, UI_IMPORT_SHAPE, UI_EXPORT_SHAPE, UI_UPGRADE_PIXEL_SHADER, UI_MASHUP, UI_SETTINGS } ui_mode;
@@ -613,6 +629,17 @@ public:
 
   ErrorMsgList m_errors;
   void SetFPSCap(int fps);
+
+  // Script engine
+  ScriptState m_script;
+  void UpdateScript() override;
+  void LoadScript(const wchar_t* path);
+  void StartScript();
+  void StopScript();
+  void ExecuteScriptLine(int lineIndex);
+  void ExecuteScriptCommand(const std::wstring& cmd);
+  void SyncScriptUI();
+
   void AddNotification(wchar_t* szMsg);
   void AddNotificationAudioDevice();
   void AddNotification(wchar_t* szMsg, float time);
@@ -831,7 +858,7 @@ public:
   HWND        m_hSettingsWnd = NULL;
   HWND        m_hSettingsTab = NULL;       // Tab control
   int         m_nSettingsActivePage = 0;
-  std::vector<HWND> m_settingsPageCtrls[9]; // HWNDs per tab (General, Visual, Colors, Sound, Files, Messages, Sprites, Remote, About)
+  std::vector<HWND> m_settingsPageCtrls[10]; // HWNDs per tab (General, Visual, Colors, Sound, Files, Messages, Sprites, Remote, Script, About)
   HFONT       m_hSettingsFont = NULL;
   HFONT       m_hSettingsFontBold = NULL;
   int         m_lastSeenIPCSeq = 0;        // tracks last IPC message seq displayed in settings
