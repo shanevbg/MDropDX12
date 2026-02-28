@@ -4,7 +4,7 @@
 
 [**Click here**](https://github.com/shanevbg/MDropDX12/releases/latest) to get the latest version.
 
-![VSync off — 630 FPS](resources/screenshots/vsync-off-630fps.png)
+![VSync off — 630 FPS](resources/screenshots/vsync-off-1110fps.png)
 
 ## Visualizer Features
 
