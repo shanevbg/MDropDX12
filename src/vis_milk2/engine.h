@@ -447,6 +447,7 @@ public:
   float m_SongInfoDisplaySeconds = 5.0f;
   bool m_DisplayCover = true;
   bool m_DisplayCoverWhenPressingB = true;
+  float m_MediaKeyNotifyTime = 1.0f;  // seconds to show media key notification
   bool m_HideNotificationsWhenRemoteActive = false;
 
   int m_MinPSVersionConfig = 2;

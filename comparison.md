@@ -165,10 +165,10 @@ Comparison of three MilkDrop-based music visualizer projects.
 
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
-| Now Playing track info | ❌ | ✅ | ❌ |
-| Album artwork display | ❌ | ✅ | ❌ |
-| Song info (Spotify/YouTube/media) | ❌ | ✅ | ❌ |
-| Windows Media Play/Pause/Stop keys | ❌ | ✅ | ❌ |
+| Now Playing track info | ✅ | ✅ | ❌ |
+| Album artwork display | ✅ | ✅ | ❌ |
+| Song info (Spotify/YouTube/media) | ✅ | ✅ | ❌ |
+| Windows Media Play/Pause/Stop keys | ✅ | ✅ | ❌ |
 
 ## Remote Control
 

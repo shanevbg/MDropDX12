@@ -1306,6 +1306,24 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       else {
         g_engine.AddNotification(L"Cover Display disabled");
       }
+      return 0;
+    }
+    // plain C falls through to engine_input.cpp (media Stop)
+  }
+  else if (wParam == VK_B) {
+    if (GetKeyState(VK_CONTROL) & 0x8000) { // Ctrl+B = toggle song info polling
+      g_engine.m_SongInfoPollingEnabled = !g_engine.m_SongInfoPollingEnabled;
+      mdropdx12.doPoll = g_engine.m_SongInfoPollingEnabled;
+      if (g_engine.m_SongInfoPollingEnabled) {
+        g_engine.AddNotification(L"Song Info enabled");
+      } else {
+        g_engine.AddNotification(L"Song Info disabled");
+        mdropdx12.currentArtist = L"";
+        mdropdx12.currentTitle = L"";
+        mdropdx12.currentAlbum = L"";
+      }
+    } else {
+      mdropdx12.doPollExplicit = true; // B = show song info now
     }
     return 0;
   }
@@ -1497,6 +1515,9 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     if (rightMouseButtonHeld) {
       // Right + Middle
       g_engine.OpenMDropDX12Remote();
+    } else {
+      // Middle only = explicit song info poll
+      mdropdx12.doPollExplicit = true;
     }
     break;
 

@@ -1361,6 +1361,16 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     //		note: regular hotkeys should be handled in HandleRegularKey.
     switch (wParam) {
     case VK_LEFT:
+      if (m_UI_mode == UI_REGULAR) {
+        if (bCtrlHeldDown) {
+          AddError(L"Rewind", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+          SendNotifyMessage(HWND_BROADCAST, WM_APPCOMMAND, 0, MAKELPARAM(0, APPCOMMAND_MEDIA_REWIND));
+        } else {
+          AddError(L"Previous", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+          keybd_event(VK_MEDIA_PREV_TRACK, 0, 0, 0);
+          keybd_event(VK_MEDIA_PREV_TRACK, 0, KEYEVENTF_KEYUP, 0);
+        }
+      }
       break;
     case VK_RIGHT:
       if (m_UI_mode == UI_LOAD) {
@@ -1378,6 +1388,16 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
         else
           m_nMashSlot = min(MASH_SLOTS - 1, m_nMashSlot + 1);
         return 0; // we processed (or absorbed) the key
+      }
+      else if (m_UI_mode == UI_REGULAR) {
+        if (bCtrlHeldDown) {
+          AddError(L"Fast Forward", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+          SendNotifyMessage(HWND_BROADCAST, WM_APPCOMMAND, 0, MAKELPARAM(0, APPCOMMAND_MEDIA_FAST_FORWARD));
+        } else {
+          AddError(L"Next", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+          keybd_event(VK_MEDIA_NEXT_TRACK, 0, 0, 0);
+          keybd_event(VK_MEDIA_NEXT_TRACK, 0, KEYEVENTF_KEYUP, 0);
+        }
       }
 
       break;
@@ -1442,6 +1462,11 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
       else if (bShiftHeldDown) {
         ToggleWindowOpacity(hWnd, false);
       }
+      else {
+        AddError(L"Stop", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+        keybd_event(VK_MEDIA_STOP, 0, 0, 0);
+        keybd_event(VK_MEDIA_STOP, 0, KEYEVENTF_KEYUP, 0);
+      }
       break;
 
     case VK_DOWN:
@@ -1463,6 +1488,11 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
       else if (bShiftHeldDown) {
         ToggleWindowOpacity(hWnd, true);
       }
+      else {
+        AddError(L"Play/Pause", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+        keybd_event(VK_MEDIA_PLAY_PAUSE, 0, 0, 0);
+        keybd_event(VK_MEDIA_PLAY_PAUSE, 0, KEYEVENTF_KEYUP, 0);
+      }
       break;
 
     case 'X':
@@ -1478,6 +1508,25 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
           }
           return 0;
         }
+        AddError(L"Play/Pause", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+        keybd_event(VK_MEDIA_PLAY_PAUSE, 0, 0, 0);
+        keybd_event(VK_MEDIA_PLAY_PAUSE, 0, KEYEVENTF_KEYUP, 0);
+      }
+      break;
+    case 'C':
+      if (m_UI_mode == UI_REGULAR) {
+        if ((GetKeyState(VK_SHIFT) & mask) == 0 && (GetKeyState(VK_CONTROL) & mask) == 0) {
+          AddError(L"Stop", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+          keybd_event(VK_MEDIA_STOP, 0, 0, 0);
+          keybd_event(VK_MEDIA_STOP, 0, KEYEVENTF_KEYUP, 0);
+        }
+      }
+      break;
+    case 'V':
+      if (m_UI_mode == UI_REGULAR) {
+        AddError(L"Next", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
+        keybd_event(VK_MEDIA_NEXT_TRACK, 0, 0, 0);
+        keybd_event(VK_MEDIA_NEXT_TRACK, 0, KEYEVENTF_KEYUP, 0);
       }
       break;
     case 'A':
