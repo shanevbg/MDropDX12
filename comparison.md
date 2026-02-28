@@ -176,7 +176,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | ------- | --------- | -------- | --------- |
 | Milkwave Remote compatibility | ♻️ | ✅ (built-in) | ❌ |
 | WM_COPYDATA IPC protocol | ♻️ | ✅ | ❌ |
-| Tabbed Remote UI | ❌ | ✅ | ❌ |
+| Tabbed Remote UI | 🤝 | ✅ | ❌ |
 | Button panel (Remote buttons) | ♻️ | ✅ | ❌ |
 
 ## Spout
@@ -233,6 +233,10 @@ MilkDrop3 supports `.milk2` files which contain two presets blended together wit
 ### Feature Overlap
 
 Many features listed under Milkwave (text messages, MIDI, media integration, wave manipulation, scripts) are **Remote-side features** that send commands to the Visualizer via IPC. Once MDropDX12 supports the WM_COPYDATA protocol, these features would become available through Milkwave Remote without needing to be reimplemented in MDropDX12 itself.
+
+### 🤝 Features Available via Milkwave Remote 3.4+
+
+Features marked 🤝 are not built into MDropDX12 directly but will work when used with Milkwave Remote 3.4 or later. The Remote provides its own UI for these features and sends commands to MDropDX12 via the WM_COPYDATA IPC protocol.
 
 ### ♻️ Features Implemented via IPC (Milkwave Remote)
 

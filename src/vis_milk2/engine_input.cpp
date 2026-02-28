@@ -1421,6 +1421,11 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
         m_waitstring.bActive = true;
         return 0; // we processed (or absorbed) the key
       }
+      // Close help overlay if showing
+      else if (m_show_help) {
+        ToggleHelp();
+        return 0;
+      }
       // SPOUT - put back in for vj mode.
       else {
         // Don't close if esc pressed when vj window has focus

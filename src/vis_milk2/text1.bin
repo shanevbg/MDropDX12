@@ -1,9 +1,9 @@
-Milkwave Help - Page 1/2 - F1 to switch page/close
+MDropDX12 Help - Page 1/2 - F1 to switch page/close
 
 ALT + ENTER             Toggle fullscreen (or double-click)
 ALT + S                 Toggle multiple monitor stretch
 SHIFT + UP / DOWN       Increase/decrease window opacity (or mousewheel)
-                        
+
 F1                      Show/hide help
 F2 / 2xR MOUSEBUTTON    Toggle borderless window (unless in fullscreen/stretch mode)
 CTRL + F2               Reset window
@@ -23,11 +23,14 @@ F11                     Inject effect: Off / Brighten / Darken / Solarize / Inve
 Shift+F11               Cycle hard cut mode (audio-reactive preset changes)
 F12                     Transparency mode (removes the black background)
 CTRL + F12              Toggle black mode (no preset rendering)
-                        
 
-CTRL + A                toggle next preset when track changes
-CTRL + C                toggle cover display when track changes
-CTRL + X                save screenshot to /capture folder
-
-Note: Media playback (play/pause/stop/next/prev) is not
-controlled by this variant. Use your media player directly.
+LEFT ARROW              Previous track
+RIGHT ARROW / V         Next track
+DOWN ARROW / X          Play/pause track
+UP ARROW / C            Stop track
+CTRL + L/R ARROW        Fast forward/rewind track
+B / M MOUSEBUTTON       Show track info
+CTRL + A                Toggle next preset when track changes
+CTRL + B                Toggle track info polling
+CTRL + C                Toggle cover display when track changes
+CTRL + X                Save screenshot to /capture folder

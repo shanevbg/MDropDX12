@@ -2385,6 +2385,11 @@ void Engine::CreateSettingsWindowOnThread() {
   // Own message pump on this thread
   MSG msg;
   while (GetMessage(&msg, NULL, 0, 0)) {
+    // Escape closes settings window
+    if (msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE) {
+      PostMessage(m_hSettingsWnd, WM_CLOSE, 0, 0);
+      continue;
+    }
     if (!IsDialogMessage(m_hSettingsWnd, &msg)) {
       TranslateMessage(&msg);
       DispatchMessage(&msg);

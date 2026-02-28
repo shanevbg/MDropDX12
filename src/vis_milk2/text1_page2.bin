@@ -1,9 +1,9 @@
-Milkwave Help - Page 2/2 - F1 to switch page/close
+MDropDX12 Help - Page 2/2 - F1 to switch page/close
 
 SPACE / H               Soft / hard cut to next preset
 BACKSPACE               Go back to previous preset
 ` / ~                   [un]lock current preset
-R                       Toggle random/sequential preset order 
+R                       Toggle random/sequential preset order
 L                       Load specific preset
 M                       Show/hide preset-editing menu
 N                       Show per-frame monitor
@@ -12,7 +12,7 @@ CTRL + S                Quicksave preset to /presets/Quicksave folder
 SHIFT + CTRL + S        Quicksave preset to /presets/Quicksave2 folder
 CTRL + D                Set current audio device to default
 SHIFT + CTRL + D        Display current audio device
-CTRL + M                Toggle interative mouse control
+CTRL + M                Toggle interactive mouse control
 CTRL + Q                Double quality factor (range 0.01 - 1.0)
 SHIFT + CTRL + Q        Half quality factor (pixellize)
 CTRL + H                Shift Hue
@@ -30,9 +30,9 @@ CTRL + T                Kills custom messages/song titles
 Q / q    Wave echo zoom +/-         [ / ]    X +/-
 W / w    Wave mode +/-              { / }    Y +/-
 E / e    Wave alpha +/-             < / >    Rotation +/-
-U / u    Wave warp scale +/-        A        Do random mini-mash-up   
-I / i    Wave zoom +/-              D        Toggle shader locks   
-O / o    Wave warp amount +/-       F        Tooggle echo orientation
+U / u    Wave warp scale +/-        A        Do random mini-mash-up
+I / i    Wave zoom +/-              D        Toggle shader locks
+O / o    Wave warp amount +/-       F        Toggle echo orientation
 P / p    Video echo alpha +/-       !        Randomize warp shader
 + / -    Brightness +/-             G / g    Gamma adjustment +/-
 J / j    Wave scale +/-
