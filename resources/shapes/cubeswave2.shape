@@ -1,0 +1,57 @@
+shapecode_0_enabled=1
+shapecode_0_sides=3
+shapecode_0_additive=0
+shapecode_0_thickOutline=0
+shapecode_0_textured=0
+shapecode_0_num_inst=1014
+shapecode_0_x=0.500
+shapecode_0_y=0.080
+shapecode_0_rad=2.01781
+shapecode_0_ang=0.00000
+shapecode_0_tex_ang=0.00000
+shapecode_0_tex_zoom=1.21795
+shapecode_0_r=1.000
+shapecode_0_g=1.000
+shapecode_0_b=0.000
+shapecode_0_a=1.000
+shapecode_0_r2=1.000
+shapecode_0_g2=1.000
+shapecode_0_b2=0.000
+shapecode_0_a2=1.000
+shapecode_0_border_r=1.000
+shapecode_0_border_g=1.000
+shapecode_0_border_b=1.000
+shapecode_0_border_a=0.000
+shape_0_per_frame1=i=instance;   sa=i/1014;     
+shape_0_per_frame2=
+shape_0_per_frame3=s1=((i/6)%13)/13;   s2=((i/6)%169)/169; 
+shape_0_per_frame4=
+shape_0_per_frame5=z1= .3+.1*sin(.2*time);
+shape_0_per_frame6=
+shape_0_per_frame7=x0= -s1+s2;             y0= 1-s1-s2;    
+shape_0_per_frame8=x1 = x0+ .04*y0-.04;    y1 = y0- .04*x0-.04;
+shape_0_per_frame9=
+shape_0_per_frame10=x1 *=  z1;    y1 *=  z1;
+shape_0_per_frame11=
+shape_0_per_frame12=d=sqrt(x1*x1-y1*y1)*sqrt(x1+y1);
+shape_0_per_frame13=
+shape_0_per_frame14=y1 += .06*sin(15*d-2*time)   ; 
+shape_0_per_frame15=
+shape_0_per_frame16=t2 = 169*6.28*sa +.55*sa  +1.57  ; 
+shape_0_per_frame17=z2 = .08*z1;
+shape_0_per_frame18=x2 = z2*sin(t2);    y2 = z2*cos(t2);     
+shape_0_per_frame19=
+shape_0_per_frame20=
+shape_0_per_frame21=x=.5 + x1+x2/q6;
+shape_0_per_frame22=y=.5 + y1+y2; 
+shape_0_per_frame23=
+shape_0_per_frame24=rad = 2*z2;     ang=3.14/4+t2;
+shape_0_per_frame25=
+shape_0_per_frame26=t3=.6+ .4*sin(15*d-2*time); 
+shape_0_per_frame27=t4=.6+ .4*cos(15*d-2*time); 
+shape_0_per_frame28=p=.1+.45*(i/2)%3;   
+shape_0_per_frame29=
+shape_0_per_frame30=r =p*t3;     r2=r;
+shape_0_per_frame31=g= p*t4;     g2=g;
+shape_0_per_frame32=b=g*g;       b2=b;
+shape_0_per_frame33= 

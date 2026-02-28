@@ -1,0 +1,80 @@
+wavecode_0_enabled=1
+wavecode_0_samples=512
+wavecode_0_sep=0
+wavecode_0_bSpectrum=0
+wavecode_0_bUseDots=0
+wavecode_0_bDrawThick=1
+wavecode_0_bAdditive=1
+wavecode_0_scaling=0.89152
+wavecode_0_smoothing=0.82000
+wavecode_0_r=1.000
+wavecode_0_g=1.000
+wavecode_0_b=1.000
+wavecode_0_a=0.900
+wave_0_init1=t1 = 1 + (rand(101)*.01 - rand(101)*.01)*.3;
+wave_0_init2=t2 = 1 + (rand(101)*.01 - rand(101)*.01)*.3;
+wave_0_init3=t3 = 1 + (rand(101)*.01 - rand(101)*.01)*.3;
+wave_0_init4=t4 = 1 + (rand(101)*.01 - rand(101)*.01)*.3;
+wave_0_init5=t5 = 1 + (rand(101)*.01 - rand(101)*.01)*.3;
+wave_0_init6=t6 = 1 + (rand(101)*.01 - rand(101)*.01)*.3;
+wave_0_init7=t7 = 1 + (rand(101)*.01 - rand(101)*.01)*.3;
+wave_0_init8=t8 = 1 + (rand(101)*.01 - rand(101)*.01)*.3;
+wave_0_init9=
+wave_0_per_frame1=t2 = t2 + bass_att;
+wave_0_per_point1=//Alle Funktionen muessen rel. zu t_rel sein
+wave_0_per_point2=
+wave_0_per_point3=k1 = cos(time/3);
+wave_0_per_point4=k2 = sin(time/2);
+wave_0_per_point5=
+wave_0_per_point6=t_abs = sample;
+wave_0_per_point7=t_rel = sample-time/2.12;
+wave_0_per_point8=ampl =  cos(t_rel)*5; 
+wave_0_per_point9=//ampl = 3;
+wave_0_per_point10=
+wave_0_per_point11=ox = sin (t_rel*8) + ampl*sin (t_rel*12) ;
+wave_0_per_point12=oy = cos (t_rel*13) + ampl*cos (t_rel*11);
+wave_0_per_point13=oz =  ampl/3;
+wave_0_per_point14=
+wave_0_per_point15=
+wave_0_per_point16=
+wave_0_per_point17=
+wave_0_per_point18=//r = sqr(sin(t_rel*3.4));
+wave_0_per_point19=//g = sqr(sin(t_rel*2.3));
+wave_0_per_point20=//b = sqr (cos(t_rel*1.9));
+wave_0_per_point21=
+wave_0_per_point22=r = 1;
+wave_0_per_point23=g = 0.5;
+wave_0_per_point24=b = 0;
+wave_0_per_point25=
+wave_0_per_point26=a=0.25*(cos(t_abs*3.14/2)) + 0.2 *below (abs(1-t_abs- t1),0.0);
+wave_0_per_point27=//a=0.25*(sin(t_abs*3.14)) + 0.4 *below (abs(1-t_abs-t1), bass_att/1);
+wave_0_per_point28=a=0.25*(cos(t_abs*1.5)) + 0.7 *below (abs(t_abs),0.0);
+wave_0_per_point29=
+wave_0_per_point30=xang = k1*3;
+wave_0_per_point31=yang = 1;
+wave_0_per_point32=zang = 3*k1;
+wave_0_per_point33=fov = 0.22;
+wave_0_per_point34=
+wave_0_per_point35=monitor = t2;
+wave_0_per_point36=
+wave_0_per_point37=// Rotation um x,y,z
+wave_0_per_point38=
+wave_0_per_point39=mx = ox*cos(zang) - oy*sin(zang);
+wave_0_per_point40=my = ox*sin(zang) + oy*cos(zang);
+wave_0_per_point41=
+wave_0_per_point42=ox = mx;
+wave_0_per_point43=oy = my;
+wave_0_per_point44=mx = ox*cos(yang) + oz*sin(yang);
+wave_0_per_point45=mz = - ox*sin(yang) + oz*cos(yang);
+wave_0_per_point46=ox = mx;
+wave_0_per_point47=oz = mz;
+wave_0_per_point48=my = oy*cos(xang) - oz*sin(xang);
+wave_0_per_point49=mz = oy*sin(xang) + oz*cos(xang);
+wave_0_per_point50=oy = my;
+wave_0_per_point51=oz = mz;
+wave_0_per_point52=
+wave_0_per_point53=oz = oz - 6;
+wave_0_per_point54=x = ox*fov/oz +0.5;
+wave_0_per_point55=//x = (x-.5)*0.75 + 0.5;
+wave_0_per_point56=y = oy*fov/oz + 0.5;
+wave_0_per_point57=

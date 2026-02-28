@@ -1,0 +1,80 @@
+shapecode_0_enabled=1
+shapecode_0_sides=10
+shapecode_0_additive=0
+shapecode_0_thickOutline=0
+shapecode_0_textured=0
+shapecode_0_num_inst=601
+shapecode_0_x=0.230
+shapecode_0_y=0.190
+shapecode_0_rad=0.04268
+shapecode_0_ang=0.00000
+shapecode_0_tex_ang=1.57080
+shapecode_0_tex_zoom=0.47878
+shapecode_0_r=1.000
+shapecode_0_g=0.310
+shapecode_0_b=0.000
+shapecode_0_a=0.600
+shapecode_0_r2=0.000
+shapecode_0_g2=0.000
+shapecode_0_b2=0.000
+shapecode_0_a2=0.000
+shapecode_0_border_r=1.000
+shapecode_0_border_g=1.000
+shapecode_0_border_b=0.100
+shapecode_0_border_a=0.000
+shape_0_per_frame1=sample=instance/num_inst;
+shape_0_per_frame2=
+shape_0_per_frame3=////// dna
+shape_0_per_frame4=
+shape_0_per_frame5=s1=30*sample;   s2=s1%30;
+shape_0_per_frame6=x=.5+s2-s1;     y=0;
+shape_0_per_frame7=
+shape_0_per_frame8=t=.21*s2;
+shape_0_per_frame9=mx=x*sin(t)+y*cos(t);
+shape_0_per_frame10=my=y*sin(t)-x*cos(t);
+shape_0_per_frame11=mz=-2.9+.2*s2;
+shape_0_per_frame12=
+shape_0_per_frame13=my_x = 1.3*mx;
+shape_0_per_frame14=my_y = 1.3*my;
+shape_0_per_frame15=my_z = mz;
+shape_0_per_frame16=
+shape_0_per_frame17=
+shape_0_per_frame18=rad=rad*(1+3*bnot(instance%20)+3*bnot((instance-1)%20));
+shape_0_per_frame19=
+shape_0_per_frame20=//// rotations
+shape_0_per_frame21=
+shape_0_per_frame22=d = 7; 
+shape_0_per_frame23=zoom =1.5;
+shape_0_per_frame24=
+shape_0_per_frame25=w1 = .5*time;
+shape_0_per_frame26=w2 = 0;
+shape_0_per_frame27=w3 = 1.57;
+shape_0_per_frame28=
+shape_0_per_frame29=x1 = cos(w1)*my_x + sin(w1)*my_y;
+shape_0_per_frame30=y1 = -sin(w1)*my_x + cos(w1)*my_y;
+shape_0_per_frame31=z1 = my_z;
+shape_0_per_frame32=
+shape_0_per_frame33=x2 = cos(w2)*x1 + sin(w2)*z1;
+shape_0_per_frame34=z2 = -sin(w2)*x1 + cos(w2)*z1;
+shape_0_per_frame35=y2 = y1;
+shape_0_per_frame36=
+shape_0_per_frame37=y3 = cos(w3)*y2 + sin(w3)*z2;
+shape_0_per_frame38=z3 = -sin(w3)*y2 + cos(w3)*z2;
+shape_0_per_frame39=x3 = x2;
+shape_0_per_frame40=
+shape_0_per_frame41=l = sqrt(x3*x3 + y3*y3);
+shape_0_per_frame42=w = atan2(x3,y3);
+shape_0_per_frame43=d = sqrt(x3*x3 + y3*y3 + (z3+d)*(z3+d));
+shape_0_per_frame44=p = tan(asin(1) + atan2(d+z3,l));
+shape_0_per_frame45=
+shape_0_per_frame46=my_x = zoom*sin(w)*p;
+shape_0_per_frame47=my_y = zoom*cos(w)*p;
+shape_0_per_frame48=
+shape_0_per_frame49=x = 0.5 + my_x/q6;
+shape_0_per_frame50=y = 0.5 + my_y;
+shape_0_per_frame51=
+shape_0_per_frame52=
+shape_0_per_frame53=rad=rad*zoom/d;
+shape_0_per_frame54=
+shape_0_per_frame55=
+shape_0_per_frame56=

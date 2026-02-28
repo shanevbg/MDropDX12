@@ -1,0 +1,49 @@
+shapecode_0_enabled=1
+shapecode_0_sides=4
+shapecode_0_additive=0
+shapecode_0_thickOutline=1
+shapecode_0_textured=0
+shapecode_0_num_inst=1024
+shapecode_0_x=0.500
+shapecode_0_y=0.500
+shapecode_0_rad=0.02210
+shapecode_0_ang=0.00000
+shapecode_0_tex_ang=0.62832
+shapecode_0_tex_zoom=0.77820
+shapecode_0_r=1.000
+shapecode_0_g=1.000
+shapecode_0_b=1.000
+shapecode_0_a=0.900
+shapecode_0_r2=1.000
+shapecode_0_g2=1.000
+shapecode_0_b2=1.000
+shapecode_0_a2=1.000
+shapecode_0_border_r=0.590
+shapecode_0_border_g=0.810
+shapecode_0_border_b=0.690
+shapecode_0_border_a=0.000
+shape_0_per_frame1=rad0 = 0.0550;
+shape_0_per_frame2=
+shape_0_per_frame3=fslot = int (instance/32);
+shape_0_per_frame4=x = 0 + fslot/32;
+shape_0_per_frame5=
+shape_0_per_frame6=y0 = (instance%32)/64;
+shape_0_per_frame7=y = 0 + y0*5+rad0;
+shape_0_per_frame8=
+shape_0_per_frame9=lim = max(0,min(1,5*log(1+gmegabuf(fslot)) - 20*y0)); 
+shape_0_per_frame10=
+shape_0_per_frame11=a=0; a2 = a/2;
+shape_0_per_frame12=trel = time;
+shape_0_per_frame13=if ( lim > 0.1,
+shape_0_per_frame14=  r = 0.5 + 0.5*sin(fslot/32*6+trel);
+shape_0_per_frame15=  g = 0.5 + 0.5*sin(fslot/32*6+2+trel);
+shape_0_per_frame16=  b = 0.5 + 0.5*sin(fslot/32*6+4+trel);
+shape_0_per_frame17=  r2 = r; g2 = g; b2 = b;
+shape_0_per_frame18=  a = min(1,a+lim); a2 = a;
+shape_0_per_frame19=,
+shape_0_per_frame20=r = 1; b = 1; g = 1; r2 = r; b2 = b; g2 = g;;
+shape_0_per_frame21=);
+shape_0_per_frame22=
+shape_0_per_frame23=
+shape_0_per_frame24=
+shape_0_per_frame25=rad = rad0;

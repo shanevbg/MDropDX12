@@ -1,0 +1,38 @@
+shapecode_0_enabled=1
+shapecode_0_sides=10
+shapecode_0_additive=0
+shapecode_0_thickOutline=0
+shapecode_0_textured=0
+shapecode_0_num_inst=1024
+shapecode_0_x=0.550
+shapecode_0_y=0.500
+shapecode_0_rad=0.04915
+shapecode_0_ang=0.00000
+shapecode_0_tex_ang=0.00000
+shapecode_0_tex_zoom=0.27705
+shapecode_0_r=0.000
+shapecode_0_g=0.000
+shapecode_0_b=0.000
+shapecode_0_a=1.000
+shapecode_0_r2=0.000
+shapecode_0_g2=0.000
+shapecode_0_b2=0.000
+shapecode_0_a2=0.000
+shapecode_0_border_r=1.000
+shapecode_0_border_g=1.000
+shapecode_0_border_b=1.000
+shapecode_0_border_a=0.000
+shape_0_per_frame1=i=2*instance;    
+shape_0_per_frame2=
+shape_0_per_frame3=sample=instance/1024;    p=q1*3.14*sample+.4*time;
+shape_0_per_frame4=
+shape_0_per_frame5=x=gmegabuf(i);   y=gmegabuf(i+1);
+shape_0_per_frame6=
+shape_0_per_frame7=zoom=.2+.03*q1*(1+.5*sin(.1*time));
+shape_0_per_frame8=
+shape_0_per_frame9=x= .5+.01*zoom*x/q6;      y= .5+.01*zoom*y;
+shape_0_per_frame10=
+shape_0_per_frame11=rad=rad*zoom*(1+.6*sin(p))/(1+.05*q1); 
+shape_0_per_frame12=
+shape_0_per_frame13=r2=.5+.3*sin(p);
+shape_0_per_frame14=g2=.5-.3*sin(p);
