@@ -2,8 +2,6 @@
 
 [**Click here**](https://github.com/shanevbg/MDropDX12/releases/latest) to get the latest version.
 
-![MDropDX12 3](https://github.com/user-attachments/assets/c828786e-d4fc-40bf-a84b-ec996eeff1b8)
-
 ## Visualizer Features
 
 * DirectX 12 rendering backend with GPU-accelerated Direct2D text overlay
