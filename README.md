@@ -18,7 +18,6 @@
 * HLSL variable shadowing fix for improved preset compatibility
 * 3D volume texture support (noisevol_lq/noisevol_hq)
 * Fallback texture search paths, Random Textures Directory, and resource viewer
-* 40 shader-based presets created for MDropDX12
 * Over 5000 presets from skilled artists (more presets [here](https://github.com/projectM-visualizer/projectm?tab=readme-ov-file#presets))
 * Improved window handling, input methods and stability
 * Use independently or with [Milkwave](https://github.com/shanevbg/Milkwave) Remote for extended control (messaging, MIDI, shader conversion, wave manipulation, and more)
@@ -162,6 +161,7 @@ I may add new features or fix bugs if people are actually using this, so don't b
 
 Many thanks to:
 
+* IkeC - [Milkwave](https://github.com/IkeC/Milkwave)
 * Ryan Geiss - [MilkDrop2](https://www.geisswerks.com/milkdrop/)
 * Maxim Volskiy - [BeatDrop](https://github.com/mvsoft74/BeatDrop)
 * oO-MrC-Oo - [XBMC plugin](https://github.com/oO-MrC-Oo/Milkdrop2-XBMC)
@@ -170,7 +170,6 @@ Many thanks to:
 * projectM - [projectm-eval](https://github.com/projectM-visualizer/projectm-eval)
 * Incubo_ - [BeatDrop-Music-Visualizer](https://github.com/OfficialIncubo/BeatDrop-Music-Visualizer)
 * milkdrop2077 - [MilkDrop3](https://github.com/milkdrop2077/MilkDrop3)
-* podenthusiast - [MDropDX12 Logo](https://www.freepik.com/author/podenthusiast/icons)
 * and all the preset authors!
 
 If you believe you or someone else should be mentioned here, please let me know.
