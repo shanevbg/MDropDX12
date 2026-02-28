@@ -213,6 +213,7 @@ protected:
   virtual void MyRenderUI(int* upper_left_corner_y, int* upper_right_corner_y, int* lower_left_corner_y, int* lower_right_corner_y, int xL, int xR) = 0;
   virtual LRESULT MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam) = 0;
   virtual void OnAltK() {}; // doesn't *have* to be implemented
+  virtual void DrawOnTopSprites() {} // override in Engine for layer-1 sprite rendering
   virtual void SetAMDFlag() = 0;
   // Preset list accessors for RenderPlaylist() — override in Engine
   virtual int  GetPresetCount() { return 0; }

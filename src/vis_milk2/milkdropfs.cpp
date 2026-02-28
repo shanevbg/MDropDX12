@@ -842,8 +842,6 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
     // ──── DX12 rendering path ────
     if (!lpDevice && m_lpDX && m_lpDX->m_device) {
       DX12_RenderWarpAndComposite();
-      if (SpritesEnabled())
-        DrawUserSprites();
       std::swap(m_dx12VS[0], m_dx12VS[1]);
       return;
     }
@@ -2185,6 +2183,10 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     quad[3].tu = 1.f; quad[3].tv = 1.f; quad[3].tu_orig = 1.f; quad[3].tv_orig = 1.f; quad[3].rad = 1.f; quad[3].ang = 0.f;
     m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, quad, 4, sizeof(MYVERTEX));
   }
+
+  // ── Draw behind-text sprites (layer 0) on the backbuffer ──
+  if (SpritesEnabled())
+    DrawUserSprites(0);
 
   // ── Display active supertexts on the backbuffer ──
   if (MessagesEnabled()) {
@@ -6017,7 +6019,7 @@ bool mdrop::Engine::SetMilkdropRenderTarget(LPDIRECTDRAWSURFACE7 lpSurf, int w, 
 }
 */
 
-void mdrop::Engine::DrawUserSprites()	// from system memory, to back buffer.
+void mdrop::Engine::DrawUserSprites(int targetLayer)	// from system memory, to back buffer.
 {
   if (!m_lpDX || !m_lpDX->m_commandList)
     return;
@@ -6045,24 +6047,34 @@ void mdrop::Engine::DrawUserSprites()	// from system memory, to back buffer.
 
   for (int iSlot = 0; iSlot < NUM_TEX; iSlot++) {
     if (m_texmgr.m_tex[iSlot].dx12Surface.IsValid()) {
-      // set values of input variables:
-      *(m_texmgr.m_tex[iSlot].var_time) = (double)(GetTime() - m_texmgr.m_tex[iSlot].fStartTime);
-      *(m_texmgr.m_tex[iSlot].var_frame) = (double)(GetFrame() - m_texmgr.m_tex[iSlot].nStartFrame);
-      *(m_texmgr.m_tex[iSlot].var_fps) = (double)GetFps();
-      *(m_texmgr.m_tex[iSlot].var_progress) = (double)m_pState->m_fBlendProgress;
-      *(m_texmgr.m_tex[iSlot].var_bass) = (double)mysound.imm_rel[0];
-      *(m_texmgr.m_tex[iSlot].var_mid) = (double)mysound.imm_rel[1];
-      *(m_texmgr.m_tex[iSlot].var_treb) = (double)mysound.imm_rel[2];
-      *(m_texmgr.m_tex[iSlot].var_bass_att) = (double)mysound.avg_rel[0];
-      *(m_texmgr.m_tex[iSlot].var_mid_att) = (double)mysound.avg_rel[1];
-      *(m_texmgr.m_tex[iSlot].var_treb_att) = (double)mysound.avg_rel[2];
+      // Evaluate expressions only on the first pass (targetLayer <= 0)
+      // to avoid double-advancing time-based animations
+      if (targetLayer <= 0) {
+        // set values of input variables:
+        *(m_texmgr.m_tex[iSlot].var_time) = (double)(GetTime() - m_texmgr.m_tex[iSlot].fStartTime);
+        *(m_texmgr.m_tex[iSlot].var_frame) = (double)(GetFrame() - m_texmgr.m_tex[iSlot].nStartFrame);
+        *(m_texmgr.m_tex[iSlot].var_fps) = (double)GetFps();
+        *(m_texmgr.m_tex[iSlot].var_progress) = (double)m_pState->m_fBlendProgress;
+        *(m_texmgr.m_tex[iSlot].var_bass) = (double)mysound.imm_rel[0];
+        *(m_texmgr.m_tex[iSlot].var_mid) = (double)mysound.imm_rel[1];
+        *(m_texmgr.m_tex[iSlot].var_treb) = (double)mysound.imm_rel[2];
+        *(m_texmgr.m_tex[iSlot].var_bass_att) = (double)mysound.avg_rel[0];
+        *(m_texmgr.m_tex[iSlot].var_mid_att) = (double)mysound.avg_rel[1];
+        *(m_texmgr.m_tex[iSlot].var_treb_att) = (double)mysound.avg_rel[2];
 
-      // evaluate expressions
+        // evaluate expressions
 #ifndef _NO_EXPR_
-      if (m_texmgr.m_tex[iSlot].m_codehandle) {
-        NSEEL_code_execute(m_texmgr.m_tex[iSlot].m_codehandle);
-      }
+        if (m_texmgr.m_tex[iSlot].m_codehandle) {
+          NSEEL_code_execute(m_texmgr.m_tex[iSlot].m_codehandle);
+        }
 #endif
+      }
+
+      // Filter by target layer (-1 = all, 0 = behind text, 1 = on top)
+      if (targetLayer >= 0) {
+        int spriteLayer = (*m_texmgr.m_tex[iSlot].var_layer != 0.0) ? 1 : 0;
+        if (spriteLayer != targetLayer) continue;
+      }
 
       bool bKillSprite = (*m_texmgr.m_tex[iSlot].var_done != 0.0);
       bool bBurnIn = (*m_texmgr.m_tex[iSlot].var_burn != 0.0);

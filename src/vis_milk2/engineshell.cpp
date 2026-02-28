@@ -1467,6 +1467,9 @@ void EngineShell::DrawAndDisplay(int redraw) {
     // Render queued text via font atlas sprites (within DX12 command list)
     m_text.DrawNow();
 
+    // Render on-top-of-text sprites (layer 1) after text has been drawn
+    DrawOnTopSprites();
+
     // Close + execute the DX12 command list (transitions RT → PRESENT)
     m_lpDX->ExecuteCommandList();
 

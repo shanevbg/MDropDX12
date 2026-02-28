@@ -90,6 +90,7 @@ DDPIXELFORMAT          ddpf;
   double* var_blendmode;
   double* var_repeatx, * var_repeaty;
   double* var_done, * var_burn;
+  double* var_layer;  // 0 = behind text (default), 1 = on top of text
   NSEEL_VMCTX	tex_eel_ctx;
 }
 td_tex;

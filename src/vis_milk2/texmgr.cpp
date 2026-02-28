@@ -518,6 +518,7 @@ void texmgr::RegisterBuiltInVariables(int iSlot) {
   m_tex[iSlot].var_blendmode = NSEEL_VM_regvar(eel_ctx, "blendmode");
   m_tex[iSlot].var_done = NSEEL_VM_regvar(eel_ctx, "done");
   m_tex[iSlot].var_burn = NSEEL_VM_regvar(eel_ctx, "burn");
+  m_tex[iSlot].var_layer = NSEEL_VM_regvar(eel_ctx, "layer");
 
   //	resetVars(NULL);
 }

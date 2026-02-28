@@ -320,6 +320,7 @@ struct SpriteImportDlgData {
   bool bReplace;     // true = replace all, false = add to existing
   int  nMaxSprites;  // max to import
   int  nBlendMode;
+  int  nLayer;       // 0 = behind text, 1 = on top
   double x, y, sx, sy, rot;
   double r, g, b, a;
   HWND hDlgWnd;
@@ -356,6 +357,9 @@ static LRESULT CALLBACK SpriteImportWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
         // Read blend mode
         int sel = (int)SendDlgItemMessageW(hWnd, IDC_SPRIMP_BLEND, CB_GETCURSEL, 0, 0);
         data->nBlendMode = (sel == CB_ERR) ? 0 : sel;
+        // Read layer
+        int lsel = (int)SendDlgItemMessageW(hWnd, IDC_SPRIMP_LAYER, CB_GETCURSEL, 0, 0);
+        data->nLayer = (lsel == CB_ERR) ? 0 : lsel;
         // Read property values
         GetDlgItemTextW(hWnd, IDC_SPRIMP_X, buf, 64);   data->x  = _wtof(buf);
         GetDlgItemTextW(hWnd, IDC_SPRIMP_Y, buf, 64);   data->y  = _wtof(buf);
@@ -462,6 +466,7 @@ static bool ShowSpriteImportDialog(HWND hParent, Engine* plugin, SpriteImportDlg
   data.bReplace = false;
   data.nMaxSprites = 100;
   data.nBlendMode = 0;
+  data.nLayer = 0;
   data.x = 0.5; data.y = 0.5;
   data.sx = 0.5; data.sy = 0.5;
   data.rot = 0;
@@ -554,6 +559,19 @@ static bool ShowSpriteImportDialog(HWND hParent, Engine* plugin, SpriteImportDlg
   for (int i = 0; i < 5; i++) SendMessageW(hBlend, CB_ADDSTRING, 0, (LPARAM)blendNames[i]);
   SendMessageW(hBlend, CB_SETCURSEL, data.nBlendMode, 0);
   if (plugin->m_bSettingsDarkTheme) SetWindowTheme(hBlend, L"DarkMode_Explorer", NULL);
+  y += lineH + gap;
+
+  // Layer
+  CreateLabel(hDlg, L"Layer:", col1, y, lblW, lineH, hFont);
+  HWND hLayer = CreateWindowExW(0, L"COMBOBOX", L"",
+    WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+    col1 + lblW, y, MulDiv(140, lineH, 20), 200, hDlg, (HMENU)(INT_PTR)IDC_SPRIMP_LAYER,
+    GetModuleHandle(NULL), NULL);
+  if (hLayer && hFont) SendMessage(hLayer, WM_SETFONT, (WPARAM)hFont, TRUE);
+  SendMessageW(hLayer, CB_ADDSTRING, 0, (LPARAM)L"0: Behind Text");
+  SendMessageW(hLayer, CB_ADDSTRING, 0, (LPARAM)L"1: On Top of Text");
+  SendMessageW(hLayer, CB_SETCURSEL, data.nLayer, 0);
+  if (plugin->m_bSettingsDarkTheme) SetWindowTheme(hLayer, L"DarkMode_Explorer", NULL);
   y += lineH + gap;
 
   // Position: X, Y
@@ -1795,6 +1813,7 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
           impData.nBlendMode, impData.x, impData.y, impData.sx, impData.sy, impData.rot,
           impData.r, impData.g, impData.b, impData.a);
         std::string defaultInitCode = initBuf;
+        if (impData.nLayer != 0) { char lb[64]; sprintf(lb, "\r\nlayer = %d;", impData.nLayer); defaultInitCode += lb; }
 
         // If replacing, clear existing entries
         if (impData.bReplace) {
@@ -2918,7 +2937,7 @@ void Engine::BuildSettingsControls() {
     PAGE_CTRL(6, CreateBtn(hw, L"Push", IDC_MW_SPR_PUSH, bx, y, bw, lineH, hFont)); bx += bw + bg;
     PAGE_CTRL(6, CreateBtn(hw, L"Kill", IDC_MW_SPR_KILL, bx, y, bw, lineH, hFont)); bx += bw + bg;
     PAGE_CTRL(6, CreateBtn(hw, L"Kill All", IDC_MW_SPR_KILLALL, bx, y, bwL, lineH, hFont)); bx += bwL + bg;
-    PAGE_CTRL(6, CreateBtn(hw, L"Defaults", IDC_MW_SPR_DEFAULTS, bx, y, bwL, lineH, hFont));
+    PAGE_CTRL(6, CreateBtn(hw, L"\u267B Defaults", IDC_MW_SPR_DEFAULTS, bx, y, bwL + MulDiv(14, lineH, 26), lineH, hFont));
   }
   y += lineH + gap;
 
@@ -2937,20 +2956,28 @@ void Engine::BuildSettingsControls() {
   y += lineH + gap + 4;
 
   // Image path row
-  PAGE_CTRL(6, CreateLabel(hw, L"Image:", x, y, 50, lineH, hFont, false));
-  PAGE_CTRL(6, CreateEdit(hw, L"", IDC_MW_SPR_IMG_PATH, x + 54, y, rw - 124, lineH, hFont, ES_READONLY, false));
-  PAGE_CTRL(6, CreateBtn(hw, L"Browse", IDC_MW_SPR_IMG_BROWSE, x + rw - 65, y, 65, lineH, hFont));
+  {
+    int imgLblW = MulDiv(50, lineH, 26);
+    int browseW = MulDiv(65, lineH, 26);
+    PAGE_CTRL(6, CreateLabel(hw, L"Image:", x, y, imgLblW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"", IDC_MW_SPR_IMG_PATH, x + imgLblW + 4, y, rw - imgLblW - browseW - 8, lineH, hFont, ES_READONLY, false));
+    PAGE_CTRL(6, CreateBtn(hw, L"Browse", IDC_MW_SPR_IMG_BROWSE, x + rw - browseW, y, browseW, lineH, hFont));
+  }
   y += lineH + 2;
 
-  // Properties row 1: Blend, X, Y
-  {
-    int col1 = x, col2 = x + rw / 3, col3 = x + 2 * rw / 3;
-    int editW = 50, labelW = 30;
+  // Scaled dimensions for property rows (base lineH = 26)
+  int propLblW = MulDiv(80, lineH, 26);   // "Position X:", "Colorkey:", etc.
+  int propEditW = MulDiv(55, lineH, 26);   // numeric edit fields
+  int propComboW = MulDiv(120, lineH, 26); // blend/layer combos
+  int propComboLblW = MulDiv(48, lineH, 26); // "Blend:", "Layer:"
+  int propCol2 = x + rw / 2;              // right column start
 
-    PAGE_CTRL(6, CreateLabel(hw, L"Blend:", col1, y, 40, lineH, hFont, false));
+  // Properties row 1: Blend, Layer
+  {
+    PAGE_CTRL(6, CreateLabel(hw, L"Blend:", x, y, propComboLblW, lineH, hFont, false));
     HWND hBlend = CreateWindowExW(0, L"COMBOBOX", L"",
-      WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL,
-      col1 + 44, y, 110, 200, hw, (HMENU)(INT_PTR)IDC_MW_SPR_BLENDMODE,
+      WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+      x + propComboLblW, y, propComboW, 200, hw, (HMENU)(INT_PTR)IDC_MW_SPR_BLENDMODE,
       GetModuleHandle(NULL), NULL);
     if (hBlend && hFont) SendMessage(hBlend, WM_SETFONT, (WPARAM)hFont, TRUE);
     const wchar_t* blendNames[] = { L"0: Blend", L"1: Decal", L"2: Additive", L"3: SrcColor", L"4: ColorKey" };
@@ -2958,57 +2985,86 @@ void Engine::BuildSettingsControls() {
     if (m_bSettingsDarkTheme) SetWindowTheme(hBlend, L"DarkMode_Explorer", NULL);
     PAGE_CTRL(6, hBlend);
 
-    PAGE_CTRL(6, CreateLabel(hw, L"X:", col2, y, labelW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"0.5", IDC_MW_SPR_X, col2 + labelW, y, editW, lineH, hFont, 0, false));
-
-    PAGE_CTRL(6, CreateLabel(hw, L"Y:", col3, y, labelW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"0.5", IDC_MW_SPR_Y, col3 + labelW, y, editW, lineH, hFont, 0, false));
+    PAGE_CTRL(6, CreateLabel(hw, L"Layer:", propCol2, y, propComboLblW, lineH, hFont, false));
+    HWND hLayer = CreateWindowExW(0, L"COMBOBOX", L"",
+      WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+      propCol2 + propComboLblW, y, propComboW + MulDiv(20, lineH, 26), 200, hw, (HMENU)(INT_PTR)IDC_MW_SPR_LAYER,
+      GetModuleHandle(NULL), NULL);
+    if (hLayer && hFont) SendMessage(hLayer, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hLayer, CB_ADDSTRING, 0, (LPARAM)L"0: Behind Text");
+    SendMessageW(hLayer, CB_ADDSTRING, 0, (LPARAM)L"1: On Top of Text");
+    if (m_bSettingsDarkTheme) SetWindowTheme(hLayer, L"DarkMode_Explorer", NULL);
+    PAGE_CTRL(6, hLayer);
   }
   y += lineH + 2;
 
-  // Properties row 2: SX, SY, Rot
+  // Properties row 2: Position X, Position Y
   {
-    int col1 = x, col2 = x + rw / 3, col3 = x + 2 * rw / 3;
-    int editW = 50, labelW = 30;
+    PAGE_CTRL(6, CreateLabel(hw, L"Position X:", x, y, propLblW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"0.5", IDC_MW_SPR_X, x + propLblW, y, propEditW, lineH, hFont, 0, false));
 
-    PAGE_CTRL(6, CreateLabel(hw, L"SX:", col1, y, labelW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"1.0", IDC_MW_SPR_SX, col1 + labelW, y, editW, lineH, hFont, 0, false));
-
-    PAGE_CTRL(6, CreateLabel(hw, L"SY:", col2, y, labelW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"1.0", IDC_MW_SPR_SY, col2 + labelW, y, editW, lineH, hFont, 0, false));
-
-    PAGE_CTRL(6, CreateLabel(hw, L"Rot:", col3, y, labelW + 4, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"0", IDC_MW_SPR_ROT, col3 + labelW + 4, y, editW, lineH, hFont, 0, false));
+    PAGE_CTRL(6, CreateLabel(hw, L"Position Y:", propCol2, y, propLblW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"0.5", IDC_MW_SPR_Y, propCol2 + propLblW, y, propEditW, lineH, hFont, 0, false));
   }
   y += lineH + 2;
 
-  // Properties row 3: R, G, B, A
+  // Properties row 3: Scale X, Scale Y
   {
-    int gap2 = 4, labelW2 = 16, editW = 40;
+    PAGE_CTRL(6, CreateLabel(hw, L"Scale X:", x, y, propLblW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"1.0", IDC_MW_SPR_SX, x + propLblW, y, propEditW, lineH, hFont, 0, false));
+
+    PAGE_CTRL(6, CreateLabel(hw, L"Scale Y:", propCol2, y, propLblW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"1.0", IDC_MW_SPR_SY, propCol2 + propLblW, y, propEditW, lineH, hFont, 0, false));
+  }
+  y += lineH + 2;
+
+  // Properties row 4: Rotation, Colorkey
+  {
+    int ckEditW = MulDiv(70, lineH, 26);
+    PAGE_CTRL(6, CreateLabel(hw, L"Rotation:", x, y, propLblW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"0", IDC_MW_SPR_ROT, x + propLblW, y, propEditW, lineH, hFont, 0, false));
+
+    PAGE_CTRL(6, CreateLabel(hw, L"Colorkey:", propCol2, y, propLblW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"0x000000", IDC_MW_SPR_COLORKEY, propCol2 + propLblW, y, ckEditW, lineH, hFont, 0, false));
+  }
+  y += lineH + 2;
+
+  // Properties row 5: Red, Green, Blue, Alpha
+  {
+    int clrLblW = MulDiv(50, lineH, 26);
+    int clrEditW = MulDiv(40, lineH, 26);
+    int clrCol2 = x + rw / 4, clrCol3 = x + rw / 2, clrCol4 = x + 3 * rw / 4;
+
+    PAGE_CTRL(6, CreateLabel(hw, L"Red:", x, y, clrLblW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_R, x + clrLblW, y, clrEditW, lineH, hFont, 0, false));
+
+    PAGE_CTRL(6, CreateLabel(hw, L"Green:", clrCol2, y, clrLblW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_G, clrCol2 + clrLblW, y, clrEditW, lineH, hFont, 0, false));
+
+    PAGE_CTRL(6, CreateLabel(hw, L"Blue:", clrCol3, y, clrLblW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_B, clrCol3 + clrLblW, y, clrEditW, lineH, hFont, 0, false));
+
+    PAGE_CTRL(6, CreateLabel(hw, L"Alpha:", clrCol4, y, clrLblW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_A, clrCol4 + clrLblW, y, clrEditW, lineH, hFont, 0, false));
+  }
+  y += lineH + 2;
+
+  // Properties row 6: Flip X, Flip Y, Burn, Repeat X, Repeat Y
+  {
+    int chkW = MulDiv(55, lineH, 26), chkGap = MulDiv(4, lineH, 26);
+    int chkBurnW = MulDiv(50, lineH, 26);
+    int repLblW = MulDiv(70, lineH, 26), repEditW = MulDiv(40, lineH, 26);
     int cx = x;
-    PAGE_CTRL(6, CreateLabel(hw, L"R:", cx, y, labelW2, lineH, hFont, false)); cx += labelW2;
-    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_R, cx, y, editW, lineH, hFont, 0, false)); cx += editW + gap2;
-    PAGE_CTRL(6, CreateLabel(hw, L"G:", cx, y, labelW2, lineH, hFont, false)); cx += labelW2;
-    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_G, cx, y, editW, lineH, hFont, 0, false)); cx += editW + gap2;
-    PAGE_CTRL(6, CreateLabel(hw, L"B:", cx, y, labelW2, lineH, hFont, false)); cx += labelW2;
-    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_B, cx, y, editW, lineH, hFont, 0, false)); cx += editW + gap2;
-    PAGE_CTRL(6, CreateLabel(hw, L"A:", cx, y, labelW2, lineH, hFont, false)); cx += labelW2;
-    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_A, cx, y, editW, lineH, hFont, 0, false));
-  }
-  y += lineH + 2;
+    PAGE_CTRL(6, CreateCheck(hw, L"Flip X", IDC_MW_SPR_FLIPX, cx, y, chkW, lineH, hFont, false, false)); cx += chkW + chkGap;
+    PAGE_CTRL(6, CreateCheck(hw, L"Flip Y", IDC_MW_SPR_FLIPY, cx, y, chkW, lineH, hFont, false, false)); cx += chkW + chkGap;
+    PAGE_CTRL(6, CreateCheck(hw, L"Burn", IDC_MW_SPR_BURN, cx, y, chkBurnW, lineH, hFont, false, false));
 
-  // Properties row 4: FlipX, FlipY, Burn, RepeatX, RepeatY, Colorkey
-  {
-    int cx = x;
-    PAGE_CTRL(6, CreateCheck(hw, L"FlipX", IDC_MW_SPR_FLIPX, cx, y, 55, lineH, hFont, false, false)); cx += 59;
-    PAGE_CTRL(6, CreateCheck(hw, L"FlipY", IDC_MW_SPR_FLIPY, cx, y, 55, lineH, hFont, false, false)); cx += 59;
-    PAGE_CTRL(6, CreateCheck(hw, L"Burn", IDC_MW_SPR_BURN, cx, y, 50, lineH, hFont, false, false)); cx += 54;
-    PAGE_CTRL(6, CreateLabel(hw, L"RepX:", cx, y, 40, lineH, hFont, false)); cx += 40;
-    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_REPEATX, cx, y, 35, lineH, hFont, 0, false)); cx += 39;
-    PAGE_CTRL(6, CreateLabel(hw, L"RepY:", cx, y, 40, lineH, hFont, false)); cx += 40;
-    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_REPEATY, cx, y, 35, lineH, hFont, 0, false)); cx += 39;
-    PAGE_CTRL(6, CreateLabel(hw, L"CK:", cx, y, 25, lineH, hFont, false)); cx += 25;
-    PAGE_CTRL(6, CreateEdit(hw, L"0x000000", IDC_MW_SPR_COLORKEY, cx, y, 70, lineH, hFont, 0, false));
+    PAGE_CTRL(6, CreateLabel(hw, L"Repeat X:", propCol2, y, repLblW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_REPEATX, propCol2 + repLblW, y, repEditW, lineH, hFont, 0, false));
+
+    int repYx = propCol2 + repLblW + repEditW + chkGap;
+    PAGE_CTRL(6, CreateLabel(hw, L"Repeat Y:", repYx, y, repLblW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_REPEATY, repYx + repLblW, y, repEditW, lineH, hFont, 0, false));
   }
   y += lineH + gap;
 
@@ -4624,6 +4680,7 @@ void Engine::UpdateSpriteProperties(int sel) {
   double dFlipx = 0; parseVar(e.szInitCode, "flipx", dFlipx); flipx = dFlipx != 0;
   double dFlipy = 0; parseVar(e.szInitCode, "flipy", dFlipy); flipy = dFlipy != 0;
   double dBurn = 0; parseVar(e.szInitCode, "burn", dBurn); burn = dBurn != 0;
+  double dLayer = 0; parseVar(e.szInitCode, "layer", dLayer); int layer = (int)dLayer;
 
   wchar_t buf[64];
   swprintf(buf, 64, L"%.3g", x); SetDlgItemTextW(hw, IDC_MW_SPR_X, buf);
@@ -4640,6 +4697,7 @@ void Engine::UpdateSpriteProperties(int sel) {
   swprintf(buf, 64, L"0x%06X", e.nColorkey); SetDlgItemTextW(hw, IDC_MW_SPR_COLORKEY, buf);
 
   SendDlgItemMessageW(hw, IDC_MW_SPR_BLENDMODE, CB_SETCURSEL, blendmode, 0);
+  SendDlgItemMessageW(hw, IDC_MW_SPR_LAYER, CB_SETCURSEL, (layer >= 0 && layer <= 1) ? layer : 0, 0);
   CheckDlgButton(hw, IDC_MW_SPR_FLIPX, flipx ? BST_CHECKED : BST_UNCHECKED);
   CheckDlgButton(hw, IDC_MW_SPR_FLIPY, flipy ? BST_CHECKED : BST_UNCHECKED);
   CheckDlgButton(hw, IDC_MW_SPR_BURN, burn ? BST_CHECKED : BST_UNCHECKED);
@@ -4688,6 +4746,8 @@ void Engine::SaveCurrentSpriteProperties() {
     GetDlgItemTextW(hw, IDC_MW_SPR_REPEATY, tmp, 64); double repeaty = _wtof(tmp);
     int blend = (int)SendDlgItemMessageW(hw, IDC_MW_SPR_BLENDMODE, CB_GETCURSEL, 0, 0);
     if (blend == CB_ERR) blend = 0;
+    int layer = (int)SendDlgItemMessageW(hw, IDC_MW_SPR_LAYER, CB_GETCURSEL, 0, 0);
+    if (layer == CB_ERR) layer = 0;
     bool flipx = (IsDlgButtonChecked(hw, IDC_MW_SPR_FLIPX) == BST_CHECKED);
     bool flipy = (IsDlgButtonChecked(hw, IDC_MW_SPR_FLIPY) == BST_CHECKED);
     bool burn  = (IsDlgButtonChecked(hw, IDC_MW_SPR_BURN)  == BST_CHECKED);
@@ -4701,6 +4761,7 @@ void Engine::SaveCurrentSpriteProperties() {
     if (flipx)              code += "\r\nflipx = 1;";
     if (flipy)              code += "\r\nflipy = 1;";
     if (burn)               code += "\r\nburn = 1;";
+    if (layer != 0)         { char lb[64]; sprintf(lb, "\r\nlayer = %d;", layer); code += lb; }
     if (repeatx != 1.0)     { char rb[64]; sprintf(rb, "\r\nrepeatx = %.6g;", repeatx); code += rb; }
     if (repeaty != 1.0)     { char rb[64]; sprintf(rb, "\r\nrepeaty = %.6g;", repeaty); code += rb; }
 
@@ -4708,7 +4769,7 @@ void Engine::SaveCurrentSpriteProperties() {
     {
       static const char* propNames[] = {
         "blendmode", "x", "y", "sx", "sy", "rot",
-        "r", "g", "b", "a", "flipx", "flipy", "burn", "repeatx", "repeaty", NULL
+        "r", "g", "b", "a", "flipx", "flipy", "burn", "layer", "repeatx", "repeaty", NULL
       };
       int len = GetWindowTextLengthW(GetDlgItem(hw, IDC_MW_SPR_INIT_CODE));
       if (len > 0) {

@@ -814,7 +814,8 @@ public:
   void        BlurPasses();
   void        GetSafeBlurMinMax(CState* pState, float* blur_min, float* blur_max);
   void		RunPerFrameEquations(int code);
-  void		DrawUserSprites();
+  void		DrawUserSprites(int targetLayer = -1);  // -1 = all, 0 = behind text, 1 = on top
+  void    DrawOnTopSprites() override { if (SpritesEnabled()) DrawUserSprites(1); }
   void		MergeSortPresets(int left, int right);
   void		BuildMenus();
   void        SetMenusForPresetVersion(int WarpPSVersion, int CompPSVersion);

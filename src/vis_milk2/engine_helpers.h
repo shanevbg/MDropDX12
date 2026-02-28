@@ -304,6 +304,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SPR_REPEATY      5025
 #define IDC_MW_SPR_BURN         5026
 #define IDC_MW_SPR_COLORKEY     5027
+#define IDC_MW_SPR_LAYER        5028
 #define IDC_MW_SPR_INIT_CODE    5030
 #define IDC_MW_SPR_FRAME_CODE   5031
 #define IDC_MW_SPR_KILLALL      5036
@@ -323,6 +324,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_SPRIMP_G              5110
 #define IDC_SPRIMP_B              5111
 #define IDC_SPRIMP_A              5112
+#define IDC_SPRIMP_LAYER          5113
 #define IDC_SPRIMP_OK             5120
 #define IDC_SPRIMP_CANCEL         5121
 
