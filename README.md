@@ -140,9 +140,9 @@ The original [MilkDrop2](https://www.geisswerks.com/milkdrop/) WinAmp plugin cre
 
 This version of the Visualizer is a ground-up rebuild of the rendering engine on DirectX 12, replacing the original DX9Ex backend entirely. The text rendering pipeline, settings UI, texture management, shader compilation, and resource handling have all been rewritten. While preset compatibility with the MilkDrop2 ecosystem is maintained, the codebase has diverged significantly from the upstream MDropDX12 project.
 
-For a more detailed explanation of all features, please read the [Manual](https://github.com/shanevbg/MDropDX12/blob/main/Manual.md). 
+For a more detailed explanation of all features, please read the [Manual](https://github.com/shanevbg/MDropDX12/blob/main/docs/Manual.md).
 
-For a chronological list of MDropDX12 releases and features, read the [Changes](Changes.md).
+For a chronological list of MDropDX12 releases and features, read the [Changes](docs/Changes.md).
 
 ## System Requirements
 
