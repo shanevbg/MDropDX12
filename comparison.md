@@ -110,6 +110,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
 | Independent messages/sprites toggles | ✅ | ❌ | ❌ |
+| Message overrides (size, font, color, effects, animation) | ✅ | ✅ | ❌ |
 | Custom text messages (from Remote) | ♻️ | ✅ | ❌ |
 | Font/color customization | ♻️ | ✅ | ❌ |
 | Multiple simultaneous messages | ♻️ | ✅ | ❌ |
@@ -134,9 +135,9 @@ Comparison of three MilkDrop-based music visualizer projects.
 
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
-| Static sprites | ❌ | ✅ | ✅ |
-| Animated sprites | ❌ | ✅ | ✅ |
-| Sprite selection from Remote | ❌ | ✅ | ❌ |
+| Static sprites | ♻️ | ✅ | ✅ |
+| Animated sprites | ♻️ | ✅ | ✅ |
+| Sprite selection from Remote | ♻️ | ✅ | ❌ |
 
 ## Shapes & Waves
 
