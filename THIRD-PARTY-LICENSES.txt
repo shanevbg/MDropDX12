@@ -1,0 +1,146 @@
+THIRD-PARTY LICENSES
+====================
+
+MDropDX12 incorporates code from the following third-party projects.
+
+
+1. MilkDrop2 — Nullsoft, Inc.
+----------------------------------------------------------------------
+Location: src/vis_milk2/ (original engine code)
+License:  BSD 3-Clause
+Website:  https://www.geisswerks.com/milkdrop/
+
+Copyright 2005-2013 Nullsoft, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+  * Redistributions of source code must retain the above copyright notice,
+    this list of conditions and the following disclaimer.
+
+  * Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation
+    and/or other materials provided with the distribution.
+
+  * Neither the name of Nullsoft nor the names of its contributors may be
+    used to endorse or promote products derived from this software without
+    specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+
+2. NS-EEL2 (Nullsoft Expression Evaluator Library v2) — Cockos / Nullsoft
+----------------------------------------------------------------------
+Location: src/ns-eel2/
+License:  zlib/libpng
+Website:  https://www.cockos.com/wdl/
+
+Copyright (C) 2004-2013 Cockos Incorporated
+Copyright (C) 1999-2003 Nullsoft, Inc.
+
+This software is provided 'as-is', without any express or implied warranty.
+In no event will the authors be held liable for any damages arising from
+the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+  1. The origin of this software must not be misrepresented; you must not
+     claim that you wrote the original software. If you use this software
+     in a product, an acknowledgment in the product documentation would be
+     appreciated but is not required.
+  2. Altered source versions must be plainly marked as such, and must not
+     be misrepresented as being the original software.
+  3. This notice may not be removed or altered from any source distribution.
+
+
+3. WDL (Cockos Incorporated Libraries)
+----------------------------------------------------------------------
+Location: src/ns-eel2/ (wdlcstring.h, wdltypes.h, utf8_extended.h, denormal.h)
+License:  zlib/libpng
+Website:  https://www.cockos.com/wdl/
+
+Copyright (C) 2005 and later, Cockos Incorporated
+
+(Same license terms as NS-EEL2 above.)
+
+
+4. Spout2 — Lynn Jarvis
+----------------------------------------------------------------------
+Location: external/Spout2/ (fetched by build.ps1)
+License:  BSD 2-Clause
+Website:  https://spout.zeal.co/
+
+Copyright (c) 2020-2024, Lynn Jarvis
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+  1. Redistributions of source code must retain the above copyright notice,
+     this list of conditions and the following disclaimer.
+
+  2. Redistributions in binary form must reproduce the above copyright
+     notice, this list of conditions and the following disclaimer in the
+     documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+
+5. Loopback Capture — Matthew van Eerde
+----------------------------------------------------------------------
+Location: src/audio/loopback-capture.cpp, loopback-capture.h
+License:  Used with permission
+Website:  https://github.com/mvaneerde/blog
+
+Code from the loopback-capture project is used with permission from the
+original author. See: https://blogs.msdn.microsoft.com/matthew_van_eerde/
+2014/11/05/draining-the-wasapi-capture-buffer-fully/
+
+
+6. GNU Bison Parser Skeleton
+----------------------------------------------------------------------
+Location: src/ns-eel2/y.tab.c, y.tab.h (generated output)
+License:  GPL v2+ with Bison special exception
+
+The parser skeleton code in y.tab.c is generated by GNU Bison 2.3.
+Copyright (C) 1984-2006 Free Software Foundation, Inc.
+
+As a special exception, you may create a larger work that contains part or
+all of the Bison parser skeleton and distribute that work under terms of
+your choice, so long as that work isn't itself a parser generator using the
+skeleton or a modified version thereof as a parser skeleton.
+
+MDropDX12 is not a parser generator; this exception applies.
+
+
+7. BeatDrop — Maxim Volskiy
+----------------------------------------------------------------------
+Location: src/ (original application framework)
+License:  BSD 3-Clause
+Website:  https://github.com/mvsoft74/BeatDrop
+
+Copyright (c) 2018 Maxim Volskiy and individual contributors
+(See LICENSE.txt for full license text.)

@@ -27,6 +27,10 @@ enc_temp_folder/
 
 # Runtime-generated files
 *.log
+diag_*.txt
+sprites.ini
+resources/presets/Quicksave2/
+resources/presets/test/
 settings.ini
 settings.ini.bak
 messages.ini
