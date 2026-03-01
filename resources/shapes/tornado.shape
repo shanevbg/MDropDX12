@@ -1,0 +1,71 @@
+shapecode_0_enabled=1
+shapecode_0_sides=30
+shapecode_0_additive=0
+shapecode_0_thickOutline=0
+shapecode_0_textured=0
+shapecode_0_num_inst=300
+shapecode_0_x=0.500
+shapecode_0_y=0.500
+shapecode_0_rad=0.11611
+shapecode_0_ang=0.00000
+shapecode_0_tex_ang=0.00000
+shapecode_0_tex_zoom=1.00000
+shapecode_0_r=1.000
+shapecode_0_g=1.000
+shapecode_0_b=1.000
+shapecode_0_a=1.000
+shapecode_0_r2=0.000
+shapecode_0_g2=0.000
+shapecode_0_b2=0.500
+shapecode_0_a2=0.000
+shapecode_0_border_r=1.000
+shapecode_0_border_g=1.000
+shapecode_0_border_b=1.000
+shapecode_0_border_a=0.450
+shape_0_per_frame1=sample=instance/num_inst;
+shape_0_per_frame2=rad=-.1+bass_att*(1-sample)*.3;
+shape_0_per_frame3=
+shape_0_per_frame4=///// Kiss surface
+shape_0_per_frame5=
+shape_0_per_frame6=r1=.04;
+shape_0_per_frame7=q10=40*3.14*sample;
+shape_0_per_frame8=q11=-10+20*sample;
+shape_0_per_frame9=
+shape_0_per_frame10=my_x = 10*r1*q11*q11*sqrt(.05*(1-q11))*cos(q10);
+shape_0_per_frame11=my_y = r1*q10*q11*sqrt(.05*(1-q11))*sin(q10);
+shape_0_per_frame12=my_z = 15*r1*q11;
+shape_0_per_frame13=
+shape_0_per_frame14=/////// rotations... by flexi
+shape_0_per_frame15=
+shape_0_per_frame16=d = 8; //// distance
+shape_0_per_frame17=zoom = 1;
+shape_0_per_frame18=
+shape_0_per_frame19=w3 = q1;
+shape_0_per_frame20=w2 = q2;
+shape_0_per_frame21=w1 = q3;
+shape_0_per_frame22=
+shape_0_per_frame23=x1 = cos(w1)*my_x + sin(w1)*my_y;
+shape_0_per_frame24=y1 = -sin(w1)*my_x + cos(w1)*my_y;
+shape_0_per_frame25=z1 = my_z;
+shape_0_per_frame26=
+shape_0_per_frame27=x2 = cos(w2)*x1 + sin(w2)*z1;
+shape_0_per_frame28=z2 = -sin(w2)*x1 + cos(w2)*z1;
+shape_0_per_frame29=y2 = y1;
+shape_0_per_frame30=
+shape_0_per_frame31=y3 = cos(w3)*y2 + sin(w3)*z2;
+shape_0_per_frame32=z3 = -sin(w3)*y2 + cos(w3)*z2;
+shape_0_per_frame33=x3 = x2;
+shape_0_per_frame34=
+shape_0_per_frame35=// perspective calculation
+shape_0_per_frame36=
+shape_0_per_frame37=l = sqrt(x3*x3 + y3*y3);
+shape_0_per_frame38=w = atan2(x3,y3);
+shape_0_per_frame39=p = tan(asin(1) + atan2(d+z3,l));
+shape_0_per_frame40=d = sqrt(x3*x3 + y3*y3 + (z3+d)*(z3+d));
+shape_0_per_frame41=
+shape_0_per_frame42=my_x = zoom*sin(w)*p;
+shape_0_per_frame43=my_y = zoom*cos(w)*p;
+shape_0_per_frame44=
+shape_0_per_frame45=x = 0.5 - my_x;
+shape_0_per_frame46=y = 0.5 + my_y;
+shape_0_per_frame47=

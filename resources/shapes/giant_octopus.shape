@@ -1,0 +1,33 @@
+shapecode_0_enabled=1
+shapecode_0_sides=30
+shapecode_0_additive=0
+shapecode_0_thickOutline=0
+shapecode_0_textured=0
+shapecode_0_num_inst=40
+shapecode_0_x=0.500
+shapecode_0_y=0.220
+shapecode_0_rad=0.70720
+shapecode_0_ang=0.00000
+shapecode_0_tex_ang=0.00000
+shapecode_0_tex_zoom=1.28429
+shapecode_0_r=1.000
+shapecode_0_g=1.000
+shapecode_0_b=1.000
+shapecode_0_a=0.400
+shapecode_0_r2=0.900
+shapecode_0_g2=0.900
+shapecode_0_b2=1.000
+shapecode_0_a2=0.000
+shapecode_0_border_r=1.000
+shapecode_0_border_g=1.000
+shapecode_0_border_b=1.000
+shapecode_0_border_a=0.000
+shape_0_per_frame1=sample=instance/num_inst;
+shape_0_per_frame2=
+shape_0_per_frame3=//// clouds
+shape_0_per_frame4=
+shape_0_per_frame5=x = sample+ .001*((40*time)%1100);
+shape_0_per_frame6=x=if(above(x,1.05),-1.1+x,x);
+shape_0_per_frame7=y=y+.02*sin(2*sample+.07*time);
+shape_0_per_frame8=rad=rad*sin(16.28*sample+.2*time);
+shape_0_per_frame9=ang=sin(25*sample)*.5*time;

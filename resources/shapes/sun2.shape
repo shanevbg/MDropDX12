@@ -1,0 +1,41 @@
+shapecode_0_enabled=1
+shapecode_0_sides=15
+shapecode_0_additive=1
+shapecode_0_thickOutline=1
+shapecode_0_textured=0
+shapecode_0_num_inst=3
+shapecode_0_x=0.500
+shapecode_0_y=0.500
+shapecode_0_rad=0.10000
+shapecode_0_ang=0.00000
+shapecode_0_tex_ang=0.00000
+shapecode_0_tex_zoom=1.00000
+shapecode_0_r=1.000
+shapecode_0_g=1.000
+shapecode_0_b=1.000
+shapecode_0_a=1.000
+shapecode_0_r2=0.000
+shapecode_0_g2=0.000
+shapecode_0_b2=0.000
+shapecode_0_a2=0.500
+shapecode_0_border_r=0.000
+shapecode_0_border_g=0.000
+shapecode_0_border_b=0.000
+shapecode_0_border_a=0.000
+shape_0_per_frame1=arg = (q10/num_inst + instance/num_inst)*6.283;
+shape_0_per_frame2=
+shape_0_per_frame3=rad1 = 0.25 ;
+shape_0_per_frame4=if (instance==0, x0=q1; y0=q2,0);
+shape_0_per_frame5=if (instance==1, x0=q2; y0=q3,0);
+shape_0_per_frame6=if (instance==2, x0=q3; y0=q4,0);
+shape_0_per_frame7=ang1=rand(12);
+shape_0_per_frame8=rad1=rand(1)*rand(1)/22*mid_att;
+shape_0_per_frame9=x= 0.5+rad1*cos(ang1);
+shape_0_per_frame10=y= 0.5+rad1*sin(ang1)*reg32;
+shape_0_per_frame11=
+shape_0_per_frame12=rad = min(0.15,mid_att*0.05+0.02)*reg32;
+shape_0_per_frame13=
+shape_0_per_frame14=r = 0.5 + 0.4*sin(8*q1);
+shape_0_per_frame15=b = 0.5 + 0.4*sin(8*q2);
+shape_0_per_frame16=g = 0.5 + 0.4*sin(8*q3);
+shape_0_per_frame17=a = 0.6; a2 = 0;
