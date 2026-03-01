@@ -114,6 +114,7 @@ void Engine::LoadDisplayOutputSettings()
     m_nMirrorOpacity = GetPrivateProfileIntW(L"DisplayOutputs", L"MirrorOpacity", 100, pIni);
     if (m_nMirrorOpacity < 1) m_nMirrorOpacity = 1;
     if (m_nMirrorOpacity > 100) m_nMirrorOpacity = 100;
+    m_bMirrorModeForAltS = GetPrivateProfileBoolW(L"DisplayOutputs", L"MirrorModeForAltS", false, pIni);
 
     if (count < 0) {
         // Legacy migration: no [DisplayOutputs] section yet.
@@ -204,6 +205,8 @@ void Engine::SaveDisplayOutputSettings()
     WritePrivateProfileStringW(L"DisplayOutputs", L"Count", buf, pIni);
     swprintf(buf, 64, L"%d", m_nMirrorOpacity);
     WritePrivateProfileStringW(L"DisplayOutputs", L"MirrorOpacity", buf, pIni);
+    swprintf(buf, 64, L"%d", m_bMirrorModeForAltS ? 1 : 0);
+    WritePrivateProfileStringW(L"DisplayOutputs", L"MirrorModeForAltS", buf, pIni);
 
     for (int i = 0; i < count; i++) {
         auto& cfg = m_displayOutputs[i].config;

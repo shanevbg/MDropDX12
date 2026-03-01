@@ -379,6 +379,7 @@ public:
   bool m_bMirrorsActive = false;       // Displays tab button; always starts off
   bool m_bMirrorClickThrough = false;  // Displays tab checkbox; not persisted
   int  m_nMirrorOpacity = 100;         // 1-100%; persisted to INI
+  bool m_bMirrorModeForAltS = false;   // When true, ALT-S activates mirrors+fullscreen instead of stretch
   void EnumerateDisplayOutputs();
   void LoadDisplayOutputSettings();
   void SaveDisplayOutputSettings();

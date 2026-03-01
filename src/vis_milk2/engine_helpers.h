@@ -365,6 +365,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_DISP_CLICKTHRU   7011   // Checkbox: mirror click-through
 #define IDC_MW_DISP_OPACITY     7012   // Edit: mirror opacity (1-100)
 #define IDC_MW_DISP_OPACITY_SPIN 7013  // Up-down (spin) buddy for opacity
+#define IDC_MW_DISP_MIRROR_ALTS 7014   // Checkbox: use mirrors for ALT-S
 
 // Settings page count
 #define SETTINGS_NUM_PAGES      11

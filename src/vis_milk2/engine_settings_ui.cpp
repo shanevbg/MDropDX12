@@ -1392,6 +1392,10 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         p->UpdateMirrorWindowStyles();
         p->RefreshDisplaysTab();
         return 0;
+      case IDC_MW_DISP_MIRROR_ALTS:
+        p->m_bMirrorModeForAltS = bChecked;
+        p->SaveDisplayOutputSettings();
+        return 0;
       case IDC_MW_QUALITY_AUTO:
         p->bQualityAuto = bChecked;
         if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
@@ -3535,6 +3539,9 @@ void Engine::BuildSettingsControls() {
       PAGE_CTRL(9, CreateLabel(hw, L"%", opX + opLblW + 2 + opEditW + 2, y, opPctW, lineH, hFont, false));
     }
   }
+  y += lineH + gap;
+  PAGE_CTRL(9, CreateCheck(hw, L"Use mirrors for ALT-S (instead of stretch)",
+    IDC_MW_DISP_MIRROR_ALTS, x, y, rw, lineH, hFont, false, m_bMirrorModeForAltS));
 
   // ===== About tab (page 10) =====
   y = tabTop + 10;

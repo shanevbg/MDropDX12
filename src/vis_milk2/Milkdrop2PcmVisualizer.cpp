@@ -1480,7 +1480,25 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       PostMessage(hWnd, WM_CLOSE, 0, 0);
     }
     else if (wParam == 'S' || wParam == 's') {
-      ToggleStretch(hWnd);
+      if (g_engine.m_bMirrorModeForAltS) {
+        if (!g_engine.m_bMirrorsActive) {
+          // Activate: fullscreen primary render + activate mirrors
+          if (!fullscreen) {
+            ToggleFullScreen(hWnd);
+          }
+          g_engine.m_bMirrorsActive = true;
+          g_engine.AddNotification(L"Mirror outputs active");
+        } else {
+          // Deactivate: disable mirrors + restore primary render window
+          g_engine.m_bMirrorsActive = false;
+          if (fullscreen) {
+            ToggleFullScreen(hWnd);
+          }
+          g_engine.AddNotification(L"Mirror outputs disabled");
+        }
+      } else {
+        ToggleStretch(hWnd);
+      }
     }
     else if (wParam == VK_RETURN) {
       ToggleFullScreen(hWnd);
