@@ -1211,6 +1211,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   switch (uMsg) {
   case WM_CLOSE:
   {
+    KillTimer(hWnd, IDT_IDLE_CHECK);
     g_engine.UnregisterGlobalHotkeys(hWnd);
     g_engine.SaveWindowSizeAndPosition(hWnd);
 
@@ -1498,6 +1499,67 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       break;
     }
     break;
+  }
+
+  case WM_TIMER:
+  {
+    if (wParam == IDT_IDLE_CHECK) {
+      if (!g_engine.m_bIdleTimerEnabled)
+        return 0;
+
+      LASTINPUTINFO lii = { sizeof(lii) };
+      if (GetLastInputInfo(&lii)) {
+        DWORD idleMs = GetTickCount() - lii.dwTime;
+        DWORD timeoutMs = (DWORD)g_engine.m_nIdleTimeoutMinutes * 60 * 1000;
+
+        if (!g_engine.m_bIdleActivated && idleMs >= timeoutMs) {
+          PostMessage(hWnd, WM_MW_IDLE_ACTIVATE, 0, 0);
+        }
+        else if (g_engine.m_bIdleAutoRestore && g_engine.m_bIdleActivated && idleMs < 1000) {
+          PostMessage(hWnd, WM_MW_IDLE_RESTORE, 0, 0);
+        }
+      }
+      return 0;
+    }
+    break;
+  }
+
+  case WM_MW_IDLE_ACTIVATE:
+  {
+    if (g_engine.m_bIdleActivated) return 0;
+
+    if (g_engine.m_nIdleAction == 0) {
+      // Fullscreen
+      if (fullscreen) return 0;  // Already fullscreen, nothing to do
+      ToggleFullScreen(hWnd);
+    } else {
+      // Stretch/Mirror
+      if (g_engine.m_bMirrorsActive) return 0;  // Already active
+      if (!fullscreen) ToggleFullScreen(hWnd);
+      g_engine.m_bMirrorsActive = true;
+    }
+    g_engine.m_bIdleActivated = true;
+    g_engine.AddNotification(L"Idle timer activated");
+    return 0;
+  }
+
+  case WM_MW_IDLE_RESTORE:
+  {
+    if (!g_engine.m_bIdleActivated) return 0;
+    g_engine.m_bIdleActivated = false;
+
+    if (g_engine.m_nIdleAction == 0) {
+      // Was fullscreen — restore if still fullscreen
+      if (fullscreen) ToggleFullScreen(hWnd);
+    } else {
+      // Was stretch/mirror — deactivate
+      if (g_engine.m_bMirrorsActive) {
+        g_engine.m_bMirrorsActive = false;
+        if (fullscreen) ToggleFullScreen(hWnd);
+      }
+    }
+    g_engine.AddNotification(L"Idle timer restored");
+    return 0;
   }
 
   case WM_SYSKEYDOWN:
@@ -2094,6 +2156,9 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
 
   // Register global hotkeys on the message pump thread's window
   g_engine.RegisterGlobalHotkeys(hwnd);
+
+  // Start idle check timer (1-second interval on the message pump thread)
+  SetTimer(hwnd, IDT_IDLE_CHECK, 1000, NULL);
 
   // --- Phase 3: Spawn dedicated render thread for DX12 ---
   g_bQuitRequested.store(false);

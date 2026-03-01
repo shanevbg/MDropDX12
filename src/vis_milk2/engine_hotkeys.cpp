@@ -66,6 +66,31 @@ void Engine::UnregisterGlobalHotkeys(HWND hwnd)
     }
 }
 
+void Engine::LoadIdleTimerSettings()
+{
+    wchar_t* pIni = GetConfigIniFile();
+    m_bIdleTimerEnabled = GetPrivateProfileIntW(L"IdleTimer", L"Enabled", 0, pIni) != 0;
+    m_nIdleTimeoutMinutes = GetPrivateProfileIntW(L"IdleTimer", L"TimeoutMinutes", 5, pIni);
+    if (m_nIdleTimeoutMinutes < 1) m_nIdleTimeoutMinutes = 1;
+    if (m_nIdleTimeoutMinutes > 60) m_nIdleTimeoutMinutes = 60;
+    m_nIdleAction = GetPrivateProfileIntW(L"IdleTimer", L"Action", 0, pIni);
+    if (m_nIdleAction < 0 || m_nIdleAction > 1) m_nIdleAction = 0;
+    m_bIdleAutoRestore = GetPrivateProfileIntW(L"IdleTimer", L"AutoRestore", 1, pIni) != 0;
+}
+
+void Engine::SaveIdleTimerSettings()
+{
+    wchar_t* pIni = GetConfigIniFile();
+    wchar_t buf[64];
+
+    WritePrivateProfileStringW(L"IdleTimer", L"Enabled", m_bIdleTimerEnabled ? L"1" : L"0", pIni);
+    swprintf(buf, 64, L"%d", m_nIdleTimeoutMinutes);
+    WritePrivateProfileStringW(L"IdleTimer", L"TimeoutMinutes", buf, pIni);
+    swprintf(buf, 64, L"%d", m_nIdleAction);
+    WritePrivateProfileStringW(L"IdleTimer", L"Action", buf, pIni);
+    WritePrivateProfileStringW(L"IdleTimer", L"AutoRestore", m_bIdleAutoRestore ? L"1" : L"0", pIni);
+}
+
 std::wstring Engine::FormatHotkeyDisplay(UINT modifiers, UINT vk)
 {
     if (vk == 0) return L"(none)";

@@ -400,6 +400,15 @@ public:
   void RegisterGlobalHotkeys(HWND hwnd);
   void UnregisterGlobalHotkeys(HWND hwnd);
   std::wstring FormatHotkeyDisplay(UINT modifiers, UINT vk);
+
+  // Idle timer (screensaver mode)
+  bool m_bIdleTimerEnabled = false;
+  int  m_nIdleTimeoutMinutes = 5;     // 1-60 minutes
+  int  m_nIdleAction = 0;             // 0 = Fullscreen, 1 = Stretch/Mirror
+  bool m_bIdleAutoRestore = true;     // True = restore on mouse/keyboard; false = manual hotkey only
+  bool m_bIdleActivated = false;      // True when idle timer triggered activation
+  void LoadIdleTimerSettings();
+  void SaveIdleTimerSettings();
   // =========================================================
 
 

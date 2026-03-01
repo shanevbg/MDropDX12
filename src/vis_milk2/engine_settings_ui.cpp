@@ -738,6 +738,15 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         p->UpdateMirrorWindowStyles();
       }
     }
+    // Idle timer timeout spin control
+    if (p && pnm->idFrom == IDC_MW_IDLE_TIMEOUT_SPIN && pnm->code == UDN_DELTAPOS) {
+      NMUPDOWN* pud = (NMUPDOWN*)lParam;
+      int newVal = pud->iPos + pud->iDelta;
+      if (newVal < 1) newVal = 1;
+      if (newVal > 60) newVal = 60;
+      p->m_nIdleTimeoutMinutes = newVal;
+      p->SaveIdleTimerSettings();
+    }
     // Sprite ListView selection change
     if (p && pnm->idFrom == IDC_MW_SPR_LIST && pnm->code == LVN_ITEMCHANGED) {
       NMLISTVIEW* pnmv = (NMLISTVIEW*)lParam;
@@ -1202,6 +1211,16 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
+    // Idle timer action combo box
+    if (id == IDC_MW_IDLE_ACTION && code == CBN_SELCHANGE) {
+      int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
+      if (sel >= 0 && sel <= 1) {
+        p->m_nIdleAction = sel;
+        p->SaveIdleTimerSettings();
+      }
+      return 0;
+    }
+
     // FPS Cap combo box selection
     if (id == IDC_MW_FPS_CAP && code == CBN_SELCHANGE) {
       int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
@@ -1492,6 +1511,20 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         p->SaveHotkeySettings();
         return 0;
       }
+      case IDC_MW_IDLE_ENABLE: {
+        p->m_bIdleTimerEnabled = bChecked;
+        if (!bChecked) p->m_bIdleActivated = false;  // Reset activation state
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_IDLE_TIMEOUT), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_IDLE_TIMEOUT_SPIN), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_IDLE_ACTION), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_IDLE_AUTO_RESTORE), bChecked);
+        p->SaveIdleTimerSettings();
+        return 0;
+      }
+      case IDC_MW_IDLE_AUTO_RESTORE:
+        p->m_bIdleAutoRestore = bChecked;
+        p->SaveIdleTimerSettings();
+        return 0;
       case IDC_MW_DARK_THEME:
         p->m_bSettingsDarkTheme = bChecked;
         WritePrivateProfileStringW(L"SettingsTheme", L"DarkTheme",
@@ -3127,6 +3160,63 @@ void Engine::BuildSettingsControls() {
       EnableWindow(GetDlgItem(hw, IDC_MW_HOTKEY_EDIT), FALSE);
       EnableWindow(GetDlgItem(hw, IDC_MW_HOTKEY_SET), FALSE);
       EnableWindow(GetDlgItem(hw, IDC_MW_HOTKEY_CLEAR), FALSE);
+    }
+  }
+  y += lineH + gap + 8;
+
+  // Idle Timer (screensaver mode)
+  PAGE_CTRL(3, CreateLabel(hw, L"Idle Timer", x, y, rw / 2 - 4, lineH, hFontBold, false));
+  PAGE_CTRL(3, CreateCheck(hw, L"Enable", IDC_MW_IDLE_ENABLE, x + rw / 2, y, rw / 2, lineH, hFont, false, m_bIdleTimerEnabled));
+  y += lineH + gap;
+
+  {
+    int lblW = MulDiv(60, lineH, 26);
+    int editW = MulDiv(50, lineH, 26);
+    int comboW = rw - lblW - editW - MulDiv(100, lineH, 26);
+
+    // Timeout
+    PAGE_CTRL(3, CreateLabel(hw, L"Timeout:", x, y, lblW, lineH, hFont, false));
+    HWND hEdit = CreateEdit(hw, L"", IDC_MW_IDLE_TIMEOUT, x + lblW, y, editW, lineH, hFont);
+    PAGE_CTRL(3, hEdit);
+    {
+      wchar_t buf[16];
+      swprintf(buf, 16, L"%d", m_nIdleTimeoutMinutes);
+      SetWindowTextW(hEdit, buf);
+    }
+    HWND hSpin = CreateWindowExW(0, UPDOWN_CLASSW, NULL,
+      WS_CHILD | WS_VISIBLE | UDS_AUTOBUDDY | UDS_SETBUDDYINT | UDS_ARROWKEYS | UDS_ALIGNRIGHT,
+      0, 0, 0, 0, hw, (HMENU)(INT_PTR)IDC_MW_IDLE_TIMEOUT_SPIN, GetModuleHandle(NULL), NULL);
+    if (hSpin) {
+      SendMessage(hSpin, UDM_SETRANGE32, 1, 60);
+      SendMessage(hSpin, UDM_SETPOS32, 0, m_nIdleTimeoutMinutes);
+    }
+    PAGE_CTRL(3, hSpin);
+
+    PAGE_CTRL(3, CreateLabel(hw, L"min", x + lblW + editW + 4, y, MulDiv(30, lineH, 26), lineH, hFont, false));
+
+    // Action combo
+    int actionX = x + lblW + editW + MulDiv(40, lineH, 26);
+    PAGE_CTRL(3, CreateLabel(hw, L"Action:", actionX, y, lblW, lineH, hFont, false));
+    HWND hCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
+      WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
+      actionX + lblW, y, comboW, lineH * 6, hw,
+      (HMENU)(INT_PTR)IDC_MW_IDLE_ACTION, GetModuleHandle(NULL), NULL);
+    if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Fullscreen");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Stretch/Mirror");
+    SendMessageW(hCombo, CB_SETCURSEL, m_nIdleAction, 0);
+    PAGE_CTRL(3, hCombo);
+
+    y += lineH + gap;
+    PAGE_CTRL(3, CreateCheck(hw, L"Auto-restore on input", IDC_MW_IDLE_AUTO_RESTORE,
+      x, y, rw, lineH, hFont, false, m_bIdleAutoRestore));
+
+    // Disable idle timer controls if not enabled
+    if (!m_bIdleTimerEnabled) {
+      EnableWindow(GetDlgItem(hw, IDC_MW_IDLE_TIMEOUT), FALSE);
+      EnableWindow(hSpin, FALSE);
+      EnableWindow(hCombo, FALSE);
+      EnableWindow(GetDlgItem(hw, IDC_MW_IDLE_AUTO_RESTORE), FALSE);
     }
   }
 

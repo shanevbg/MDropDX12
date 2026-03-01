@@ -236,7 +236,15 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_CONTENT_BASE_BROWSE 2137  // Button: Browse for Content Base Path
 #define IDC_MW_CONTENT_BASE_CLEAR  2138  // Button: Clear Content Base Path
 
+// Idle Timer controls (System tab)
+#define IDC_MW_IDLE_ENABLE         2150  // Checkbox: enable idle timer
+#define IDC_MW_IDLE_TIMEOUT        2151  // Edit: timeout in minutes
+#define IDC_MW_IDLE_TIMEOUT_SPIN   2152  // Up-down spinner buddy
+#define IDC_MW_IDLE_ACTION         2153  // ComboBox: Fullscreen / Stretch-Mirror
+#define IDC_MW_IDLE_AUTO_RESTORE   2154  // Checkbox: auto-restore on input
+
 #define IDT_IPC_MONITOR             10001 // Timer ID for IPC message polling
+#define IDT_IDLE_CHECK              10002 // Timer ID for idle detection (1-second interval)
 
 #define IDC_MW_MSG_PLAY             4010   // "Play/Stop" toggle button on Messages tab
 
@@ -391,6 +399,8 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_TOGGLE_DISPLAY    (WM_APP + 13) // wParam = output index in m_displayOutputs
 #define WM_MW_REFRESH_DISPLAYS  (WM_APP + 14) // re-enumerate monitors
 #define WM_MW_REGISTER_HOTKEYS  (WM_APP + 15) // re-register global hotkeys on render thread
+#define WM_MW_IDLE_ACTIVATE     (WM_APP + 16) // idle timer triggered — go fullscreen or activate mirrors
+#define WM_MW_IDLE_RESTORE      (WM_APP + 17) // user became active — restore previous state
 
 // Milkwave Remote messages (sent via PostMessage from Milkwave Remote → IPC window → render window)
 #define WM_MW_NEXT_PRESET       (WM_APP + 100)

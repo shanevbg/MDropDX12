@@ -5,7 +5,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Project | Description | Graphics API | Status |
 | ------- | ----------- | ------------ | ------ |
 | **MDropDX12** | Ground-up DX12 rebuild of MilkDrop2 engine | DirectX 12 | Active (v1.0) |
-| **Milkwave** | Remote control app + bundled MilkDrop2 visualizer | DirectX 9Ex | Active (v3.5-dev) |
+| **Milkwave** | Remote control app + bundled MilkDrop2 visualizer | DirectX 9Ex | Active (v3.5) |
 | **MilkDrop3** | Enhanced MilkDrop2 fork (reference visualizer) | DirectX 9Ex | Active |
 
 ## Rendering
@@ -154,12 +154,22 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Mouse interaction mode (Ctrl+M) | ❌ | ✅ | ❌ |
 | Expanded variable ranges | ❌ | ❌ | ✅ |
 
-## MIDI
+## Input Mixing
+
+| Feature | MDropDX12 | Milkwave | MilkDrop3 |
+| ------- | --------- | -------- | --------- |
+| Webcam / video input mixing | ❌ | ✅ | ❌ |
+| Spout sender input mixing | ❌ | ✅ | ❌ |
+| Layer order and blending modes | ❌ | ✅ | ❌ |
+| Luma key blending | ❌ | ✅ | ❌ |
+
+## MIDI & Controllers
 
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
 | MIDI automation (up to 50 controls) | ❌ | ✅ | ❌ |
 | MIDI tab in Remote | ❌ | ✅ | ❌ |
+| Game controller support | ❌ | ✅ | ❌ |
 
 ## Media Integration
 
@@ -210,6 +220,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Multi-tab settings (11 tabs) | ✅ | ✅ | ✅ |
 | Per-display opacity and click-through | ✅ | ❌ | ❌ |
 | Configurable global hotkeys | ✅ | ❌ | ❌ |
+| Idle timer / screensaver mode | ✅ | ❌ | ❌ |
 | Verbose logging (LogLevel=2) | ✅ | ✅ | ❌ |
 
 ## Expression Evaluation
@@ -235,16 +246,16 @@ MilkDrop3 supports `.milk2` files which contain two presets blended together wit
 ### Architectural Differences
 
 - **MDropDX12**: DirectX 12, x64, GDI overlay for text, no DX9 half-texel offset, no projection matrix (clip-space passthrough)
-- **Milkwave**: Bundles a modified MilkDrop2 (DX9Ex) visualizer with a separate WinForms Remote control app
+- **Milkwave**: Bundles a modified MilkDrop2 (DX9Ex) visualizer with a separate .NET 8 Remote control app; adds input mixing, game controller support, MIDI automation
 - **MilkDrop3**: DirectX 9Ex, x86, adds .milk2 format, MilkPanel shader editor, deep mashup system, expanded variable ranges
 
 ### Feature Overlap
 
 Many features listed under Milkwave (text messages, MIDI, media integration, wave manipulation, scripts) are **Remote-side features** that send commands to the Visualizer via IPC. Once MDropDX12 supports the WM_COPYDATA protocol, these features would become available through Milkwave Remote without needing to be reimplemented in MDropDX12 itself.
 
-### 🤝 Features Available via Milkwave Remote 3.4+
+### 🤝 Features Available via Milkwave Remote 3.5+
 
-Features marked 🤝 are not built into MDropDX12 directly but will work when used with Milkwave Remote 3.4 or later. The Remote provides its own UI for these features and sends commands to MDropDX12 via the WM_COPYDATA IPC protocol.
+Features marked 🤝 are not built into MDropDX12 directly but will work when used with Milkwave Remote 3.5 or later. The Remote provides its own UI for these features and sends commands to MDropDX12 via the WM_COPYDATA IPC protocol.
 
 ### ♻️ Features Implemented via IPC (Milkwave Remote)
 
