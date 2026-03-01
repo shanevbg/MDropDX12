@@ -8,8 +8,8 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - **Graphics**: DirectX 12 (migrated from DX9Ex; D3D11on12 for Direct2D text)
 - **Audio**: WASAPI loopback capture
 - **Spout** integration for texture sharing
-- **Expression eval**: projectM-eval via ns-eel2 shim (see `src/ns-eel2-shim/`)
-- **Main source**: `src/vis_milk2/` (engine, plugin, overlay, text, menu)
+- **Expression eval**: projectM-eval via ns-eel2 (see `src/ns-eel2/`)
+- **Main source**: `src/mDropDX12/` (engine, app, overlay, text, menu)
 - **Audio source**: `src/audio/` (WASAPI loopback capture)
 - **Build**: `powershell -ExecutionPolicy Bypass -File build.ps1 Release`
 - Build outputs: Debug uses `../../Release` as working dir; Release uses exe directory
@@ -93,4 +93,5 @@ See `docs/dx12-migration-status.md` for detailed migration state.
 
 ## License
 
-- 3-Clause BSD License (as BeatDrop fork)
+- CC-BY-NC 4.0 (Creative Commons Attribution-NonCommercial 4.0 International)
+- Third-party components retain their original licenses (see THIRD-PARTY-LICENSES.txt)

@@ -33,7 +33,7 @@
 #include <wincodec.h>
 #pragma comment(lib, "windowscodecs.lib")
 #include <set>
-#include "Milkdrop2PcmVisualizer.h"
+#include "App.h"
 
 namespace mdrop {
 

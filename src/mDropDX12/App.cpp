@@ -166,7 +166,7 @@ using Microsoft::WRL::ComPtr;
 #include "mdropdx12.h"
 #include <locale>
 #include <codecvt>
-#include "Milkdrop2PcmVisualizer.h"
+#include "App.h"
 
 namespace fs = std::filesystem;
 

@@ -685,7 +685,7 @@ D3DVERTEXELEMENT9 g_SpriteVertDecl[] =
 };
 
 //extern CSoundData*   pg_sound;	// declared in main.cpp
-extern Engine g_engine;		// declared in Milkdrop2PcmVisualizer.cpp
+extern Engine g_engine;		// declared in App.cpp
 extern CShaderParamsList global_CShaderParams_master_list; // defined in engine_shaders.cpp
 
 //----------------------------------------------------------------------

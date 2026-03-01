@@ -19,9 +19,9 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectName>MDropDX12Visualizer</ProjectName>
+    <ProjectName>MDropDX12</ProjectName>
     <ProjectGuid>{881FB534-7396-485A-ADC2-6FBEBED7A0F4}</ProjectGuid>
-    <RootNamespace>vis_milk2</RootNamespace>
+    <RootNamespace>mDropDX12</RootNamespace>
     <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -153,7 +153,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <RandomizedBaseAddress>false</RandomizedBaseAddress>
       <DataExecutionPrevention />
-      <ImportLibrary>.\Release/vis_milk2.lib</ImportLibrary>
+      <ImportLibrary>.\Release/mDropDX12.lib</ImportLibrary>
       <TargetMachine>MachineX86</TargetMachine>
     </Link>
     <PostBuildEvent>
@@ -207,10 +207,10 @@
       <DelayLoadDLLs>
       </DelayLoadDLLs>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>.\Debug/vis_milk2.pdb</ProgramDatabaseFile>
+      <ProgramDatabaseFile>.\Debug/mDropDX12.pdb</ProgramDatabaseFile>
       <RandomizedBaseAddress>false</RandomizedBaseAddress>
       <DataExecutionPrevention />
-      <ImportLibrary>.\Debug/vis_milk2.lib</ImportLibrary>
+      <ImportLibrary>.\Debug/mDropDX12.lib</ImportLibrary>
       <TargetMachine>MachineX86</TargetMachine>
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
     </Link>
@@ -272,7 +272,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <RandomizedBaseAddress>true</RandomizedBaseAddress>
       <DataExecutionPrevention />
-      <ImportLibrary>.\Release_x64/vis_milk2.lib</ImportLibrary>
+      <ImportLibrary>.\Release_x64/mDropDX12.lib</ImportLibrary>
       <TargetMachine>MachineX64</TargetMachine>
     </Link>
     <PostBuildEvent>
@@ -326,10 +326,10 @@
       <DelayLoadDLLs>
       </DelayLoadDLLs>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>.\Debug_x64/vis_milk2.pdb</ProgramDatabaseFile>
+      <ProgramDatabaseFile>.\Debug_x64/mDropDX12.pdb</ProgramDatabaseFile>
       <RandomizedBaseAddress>true</RandomizedBaseAddress>
       <DataExecutionPrevention />
-      <ImportLibrary>.\Debug_x64/vis_milk2.lib</ImportLibrary>
+      <ImportLibrary>.\Debug_x64/mDropDX12.lib</ImportLibrary>
       <TargetMachine>MachineX64</TargetMachine>
     </Link>
     <PostBuildEvent>
@@ -357,7 +357,7 @@
     <ClCompile Include="dxcontext.cpp" />
     <ClCompile Include="fft.cpp" />
     <ClCompile Include="menu.cpp" />
-    <ClCompile Include="Milkdrop2PcmVisualizer.cpp" />
+    <ClCompile Include="App.cpp" />
     <ClCompile Include="milkdropfs.cpp" />
     <ClCompile Include="mdropdx12.cpp" />
     <ClCompile Include="engine.cpp" />
@@ -437,7 +437,7 @@
     <ClInclude Include="fft.h" />
     <ClInclude Include="md_defines.h" />
     <ClInclude Include="menu.h" />
-    <ClInclude Include="Milkdrop2PcmVisualizer.h" />
+    <ClInclude Include="App.h" />
     <ClInclude Include="mdropdx12.h" />
     <ClInclude Include="display_output.h" />
     <ClInclude Include="hotkeys.h" />
@@ -458,8 +458,6 @@
     <ResourceCompile Include="engine.rc" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="plugin.dsp" />
-    <None Include="plugin.vcproj" />
     <None Include="text1.bin" />
     <None Include="text1_page2.bin" />
   </ItemGroup>

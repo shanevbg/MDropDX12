@@ -16,7 +16,7 @@
       "type": "shell",
       "command": "msbuild",
       "args": [
-        "${workspaceFolder}\\src\\vis_milk2\\plugin.vcxproj",
+        "${workspaceFolder}\\src\\mDropDX12\\engine.vcxproj",
         "/p:Configuration=Debug",
         "/p:Platform=Win32",
         "/p:PlatformToolset=v143"
@@ -36,7 +36,7 @@
       "type": "shell",
       "command": "msbuild",
       "args": [
-        "${workspaceFolder}\\src\\vis_milk2\\plugin.vcxproj",
+        "${workspaceFolder}\\src\\mDropDX12\\engine.vcxproj",
         "/p:Configuration=Release",
         "/p:Platform=Win32",
         "/p:PlatformToolset=v143"
@@ -47,7 +47,7 @@
     {
       "label": "Build RELEASE",
       "type": "shell",
-      "command": "& { msbuild '${workspaceFolder}\\src\\vis_milk2\\plugin.vcxproj' /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143; $buildExit = $LASTEXITCODE; if ($buildExit -ne 0) { exit $buildExit }; Push-Location -LiteralPath '${workspaceFolder}\\config'; & '.\\release.cmd'; $releaseExit = $LASTEXITCODE; Pop-Location; if ($releaseExit -ne 0) { exit $releaseExit } }",
+      "command": "& { msbuild '${workspaceFolder}\\src\\mDropDX12\\engine.vcxproj' /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143; $buildExit = $LASTEXITCODE; if ($buildExit -ne 0) { exit $buildExit }; Push-Location -LiteralPath '${workspaceFolder}\\config'; & '.\\release.cmd'; $releaseExit = $LASTEXITCODE; Pop-Location; if ($releaseExit -ne 0) { exit $releaseExit } }",
       "group": "build",
       "problemMatcher": "$msCompile"
     },
@@ -63,7 +63,7 @@
       "type": "shell",
       "command": "msbuild",
       "args": [
-        "${workspaceFolder}\\src\\vis_milk2\\plugin.vcxproj",
+        "${workspaceFolder}\\src\\mDropDX12\\engine.vcxproj",
         "/t:Clean",
         "/p:Configuration=Debug",
         "/p:Platform=Win32"

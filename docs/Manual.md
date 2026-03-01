@@ -4,7 +4,7 @@ MDropDX12 is a DirectX 12 music visualizer based on the MilkDrop2 engine. It ren
 
 ## Getting Started
 
-Run `MDropDX12Visualizer.exe`. The visualizer starts in windowed mode, capturing system audio via WASAPI loopback. Play music through any application and visuals will respond automatically.
+Run `MDropDX12.exe`. The visualizer starts in windowed mode, capturing system audio via WASAPI loopback. Play music through any application and visuals will respond automatically.
 
 Press **F1** for the built-in help overlay (press again for page 2, again to close).
 

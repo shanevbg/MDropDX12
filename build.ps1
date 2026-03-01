@@ -54,7 +54,7 @@ if (-not (Test-Path (Join-Path $spoutDir "SPOUTSDK"))) {
 }
 
 # ── 4. Run the build ───────────────────────────────────────────────────────────
-$project = Join-Path $PSScriptRoot "src\vis_milk2\engine.vcxproj"
+$project = Join-Path $PSScriptRoot "src\mDropDX12\engine.vcxproj"
 
 & $msbuild $project `
     /t:$Target `

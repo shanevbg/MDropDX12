@@ -1,6 +1,6 @@
 MDropDX12 - Advanced MilkDrop2 Visualizer with Remote Control
 
-MDropDX12Visualizer.exe: 
+MDropDX12.exe: 
 The Visualizer. You may run and use this independently without the Remote. You can press F8 (or Right+Middle Mouse Button) anytime to start the Remote.
 
 MDropDX12Remote.exe: 

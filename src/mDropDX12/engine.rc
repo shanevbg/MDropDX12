@@ -96,7 +96,7 @@ VALUE "FileDescription", "MDropDX12 Visualizer"
 VALUE "FileVersion", "3.4.0.0"
 VALUE "InternalName", "MDropDX12"
 VALUE "LegalCopyright", ""
-VALUE "OriginalFilename", "MDropDX12Visualizer.exe"
+VALUE "OriginalFilename", "MDropDX12.exe"
 VALUE "ProductName", "MDropDX12 Visualizer"
 VALUE "ProductVersion", "3.4.0.0"
 END

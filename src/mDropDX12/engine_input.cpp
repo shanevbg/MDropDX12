@@ -20,7 +20,7 @@
 #include <cstdint>
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
-#include "Milkdrop2PcmVisualizer.h"
+#include "App.h"
 
 #define FRAND ((rand() % 7381)/7380.0f)
 #define clamp(value, min, max) ((value) < (min) ? (min) : ((value) > (max) ? (max) : (value)))
@@ -1006,7 +1006,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     case VK_F8:
       OpenSettingsWindow();
       return 0;
-      // F9 is handled in Milkdrop2PcmVisualizer.cpp
+      // F9 is handled in App.cpp
     case VK_F10:
       if (bShiftHeldDown)
         EnqueueRenderCmd(RenderCmd::SpoutFixedSize);
@@ -2197,7 +2197,7 @@ int Engine::HandleRegularKey(WPARAM wParam) {
   case 'd':
   case 'D':
     if ((GetKeyState(VK_CONTROL) & 0x8000) == 0) {
-      // Ctrl+D handled in Milkdrop2PcmVisualizer.cpp
+      // Ctrl+D handled in App.cpp
       if (!m_bCompShaderLock && !m_bWarpShaderLock) {
         m_bCompShaderLock = true; m_bWarpShaderLock = false;
         AddNotification(wasabiApiLangString(IDS_COMPSHADER_LOCKED));

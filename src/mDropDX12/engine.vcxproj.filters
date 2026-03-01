@@ -100,7 +100,7 @@
     <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12\SpoutDX12.cpp">
       <Filter>Spout2</Filter>
     </ClCompile>
-    <ClCompile Include="Milkdrop2PcmVisualizer.cpp">
+    <ClCompile Include="App.cpp">
       <Filter>library\sources</Filter>
     </ClCompile>
     <ClCompile Include="mdropdx12.cpp">
@@ -252,7 +252,7 @@
     <ClInclude Include="..\audio\prefs.h">
       <Filter>library\headers</Filter>
     </ClInclude>
-    <ClInclude Include="Milkdrop2PcmVisualizer.h">
+    <ClInclude Include="App.h">
       <Filter>library\headers</Filter>
     </ClInclude>
   </ItemGroup>

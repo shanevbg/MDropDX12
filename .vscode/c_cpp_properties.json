@@ -4,10 +4,8 @@
       "name": "Win32",
       "includePath": [
         "${workspaceFolder}/**",
-        "${workspaceFolder}/src/vis_milk2",
+        "${workspaceFolder}/src/mDropDX12",
         "${workspaceFolder}/src/audio",
-        "${workspaceFolder}/src/spoutDX9",
-        "${workspaceFolder}/src/ns-eel2-shim",
         "${workspaceFolder}/src/lib",
         "${env:DXSDK_DIR}Include",
         "C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um",

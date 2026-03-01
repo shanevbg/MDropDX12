@@ -6,7 +6,7 @@ MDropDX12 incorporates code from the following third-party projects.
 
 1. MilkDrop2 — Nullsoft, Inc.
 ----------------------------------------------------------------------
-Location: src/vis_milk2/ (original engine code)
+Location: src/mDropDX12/ (original engine code, renamed from vis_milk2)
 License:  BSD 3-Clause
 Website:  https://www.geisswerks.com/milkdrop/
 

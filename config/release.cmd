@@ -1,6 +1,6 @@
 set releasePath=..\Release
 set backupPath=..\Release\backup
-set visualizerBuildPath=..\src\vis_milk2\Release
+set visualizerBuildPath=..\src\mDropDX12\Release
 
 copy %releasePath%\settings.ini %backupPath%\settings.ini.bak
 
@@ -13,7 +13,7 @@ del /q %releasePath%\resources\buttons\btn-4*.png
 
 copy *.ini %releasePath%
 copy *.txt %releasePath%
-copy %visualizerBuildPath%\MDropDX12Visualizer.exe %releasePath%
+copy %visualizerBuildPath%\MDropDX12.exe %releasePath%
 
 copy ..\resources\sprites\cover.png %releasePath%\resources\sprites\cover.png
 

@@ -6,9 +6,9 @@ src/**/Release_x64
 **/*.aps
 **/*.suo
 **/*.db
-vis_milk2/bin
+mDropDX12/bin
 /MDropDX12.slnLaunch.user
-/src/vis_milk2/log
+/src/mDropDX12/log
 /install/_Archiv
 /config/roadmap.md
 *.exe

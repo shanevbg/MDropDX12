@@ -5,8 +5,8 @@
 
 !define MUI_ABORTWARNING
 
-!define MUI_ICON "..\resources\icons\MDropDX12Visualizer.ico"
-!define MUI_UNICON "..\resources\icons\MDropDX12Visualizer.ico"
+!define MUI_ICON "..\resources\icons\MDropDX12.ico"
+!define MUI_UNICON "..\resources\icons\MDropDX12.ico"
 
 !define VERSION "3.5"
 !define VER_MAJOR 3
@@ -27,7 +27,7 @@ RequestExecutionLevel user
 
 !define MUI_DIRECTORYPAGE_TEXT_TOP "MDropDX12 needs FULL WRITE ACCESS to its directory! Do NOT install into $\"Program Files$\" or a similar protected location."
 
-!define MUI_FINISHPAGE_RUN "$INSTDIR\MDropDX12Visualizer.exe"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\MDropDX12.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Run MDropDX12 now!"
 
 !define MUI_FINISHPAGE_SHOWREADME "$INSTDIR\README.txt"
@@ -75,7 +75,7 @@ Section "MDropDX12" SecMDropDX12
   File /r "${RELDIR}resources\textures\*"
 
   SetOutPath "$INSTDIR"
-  File "${RELDIR}MDropDX12Visualizer.exe"
+  File "${RELDIR}MDropDX12.exe"
   File "${RELDIR}README.txt"
   SetOverwrite off
   File "${RELDIR}script-default.txt"
@@ -96,7 +96,7 @@ Section "MDropDX12" SecMDropDX12
   WriteRegStr HKCU "${REG_UNINST_KEY}" "InstallLocation" "$INSTDIR"
 
   WriteRegStr HKCU "${REG_UNINST_KEY}" "DisplayName" "MDropDX12 Visualizer"
-  WriteRegStr HKCU "${REG_UNINST_KEY}" "DisplayIcon" "$INSTDIR\MDropDX12Visualizer.exe"
+  WriteRegStr HKCU "${REG_UNINST_KEY}" "DisplayIcon" "$INSTDIR\MDropDX12.exe"
 
   WriteRegStr HKCU "${REG_UNINST_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegDWORD HKCU "${REG_UNINST_KEY}" "VersionMajor" "${VER_MAJOR}"
@@ -139,12 +139,12 @@ SectionEnd
 
 Section "Start menu items"
   ;Create shortcuts
-  CreateShortcut "$SMPROGRAMS\MDropDX12 Visualizer.lnk" "$INSTDIR\MDropDX12Visualizer.exe"
+  CreateShortcut "$SMPROGRAMS\MDropDX12 Visualizer.lnk" "$INSTDIR\MDropDX12.exe"
   CreateShortcut "$SMPROGRAMS\MDropDX12 Uninstall.lnk" "$INSTDIR\Uninstall.exe"
 SectionEnd
 
 Section "Desktop shortcuts"
-  CreateShortcut "$Desktop\MDropDX12 Visualizer.lnk" "$INSTDIR\MDropDX12Visualizer.exe"
+  CreateShortcut "$Desktop\MDropDX12 Visualizer.lnk" "$INSTDIR\MDropDX12.exe"
 SectionEnd
 
 ; Uninstaller
@@ -154,7 +154,7 @@ Section Uninstall
   RMDir /r "$INSTDIR\backup"
   RMDir /r "$INSTDIR\log"
 
-  Delete "$INSTDIR\MDropDX12Visualizer.exe"
+  Delete "$INSTDIR\MDropDX12.exe"
   Delete "$INSTDIR\README.txt"
   Delete "$INSTDIR\script-default.txt"
   Delete "$INSTDIR\midi-default.txt"
