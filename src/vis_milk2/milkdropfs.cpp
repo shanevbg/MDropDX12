@@ -956,8 +956,16 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
     // render string to m_lpDDSTitle, if necessary
     for (int i = 0; i < NUM_SUPERTEXTS; i++) {
       if (m_supertexts[i].fStartTime != -1.0f && m_supertexts[i].bRedrawSuperText) {
+        LARGE_INTEGER freq_, t0_, t1_;
+        QueryPerformanceFrequency(&freq_);
+        QueryPerformanceCounter(&t0_);
         if (!RenderStringToTitleTexture(i))
           m_supertexts[i].fStartTime = -1.0f;
+        QueryPerformanceCounter(&t1_);
+        double ms_ = (double)(t1_.QuadPart - t0_.QuadPart) * 1000.0 / freq_.QuadPart;
+        wchar_t dbg_[256];
+        swprintf_s(dbg_, L"RenderStringToTitleTexture[%d] took %.2f ms\n", i, ms_);
+        DebugLogW(dbg_);
         m_supertexts[i].bRedrawSuperText = false;
       }
     }

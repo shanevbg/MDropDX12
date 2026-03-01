@@ -312,6 +312,7 @@ private:
   float  m_time_hist[TIME_HIST_SLOTS];		// cumulative
   int    m_time_hist_pos;
   LARGE_INTEGER m_prev_end_of_frame;
+  HANDLE m_hFPSTimer = NULL;  // high-resolution waitable timer for FPS limiting
 
   // PRIVATE AUDIO PROCESSING DATA
   FFT   m_fftobj;

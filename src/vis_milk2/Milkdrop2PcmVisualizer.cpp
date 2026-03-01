@@ -1653,6 +1653,25 @@ static void PerformDeviceRecovery() {
 }
 
 void RenderFrame() {
+  static LARGE_INTEGER s_rfFreq = {};
+  static LARGE_INTEGER s_rfPrev = {};
+  static int s_slowFrames = 0;
+  if (!s_rfFreq.QuadPart) { QueryPerformanceFrequency(&s_rfFreq); QueryPerformanceCounter(&s_rfPrev); }
+  LARGE_INTEGER rfNow;
+  QueryPerformanceCounter(&rfNow);
+  double frameDelta = (double)(rfNow.QuadPart - s_rfPrev.QuadPart) * 1000.0 / s_rfFreq.QuadPart;
+  s_rfPrev = rfNow;
+  if (frameDelta > 50.0) { // Log frames taking >50ms (< 20fps)
+    s_slowFrames++;
+    wchar_t dbg[256];
+    swprintf_s(dbg, L"SLOW FRAME #%d: %.1f ms (%.0f fps)\n", s_slowFrames, frameDelta, 1000.0 / frameDelta);
+    DebugLogW(dbg);
+  } else if (s_slowFrames > 0) {
+    wchar_t dbg[256];
+    swprintf_s(dbg, L"SLOW FRAMES ENDED: had %d slow frames, now %.1f ms\n", s_slowFrames, frameDelta);
+    DebugLogW(dbg);
+    s_slowFrames = 0;
+  }
 
   // Process any commands enqueued from the message pump thread
   g_engine.ProcessPendingCommands();

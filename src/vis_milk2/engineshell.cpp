@@ -302,8 +302,27 @@ ID3D12GraphicsCommandList* EngineShell::GetCommandList() {
   return m_lpDX ? m_lpDX->m_commandList.Get() : nullptr;
 }
 
+// CREATE_WAITABLE_TIMER_HIGH_RESOLUTION requires Windows 10 1803+.
+// Define it if the SDK doesn't (older headers).
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+
 int EngineShell::InitNondx9Stuff() {
   timeBeginPeriod(1);
+
+  // Create a high-resolution waitable timer for FPS limiting.
+  // Unlike Sleep(), this is NOT throttled by Windows 11 background-app
+  // timer coalescing, so FPS stays stable during cross-process IPC.
+  m_hFPSTimer = CreateWaitableTimerExW(
+    NULL, NULL,
+    CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+    TIMER_ALL_ACCESS);
+  if (!m_hFPSTimer) {
+    // Fallback: regular waitable timer (still better than Sleep)
+    m_hFPSTimer = CreateWaitableTimerW(NULL, TRUE, NULL);
+  }
+
   m_fftobj.Init(576, NUM_FREQUENCIES);
   if (!InitGDIStuff()) return false;
   return AllocateMyNonDx9Stuff();
@@ -311,6 +330,10 @@ int EngineShell::InitNondx9Stuff() {
 
 void EngineShell::CleanUpNondx9Stuff() {
   timeEndPeriod(1);
+  if (m_hFPSTimer) {
+    CloseHandle(m_hFPSTimer);
+    m_hFPSTimer = NULL;
+  }
   CleanUpMyNonDx9Stuff();
   CleanUpGDIStuff();
   m_fftobj.CleanUp();
@@ -1588,96 +1611,42 @@ void EngineShell::EnforceMaxFPS() {
   if (max_fps <= 0)
     return;
 
-  float fps_lo = (float)max_fps;
-  float fps_hi = (float)max_fps;
+  if (m_high_perf_timer_freq.QuadPart <= 0)
+    return;
 
-  if (m_save_cpu) {
-    // Find the optimal lo/hi bounds for the fps
-    // that will result in a maximum difference,
-    // in the time for a single frame, of 0.003 seconds -
-    // the assumed granularity for Sleep(1) -
+  LARGE_INTEGER now;
+  QueryPerformanceCounter(&now);
 
-    // Using this range of acceptable fps
-    // will allow us to do (sloppy) fps limiting
-    // using only Sleep(1), and never the
-    // second half of it: Sleep(0) in a tight loop,
-    // which sucks up the CPU (whereas Sleep(1)
-    // leaves it idle).
+  if (m_prev_end_of_frame.QuadPart == 0) {
+    m_prev_end_of_frame = now;
+    return;
+  }
 
-    // The original equation:
-    //   1/(max_fps*t1) = 1/(max*fps/t1) - 0.003
-    // where:
-    //   t1 > 0
-    //   max_fps*t1 is the upper range for fps
-    //   max_fps/t1 is the lower range for fps
+  // Target frame duration in QPC ticks
+  __int64 ticks_per_frame = m_high_perf_timer_freq.QuadPart / max_fps;
+  __int64 ticks_elapsed = now.QuadPart - m_prev_end_of_frame.QuadPart;
+  __int64 ticks_remaining = ticks_per_frame - ticks_elapsed;
 
-    float a = 1;
-    float b = -0.003f * max_fps;
-    float c = -1.0f;
-    float det = b * b - 4 * a * c;
-    if (det > 0) {
-      float t1 = (-b + sqrtf(det)) / (2 * a);
-      //float t2 = (-b - sqrtf(det)) / (2*a);
+  // Guard against time wrap or huge gaps
+  if (ticks_elapsed < 0 || ticks_elapsed > m_high_perf_timer_freq.QuadPart * 2) {
+    m_prev_end_of_frame = now;
+    return;
+  }
 
-      if (t1 > 1.0f) {
-        fps_lo = max_fps / t1;
-        fps_hi = max_fps * t1;
-        // verify: now [1.0f/fps_lo - 1.0f/fps_hi] should equal 0.003 seconds.
-        // note: allowing tolerance to go beyond these values for
-        // fps_lo and fps_hi would gain nothing.
-      }
+  if (ticks_remaining > 0 && m_hFPSTimer) {
+    // Convert remaining ticks to 100-nanosecond units (negative = relative time)
+    double seconds_remaining = (double)ticks_remaining / (double)m_high_perf_timer_freq.QuadPart;
+    LARGE_INTEGER dueTime;
+    dueTime.QuadPart = -(LONGLONG)(seconds_remaining * 10000000.0);
+
+    // High-resolution waitable timer: immune to Windows 11 background
+    // timer throttling that causes Sleep() to bloat from 1ms to 15.6ms.
+    if (SetWaitableTimerEx(m_hFPSTimer, &dueTime, 0, NULL, NULL, NULL, 0)) {
+      WaitForSingleObject(m_hFPSTimer, 100);
     }
   }
 
-  if (m_high_perf_timer_freq.QuadPart > 0) {
-    LARGE_INTEGER t;
-    QueryPerformanceCounter(&t);
-
-    if (m_prev_end_of_frame.QuadPart != 0) {
-      int ticks_to_wait_lo = (int)((float)m_high_perf_timer_freq.QuadPart / (float)fps_hi);
-      int ticks_to_wait_hi = (int)((float)m_high_perf_timer_freq.QuadPart / (float)fps_lo);
-      int done = 0;
-      int loops = 0;
-      do {
-        QueryPerformanceCounter(&t);
-
-        __int64 t2 = t.QuadPart - m_prev_end_of_frame.QuadPart;
-        if (t2 > 2147483000)
-          done = 1;
-        if (t.QuadPart < m_prev_end_of_frame.QuadPart)    // time wrap
-          done = 1;
-
-        // this is sloppy - if your freq. is high, this can overflow (to a (-) int) in just a few minutes
-        // but it's ok, we have protection for that above.
-        int ticks_passed = (int)(t.QuadPart - m_prev_end_of_frame.QuadPart);
-        if (ticks_passed >= ticks_to_wait_lo)
-          done = 1;
-
-        if (!done) {
-          // if > 0.01s left, do Sleep(1), which will actually sleep some
-          //   steady amount of up to 3 ms (depending on the OS),
-          //   and do so in a nice way (cpu meter drops; laptop battery spared).
-          // otherwise, do a few Sleep(0)'s, which just give up the timeslice,
-          //   but don't really save cpu or battery, but do pass a tiny
-          //   amount of time.
-
-          //if (ticks_left > (int)m_high_perf_timer_freq.QuadPart/500)
-          if (ticks_to_wait_hi - ticks_passed > (int)m_high_perf_timer_freq.QuadPart / 100)
-            Sleep(5);
-          else if (ticks_to_wait_hi - ticks_passed > (int)m_high_perf_timer_freq.QuadPart / 1000)
-            Sleep(1);
-          else
-            for (int i = 0; i < 10; i++)
-              Sleep(0);  // causes thread to give up its timeslice
-        }
-      } while (!done);
-    }
-
-    m_prev_end_of_frame = t;
-  }
-  else {
-    Sleep(1000 / max_fps);
-  }
+  QueryPerformanceCounter(&m_prev_end_of_frame);
 }
 
 void EngineShell::DoTime() {
