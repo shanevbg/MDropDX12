@@ -783,6 +783,35 @@ public:
   void CreateDX12PresetPSOs();                        // creates PSOs from m_shaders bytecodes
   void DX12_BlurPasses();                             // DX12 implementation of BlurPasses()
 
+  // ── Spout Video Input ──
+  struct SpoutInputState {
+      spoutDX12 receiver;
+      ComPtr<ID3D12Resource> pReceivedTexture;
+      DX12Texture dx12InputTex;
+      UINT nSenderWidth = 0, nSenderHeight = 0;
+      bool bReceiverReady = false;
+      bool bConnected = false;
+  };
+  std::unique_ptr<SpoutInputState> m_spoutInput;
+
+  bool    m_bSpoutInputEnabled = false;
+  bool    m_bSpoutInputOnTop = false;       // false=background, true=overlay
+  float   m_fSpoutInputOpacity = 1.0f;
+  bool    m_bSpoutInputLumaKey = false;
+  float   m_fSpoutInputLumaThreshold = 0.1f;
+  float   m_fSpoutInputLumaSoftness = 0.1f;
+  wchar_t m_szSpoutInputSender[256] = {};
+  ComPtr<ID3D12PipelineState> m_pSpoutInputPSO;
+
+  void InitSpoutInput();
+  void DestroySpoutInput();
+  void UpdateSpoutInputTexture();
+  void CompositeSpoutInput(bool isBackground);
+  void CompileSpoutInputPSO();
+  void EnumerateSpoutSenders(std::vector<std::string>& outNames);
+  void SaveSpoutInputSettings();
+  void LoadSpoutInputSettings();
+
   int               m_nTitleTexSizeX, m_nTitleTexSizeY;
   UINT              m_adapterId;
   MYVERTEX* m_verts;

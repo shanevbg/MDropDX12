@@ -1884,6 +1884,23 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     }
   }
 
+  // ── Spout Video Input: BACKGROUND layer ──
+  // Draw onto VS[0] before warp so video feeds through the preset's warp distortion
+  if (m_bSpoutInputEnabled && !m_bSpoutInputOnTop) {
+    UpdateSpoutInputTexture();
+    if (m_spoutInput && m_spoutInput->bConnected) {
+      m_lpDX->TransitionResource(m_dx12VS[0], D3D12_RESOURCE_STATE_RENDER_TARGET);
+      D3D12_CPU_DESCRIPTOR_HANDLE rtv = m_lpDX->GetRtvCpuHandle(m_dx12VS[0]);
+      cmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+      D3D12_VIEWPORT vpBg = { 0, 0, (float)m_nTexSizeX, (float)m_nTexSizeY, 0.f, 1.f };
+      D3D12_RECT scBg = { 0, 0, (LONG)m_nTexSizeX, (LONG)m_nTexSizeY };
+      cmdList->RSSetViewports(1, &vpBg);
+      cmdList->RSSetScissorRects(1, &scBg);
+      CompositeSpoutInput(true);
+      m_lpDX->TransitionResource(m_dx12VS[0], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    }
+  }
+
   // ── Warp pass: draw mesh from VS0 into VS1 ──
   {
     m_lpDX->TransitionResource(m_dx12VS[0], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -2139,6 +2156,13 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     quad[3].x =  1.f; quad[3].y = -1.f; quad[3].z = 0.f; quad[3].Diffuse = 0xFFFFFFFF;
     quad[3].tu = 1.f; quad[3].tv = 1.f; quad[3].tu_orig = 1.f; quad[3].tv_orig = 1.f; quad[3].rad = 1.f; quad[3].ang = 0.f;
     m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, quad, 4, sizeof(MYVERTEX));
+  }
+
+  // ── Spout Video Input: OVERLAY layer ──
+  // Draw onto backbuffer after comp pass (video on top of preset)
+  if (m_bSpoutInputEnabled && m_bSpoutInputOnTop) {
+    UpdateSpoutInputTexture();
+    CompositeSpoutInput(false);
   }
 
   // ── Draw behind-text sprites (layer 0) on the backbuffer ──

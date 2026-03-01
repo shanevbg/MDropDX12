@@ -243,6 +243,20 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_IDLE_ACTION         2153  // ComboBox: Fullscreen / Stretch-Mirror
 #define IDC_MW_IDLE_AUTO_RESTORE   2154  // Checkbox: auto-restore on input
 
+// Spout Video Input controls (Displays tab)
+#define IDC_MW_SPINPUT_ENABLE       7020
+#define IDC_MW_SPINPUT_SENDER       7021
+#define IDC_MW_SPINPUT_REFRESH      7022
+#define IDC_MW_SPINPUT_LAYER_BG     7023
+#define IDC_MW_SPINPUT_LAYER_OV     7024
+#define IDC_MW_SPINPUT_OPACITY      7025
+#define IDC_MW_SPINPUT_OPACITY_LBL  7026
+#define IDC_MW_SPINPUT_LUMAKEY      7027
+#define IDC_MW_SPINPUT_LUMA_THR     7028
+#define IDC_MW_SPINPUT_LUMA_THR_LBL 7029
+#define IDC_MW_SPINPUT_LUMA_SOFT    7030
+#define IDC_MW_SPINPUT_LUMA_SOFT_LBL 7031
+
 #define IDT_IPC_MONITOR             10001 // Timer ID for IPC message polling
 #define IDT_IDLE_CHECK              10002 // Timer ID for idle detection (1-second interval)
 

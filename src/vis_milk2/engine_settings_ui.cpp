@@ -837,6 +837,28 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_GAMMA_LABEL), buf);
       break;
     }
+    // ── Spout Video Input sliders ──
+    case IDC_MW_SPINPUT_OPACITY: {
+      p->m_fSpoutInputOpacity = pos / 100.0f;
+      wchar_t buf[32]; swprintf(buf, 32, L"%d%%", pos);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_SPINPUT_OPACITY_LBL), buf);
+      p->SaveSpoutInputSettings();
+      break;
+    }
+    case IDC_MW_SPINPUT_LUMA_THR: {
+      p->m_fSpoutInputLumaThreshold = pos / 100.0f;
+      wchar_t buf[32]; swprintf(buf, 32, L"%d%%", pos);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMA_THR_LBL), buf);
+      p->SaveSpoutInputSettings();
+      break;
+    }
+    case IDC_MW_SPINPUT_LUMA_SOFT: {
+      p->m_fSpoutInputLumaSoftness = pos / 100.0f;
+      wchar_t buf[32]; swprintf(buf, 32, L"%d%%", pos);
+      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMA_SOFT_LBL), buf);
+      p->SaveSpoutInputSettings();
+      break;
+    }
     }
     return 0;
   }
@@ -1480,6 +1502,40 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       case IDC_MW_DISP_MIRROR_ALTS:
         p->m_bMirrorModeForAltS = bChecked;
         p->SaveDisplayOutputSettings();
+        return 0;
+      // ── Spout Video Input checkboxes ──
+      case IDC_MW_SPINPUT_ENABLE: {
+        p->m_bSpoutInputEnabled = bChecked;
+        // Enable/disable sub-controls
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_SENDER), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_REFRESH), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LAYER_BG), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LAYER_OV), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_OPACITY), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMAKEY), bChecked);
+        bool lumaOn = bChecked && p->m_bSpoutInputLumaKey;
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMA_THR), lumaOn);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMA_SOFT), lumaOn);
+        if (bChecked)
+          p->InitSpoutInput();
+        else
+          p->DestroySpoutInput();
+        p->SaveSpoutInputSettings();
+        return 0;
+      }
+      case IDC_MW_SPINPUT_LUMAKEY: {
+        p->m_bSpoutInputLumaKey = bChecked;
+        bool lumaOn = p->m_bSpoutInputEnabled && bChecked;
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMA_THR), lumaOn);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMA_SOFT), lumaOn);
+        p->SaveSpoutInputSettings();
+        return 0;
+      }
+      case IDC_MW_SPINPUT_LAYER_BG:
+        if (bChecked) { p->m_bSpoutInputOnTop = false; p->SaveSpoutInputSettings(); }
+        return 0;
+      case IDC_MW_SPINPUT_LAYER_OV:
+        if (bChecked) { p->m_bSpoutInputOnTop = true; p->SaveSpoutInputSettings(); }
         return 0;
       case IDC_MW_QUALITY_AUTO:
         p->bQualityAuto = bChecked;
@@ -2139,6 +2195,46 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         return 0;
       }
       }
+    }
+
+    // ===== Spout Video Input handlers =====
+    if (code == BN_CLICKED && id == IDC_MW_SPINPUT_REFRESH) {
+      HWND hCombo = GetDlgItem(hWnd, IDC_MW_SPINPUT_SENDER);
+      if (hCombo) {
+        // Remember current selection text
+        wchar_t curSel[256] = {};
+        int idx = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
+        if (idx > 0) SendMessageW(hCombo, CB_GETLBTEXT, idx, (LPARAM)curSel);
+        SendMessage(hCombo, CB_RESETCONTENT, 0, 0);
+        SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"(Auto - first available)");
+        std::vector<std::string> senders;
+        p->EnumerateSpoutSenders(senders);
+        int newSel = 0;
+        for (int i = 0; i < (int)senders.size(); i++) {
+          wchar_t wName[256];
+          MultiByteToWideChar(CP_ACP, 0, senders[i].c_str(), -1, wName, 256);
+          SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)wName);
+          if (curSel[0] && _wcsicmp(wName, curSel) == 0) newSel = i + 1;
+        }
+        SendMessage(hCombo, CB_SETCURSEL, newSel, 0);
+      }
+      return 0;
+    }
+    if (code == CBN_SELCHANGE && id == IDC_MW_SPINPUT_SENDER) {
+      HWND hCombo = (HWND)lParam;
+      int sel = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
+      if (sel <= 0) {
+        p->m_szSpoutInputSender[0] = L'\0';
+      } else {
+        SendMessageW(hCombo, CB_GETLBTEXT, sel, (LPARAM)p->m_szSpoutInputSender);
+      }
+      // Reinitialize receiver with new sender name
+      if (p->m_bSpoutInputEnabled) {
+        p->DestroySpoutInput();
+        p->InitSpoutInput();
+      }
+      p->SaveSpoutInputSettings();
+      return 0;
     }
 
     // ===== Sprites tab button handlers (BN_CLICKED) =====
@@ -3728,6 +3824,108 @@ void Engine::BuildSettingsControls() {
   y += lineH + gap;
   PAGE_CTRL(9, CreateCheck(hw, L"Use mirrors for ALT-S (instead of stretch)",
     IDC_MW_DISP_MIRROR_ALTS, x, y, rw, lineH, hFont, false, m_bMirrorModeForAltS));
+  y += lineH + gap + 8;
+
+  // ── Video Input (Spout) ──
+  PAGE_CTRL(9, CreateLabel(hw, L"Video Input (Spout)", x, y, rw, lineH, hFontBold, false));
+  y += lineH + gap;
+
+  PAGE_CTRL(9, CreateCheck(hw, L"Enable", IDC_MW_SPINPUT_ENABLE, x, y, rw / 3, lineH, hFont, m_bSpoutInputEnabled, false));
+  y += lineH + gap;
+
+  // Sender combo + Refresh button
+  {
+    int sLbl = MulDiv(70, lineH, 26);
+    int refreshW = MulDiv(72, lineH, 26);
+    PAGE_CTRL(9, CreateLabel(hw, L"Sender:", x, y, sLbl, lineH, hFont, false));
+    HWND hCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
+      WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+      x + sLbl + 4, y, rw - sLbl - 4 - refreshW - 8, lineH * 8, hw,
+      (HMENU)(INT_PTR)IDC_MW_SPINPUT_SENDER, GetModuleHandle(NULL), NULL);
+    if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    // Populate with available senders
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"(Auto - first available)");
+    std::vector<std::string> senders;
+    EnumerateSpoutSenders(senders);
+    int selIdx = 0;
+    for (int i = 0; i < (int)senders.size(); i++) {
+      wchar_t wName[256];
+      MultiByteToWideChar(CP_ACP, 0, senders[i].c_str(), -1, wName, 256);
+      SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)wName);
+      if (m_szSpoutInputSender[0] && _wcsicmp(wName, m_szSpoutInputSender) == 0)
+        selIdx = i + 1;
+    }
+    SendMessage(hCombo, CB_SETCURSEL, selIdx, 0);
+    if (!m_bSpoutInputEnabled) EnableWindow(hCombo, FALSE);
+    PAGE_CTRL(9, hCombo);
+    PAGE_CTRL(9, CreateBtn(hw, L"Refresh", IDC_MW_SPINPUT_REFRESH, x + rw - refreshW, y, refreshW, lineH, hFont));
+    if (!m_bSpoutInputEnabled) EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_REFRESH), FALSE);
+  }
+  y += lineH + gap;
+
+  // Layer radio: Background / Overlay
+  {
+    int layLbl = MulDiv(50, lineH, 26);
+    int radioW = MulDiv(110, lineH, 26);
+    PAGE_CTRL(9, CreateLabel(hw, L"Layer:", x, y, layLbl, lineH, hFont, false));
+    PAGE_CTRL(9, CreateRadio(hw, L"Background", IDC_MW_SPINPUT_LAYER_BG, x + layLbl + 4, y, radioW, lineH, hFont, !m_bSpoutInputOnTop, true, false));
+    PAGE_CTRL(9, CreateRadio(hw, L"Overlay", IDC_MW_SPINPUT_LAYER_OV, x + layLbl + 4 + radioW + 4, y, radioW, lineH, hFont, m_bSpoutInputOnTop, false, false));
+    if (!m_bSpoutInputEnabled) {
+      EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LAYER_BG), FALSE);
+      EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LAYER_OV), FALSE);
+    }
+  }
+  y += lineH + gap;
+
+  // Opacity slider 0-100%
+  {
+    int slLbl = MulDiv(80, lineH, 26);
+    int valW = MulDiv(50, lineH, 26);
+    PAGE_CTRL(9, CreateLabel(hw, L"Opacity:", x, y, slLbl, lineH, hFont, false));
+    PAGE_CTRL(9, CreateSlider(hw, IDC_MW_SPINPUT_OPACITY, x + slLbl + 4, y, rw - slLbl - 4 - valW, lineH, 0, 100, (int)(m_fSpoutInputOpacity * 100), false));
+    wchar_t buf2[32]; swprintf(buf2, 32, L"%d%%", (int)(m_fSpoutInputOpacity * 100));
+    PAGE_CTRL(9, CreateLabel(hw, buf2, x + rw - valW, y, valW, lineH, hFont, false));
+    HWND hLbl = m_settingsPageCtrls[9].back();
+    SetWindowLongPtrW(hLbl, GWLP_ID, IDC_MW_SPINPUT_OPACITY_LBL);
+    if (!m_bSpoutInputEnabled) EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_OPACITY), FALSE);
+  }
+  y += lineH + gap;
+
+  // Luma Key checkbox
+  PAGE_CTRL(9, CreateCheck(hw, L"Luma Key", IDC_MW_SPINPUT_LUMAKEY, x, y, rw / 3, lineH, hFont, m_bSpoutInputLumaKey, false));
+  if (!m_bSpoutInputEnabled) EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LUMAKEY), FALSE);
+  y += lineH + gap;
+
+  // Threshold slider 0-100%
+  {
+    int indent = MulDiv(16, lineH, 26);
+    int slLbl = MulDiv(90, lineH, 26);
+    int valW = MulDiv(50, lineH, 26);
+    PAGE_CTRL(9, CreateLabel(hw, L"Threshold:", x + indent, y, slLbl, lineH, hFont, false));
+    PAGE_CTRL(9, CreateSlider(hw, IDC_MW_SPINPUT_LUMA_THR, x + indent + slLbl + 4, y, rw - indent - slLbl - 4 - valW, lineH, 0, 100, (int)(m_fSpoutInputLumaThreshold * 100), false));
+    wchar_t buf2[32]; swprintf(buf2, 32, L"%d%%", (int)(m_fSpoutInputLumaThreshold * 100));
+    PAGE_CTRL(9, CreateLabel(hw, buf2, x + rw - valW, y, valW, lineH, hFont, false));
+    HWND hLbl = m_settingsPageCtrls[9].back();
+    SetWindowLongPtrW(hLbl, GWLP_ID, IDC_MW_SPINPUT_LUMA_THR_LBL);
+    if (!m_bSpoutInputEnabled || !m_bSpoutInputLumaKey)
+      EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LUMA_THR), FALSE);
+  }
+  y += lineH + gap;
+
+  // Softness slider 0-100%
+  {
+    int indent = MulDiv(16, lineH, 26);
+    int slLbl = MulDiv(90, lineH, 26);
+    int valW = MulDiv(50, lineH, 26);
+    PAGE_CTRL(9, CreateLabel(hw, L"Softness:", x + indent, y, slLbl, lineH, hFont, false));
+    PAGE_CTRL(9, CreateSlider(hw, IDC_MW_SPINPUT_LUMA_SOFT, x + indent + slLbl + 4, y, rw - indent - slLbl - 4 - valW, lineH, 0, 100, (int)(m_fSpoutInputLumaSoftness * 100), false));
+    wchar_t buf2[32]; swprintf(buf2, 32, L"%d%%", (int)(m_fSpoutInputLumaSoftness * 100));
+    PAGE_CTRL(9, CreateLabel(hw, buf2, x + rw - valW, y, valW, lineH, hFont, false));
+    HWND hLbl = m_settingsPageCtrls[9].back();
+    SetWindowLongPtrW(hLbl, GWLP_ID, IDC_MW_SPINPUT_LUMA_SOFT_LBL);
+    if (!m_bSpoutInputEnabled || !m_bSpoutInputLumaKey)
+      EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LUMA_SOFT), FALSE);
+  }
 
   // ===== About tab (page 10) =====
   y = tabTop + 10;
@@ -3947,9 +4145,11 @@ void Engine::LayoutSettingsControls() {
   }
 
   // Stretch sliders + reposition value labels
-  int sliderIDs[] = { IDC_MW_OPACITY, IDC_MW_RENDER_QUALITY, IDC_MW_COL_HUE, IDC_MW_COL_SAT, IDC_MW_COL_BRIGHT };
-  int labelIDs[] = { IDC_MW_OPACITY_LABEL, IDC_MW_QUALITY_LABEL, IDC_MW_COL_HUE_LABEL, IDC_MW_COL_SAT_LABEL, IDC_MW_COL_BRIGHT_LABEL };
-  for (int i = 0; i < 5; i++) {
+  int sliderIDs[] = { IDC_MW_OPACITY, IDC_MW_RENDER_QUALITY, IDC_MW_COL_HUE, IDC_MW_COL_SAT, IDC_MW_COL_BRIGHT,
+                      IDC_MW_SPINPUT_OPACITY, IDC_MW_SPINPUT_LUMA_THR, IDC_MW_SPINPUT_LUMA_SOFT };
+  int labelIDs[] = { IDC_MW_OPACITY_LABEL, IDC_MW_QUALITY_LABEL, IDC_MW_COL_HUE_LABEL, IDC_MW_COL_SAT_LABEL, IDC_MW_COL_BRIGHT_LABEL,
+                     IDC_MW_SPINPUT_OPACITY_LBL, IDC_MW_SPINPUT_LUMA_THR_LBL, IDC_MW_SPINPUT_LUMA_SOFT_LBL };
+  for (int i = 0; i < 8; i++) {
     HWND hSlider = GetDlgItem(m_hSettingsWnd, sliderIDs[i]);
     HWND hLabel = GetDlgItem(m_hSettingsWnd, labelIDs[i]);
     if (hSlider) {
@@ -4123,6 +4323,22 @@ void Engine::LayoutSettingsControls() {
       int pad = 8;
       moveCtrl(IDC_MW_IPC_MSG_TEXT, rg.left + pad, rg.top + lineH + 2,
                rg.right - rg.left - pad * 2, rg.bottom - rg.top - lineH - pad - 2);
+    }
+  }
+
+  // Stretch Spout Input sender combo + reposition Refresh button
+  {
+    HWND hCombo = GetDlgItem(m_hSettingsWnd, IDC_MW_SPINPUT_SENDER);
+    HWND hRefresh = GetDlgItem(m_hSettingsWnd, IDC_MW_SPINPUT_REFRESH);
+    if (hCombo) {
+      RECT r; GetWindowRect(hCombo, &r);
+      MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+      int refreshW = MulDiv(72, lineH, 26);
+      int comboW = rw - (r.left - rcDisplay.left) - 16 - refreshW - 8;
+      if (comboW > 60) {
+        MoveWindow(hCombo, r.left, r.top, comboW, r.bottom - r.top, TRUE);
+        if (hRefresh) MoveWindow(hRefresh, r.left + comboW + 8, r.top, refreshW, r.bottom - r.top, TRUE);
+      }
     }
   }
 

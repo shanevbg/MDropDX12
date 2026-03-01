@@ -1188,6 +1188,9 @@ void Engine::MyReadConfig() {
   // Idle timer (screensaver mode)
   LoadIdleTimerSettings();
 
+  // Spout video input
+  LoadSpoutInputSettings();
+
   m_nInjectEffectMode = GetPrivateProfileIntW(L"Settings", L"nInjectEffectMode", 0, pIni);
   m_nInjectEffectMode = max(0, min(4, m_nInjectEffectMode)); // clamp to valid range
   // ======================================
@@ -2373,6 +2376,9 @@ int Engine::AllocateMyDX9Stuff() {
         DebugLogA(m_pInjectEffectPSO ? "DX12: Inject effect PSO: created" : "DX12: Inject effect PSO: create FAILED");
       }
     }
+
+    // Spout video input luma-key PSO (alpha blended)
+    CompileSpoutInputPSO();
   }
 
   m_fAspectX = (m_nTexSizeY > m_nTexSizeX) ? m_nTexSizeX / (float)m_nTexSizeY : 1.0f;
@@ -2998,6 +3004,8 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
     m_dx12VS[1].Reset();
     m_injectEffectTex.Reset();
     m_pInjectEffectPSO.Reset();
+    m_pSpoutInputPSO.Reset();
+    DestroySpoutInput();
 #if (NUM_BLUR_TEX > 0)
     for (int bi = 0; bi < NUM_BLUR_TEX; bi++)
       m_dx12Blur[bi].Reset();
