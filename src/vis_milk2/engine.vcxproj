@@ -439,6 +439,7 @@
     <ClInclude Include="display_output.h" />
     <ClInclude Include="engine.h" />
     <ClInclude Include="engineshell.h" />
+    <ClInclude Include="render_commands.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="shell_defines.h" />
     <ClInclude Include="state.h" />

@@ -415,29 +415,23 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     ToggleAlwaysOnTop(GetPluginWindow());
     return 0;
   case WM_MW_TOGGLE_SPOUT:
-    ToggleSpout();
+    EnqueueRenderCmd(RenderCmd::ToggleSpout);
     return 0;
   case WM_MW_RESET_BUFFERS:
-    ResetBufferAndFonts();
+    EnqueueRenderCmd(RenderCmd::ResetBuffers);
     return 0;
   case WM_MW_RESTART_DEVICE:
-    m_bDeviceRecoveryPending = true;
+    EnqueueRenderCmd(RenderCmd::DeviceRecovery);
     return 0;
   case WM_MW_SPOUT_FIXEDSIZE:
-    SetSpoutFixedSize(false, true);
+    EnqueueRenderCmd(RenderCmd::SpoutFixedSize);
     return 0;
   case WM_MW_PUSH_MESSAGE:
     LaunchCustomMessage((int)wParam);
     return 0;
 
   case WM_MW_REFRESH_DISPLAYS:
-    // Re-enumerate monitors, destroy mirrors for disconnected ones
-    for (auto& out : m_displayOutputs) {
-        if (out.config.type == DisplayOutputType::Monitor && out.monitorState)
-            DestroyDisplayOutput(out);
-    }
-    EnumerateDisplayOutputs();
-    RefreshDisplaysTab();
+    EnqueueRenderCmd(RenderCmd::RefreshDisplays);
     return 0;
 
   case WM_DISPLAYCHANGE:
@@ -446,13 +440,22 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     return 0;
 
   case WM_MW_PUSH_SPRITE:
-    // Queue for next frame — LoadTex needs an open command list (BeginFrame)
-    m_pendingSpriteLoads.push_back({(int)wParam, (int)lParam});
+  {
+    RenderCommand cmd;
+    cmd.cmd = RenderCmd::PushSprite;
+    cmd.iParam1 = (int)wParam;
+    cmd.iParam2 = (int)lParam;
+    EnqueueRenderCmd(std::move(cmd));
     return 0;
-
+  }
   case WM_MW_KILL_SPRITE:
-    KillSprite((int)wParam);
+  {
+    RenderCommand cmd;
+    cmd.cmd = RenderCmd::KillSprite;
+    cmd.iParam1 = (int)wParam;
+    EnqueueRenderCmd(std::move(cmd));
     return 0;
+  }
 
   case WM_MW_RESTART_IPC:
   {
@@ -470,25 +473,26 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
 
   // Milkwave Remote messages (forwarded from IPC window)
   case WM_MW_NEXT_PRESET:
-    if (!m_bPresetLockedByCode)
-      LoadRandomPreset(m_fBlendTimeUser);
-    return 0;
-  case WM_MW_PREV_PRESET:
-    PrevPreset(0);
-    m_fHardCutThresh *= 2.0f;
-    return 0;
-  case WM_MW_CAPTURE:
   {
-    wchar_t filename[MAX_PATH];
-    if (CaptureScreenshotWithFilename(filename, MAX_PATH)) {
-      wchar_t msg[MAX_PATH + 32];
-      swprintf_s(msg, MAX_PATH + 32, L"capture/%s saved", filename);
-      AddNotification(msg);
-    }
+    RenderCommand cmd;
+    cmd.cmd = RenderCmd::NextPreset;
+    cmd.fParam = m_fBlendTimeUser;
+    EnqueueRenderCmd(std::move(cmd));
     return 0;
   }
+  case WM_MW_PREV_PRESET:
+  {
+    RenderCommand cmd;
+    cmd.cmd = RenderCmd::PrevPreset;
+    cmd.fParam = 0.0f;
+    EnqueueRenderCmd(std::move(cmd));
+    return 0;
+  }
+  case WM_MW_CAPTURE:
+    EnqueueRenderCmd(RenderCmd::CaptureScreenshot);
+    return 0;
   case WM_MW_ENABLESPOUTMIX:
-    ToggleSpout();
+    EnqueueRenderCmd(RenderCmd::ToggleSpout);
     return 0;
   case WM_MW_COVER_CHANGED:
   case WM_MW_SPRITE_MODE:
@@ -514,14 +518,17 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     wchar_t* message = (wchar_t*)lParam;
     DWORD_PTR dwData = (DWORD_PTR)wParam;
     if (message) {
-      // Capture for IPC monitor
+      // Capture for IPC monitor (lightweight, stays on message pump thread)
       SYSTEMTIME st; GetLocalTime(&st);
       swprintf_s(g_szLastIPCTime, L"%02d:%02d:%02d", st.wHour, st.wMinute, st.wSecond);
       wcsncpy_s(g_szLastIPCMessage, message, _TRUNCATE);
       g_lastIPCMessageSeq.fetch_add(1);
 
       if (dwData == 1) {
-        LaunchMessage(message);
+        RenderCommand cmd;
+        cmd.cmd = RenderCmd::IPCMessage;
+        cmd.sParam = message;
+        EnqueueRenderCmd(std::move(cmd));
       }
       // Future: handle other dwData values (e.g., WM_SETSPOUTSENDER)
       free(message);
@@ -818,19 +825,8 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     case VK_F2:
       if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
         // Ctrl+F2: kill switch — disable all display outputs
-        for (auto& out : m_displayOutputs) {
-          if (out.config.bEnabled) {
-            out.config.bEnabled = false;
-            if (out.config.type == DisplayOutputType::Spout) {
-              // Sync legacy bSpoutOut for first Spout
-              bSpoutOut = false;
-            }
-          }
-        }
-        m_bMirrorsActive = false;  // Also deactivate mirror toggle
-        // Mirrors will be cleaned up by SendToDisplayOutputs on next frame
+        EnqueueRenderCmd(RenderCmd::DisableAllOutputs);
         AddNotification(L"All display outputs disabled");
-        RefreshDisplaysTab();
       }
       return 0;
     case VK_F3:
@@ -904,12 +900,10 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
       return 0;
       // F9 is handled in Milkdrop2PcmVisualizer.cpp
     case VK_F10:
-      if (bShiftHeldDown) {
-        SetSpoutFixedSize(true, true);
-      }
-      else {
-        ToggleSpout();
-      }
+      if (bShiftHeldDown)
+        EnqueueRenderCmd(RenderCmd::SpoutFixedSize);
+      else
+        EnqueueRenderCmd(RenderCmd::ToggleSpout);
       return 0;
     case VK_F11:
     {
@@ -947,7 +941,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
         float newQuality = clamp(m_fRenderQuality * multiplier, 0.01f, 1.0f);
         if (fabsf(newQuality - m_fRenderQuality) > 0.0001f) {
           m_fRenderQuality = newQuality;
-          ResetBufferAndFonts();
+          EnqueueRenderCmd(RenderCmd::ResetBuffers);
           SendSettingsInfoToMDropDX12Remote();
         }
         return 0;
@@ -1536,14 +1530,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     case 'X':
       if (m_UI_mode == UI_REGULAR) {
         if ((GetKeyState(VK_CONTROL) & mask) != 0) {
-          wchar_t filename[MAX_PATH];
-          if (CaptureScreenshotWithFilename(filename, MAX_PATH)) {
-            wchar_t msg[MAX_PATH + 32];
-            swprintf_s(msg, MAX_PATH + 32, L"capture/%s saved", filename);
-            AddNotification(msg);
-          } else {
-            AddNotification(L"Failed to save screenshot");
-          }
+          EnqueueRenderCmd(RenderCmd::CaptureScreenshot);
           return 0;
         }
         AddError(L"Play/Pause", m_MediaKeyNotifyTime, ERR_NOTIFY, false);
@@ -1585,7 +1572,10 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
       if (m_UI_mode == UI_LOAD)
         goto HitEnterFromLoadMenu;
       if (!m_bPresetLockedByCode) {
-        LoadRandomPreset(m_fBlendTimeUser);
+        RenderCommand cmd;
+        cmd.cmd = RenderCmd::NextPreset;
+        cmd.fParam = m_fBlendTimeUser;
+        EnqueueRenderCmd(std::move(cmd));
         return 0; // we processed (or absorbed) the key
       }
       break;
@@ -2593,5 +2583,96 @@ void Engine::WaitString_SeekDownOneLine() {
   }
 }
 
+
+// ─── Render Command Dispatch ─────────────────────────────────────────────────
+
+void Engine::ExecuteRenderCommand(const RenderCommand& cmd) {
+  switch (cmd.cmd) {
+    case RenderCmd::ResetBuffers:
+      ResetBufferAndFonts();
+      break;
+    case RenderCmd::ResizeWindow:
+      OnUserResizeWindow();
+      break;
+    case RenderCmd::DeviceRecovery:
+      m_bDeviceRecoveryPending = true;
+      break;
+    case RenderCmd::ToggleSpout:
+      ToggleSpout();
+      break;
+    case RenderCmd::SpoutFixedSize:
+      SetSpoutFixedSize(false, true);
+      break;
+    case RenderCmd::RefreshDisplays:
+      for (auto& out : m_displayOutputs) {
+        if (out.config.type == DisplayOutputType::Monitor && out.monitorState)
+          DestroyDisplayOutput(out);
+      }
+      EnumerateDisplayOutputs();
+      RefreshDisplaysTab();
+      break;
+    case RenderCmd::NextPreset:
+      if (!m_bPresetLockedByCode)
+        LoadRandomPreset(cmd.fParam > 0 ? cmd.fParam : m_fBlendTimeUser);
+      break;
+    case RenderCmd::PrevPreset:
+      PrevPreset(cmd.fParam);
+      m_fHardCutThresh *= 2.0f;
+      break;
+    case RenderCmd::LoadPreset:
+      if (!m_bPresetLockedByCode)
+        LoadRandomPreset(cmd.fParam > 0 ? cmd.fParam : m_fBlendTimeUser);
+      break;
+    case RenderCmd::CaptureScreenshot:
+    {
+      wchar_t filename[MAX_PATH];
+      if (CaptureScreenshotWithFilename(filename, MAX_PATH)) {
+        wchar_t msg[MAX_PATH + 32];
+        swprintf_s(msg, MAX_PATH + 32, L"capture/%s saved", filename);
+        AddNotification(msg);
+      }
+      break;
+    }
+    case RenderCmd::IPCMessage:
+      if (!cmd.sParam.empty()) {
+        // LaunchMessage takes non-const wchar_t*; make a mutable copy
+        std::wstring msgCopy = cmd.sParam;
+        {
+          LARGE_INTEGER freq, t0, t1;
+          QueryPerformanceFrequency(&freq);
+          QueryPerformanceCounter(&t0);
+          LaunchMessage(msgCopy.data());
+          QueryPerformanceCounter(&t1);
+          double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / freq.QuadPart;
+          wchar_t dbg[512];
+          swprintf_s(dbg, L"IPC LaunchMessage took %.2f ms for: %.80s\n", ms, msgCopy.c_str());
+          DebugLogW(dbg);
+        }
+      }
+      break;
+    case RenderCmd::PushSprite:
+      m_pendingSpriteLoads.push_back({cmd.iParam1, cmd.iParam2});
+      break;
+    case RenderCmd::KillSprite:
+      KillSprite(cmd.iParam1);
+      break;
+    case RenderCmd::LoadShaders:
+      // Handled during preset load; placeholder for future use
+      break;
+    case RenderCmd::DisableAllOutputs:
+      for (auto& out : m_displayOutputs) {
+        out.config.bEnabled = false;
+        if (out.monitorState)
+          DestroyDisplayOutput(out);
+      }
+      m_bMirrorsActive = false;
+      SaveDisplayOutputSettings();
+      RefreshDisplaysTab();
+      break;
+    case RenderCmd::Quit:
+      // Handled by the render loop directly
+      break;
+  }
+}
 
 } // namespace mdrop

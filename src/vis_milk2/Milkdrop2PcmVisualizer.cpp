@@ -218,7 +218,11 @@ wchar_t m_szAudioDevicePrevious[MAX_PATH];
 
 HANDLE hThreadLoopbackCapture;
 
-bool pauseRender = false;
+// --- Render thread (Phase 3: separate from message pump) ---
+static HANDLE g_hDX12RenderThread = nullptr;
+static unsigned g_nDX12RenderThreadId = 0;
+std::atomic<bool> g_bQuitRequested{false};
+std::atomic<bool> g_bRenderReady{false};
 
 static HICON icon = nullptr;
 
@@ -1209,6 +1213,19 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   case WM_CLOSE:
   {
     g_engine.SaveWindowSizeAndPosition(hWnd);
+
+    // Signal render thread to exit its loop
+    g_bQuitRequested.store(true);
+
+    // Wait for render thread to finish DX12 cleanup before destroying the window
+    if (g_hDX12RenderThread) {
+      mdropdx12.LogInfo(L"WM_CLOSE: Waiting for render thread to exit...");
+      WaitForSingleObject(g_hDX12RenderThread, 5000);
+      CloseHandle(g_hDX12RenderThread);
+      g_hDX12RenderThread = nullptr;
+      mdropdx12.LogInfo(L"WM_CLOSE: Render thread exited");
+    }
+
     DestroyWindow(hWnd);
     UnregisterClassW(L"Direct3DWindowClass", NULL);
     return 0;
@@ -1459,8 +1476,8 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 
   case WM_SYSKEYDOWN:
   {
-    if (wParam == VK_F4) { // SPOUT ??
-      PostQuitMessage(0);
+    if (wParam == VK_F4) { // Alt+F4: close via WM_CLOSE for proper render thread shutdown
+      PostMessage(hWnd, WM_CLOSE, 0, 0);
     }
     else if (wParam == 'S' || wParam == 's') {
       ToggleStretch(hWnd);
@@ -1637,6 +1654,9 @@ static void PerformDeviceRecovery() {
 
 void RenderFrame() {
 
+  // Process any commands enqueued from the message pump thread
+  g_engine.ProcessPendingCommands();
+
   // Check for user-triggered device restart BEFORE rendering
   // (avoids submitting commands to a doomed/crashed device)
   if (g_engine.m_bDeviceRecoveryPending) {
@@ -1736,6 +1756,94 @@ void RenderFrame() {
   if (g_engine.m_bDeviceRecoveryPending) {
     PerformDeviceRecovery();
   }
+}
+
+// --- Render thread entry point (Phase 3) ---
+// Owns all DX12 state: init, render loop, cleanup.
+// Runs on a dedicated thread; message pump runs on the caller thread.
+struct RenderThreadParams {
+  HWND hwnd;
+  unsigned int backbufferWidth;
+  unsigned int backbufferHeight;
+};
+
+unsigned __stdcall RenderThreadProc(void* data) {
+  RenderThreadParams* params = (RenderThreadParams*)data;
+  HWND hwnd = params->hwnd;
+  unsigned int BackbufferWidth = params->backbufferWidth;
+  unsigned int BackbufferHeight = params->backbufferHeight;
+  delete params;
+
+  try {
+    mdropdx12.LogInfo(L"RenderThread: InitD3d");
+    InitD3d(hwnd, BackbufferWidth, BackbufferHeight);
+
+    mdropdx12.LogInfo(L"RenderThread: PluginInitialize");
+    g_engine.PluginInitialize(
+      pD3DDevice.Get(),
+      pCommandQueue.Get(),
+      pDXGIFactory.Get(),
+      hwnd,
+      BackbufferWidth,
+      BackbufferHeight);
+
+    // Force dimension correction: WM_SIZE from ShowWindow was missed because m_lpDX
+    // was null at that time. Verify dimensions match the actual client rect now.
+    if (g_engine.m_lpDX && g_engine.m_lpDX->m_ready) {
+      RECT rc;
+      GetClientRect(hwnd, &rc);
+      int actualW = rc.right - rc.left;
+      int actualH = rc.bottom - rc.top;
+      if (actualW > 0 && actualH > 0 &&
+          (actualW != g_engine.m_lpDX->m_client_width ||
+           actualH != g_engine.m_lpDX->m_client_height)) {
+        wchar_t dbg[256];
+        swprintf(dbg, 256, L"DX12 init correction: swap chain %dx%d -> client %dx%d\n",
+                 g_engine.m_lpDX->m_client_width, g_engine.m_lpDX->m_client_height,
+                 actualW, actualH);
+        DebugLogW(dbg);
+        g_engine.OnUserResizeWindow();
+      }
+    }
+
+    g_engine.StartIpcWorkerThread();
+    g_bRenderReady.store(true);
+
+    mdropdx12.LogInfo(L"RenderThread: Render loop starting");
+    unsigned int frame = 0;
+
+    while (!g_bQuitRequested.load()) {
+      try {
+        GetAudioBuf(pcmLeftIn, pcmRightIn, SAMPLE_SIZE);
+        RenderFrame();
+      } catch (const std::exception& e) {
+        try {
+          std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+          std::wstring emsg = converter.from_bytes(e.what());
+          std::wstring logMsg = L"Exception in render loop: " + emsg;
+          mdropdx12.LogInfo(logMsg);
+        } catch (...) {
+          mdropdx12.LogInfo(L"Exception in render loop (failed to convert exception message)");
+        }
+      } catch (...) {
+        mdropdx12.LogInfo(L"Unknown non-standard exception in render loop");
+      }
+      frame++;
+    }
+
+    mdropdx12.LogInfo(L"RenderThread: Render loop ended, cleaning up");
+  } catch (const std::exception& e) {
+    mdropdx12.LogException(L"RenderThread: Exception in render thread", e, true);
+  }
+
+  // Clean up: stop IPC worker, write config, plugin quit, deinit D3D
+  g_engine.StopIpcWorkerThread();
+  g_engine.MyWriteConfig();
+  g_engine.PluginQuit();
+  DeinitD3d();
+
+  mdropdx12.LogInfo(L"RenderThread: Exiting");
+  return 0;
 }
 
 unsigned __stdcall CreateWindowAndRun(void* data) {
@@ -1927,14 +2035,10 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   mdropdx12.doPoll = g_engine.m_SongInfoPollingEnabled;
   mdropdx12.doSaveCover = g_engine.m_DisplayCover;
 
-  unsigned int frame = 0;
-
-
   // MDropDX12: Moved to StartThreads()
   // g_engine.PluginPreInitialize(0, 0);
 
   // SPOUT
-
   // Use actual client area dimensions (not window dimensions which include title bar + borders)
   RECT clientRect;
   GetClientRect(hwnd, &clientRect);
@@ -1950,82 +2054,61 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
     BackbufferHeight = g_engine.nSpoutFixedHeight;
   }
 
-  mdropdx12.LogInfo(L"CreateWindowAndRun: InitD3d");
-  InitD3d(hwnd, BackbufferWidth, BackbufferHeight);
+  // --- Phase 3: Spawn dedicated render thread for DX12 ---
+  g_bQuitRequested.store(false);
+  g_bRenderReady.store(false);
 
-  mdropdx12.LogInfo(L"CreateWindowAndRun: PluginInitialize");
-  g_engine.PluginInitialize(
-    pD3DDevice.Get(),
-    pCommandQueue.Get(),
-    pDXGIFactory.Get(),
-    hwnd,
-    BackbufferWidth,
-    BackbufferHeight);
+  RenderThreadParams* rtParams = new RenderThreadParams();
+  rtParams->hwnd = hwnd;
+  rtParams->backbufferWidth = BackbufferWidth;
+  rtParams->backbufferHeight = BackbufferHeight;
 
-  // Force dimension correction: WM_SIZE from ShowWindow was missed because m_lpDX
-  // was null at that time. Verify dimensions match the actual client rect now.
-  if (g_engine.m_lpDX && g_engine.m_lpDX->m_ready) {
-    RECT rc;
-    GetClientRect(hwnd, &rc);
-    int actualW = rc.right - rc.left;
-    int actualH = rc.bottom - rc.top;
-    if (actualW > 0 && actualH > 0 &&
-        (actualW != g_engine.m_lpDX->m_client_width ||
-         actualH != g_engine.m_lpDX->m_client_height)) {
-      wchar_t dbg[256];
-      swprintf(dbg, 256, L"DX12 init correction: swap chain %dx%d -> client %dx%d\n",
-               g_engine.m_lpDX->m_client_width, g_engine.m_lpDX->m_client_height,
-               actualW, actualH);
-      DebugLogW(dbg);
-      g_engine.OnUserResizeWindow();
-    }
+  g_hDX12RenderThread = (HANDLE)_beginthreadex(
+    nullptr,
+    0,
+    &RenderThreadProc,
+    rtParams,
+    0,
+    &g_nDX12RenderThreadId);
+
+  if (!g_hDX12RenderThread) {
+    mdropdx12.LogInfo(L"CreateWindowAndRun: Failed to create render thread!");
+    delete rtParams;
+    threadRender = nullptr;
+    threadId = 0;
+    return 0;
   }
 
+  mdropdx12.LogInfo(L"CreateWindowAndRun: Render thread spawned, entering message pump");
+
+  // --- Blocking message pump (CPU-efficient, no busy-wait) ---
   MSG msg;
-  msg.message = WM_NULL;
-
-  try {
-    mdropdx12.LogInfo(L"CreateWindowAndRun: Message loop starting");
-
-    PeekMessage(&msg, NULL, 0U, 0U, PM_NOREMOVE);
-    while (WM_QUIT != msg.message) {
-      try {
-        if (PeekMessage(&msg, NULL, 0U, 0U, PM_REMOVE) != 0) {
-          TranslateMessage(&msg);
-          DispatchMessage(&msg);
-        }
-        else if (!pauseRender) {
-          GetAudioBuf(pcmLeftIn, pcmRightIn, SAMPLE_SIZE);
-          RenderFrame();
-        }
-      } catch (const std::exception& e) {
-        try {
-          // Convert exception message (UTF-8) to wide string for logging
-          std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
-          std::wstring emsg = converter.from_bytes(e.what());
-          std::wstring logMsg = L"Exception in render loop: " + emsg;
-          mdropdx12.LogInfo(logMsg);
-        } catch (...) {
-          mdropdx12.LogInfo(L"Exception in render loop (failed to convert exception message)");
-        }
-      } catch (...) {
-        mdropdx12.LogInfo(L"Unknown non-standard exception in render loop");
-      }
-      frame++;
+  BOOL bRet;
+  while ((bRet = GetMessage(&msg, NULL, 0, 0)) != 0) {
+    if (bRet == -1) {
+      // GetMessage error — bail
+      mdropdx12.LogInfo(L"CreateWindowAndRun: GetMessage returned -1");
+      break;
     }
-  } catch (const std::exception& e) {
-    mdropdx12.LogException(L"CreateWindowAndRun: Exception in main loop", e, true);
+    TranslateMessage(&msg);
+    DispatchMessage(&msg);
   }
-  mdropdx12.LogInfo(L"CreateWindowAndRun: Message loop ended");
+
+  mdropdx12.LogInfo(L"CreateWindowAndRun: Message pump ended");
+
+  // Signal render thread to quit (in case WM_CLOSE didn't already)
+  g_bQuitRequested.store(true);
+
+  // Wait for render thread to finish DX12 cleanup
+  if (g_hDX12RenderThread) {
+    WaitForSingleObject(g_hDX12RenderThread, 5000);
+    CloseHandle(g_hDX12RenderThread);
+    g_hDX12RenderThread = nullptr;
+  }
 
   // Stop IPC thread before tearing down the render window
   StopIPCThread();
   g_hRenderWindow.store(nullptr);
-
-  g_engine.MyWriteConfig();
-  g_engine.PluginQuit();
-
-  DeinitD3d();
 
   threadRender = nullptr;
   threadId = 0;

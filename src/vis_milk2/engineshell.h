@@ -38,6 +38,8 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "defines.h"
 #include "textmgr.h"
 #include "overlay.h"
+#include "render_commands.h"
+#include <atomic>
 #include <vector>
 
 // SPOUT
@@ -93,8 +95,20 @@ public:
   int m_backBufHeight;
 
   DXContext* m_lpDX;            // pointer to DXContext object
-  bool m_bDeviceRecoveryPending = false; // TDR recovery: set when device-lost detected
+  std::atomic<bool> m_bDeviceRecoveryPending{false}; // TDR recovery: set when device-lost detected
   HWND         GetPluginWindow();          // returns handle to the plugin window
+
+  // ─── Render Command Queue ───────────────────────────────────────────────
+  // Enqueue from any thread (message pump, settings, IPC); process on render thread.
+  void EnqueueRenderCmd(RenderCommand cmd);
+  void EnqueueRenderCmd(RenderCmd type);  // convenience for parameterless commands
+  void ProcessPendingCommands();
+protected:
+  virtual void ExecuteRenderCommand(const RenderCommand& cmd);
+private:
+  std::queue<RenderCommand> m_renderCmdQueue;
+  std::mutex m_renderCmdMutex;
+public:
 
 protected:
 
@@ -269,9 +283,9 @@ private:
   char m_adapter_devicename_windowed[256];
 
   // PRIVATE RUNTIME SETTINGS
-  int m_lost_focus;     // ~mostly for fullscreen mode
-  int m_hidden;         // ~mostly for windowed mode
-  int m_resizing;       // ~mostly for windowed mode
+  std::atomic<int> m_lost_focus{0};     // ~mostly for fullscreen mode
+  std::atomic<int> m_hidden{0};         // ~mostly for windowed mode
+  std::atomic<int> m_resizing{0};       // ~mostly for windowed mode
   int m_show_playlist;
   int  m_playlist_pos;            // current selection on (plugin's) playlist menu
   int  m_playlist_pageups;        // can be + or -

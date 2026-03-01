@@ -19,6 +19,7 @@
 #include <Windows.h>
 #include "AutoCharFn.h"
 #include <sstream>
+#include <condition_variable>
 
 #define FRAND ((rand() % 7381)/7380.0f)
 
@@ -1693,6 +1694,77 @@ void Engine::OnFinishedLoadingPreset() {
   if (m_hResourceWnd && IsWindow(m_hResourceWnd) && IsWindowVisible(m_hResourceWnd))
     PostMessage(m_hResourceWnd, WM_COMMAND, MAKEWPARAM(IDC_RV_REFRESH, BN_CLICKED), 0);
 }
+// ─── IPC Worker Thread ─────────────────────────────────────────────────────
+// Fire-and-forget: callers enqueue messages, worker thread does the blocking
+// SendMessage(WM_COPYDATA) cross-process call off the render path.
+static std::queue<std::wstring>    s_ipcQueue;
+static std::mutex                  s_ipcMutex;
+static std::condition_variable     s_ipcCV;
+static std::atomic<bool>           s_ipcShutdown{false};
+static HANDLE                      s_hIpcThread = nullptr;
+
+static unsigned __stdcall IpcWorkerThread(void* pParam) {
+  Engine* engine = static_cast<Engine*>(pParam);
+
+  while (true) {
+    std::wstring msg;
+    {
+      std::unique_lock<std::mutex> lock(s_ipcMutex);
+      s_ipcCV.wait(lock, [] { return !s_ipcQueue.empty() || s_ipcShutdown.load(); });
+      if (s_ipcShutdown.load() && s_ipcQueue.empty())
+        break;
+      msg = std::move(s_ipcQueue.front());
+      s_ipcQueue.pop();
+    }
+
+    try {
+      // Find the Remote window
+      HWND hRemoteWnd = NULL;
+      if (engine->m_szRemoteWindowTitle[0] != L'\0')
+        hRemoteWnd = FindWindowW(NULL, engine->m_szRemoteWindowTitle);
+      if (!hRemoteWnd)
+        hRemoteWnd = FindWindowW(NULL, L"MDropDX12 Remote");
+      if (!hRemoteWnd || !IsWindow(hRemoteWnd))
+        continue;
+
+      COPYDATASTRUCT cds;
+      cds.dwData = 1;
+      cds.cbData = (DWORD)((msg.size() + 1) * sizeof(wchar_t));
+      cds.lpData = (void*)msg.c_str();
+
+      // Blocking SendMessage is fine here — we're on a dedicated worker thread.
+      // Use timeout as a safety net in case Remote is truly hung.
+      DWORD_PTR result = 0;
+      SendMessageTimeoutW(hRemoteWnd, WM_COPYDATA,
+        (WPARAM)engine->GetPluginWindow(), (LPARAM)&cds,
+        SMTO_ABORTIFHUNG | SMTO_BLOCK, 1000, &result);
+    } catch (...) {
+      // ignore
+    }
+  }
+  return 0;
+}
+
+void Engine::StartIpcWorkerThread() {
+  if (s_hIpcThread)
+    return;
+  s_ipcShutdown.store(false);
+  s_hIpcThread = (HANDLE)_beginthreadex(nullptr, 0, IpcWorkerThread, this, 0, nullptr);
+}
+
+void Engine::StopIpcWorkerThread() {
+  if (!s_hIpcThread)
+    return;
+  {
+    std::lock_guard<std::mutex> lock(s_ipcMutex);
+    s_ipcShutdown.store(true);
+  }
+  s_ipcCV.notify_one();
+  WaitForSingleObject(s_hIpcThread, 3000);
+  CloseHandle(s_hIpcThread);
+  s_hIpcThread = nullptr;
+}
+
 int Engine::SendMessageToMDropDX12Remote(const wchar_t* messageToSend) {
   return SendMessageToMDropDX12Remote(messageToSend, false);
 }
@@ -1700,48 +1772,26 @@ int Engine::SendMessageToMDropDX12Remote(const wchar_t* messageToSend) {
 int Engine::SendMessageToMDropDX12Remote(const wchar_t* messageToSend, bool doForce) {
   using namespace std::chrono;
   try {
-    if (!messageToSend || !*messageToSend) {
-      wprintf(L"message is null or empty.\n");
+    if (!messageToSend || !*messageToSend)
       return 0;
-    }
 
-    // Get current time since epoch in milliseconds
+    // Throttle: skip if sent too recently (unless forced)
     uint64_t Now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-    if (!doForce && Now - LastSentMDropDX12Message < 100) {
-      // Skipping message send to MDropDX12 Remote to avoid flooding
+    if (!doForce && Now - LastSentMDropDX12Message < 100)
       return 0;
-    }
     LastSentMDropDX12Message = Now;
 
-    // Find the Remote window (configured title first, then default)
-    HWND hRemoteWnd = NULL;
-    if (m_szRemoteWindowTitle[0] != L'\0')
-      hRemoteWnd = FindWindowW(NULL, m_szRemoteWindowTitle);
-    if (!hRemoteWnd)
-      hRemoteWnd = FindWindowW(NULL, L"MDropDX12 Remote");
-    if (!hRemoteWnd)
-      return 0;
-
-    // Prepare the COPYDATASTRUCT
-    COPYDATASTRUCT cds;
-    cds.dwData = 1; // Custom identifier for the message
-    cds.cbData = (wcslen(messageToSend) + 1) * sizeof(wchar_t); // Size of the data in bytes
-    cds.lpData = (void*)messageToSend; // Pointer to the data
-
-    if (IsWindow(hRemoteWnd)) {
-      // Send the WM_COPYDATA message
-      if (SendMessage(hRemoteWnd, WM_COPYDATA, (WPARAM)GetPluginWindow(), (LPARAM)&cds) != 0) {
-        wprintf(L"Failed to send WM_COPYDATA message to MDropDX12 Remote.\n");
-        return 0;
-      }
-      else {
-        wprintf(L"WM_COPYDATA message sent successfully to MDropDX12 Remote.\n");
-      }
+    // Fire-and-forget: copy the string and enqueue for the IPC worker thread.
+    // The worker does the blocking SendMessage(WM_COPYDATA) off the render path.
+    {
+      std::lock_guard<std::mutex> lock(s_ipcMutex);
+      s_ipcQueue.emplace(messageToSend);
     }
+    s_ipcCV.notify_one();
   } catch (...) {
     // ignore
   }
-  return 1;
+  return 1; // Optimistic — message is queued
 }
 
 void Engine::PostMessageToMDropDX12Remote(UINT msg) {

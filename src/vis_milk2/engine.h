@@ -344,6 +344,7 @@ public:
   void OpenMDropDX12Remote();
   void SetAudioDeviceDisplayName(const wchar_t* displayName, bool isRenderDevice);
   void SetAMDFlag();
+  void ExecuteRenderCommand(const RenderCommand& cmd) override;
   int  GetPresetCount() override;
   int  GetCurrentPresetIndex() override;
   const wchar_t* GetPresetName(int idx) override;
@@ -631,6 +632,8 @@ public:
   int SendMessageToMDropDX12Remote(const wchar_t* presetFile);
   int SendMessageToMDropDX12Remote(const wchar_t* presetFile, bool doForce);
   void PostMessageToMDropDX12Remote(UINT msg);
+  void StartIpcWorkerThread();
+  void StopIpcWorkerThread();
 
 #define WM_USER_NEXT_PRESET WM_USER + 100
 #define WM_USER_PREV_PRESET WM_USER + 101

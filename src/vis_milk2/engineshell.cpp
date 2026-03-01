@@ -2383,8 +2383,7 @@ LRESULT EngineShell::PluginShellWindowProc(HWND hWnd, unsigned uMsg, WPARAM wPar
       // SPOUT DEBUG
       // Allow restore from minimize without reset of the window
       if (SIZE_MAXIMIZED == wParam || SIZE_RESTORED == wParam) // the window has been maximized or restored
-        // if (SIZE_MAXIMIZED == wParam ) // the window has been maximized
-        OnUserResizeWindow();
+        EnqueueRenderCmd(RenderCmd::ResizeWindow);
     }
 
     break;
@@ -2400,7 +2399,7 @@ LRESULT EngineShell::PluginShellWindowProc(HWND hWnd, unsigned uMsg, WPARAM wPar
     if ((rect.right - rect.left) != 1280
       || (rect.bottom - rect.top) != 720) {
       if (m_lpDX && m_lpDX->m_ready)
-        OnUserResizeWindow();
+        EnqueueRenderCmd(RenderCmd::ResizeWindow);
     }
     m_resizing = 0;
     break;
@@ -2901,4 +2900,65 @@ void EngineShell::ResetBufferAndFonts() {
     }
   }
 }
+// ─── Render Command Queue ────────────────────────────────────────────────────
+
+void EngineShell::EnqueueRenderCmd(RenderCommand cmd) {
+  std::lock_guard<std::mutex> lock(m_renderCmdMutex);
+  m_renderCmdQueue.push(std::move(cmd));
+}
+
+void EngineShell::EnqueueRenderCmd(RenderCmd type) {
+  RenderCommand cmd;
+  cmd.cmd = type;
+  EnqueueRenderCmd(std::move(cmd));
+}
+
+void EngineShell::ProcessPendingCommands() {
+  // Drain the queue into a local copy to minimize lock hold time
+  std::queue<RenderCommand> localQueue;
+  {
+    std::lock_guard<std::mutex> lock(m_renderCmdMutex);
+    std::swap(localQueue, m_renderCmdQueue);
+  }
+
+  if (localQueue.empty())
+    return;
+
+  LARGE_INTEGER freq, t0, t1;
+  QueryPerformanceFrequency(&freq);
+  QueryPerformanceCounter(&t0);
+  int count = 0;
+
+  while (!localQueue.empty()) {
+    ExecuteRenderCommand(localQueue.front());
+    localQueue.pop();
+    count++;
+  }
+
+  QueryPerformanceCounter(&t1);
+  double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / freq.QuadPart;
+  if (ms > 1.0) { // Only log if > 1ms
+    wchar_t dbg[256];
+    swprintf_s(dbg, L"ProcessPendingCommands: %d cmds in %.2f ms\n", count, ms);
+    DebugLogW(dbg);
+  }
+}
+
+void EngineShell::ExecuteRenderCommand(const RenderCommand& cmd) {
+  switch (cmd.cmd) {
+    case RenderCmd::ResetBuffers:
+      ResetBufferAndFonts();
+      break;
+    case RenderCmd::ResizeWindow:
+      OnUserResizeWindow();
+      break;
+    case RenderCmd::DeviceRecovery:
+      m_bDeviceRecoveryPending = true;
+      break;
+    default:
+      // Commands that need Engine-level access are handled by Engine::ExecuteRenderCommand()
+      break;
+  }
+}
+
 } // namespace mdrop

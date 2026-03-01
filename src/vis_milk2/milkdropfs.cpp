@@ -202,52 +202,97 @@ bool mdrop::Engine::RenderStringToTitleTexture(int supertextIndex)
   bool ret = true;
 
   if (!m_supertexts[supertextIndex].bIsSongTitle) {
-    // Custom message: binary search for best font size using GDI
+    // --- Font cache: avoid expensive binary search + CreateFontW when
+    // the font face/style and text length are unchanged. ---
+    static HFONT  s_cachedFont = nullptr;
+    static wchar_t s_cachedFace[128] = {};
+    static int    s_cachedBold = 0;
+    static int    s_cachedItal = 0;
+    static int    s_cachedTexW = 0;
+    static int    s_cachedTextLen = 0;
+    static int    s_cachedSizeIdx = -1; // index into g_title_font_sizes
+
+    int textLen = (int)wcslen(szTextToDraw);
+    bool cacheHit = (s_cachedFont != nullptr &&
+                     s_cachedTexW == m_nTitleTexSizeX &&
+                     s_cachedBold == m_supertexts[supertextIndex].bBold &&
+                     s_cachedItal == m_supertexts[supertextIndex].bItal &&
+                     wcscmp(s_cachedFace, m_supertexts[supertextIndex].nFontFace) == 0);
+
     int lo = 0;
-    int hi = sizeof(g_title_font_sizes) / sizeof(int) - 1;
 
-    RECT temp = rect;
-    while (lo < hi - 1) {
-      int mid = (lo + hi) / 2;
+    if (cacheHit && s_cachedTextLen > 0) {
+      // Text length similar enough — verify cached size still fits with one measurement
+      HGDIOBJ oldFont = SelectObject(m_titleDC, s_cachedFont);
+      RECT temp = rect;
+      int h = ::DrawTextW(m_titleDC, szTextToDraw, -1, &temp, DT_SINGLELINE | DT_CALCRECT | DT_CENTER);
+      SelectObject(m_titleDC, oldFont);
 
-      HFONT testFont = CreateFontW(g_title_font_sizes[mid], 0, 0, 0,
+      if (temp.right - temp.left < rect.right - rect.left && h <= rect.bottom - rect.top) {
+        // Cached font still fits — skip binary search entirely
+        lo = s_cachedSizeIdx;
+      } else {
+        // Text too long for cached size — invalidate and redo search
+        cacheHit = false;
+      }
+    }
+
+    if (!cacheHit) {
+      // Full binary search for best font size
+      int hi = sizeof(g_title_font_sizes) / sizeof(int) - 1;
+
+      RECT temp = rect;
+      while (lo < hi - 1) {
+        int mid = (lo + hi) / 2;
+
+        HFONT testFont = CreateFontW(g_title_font_sizes[mid], 0, 0, 0,
+          m_supertexts[supertextIndex].bBold ? 900 : 400,
+          m_supertexts[supertextIndex].bItal, FALSE, FALSE,
+          DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+          m_fontinfo[SONGTITLE_FONT].bAntiAliased ? ANTIALIASED_QUALITY : DEFAULT_QUALITY,
+          DEFAULT_PITCH, m_supertexts[supertextIndex].nFontFace);
+        if (!testFont) { hi = mid; continue; }
+
+        HGDIOBJ oldFont = SelectObject(m_titleDC, testFont);
+        temp = rect;
+        int h = ::DrawTextW(m_titleDC, szTextToDraw, -1, &temp, DT_SINGLELINE | DT_CALCRECT | DT_CENTER);
+
+        if (temp.right - temp.left >= rect.right - rect.left || h > rect.bottom - rect.top)
+          hi = mid;
+        else
+          lo = mid;
+
+        SelectObject(m_titleDC, oldFont);
+        DeleteObject(testFont);
+      }
+
+      // Update font cache: destroy old, create and cache new
+      if (s_cachedFont) { DeleteObject(s_cachedFont); s_cachedFont = nullptr; }
+
+      s_cachedFont = CreateFontW(g_title_font_sizes[lo], 0, 0, 0,
         m_supertexts[supertextIndex].bBold ? 900 : 400,
         m_supertexts[supertextIndex].bItal, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        m_fontinfo[SONGTITLE_FONT].bAntiAliased ? ANTIALIASED_QUALITY : DEFAULT_QUALITY,
+        ANTIALIASED_QUALITY,
         DEFAULT_PITCH, m_supertexts[supertextIndex].nFontFace);
-      if (!testFont) { hi = mid; continue; }
 
-      HGDIOBJ oldFont = SelectObject(m_titleDC, testFont);
-      temp = rect;
-      int h = ::DrawTextW(m_titleDC, szTextToDraw, -1, &temp, DT_SINGLELINE | DT_CALCRECT | DT_CENTER);
-
-      if (temp.right - temp.left >= rect.right - rect.left || h > rect.bottom - rect.top)
-        hi = mid;
-      else
-        lo = mid;
-
-      SelectObject(m_titleDC, oldFont);
-      DeleteObject(testFont);
+      wcsncpy_s(s_cachedFace, m_supertexts[supertextIndex].nFontFace, _TRUNCATE);
+      s_cachedBold = m_supertexts[supertextIndex].bBold;
+      s_cachedItal = m_supertexts[supertextIndex].bItal;
+      s_cachedTexW = m_nTitleTexSizeX;
+      s_cachedTextLen = textLen;
+      s_cachedSizeIdx = lo;
     }
 
-    // Create final font at 'lo' size and draw
-    HFONT bestFont = CreateFontW(g_title_font_sizes[lo], 0, 0, 0,
-      m_supertexts[supertextIndex].bBold ? 900 : 400,
-      m_supertexts[supertextIndex].bItal, FALSE, FALSE,
-      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-      ANTIALIASED_QUALITY,
-      DEFAULT_PITCH, m_supertexts[supertextIndex].nFontFace);
-
-    if (bestFont) {
-      HGDIOBJ oldFont = SelectObject(m_titleDC, bestFont);
+    if (s_cachedFont) {
+      HGDIOBJ oldFont = SelectObject(m_titleDC, s_cachedFont);
 
       int lineCount = 1;
       for (const wchar_t* p = szTextToDraw; *p; ++p) {
         if (*p == L'\n') ++lineCount;
       }
 
-      temp = rect;
+      RECT temp = rect;
       int h = ::DrawTextW(m_titleDC, szTextToDraw, -1, &temp, DT_SINGLELINE | DT_CALCRECT | DT_CENTER);
 
       long offset = h / 2;
@@ -271,7 +316,7 @@ bool mdrop::Engine::RenderStringToTitleTexture(int supertextIndex)
       }
 
       SelectObject(m_titleDC, oldFont);
-      DeleteObject(bestFont);
+      // Don't delete — font is cached for reuse
     } else {
       ret = false;
     }
