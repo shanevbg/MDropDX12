@@ -350,8 +350,20 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SCRIPT_LOOP      6008
 #define IDC_MW_SCRIPT_LINE      6009
 
+// Displays tab control IDs (page 9)
+#define IDC_MW_DISP_LIST        7000   // ListBox: display outputs
+#define IDC_MW_DISP_ENABLE      7001   // Checkbox: enable selected output
+#define IDC_MW_DISP_FULLSCREEN  7002   // Checkbox: fullscreen (monitors only)
+#define IDC_MW_DISP_REFRESH     7003   // Button: refresh monitor list
+#define IDC_MW_DISP_ADD_SPOUT   7004   // Button: add Spout output
+#define IDC_MW_DISP_REMOVE      7005   // Button: remove selected Spout output
+#define IDC_MW_DISP_SPOUT_NAME  7006   // Edit: Spout sender name
+#define IDC_MW_DISP_SPOUT_W     7007   // Edit: Spout width
+#define IDC_MW_DISP_SPOUT_H     7008   // Edit: Spout height
+#define IDC_MW_DISP_SPOUT_FIXED 7009   // Checkbox: Spout fixed size
+
 // Settings page count
-#define SETTINGS_NUM_PAGES      10
+#define SETTINGS_NUM_PAGES      11
 
 // Custom messages for thread-safe side effects (settings thread → render thread)
 #define WM_MW_SET_OPACITY       (WM_APP + 1)
@@ -366,6 +378,8 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_RESTART_IPC       (WM_APP + 10) // settings thread requests IPC window restart
 #define WM_MW_PUSH_SPRITE       (WM_APP + 11) // wParam = spriteNum, lParam = slot (-1=auto)
 #define WM_MW_KILL_SPRITE       (WM_APP + 12) // wParam = slot index
+#define WM_MW_TOGGLE_DISPLAY    (WM_APP + 13) // wParam = output index in m_displayOutputs
+#define WM_MW_REFRESH_DISPLAYS  (WM_APP + 14) // re-enumerate monitors
 
 // Milkwave Remote messages (sent via PostMessage from Milkwave Remote → IPC window → render window)
 #define WM_MW_NEXT_PRESET       (WM_APP + 100)

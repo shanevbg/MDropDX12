@@ -362,6 +362,7 @@
     <ClCompile Include="mdropdx12.cpp" />
     <ClCompile Include="engine.cpp" />
     <ClCompile Include="engine_input.cpp" />
+    <ClCompile Include="engine_displays.cpp" />
     <ClCompile Include="engine_messages.cpp" />
     <ClCompile Include="engine_presets.cpp" />
     <ClCompile Include="engine_script.cpp" />
@@ -435,6 +436,7 @@
     <ClInclude Include="menu.h" />
     <ClInclude Include="Milkdrop2PcmVisualizer.h" />
     <ClInclude Include="mdropdx12.h" />
+    <ClInclude Include="display_output.h" />
     <ClInclude Include="engine.h" />
     <ClInclude Include="engineshell.h" />
     <ClInclude Include="resource.h" />

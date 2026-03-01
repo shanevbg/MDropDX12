@@ -214,7 +214,7 @@ protected:
   virtual LRESULT MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam) = 0;
   virtual void OnAltK() {}; // doesn't *have* to be implemented
   virtual void DrawOnTopSprites() {} // override in Engine for layer-1 sprite rendering
-  virtual void SpoutSendFrame() {}  // override in Engine for Spout DX12 output
+  virtual void SendToDisplayOutputs() {} // override in Engine for display mirrors + Spout
   virtual void UpdateScript() {}    // override in Engine for script playback
   virtual void SetAMDFlag() = 0;
   // Preset list accessors for RenderPlaylist() — override in Engine

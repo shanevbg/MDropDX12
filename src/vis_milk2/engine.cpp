@@ -1177,6 +1177,11 @@ void Engine::MyReadConfig() {
   bSpoutFixedSize = GetPrivateProfileBoolW(L"Settings", L"bSpoutFixedSize", bSpoutFixedSize, pIni);
   nSpoutFixedWidth = GetPrivateProfileIntW(L"Settings", L"nSpoutFixedWidth", nSpoutFixedWidth, pIni);
   nSpoutFixedHeight = GetPrivateProfileIntW(L"Settings", L"nSpoutFixedHeight", nSpoutFixedHeight, pIni);
+
+  // Display outputs (monitors + Spout senders) — enumerate first, then load saved settings
+  EnumerateDisplayOutputs();
+  LoadDisplayOutputSettings();
+
   m_nInjectEffectMode = GetPrivateProfileIntW(L"Settings", L"nInjectEffectMode", 0, pIni);
   m_nInjectEffectMode = max(0, min(4, m_nInjectEffectMode)); // clamp to valid range
   // ======================================
@@ -1433,6 +1438,9 @@ void Engine::MyWriteConfig() {
   WritePrivateProfileIntW(bSpoutFixedSize, L"bSpoutFixedSize", pIni, L"Settings");
   WritePrivateProfileIntW(nSpoutFixedWidth, L"nSpoutFixedWidth", pIni, L"Settings");
   WritePrivateProfileIntW(nSpoutFixedHeight, L"nSpoutFixedHeight", pIni, L"Settings");
+
+  // Display outputs (monitors + Spout senders)
+  SaveDisplayOutputSettings();
   // ================================
   WritePrivateProfileFloatW(m_fRenderQuality, L"fRenderQuality", pIni, L"Settings");
 
@@ -1704,8 +1712,10 @@ void Engine::CleanUpMyNonDx9Stuff() {
     m_presetLoadThread.join();
 
 // =========================================================
-// SPOUT cleanup on exit
-//
+// Display outputs cleanup
+  DestroyAllDisplayOutputs();
+
+// SPOUT cleanup on exit (legacy)
   SpoutReleaseWraps();
   spoutsender.CloseDirectX12();
 

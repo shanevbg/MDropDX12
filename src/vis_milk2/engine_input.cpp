@@ -430,6 +430,21 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     LaunchCustomMessage((int)wParam);
     return 0;
 
+  case WM_MW_REFRESH_DISPLAYS:
+    // Re-enumerate monitors, destroy mirrors for disconnected ones
+    for (auto& out : m_displayOutputs) {
+        if (out.config.type == DisplayOutputType::Monitor && out.monitorState)
+            DestroyDisplayOutput(out);
+    }
+    EnumerateDisplayOutputs();
+    RefreshDisplaysTab();
+    return 0;
+
+  case WM_DISPLAYCHANGE:
+    // Monitor connect/disconnect — re-enumerate
+    PostMessage(GetPluginWindow(), WM_MW_REFRESH_DISPLAYS, 0, 0);
+    return 0;
+
   case WM_MW_PUSH_SPRITE:
     // Queue for next frame — LoadTex needs an open command list (BeginFrame)
     m_pendingSpriteLoads.push_back({(int)wParam, (int)lParam});
@@ -800,6 +815,23 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
       //m_bShowSongLen  = !m_bShowSongLen;
       //m_bShowPresetInfo = !m_bShowPresetInfo; //I didn't need this.
       //return 0; // we processed (or absorbed) the key
+    case VK_F2:
+      if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
+        // Ctrl+F2: kill switch — disable all display outputs
+        for (auto& out : m_displayOutputs) {
+          if (out.config.bEnabled) {
+            out.config.bEnabled = false;
+            if (out.config.type == DisplayOutputType::Spout) {
+              // Sync legacy bSpoutOut for first Spout
+              bSpoutOut = false;
+            }
+          }
+        }
+        // Mirrors will be cleaned up by SendToDisplayOutputs on next frame
+        AddNotification(L"All display outputs disabled");
+        RefreshDisplaysTab();
+      }
+      return 0;
     case VK_F3:
     {
       bool bCtrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;

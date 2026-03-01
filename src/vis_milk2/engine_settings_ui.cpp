@@ -1324,6 +1324,60 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
           if (hw) PostMessage(hw, WM_MW_TOGGLE_SPOUT, 0, 0);
         }
         return 0;
+      // ── Displays tab checkboxes ──
+      case IDC_MW_DISP_ENABLE: {
+        int sel = p->m_nDisplaysTabSel;
+        if (sel >= 0 && sel < (int)p->m_displayOutputs.size()) {
+          auto& out = p->m_displayOutputs[sel];
+          out.config.bEnabled = bChecked;
+          // Destroy Spout resources when disabling (safe from settings thread)
+          // Monitor mirrors are cleaned up on the render thread in SendToDisplayOutputs
+          if (!bChecked && out.spoutState) {
+            p->DestroyDisplayOutput(out);
+          }
+          // Sync legacy variable if this is the first Spout output
+          if (out.config.type == DisplayOutputType::Spout) {
+            bool isFirst = false;
+            for (auto& o : p->m_displayOutputs) {
+              if (o.config.type == DisplayOutputType::Spout) { isFirst = (&o == &out); break; }
+            }
+            if (isFirst) {
+              p->bSpoutOut = bChecked;
+              // Update Sound tab checkbox if visible
+              HWND hSpoutCheck = GetDlgItem(hWnd, IDC_MW_SPOUT);
+              if (hSpoutCheck) SendMessage(hSpoutCheck, BM_SETCHECK, bChecked ? BST_CHECKED : BST_UNCHECKED, 0);
+            }
+          }
+          p->bSpoutChanged = true;
+          if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
+          p->RefreshDisplaysTab();
+          HWND hList = GetDlgItem(hWnd, IDC_MW_DISP_LIST);
+          if (hList) SendMessage(hList, LB_SETCURSEL, sel, 0);
+        }
+        return 0;
+      }
+      case IDC_MW_DISP_FULLSCREEN: {
+        int sel = p->m_nDisplaysTabSel;
+        if (sel >= 0 && sel < (int)p->m_displayOutputs.size()) {
+          p->m_displayOutputs[sel].config.bFullscreen = bChecked;
+          p->bSpoutChanged = true;
+        }
+        return 0;
+      }
+      case IDC_MW_DISP_SPOUT_FIXED: {
+        int sel = p->m_nDisplaysTabSel;
+        if (sel >= 0 && sel < (int)p->m_displayOutputs.size() &&
+            p->m_displayOutputs[sel].config.type == DisplayOutputType::Spout) {
+          p->m_displayOutputs[sel].config.bFixedSize = bChecked;
+          // Sync legacy for first Spout
+          for (auto& o : p->m_displayOutputs) {
+            if (o.config.type == DisplayOutputType::Spout) { p->bSpoutFixedSize = o.config.bFixedSize; break; }
+          }
+          p->bSpoutChanged = true;
+          if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
+        }
+        return 0;
+      }
       case IDC_MW_QUALITY_AUTO:
         p->bQualityAuto = bChecked;
         if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
@@ -1342,6 +1396,10 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         return 0;
       case IDC_MW_SPOUT_FIXED:
         p->bSpoutFixedSize = bChecked;
+        // Sync first Spout output
+        for (auto& o : p->m_displayOutputs) {
+          if (o.config.type == DisplayOutputType::Spout) { o.config.bFixedSize = bChecked; break; }
+        }
         if (hw) PostMessage(hw, WM_MW_SPOUT_FIXEDSIZE, 0, 0);
         return 0;
       case IDC_MW_DARK_THEME:
@@ -1710,6 +1768,13 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
+    // Displays tab listbox selection
+    if (id == IDC_MW_DISP_LIST && code == LBN_SELCHANGE) {
+      int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
+      p->UpdateDisplaysTabSelection(sel);
+      return 0;
+    }
+
     // Edit control changes (apply on focus lost)
     if (code == EN_KILLFOCUS) {
       wchar_t buf[64];
@@ -1780,12 +1845,20 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         p->nSpoutFixedWidth = _wtoi(buf);
         if (p->nSpoutFixedWidth < 64) p->nSpoutFixedWidth = 64;
         if (p->nSpoutFixedWidth > 7680) p->nSpoutFixedWidth = 7680;
+        // Sync first Spout output
+        for (auto& o : p->m_displayOutputs) {
+          if (o.config.type == DisplayOutputType::Spout) { o.config.nWidth = p->nSpoutFixedWidth; break; }
+        }
         if (hw) PostMessage(hw, WM_MW_SPOUT_FIXEDSIZE, 0, 0);
         return 0;
       case IDC_MW_SPOUT_HEIGHT:
         p->nSpoutFixedHeight = _wtoi(buf);
         if (p->nSpoutFixedHeight < 64) p->nSpoutFixedHeight = 64;
         if (p->nSpoutFixedHeight > 4320) p->nSpoutFixedHeight = 4320;
+        // Sync first Spout output
+        for (auto& o : p->m_displayOutputs) {
+          if (o.config.type == DisplayOutputType::Spout) { o.config.nHeight = p->nSpoutFixedHeight; break; }
+        }
         if (hw) PostMessage(hw, WM_MW_SPOUT_FIXEDSIZE, 0, 0);
         return 0;
       case IDC_MW_MSG_INTERVAL: {
@@ -1802,6 +1875,51 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         if (val > 9999.0f) val = 9999.0f;
         p->m_fMsgAutoplayJitter = val;
         p->SaveMsgAutoplaySettings();
+        return 0;
+      }
+      // ── Displays tab edit controls ──
+      case IDC_MW_DISP_SPOUT_NAME: {
+        int sel = p->m_nDisplaysTabSel;
+        if (sel >= 0 && sel < (int)p->m_displayOutputs.size() &&
+            p->m_displayOutputs[sel].config.type == DisplayOutputType::Spout) {
+          wchar_t nbuf[128];
+          GetWindowTextW((HWND)lParam, nbuf, 128);
+          wcsncpy_s(p->m_displayOutputs[sel].config.szName, nbuf, _TRUNCATE);
+          p->bSpoutChanged = true;
+          p->RefreshDisplaysTab();
+          HWND hList = GetDlgItem(hWnd, IDC_MW_DISP_LIST);
+          if (hList) SendMessage(hList, LB_SETCURSEL, sel, 0);
+        }
+        return 0;
+      }
+      case IDC_MW_DISP_SPOUT_W: {
+        int sel = p->m_nDisplaysTabSel;
+        if (sel >= 0 && sel < (int)p->m_displayOutputs.size() &&
+            p->m_displayOutputs[sel].config.type == DisplayOutputType::Spout) {
+          int w = _wtoi(buf);
+          if (w < 64) w = 64; if (w > 7680) w = 7680;
+          p->m_displayOutputs[sel].config.nWidth = w;
+          // Sync legacy for first Spout
+          for (auto& o : p->m_displayOutputs) {
+            if (o.config.type == DisplayOutputType::Spout) { p->nSpoutFixedWidth = o.config.nWidth; break; }
+          }
+          p->bSpoutChanged = true;
+        }
+        return 0;
+      }
+      case IDC_MW_DISP_SPOUT_H: {
+        int sel = p->m_nDisplaysTabSel;
+        if (sel >= 0 && sel < (int)p->m_displayOutputs.size() &&
+            p->m_displayOutputs[sel].config.type == DisplayOutputType::Spout) {
+          int h = _wtoi(buf);
+          if (h < 64) h = 64; if (h > 4320) h = 4320;
+          p->m_displayOutputs[sel].config.nHeight = h;
+          // Sync legacy for first Spout
+          for (auto& o : p->m_displayOutputs) {
+            if (o.config.type == DisplayOutputType::Spout) { p->nSpoutFixedHeight = o.config.nHeight; break; }
+          }
+          p->bSpoutChanged = true;
+        }
         return 0;
       }
       case IDC_MW_IPC_TITLE: {
@@ -1824,6 +1942,56 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       case IDC_MW_SCRIPT_BEATS: {
         int v = _wtoi(buf);
         if (v > 0) p->m_script.beats = v;
+        return 0;
+      }
+      }
+    }
+
+    // ===== Displays tab button handlers (BN_CLICKED) =====
+    if (code == BN_CLICKED && (id == IDC_MW_DISP_REFRESH || id == IDC_MW_DISP_ADD_SPOUT || id == IDC_MW_DISP_REMOVE)) {
+      HWND hw = p->GetPluginWindow();
+      switch (id) {
+      case IDC_MW_DISP_REFRESH:
+        p->EnumerateDisplayOutputs();
+        p->RefreshDisplaysTab();
+        p->UpdateDisplaysTabSelection(-1);
+        return 0;
+      case IDC_MW_DISP_ADD_SPOUT: {
+        DisplayOutput newSpout;
+        newSpout.config.type = DisplayOutputType::Spout;
+        newSpout.config.bEnabled = false;
+        // Generate unique name
+        int idx = 1;
+        for (auto& o : p->m_displayOutputs)
+          if (o.config.type == DisplayOutputType::Spout) idx++;
+        if (idx == 1)
+          wcscpy_s(newSpout.config.szName, L"MDropDX12");
+        else
+          swprintf(newSpout.config.szName, 128, L"MDropDX12_%d", idx);
+        // Insert before monitors (at beginning)
+        p->m_displayOutputs.insert(p->m_displayOutputs.begin(), std::move(newSpout));
+        p->bSpoutChanged = true;
+        p->RefreshDisplaysTab();
+        // Select the new entry
+        HWND hList = GetDlgItem(hWnd, IDC_MW_DISP_LIST);
+        if (hList) SendMessage(hList, LB_SETCURSEL, 0, 0);
+        p->UpdateDisplaysTabSelection(0);
+        return 0;
+      }
+      case IDC_MW_DISP_REMOVE: {
+        int sel = p->m_nDisplaysTabSel;
+        if (sel >= 0 && sel < (int)p->m_displayOutputs.size()) {
+          auto& cfg = p->m_displayOutputs[sel].config;
+          // Only allow removing Spout outputs (monitors are auto-enumerated)
+          if (cfg.type == DisplayOutputType::Spout) {
+            p->DestroyDisplayOutput(p->m_displayOutputs[sel]);
+            p->m_displayOutputs.erase(p->m_displayOutputs.begin() + sel);
+            p->bSpoutChanged = true;
+            if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
+            p->RefreshDisplaysTab();
+            p->UpdateDisplaysTabSelection(-1);
+          }
+        }
         return 0;
       }
       }
@@ -2490,7 +2658,7 @@ void Engine::BuildSettingsControls() {
   SetWindowSubclass(m_hSettingsTab, SettingsTabSubclassProc, 1, (DWORD_PTR)this);
 
   // Insert tab pages (use TCM_INSERTITEMW explicitly — project is _MBCS, not UNICODE)
-  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"Sound", L"Files", L"Messages", L"Sprites", L"Remote", L"Script", L"About" };
+  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"Sound", L"Files", L"Messages", L"Sprites", L"Remote", L"Script", L"Displays", L"About" };
   for (int i = 0; i < SETTINGS_NUM_PAGES; i++) {
     TCITEMW ti = {};
     ti.mask = TCIF_TEXT;
@@ -3237,16 +3405,61 @@ void Engine::BuildSettingsControls() {
     PAGE_CTRL(8, hScriptList);
   }
 
-  // ===== About tab (page 9) =====
+  // ===== Displays tab (page 9) =====
   y = tabTop + 10;
 
-  PAGE_CTRL(9, CreateLabel(hw, L"MDropDX12", x, y, rw, 24, hFontBold, false));
+  PAGE_CTRL(9, CreateLabel(hw, L"Display Outputs", x, y, rw, lineH, hFontBold, false));
+  y += lineH + gap;
+
+  // ListBox showing all display outputs (monitors + Spout senders)
+  {
+    int listH = lineH * 8;
+    HWND hList = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", NULL,
+      WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
+      x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_DISP_LIST, GetModuleHandle(NULL), NULL);
+    if (hList && hFont) SendMessage(hList, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(9, hList);
+    y += listH + gap;
+  }
+
+  // Enable checkbox + Fullscreen checkbox side-by-side
+  PAGE_CTRL(9, CreateCheck(hw, L"Enabled", IDC_MW_DISP_ENABLE, x, y, rw / 2 - 4, lineH, hFont, false, false));
+  PAGE_CTRL(9, CreateCheck(hw, L"Fullscreen", IDC_MW_DISP_FULLSCREEN, x + rw / 2, y, rw / 2, lineH, hFont, false, false));
+  y += lineH + gap;
+
+  // Spout settings group (name, fixed size, width, height)
+  PAGE_CTRL(9, CreateLabel(hw, L"Sender Name:", x, y, 100, lineH, hFont, false));
+  PAGE_CTRL(9, CreateEdit(hw, L"MDropDX12", IDC_MW_DISP_SPOUT_NAME, x + 104, y, rw - 104, lineH, hFont, 0, false));
+  y += lineH + 2;
+
+  PAGE_CTRL(9, CreateCheck(hw, L"Fixed Size", IDC_MW_DISP_SPOUT_FIXED, x, y, rw / 2 - 4, lineH, hFont, false, false));
+  y += lineH + 2;
+
+  PAGE_CTRL(9, CreateLabel(hw, L"Width:", x, y, 50, lineH, hFont, false));
+  PAGE_CTRL(9, CreateEdit(hw, L"1920", IDC_MW_DISP_SPOUT_W, x + 54, y, 70, lineH, hFont, 0, false));
+  PAGE_CTRL(9, CreateLabel(hw, L"Height:", x + 140, y, 50, lineH, hFont, false));
+  PAGE_CTRL(9, CreateEdit(hw, L"1080", IDC_MW_DISP_SPOUT_H, x + 194, y, 70, lineH, hFont, 0, false));
+  y += lineH + gap + 4;
+
+  // Buttons: Add Spout, Remove, Refresh
+  {
+    int btnW = MulDiv(100, lineH, 26);
+    int btnGap = 8;
+    PAGE_CTRL(9, CreateBtn(hw, L"Add Spout", IDC_MW_DISP_ADD_SPOUT, x, y, btnW, lineH, hFont));
+    PAGE_CTRL(9, CreateBtn(hw, L"Remove", IDC_MW_DISP_REMOVE, x + btnW + btnGap, y, btnW, lineH, hFont));
+    PAGE_CTRL(9, CreateBtn(hw, L"Refresh", IDC_MW_DISP_REFRESH, x + 2 * (btnW + btnGap), y, btnW, lineH, hFont));
+  }
+
+  // ===== About tab (page 10) =====
+  y = tabTop + 10;
+
+  PAGE_CTRL(10, CreateLabel(hw, L"MDropDX12", x, y, rw, 24, hFontBold, false));
   y += 28;
 
   {
     wchar_t szVersion[128];
     swprintf(szVersion, 128, L"Version %d.%d-dev", INT_VERSION / 100, INT_SUBVERSION);
-    PAGE_CTRL(9, CreateLabel(hw, szVersion, x, y, rw, lineH, hFont, false));
+    PAGE_CTRL(10, CreateLabel(hw, szVersion, x, y, rw, lineH, hFont, false));
     y += lineH + 4;
   }
 
@@ -3256,29 +3469,29 @@ void Engine::BuildSettingsControls() {
     MultiByteToWideChar(CP_ACP, 0, __DATE__, -1, wDate, 32);
     MultiByteToWideChar(CP_ACP, 0, __TIME__, -1, wTime, 32);
     swprintf(szBuild, 128, L"Built: %s  %s", wDate, wTime);
-    PAGE_CTRL(9, CreateLabel(hw, szBuild, x, y, rw, lineH, hFont, false));
+    PAGE_CTRL(10, CreateLabel(hw, szBuild, x, y, rw, lineH, hFont, false));
     y += lineH + 4;
   }
 
-  PAGE_CTRL(9, CreateLabel(hw, L"MilkDrop2-based music visualizer", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(10, CreateLabel(hw, L"MilkDrop2-based music visualizer", x, y, rw, lineH, hFont, false));
   y += lineH + 4;
-  PAGE_CTRL(9, CreateLabel(hw, L"DirectX 12 / Windows 11 64-bit", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(10, CreateLabel(hw, L"DirectX 12 / Windows 11 64-bit", x, y, rw, lineH, hFont, false));
   y += lineH + 12;
 
   // Debug Log Level radio buttons
-  PAGE_CTRL(9, CreateLabel(hw, L"Debug Log Level:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(10, CreateLabel(hw, L"Debug Log Level:", x, y, lw, lineH, hFont, false));
   {
     int rx = x + lw + 4;
     int rbw = 80;
-    PAGE_CTRL(9, CreateRadio(hw, L"Off",     IDC_MW_LOGLEVEL_OFF,     rx,            y, rbw, lineH, hFont, m_LogLevel == 0, true,  false));
+    PAGE_CTRL(10, CreateRadio(hw, L"Off",     IDC_MW_LOGLEVEL_OFF,     rx,            y, rbw, lineH, hFont, m_LogLevel == 0, true,  false));
     rx += rbw;
-    PAGE_CTRL(9, CreateRadio(hw, L"Error",   IDC_MW_LOGLEVEL_ERROR,   rx,            y, rbw, lineH, hFont, m_LogLevel == 1, false, false));
+    PAGE_CTRL(10, CreateRadio(hw, L"Error",   IDC_MW_LOGLEVEL_ERROR,   rx,            y, rbw, lineH, hFont, m_LogLevel == 1, false, false));
     rx += rbw;
-    PAGE_CTRL(9, CreateRadio(hw, L"Warn",    IDC_MW_LOGLEVEL_WARN,    rx,            y, rbw, lineH, hFont, m_LogLevel == 2, false, false));
+    PAGE_CTRL(10, CreateRadio(hw, L"Warn",    IDC_MW_LOGLEVEL_WARN,    rx,            y, rbw, lineH, hFont, m_LogLevel == 2, false, false));
     rx += rbw;
-    PAGE_CTRL(9, CreateRadio(hw, L"Info",    IDC_MW_LOGLEVEL_INFO,    rx,            y, rbw, lineH, hFont, m_LogLevel == 3, false, false));
+    PAGE_CTRL(10, CreateRadio(hw, L"Info",    IDC_MW_LOGLEVEL_INFO,    rx,            y, rbw, lineH, hFont, m_LogLevel == 3, false, false));
     rx += rbw;
-    PAGE_CTRL(9, CreateRadio(hw, L"Verbose", IDC_MW_LOGLEVEL_VERBOSE, rx,            y, rbw, lineH, hFont, m_LogLevel == 4, false, false));
+    PAGE_CTRL(10, CreateRadio(hw, L"Verbose", IDC_MW_LOGLEVEL_VERBOSE, rx,            y, rbw, lineH, hFont, m_LogLevel == 4, false, false));
   }
 
   // ===== Remote tab (page 7) =====
@@ -3393,6 +3606,10 @@ void Engine::ShowSettingsPage(int page) {
     }
   }
   m_nSettingsActivePage = page;
+
+  // Refresh dynamic tab content
+  if (page == 9) // Displays tab
+    RefreshDisplaysTab();
 }
 
 int Engine::GetSettingsLineHeight() {

@@ -150,7 +150,7 @@ The "Intensity", "Shift" and "Version" values can be read by presets that suppor
 
 With "Hue", "Saturation" and "Brightness", you can change the overall color tone of the Visualizer output. This may be useful if you want to adapt the colors of a preset to your room lighting, or just want to experiment with different looks.
 
-For [Spout](https://spout.zeal.co/), you can set the output to a "Fixed" resolution instead of the Visualizer window size. This may be useful if you want to use MDropDX12 as a source for other applications that expect a certain resolution. The Visualizer window will then use the fixed backbuffer size and aspect ratio for display.
+For [Spout](https://spout.zeal.co/), you can toggle the default Spout output on or off. For more advanced Spout configuration (multiple senders, fixed resolution), see the Displays tab in the Visualizer Settings (F8). You can also set the output to a "Fixed" resolution instead of the Visualizer window size. This may be useful if you want to use MDropDX12 as a source for other applications that expect a certain resolution. The Visualizer window will then use the fixed backbuffer size and aspect ratio for display.
 
 With the "Quality" setting, you can reduce the size of the backbuffer used for rendering, eg. a quality factor of 0.5 will render to an internal buffer with half the width and height of your Visualizer window. This will improve performance on slower systems, but will also reduce visual quality. A low quality may also yield in a pixellated look, giving a nice retro effect. Note that the quality setting will be ignored if "Fixed" Spout resolution is used.
 
@@ -209,6 +209,38 @@ If you've played around with one of these values and want to save it to the pres
 ```
 
 Note that this would be a MDropDX12 specific change that would not port over to other MilkDrop variants since they use a different _include.fx_. If you want a portable version, include your own version of _shiftHSV()_ in your preset and call that. See the "SnoopethDuckDuck + IkeC - Breeze" preset for an example.
+
+## Display Outputs (Visualizer Settings → Displays tab)
+
+The Displays tab in the Visualizer Settings window (F8) provides a unified interface for managing all render outputs: monitor mirrors and Spout senders.
+
+### Monitor Mirroring
+
+MDropDX12 can mirror its visualization output to additional monitors connected to your system. The Displays tab lists all detected monitors (excluding the one running the main Visualizer window). Enable a monitor to create a borderless fullscreen mirror window on that display. Mirror windows are click-through, meaning mouse input passes through to windows behind them.
+
+Monitors are enumerated automatically at startup and when displays are connected or disconnected. Use the "Refresh" button to manually re-scan.
+
+### Spout Senders
+
+You can configure multiple Spout senders, each with its own name and optional fixed resolution. Use "Add Spout" to create additional senders beyond the default one. Each sender appears in Spout-compatible receivers (OBS, Resolume, etc.) as a separate source.
+
+For each Spout output you can configure:
+
+- **Sender Name**: The name visible to Spout receivers (must be unique)
+- **Fixed Size**: Lock the Spout output to a specific resolution instead of matching the Visualizer window size
+- **Width / Height**: The fixed resolution dimensions (only used when Fixed Size is enabled)
+
+### Kill Switch
+
+Press **Ctrl+F2** to instantly disable all display outputs (monitors and Spout senders). This is useful if a mirror window covers your screen or you need to quickly free GPU resources. The main Visualizer window is not affected.
+
+### Hotkeys
+
+| Key | Action |
+| --- | ------ |
+| F10 | Toggle default Spout output on/off |
+| Shift+F10 | Toggle Spout fixed size |
+| Ctrl+F2 | Disable all display outputs |
 
 # Closing Notes
 

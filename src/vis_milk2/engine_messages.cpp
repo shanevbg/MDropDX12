@@ -2752,20 +2752,9 @@ void Engine::GetSongTitle(wchar_t* szSongTitle, int nSize) {
 }
 
 // =========================================================
-// Per-frame Spout send (called from EngineShell::DoTime between ExecuteCommandList and Present)
-void Engine::SpoutSendFrame() {
-  if (!bSpoutOut) return;
-
-  // Lazy initialization: if Spout is enabled but not yet set up, open the sender
-  if (!m_bSpoutDX12Ready) {
-    if (!bInitialized && m_lpDX && m_lpDX->m_backbuffer_width > 0) {
-      OpenSender(m_lpDX->m_backbuffer_width, m_lpDX->m_backbuffer_height);
-    }
-    if (!m_bSpoutDX12Ready) return;
-  }
-
-  spoutsender.SendDX11Resource(m_pWrappedBackBuffers[m_lpDX->m_frameIndex]);
-}
+// NOTE: SpoutSendFrame() has been replaced by SendToDisplayOutputs() in engine_displays.cpp
+// The per-output Spout lifecycle is now managed there.
+// =========================================================
 
 // SPOUT initialization function
 // Initializes SpoutDX12 sender via D3D11On12 interop
@@ -2976,20 +2965,29 @@ int Engine::ToggleSpout() {
   bSpoutChanged = true; // write config on exit
   bSpoutOut = !bSpoutOut;
   if (bSpoutOut) {
-    // Start spout
     AddNotification(L"Spout output enabled");
   }
   else {
-    // Stop Spout
     AddNotification(L"Spout output disabled");
   }
+
+  // Sync first Spout output in m_displayOutputs
+  for (auto& o : m_displayOutputs) {
+    if (o.config.type == DisplayOutputType::Spout) {
+      o.config.bEnabled = bSpoutOut;
+      if (!bSpoutOut && o.spoutState) {
+        DestroyDisplayOutput(o);
+      }
+      break;
+    }
+  }
+
   SetSpoutFixedSize(false, false);
 
   if (bInitialized || m_bSpoutDX12Ready) {
     SpoutReleaseWraps();
     spoutsender.CloseDirectX12();
     bInitialized = false;
-    // Re-initialized on next frame if bSpoutOut is true
   }
 
   ResetBufferAndFonts();
@@ -3001,6 +2999,15 @@ int Engine::SetSpoutFixedSize(bool toggleSwitch, bool showNotifications) {
   bSpoutChanged = true; // write config on exit
   if (toggleSwitch) {
     bSpoutFixedSize = !bSpoutFixedSize;
+  }
+  // Sync first Spout output in m_displayOutputs
+  for (auto& o : m_displayOutputs) {
+    if (o.config.type == DisplayOutputType::Spout) {
+      o.config.bFixedSize = bSpoutFixedSize;
+      o.config.nWidth = nSpoutFixedWidth;
+      o.config.nHeight = nSpoutFixedHeight;
+      break;
+    }
   }
   if (IsSpoutActiveAndFixed()) {
     if (toggleSwitch && showNotifications) {

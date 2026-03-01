@@ -179,12 +179,16 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Tabbed Remote UI | 🤝 | ✅ | ❌ |
 | Button panel (Remote buttons) | ♻️ | ✅ | ❌ |
 
-## Spout
+## Display Outputs
 
 | Feature | MDropDX12 | Milkwave | MilkDrop3 |
 | ------- | --------- | -------- | --------- |
 | Spout texture output | ✅ (DX12 via D3D11On12) | ✅ (DX9) | ❌ |
-| Window-independent Spout resolution | ❌ (planned) | ✅ | ❌ |
+| Multiple Spout senders | ✅ | ❌ | ❌ |
+| Fixed-size Spout resolution | ✅ | ✅ | ❌ |
+| Monitor mirroring (DX12 copy) | ✅ | ❌ | ❌ |
+| Unified Displays tab | ✅ | ❌ | ❌ |
+| Display output kill switch (Ctrl+F2) | ✅ | ❌ | ❌ |
 
 ## GPU Protection
 
@@ -202,7 +206,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | ------- | --------- | -------- | --------- |
 | In-app settings window (F8) | ✅ | ✅ | ✅ |
 | Dark theme settings UI | ✅ | ❌ | ❌ |
-| Multi-tab settings (10 tabs) | ✅ | ✅ | ✅ |
+| Multi-tab settings (11 tabs) | ✅ | ✅ | ✅ |
 | Verbose logging (LogLevel=2) | ✅ | ✅ | ❌ |
 
 ## Expression Evaluation

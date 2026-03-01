@@ -31,12 +31,14 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define MDROP_ENGINE_H 1
 
 // =========================================================
-// SPOUT
+// SPOUT & DISPLAY OUTPUTS
 #include "SpoutDX12.h" // Spout2 DX12 support class (D3D11On12 interop)
+#include "display_output.h"
 #include <io.h> // for file existence check
 // =========================================================
 
 #include "engineshell.h"
+#include "engine_helpers.h"  // SETTINGS_NUM_PAGES, control IDs
 #include "md_defines.h"
 #include "menu.h"
 #include "support.h"
@@ -365,6 +367,25 @@ public:
   HWND g_hwnd;
   HDC g_hdc;
   wchar_t	m_szSavedSongTitle[512]; // for saving song tile with Spout on or off
+  // =========================================================
+
+  // =========================================================
+  // DISPLAY OUTPUTS (monitor mirrors + Spout senders)
+  std::vector<DisplayOutput> m_displayOutputs;
+  ComPtr<ID3D12CommandAllocator>     m_mirrorCmdAllocators[DXC_FRAME_COUNT];
+  ComPtr<ID3D12GraphicsCommandList>  m_mirrorCmdList;
+  bool m_bMirrorClassRegistered = false;
+  void EnumerateDisplayOutputs();
+  void LoadDisplayOutputSettings();
+  void SaveDisplayOutputSettings();
+  void InitDisplayOutput(DisplayOutput& out);
+  void DestroyDisplayOutput(DisplayOutput& out);
+  void DestroyAllDisplayOutputs();
+  void ResizeMirrorSwapChain(MonitorMirrorState& ms, int newW, int newH);
+  void SendToDisplayOutputs() override;
+  void RefreshDisplaysTab();
+  void UpdateDisplaysTabSelection(int sel);
+  int  m_nDisplaysTabSel = -1;  // Selected index in Displays tab listbox
   // =========================================================
 
 
@@ -855,7 +876,7 @@ public:
   void		RunPerFrameEquations(int code);
   void		DrawUserSprites(int targetLayer = -1);  // -1 = all, 0 = behind text, 1 = on top
   void    DrawOnTopSprites() override { if (SpritesEnabled()) DrawUserSprites(1); }
-  void    SpoutSendFrame() override;
+  // SendToDisplayOutputs is declared with the display output members above
   void		MergeSortPresets(int left, int right);
   void		BuildMenus();
   void        SetMenusForPresetVersion(int WarpPSVersion, int CompPSVersion);
@@ -870,7 +891,7 @@ public:
   HWND        m_hSettingsWnd = NULL;
   HWND        m_hSettingsTab = NULL;       // Tab control
   int         m_nSettingsActivePage = 0;
-  std::vector<HWND> m_settingsPageCtrls[10]; // HWNDs per tab (General, Visual, Colors, Sound, Files, Messages, Sprites, Remote, Script, About)
+  std::vector<HWND> m_settingsPageCtrls[SETTINGS_NUM_PAGES]; // HWNDs per tab
   HFONT       m_hSettingsFont = NULL;
   HFONT       m_hSettingsFontBold = NULL;
   int         m_lastSeenIPCSeq = 0;        // tracks last IPC message seq displayed in settings

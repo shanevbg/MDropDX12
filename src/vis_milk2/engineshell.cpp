@@ -1474,8 +1474,8 @@ void EngineShell::DrawAndDisplay(int redraw) {
     // Close + execute the DX12 command list (transitions RT → PRESENT)
     m_lpDX->ExecuteCommandList();
 
-    // Spout output: send current backbuffer via D3D11On12 interop
-    SpoutSendFrame();
+    // Display outputs: mirror to monitors + Spout senders
+    SendToDisplayOutputs();
 
     // Present + advance to next frame
     m_lpDX->EndFrame();
