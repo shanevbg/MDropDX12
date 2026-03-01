@@ -234,12 +234,15 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 
 ### Displays Tab
 
-- **Output List**: Shows all detected monitors and Spout senders with ON/OFF status
+- **Output List**: Shows all detected monitors and Spout senders with status (OFF / ON / ACTIVE)
 - **Enable**: Toggle the selected output on or off
 - **Fullscreen**: Toggle fullscreen mode for monitor mirrors
 - **Add Spout**: Create a new Spout sender with a unique name
 - **Remove**: Delete the selected Spout sender
 - **Refresh**: Re-enumerate connected monitors
+- **Activate Mirrors**: Activate or deactivate all enabled monitor mirrors. Mirrors are always inactive at startup for safety; press this button to create the mirror windows.
+- **Click-through**: When checked, mouse events pass through mirror windows to applications behind them. Mirror windows are always topmost so they remain visible in click-through mode. Click-through is off by default at each launch (not persisted).
+- **Opacity**: Mirror window opacity (1-100%). Applied to all active mirror windows in real time. Persisted to settings.ini.
 - **Sender Name**: Name visible to Spout receivers (Spout outputs only)
 - **Fixed Size**: Lock Spout output to a specific resolution (Spout outputs only)
 - **Width / Height**: Fixed resolution dimensions (Spout outputs only)
@@ -356,7 +359,15 @@ The Displays tab in Settings (F8) provides a unified interface for managing all 
 
 ### Monitor Mirroring
 
-MDropDX12 can mirror its visualization output to additional monitors connected to your system. The Displays tab lists all detected monitors (excluding the one running the main visualizer window). Enable a monitor to create a borderless fullscreen mirror window on that display. Mirror windows are click-through, meaning mouse input passes through to windows behind them.
+MDropDX12 can mirror its visualization output to additional monitors connected to your system. The Displays tab lists all detected monitors (excluding the one running the main visualizer window). Enable a monitor and press **Activate Mirrors** to create borderless fullscreen mirror windows on those displays.
+
+**Safety**: Mirror windows are always inactive at startup. You must explicitly press the **Activate Mirrors** button on the Displays tab to create them. This prevents accidental full-screen coverage of monitors.
+
+**Z-order**: Mirror windows are always topmost so they stay above normal desktop windows. The Settings window (also topmost) sits above mirrors naturally when focused.
+
+**Click-through**: By default, mirror windows are opaque and block mouse input. Check **Click-through** on the Displays tab to allow mouse events to pass through to applications behind the mirror. Click-through state is not persisted — it resets to off each launch.
+
+**Opacity**: Use the **Opacity** spin box (1-100%) to control mirror window transparency. This is useful in combination with click-through to see and interact with windows behind the visualization. Opacity is persisted to settings.ini.
 
 Monitors are enumerated automatically at startup and when displays are connected or disconnected. Use the "Refresh" button to manually re-scan.
 
@@ -372,7 +383,7 @@ For each Spout output you can configure:
 
 ### Display Output Kill Switch
 
-Press **Ctrl+F2** to instantly disable all display outputs (monitors and Spout senders). This is useful if a mirror window covers your screen or you need to quickly free GPU resources. The main visualizer window is not affected.
+Press **Ctrl+F2** to instantly disable all display outputs (monitors and Spout senders) and deactivate mirrors. This is useful if a mirror window covers your screen or you need to quickly free GPU resources. The main visualizer window is not affected.
 
 ## Spout Output
 

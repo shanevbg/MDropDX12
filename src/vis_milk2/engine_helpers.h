@@ -361,6 +361,10 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_DISP_SPOUT_W     7007   // Edit: Spout width
 #define IDC_MW_DISP_SPOUT_H     7008   // Edit: Spout height
 #define IDC_MW_DISP_SPOUT_FIXED 7009   // Checkbox: Spout fixed size
+#define IDC_MW_DISP_ACTIVATE    7010   // Button: activate/deactivate mirrors
+#define IDC_MW_DISP_CLICKTHRU   7011   // Checkbox: mirror click-through
+#define IDC_MW_DISP_OPACITY     7012   // Edit: mirror opacity (1-100)
+#define IDC_MW_DISP_OPACITY_SPIN 7013  // Up-down (spin) buddy for opacity
 
 // Settings page count
 #define SETTINGS_NUM_PAGES      11

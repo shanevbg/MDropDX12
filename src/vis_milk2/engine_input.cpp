@@ -827,6 +827,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
             }
           }
         }
+        m_bMirrorsActive = false;  // Also deactivate mirror toggle
         // Mirrors will be cleaned up by SendToDisplayOutputs on next frame
         AddNotification(L"All display outputs disabled");
         RefreshDisplaysTab();
@@ -1004,7 +1005,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
 
     case VK_F9:
       m_bShowShaderHelp = !m_bShowShaderHelp;
-      return FALSE;   //Alr. Fixed the shader help.
+      return 0;
 
     case VK_SCROLL:
       m_bPresetLockedByUser = GetKeyState(VK_SCROLL) & 1;

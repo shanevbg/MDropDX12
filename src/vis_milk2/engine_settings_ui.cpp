@@ -725,6 +725,15 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       int sel = TabCtrl_GetCurSel(pnm->hwndFrom);
       if (p) p->ShowSettingsPage(sel);
     }
+    // Mirror opacity spin control
+    if (p && pnm->idFrom == IDC_MW_DISP_OPACITY_SPIN && pnm->code == UDN_DELTAPOS) {
+      NMUPDOWN* pud = (NMUPDOWN*)lParam;
+      int newVal = pud->iPos + pud->iDelta;
+      if (newVal < 1) newVal = 1;
+      if (newVal > 100) newVal = 100;
+      p->m_nMirrorOpacity = newVal;
+      p->UpdateMirrorWindowStyles();
+    }
     // Sprite ListView selection change
     if (p && pnm->idFrom == IDC_MW_SPR_LIST && pnm->code == LVN_ITEMCHANGED) {
       NMLISTVIEW* pnmv = (NMLISTVIEW*)lParam;
@@ -1378,6 +1387,11 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         }
         return 0;
       }
+      case IDC_MW_DISP_CLICKTHRU:
+        p->m_bMirrorClickThrough = bChecked;
+        p->UpdateMirrorWindowStyles();
+        p->RefreshDisplaysTab();
+        return 0;
       case IDC_MW_QUALITY_AUTO:
         p->bQualityAuto = bChecked;
         if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
@@ -1922,6 +1936,14 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         }
         return 0;
       }
+      case IDC_MW_DISP_OPACITY: {
+        int val = _wtoi(buf);
+        if (val < 1) val = 1;
+        if (val > 100) val = 100;
+        p->m_nMirrorOpacity = val;
+        p->UpdateMirrorWindowStyles();
+        return 0;
+      }
       case IDC_MW_IPC_TITLE: {
         wchar_t tbuf[256];
         GetWindowTextW((HWND)lParam, tbuf, 256);
@@ -1948,6 +1970,34 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     }
 
     // ===== Displays tab button handlers (BN_CLICKED) =====
+    if (code == BN_CLICKED && id == IDC_MW_DISP_ACTIVATE) {
+      p->m_bMirrorsActive = !p->m_bMirrorsActive;
+      // Update button text
+      HWND hBtn = GetDlgItem(hWnd, IDC_MW_DISP_ACTIVATE);
+      if (hBtn) SetWindowTextW(hBtn, p->m_bMirrorsActive ? L"Deactivate Mirrors" : L"Activate Mirrors");
+      if (p->m_bMirrorsActive) {
+        int nMirrors = 0;
+        for (auto& o : p->m_displayOutputs)
+          if (o.config.type == DisplayOutputType::Monitor && o.config.bEnabled)
+            nMirrors++;
+        if (nMirrors > 0) {
+          wchar_t buf[128];
+          swprintf(buf, 128, L"Mirror outputs active (%d)", nMirrors);
+          p->AddNotification(buf);
+        }
+        else
+          p->AddNotification(L"Mirror outputs active (no monitors configured)");
+      }
+      else {
+        p->AddNotification(L"Mirror outputs disabled");
+      }
+      p->RefreshDisplaysTab();
+      // Move focus to listbox so spacebar doesn't re-trigger the button
+      HWND hList = GetDlgItem(hWnd, IDC_MW_DISP_LIST);
+      if (hList) SetFocus(hList);
+      return 0;
+    }
+
     if (code == BN_CLICKED && (id == IDC_MW_DISP_REFRESH || id == IDC_MW_DISP_ADD_SPOUT || id == IDC_MW_DISP_REMOVE)) {
       HWND hw = p->GetPluginWindow();
       switch (id) {
@@ -3448,6 +3498,42 @@ void Engine::BuildSettingsControls() {
     PAGE_CTRL(9, CreateBtn(hw, L"Add Spout", IDC_MW_DISP_ADD_SPOUT, x, y, btnW, lineH, hFont));
     PAGE_CTRL(9, CreateBtn(hw, L"Remove", IDC_MW_DISP_REMOVE, x + btnW + btnGap, y, btnW, lineH, hFont));
     PAGE_CTRL(9, CreateBtn(hw, L"Refresh", IDC_MW_DISP_REFRESH, x + 2 * (btnW + btnGap), y, btnW, lineH, hFont));
+    y += lineH + gap + 4;
+
+    // Activate/Deactivate mirrors button
+    PAGE_CTRL(9, CreateBtn(hw, m_bMirrorsActive ? L"Deactivate Mirrors" : L"Activate Mirrors",
+      IDC_MW_DISP_ACTIVATE, x, y, rw, lineH, hFont));
+    y += lineH + gap;
+
+    // Mirror click-through checkbox + opacity
+    PAGE_CTRL(9, CreateCheck(hw, L"Click-through", IDC_MW_DISP_CLICKTHRU, x, y, rw / 2 - 4, lineH, hFont, false, m_bMirrorClickThrough));
+    {
+      wchar_t opBuf[8];
+      swprintf(opBuf, 8, L"%d", m_nMirrorOpacity);
+      int opLblW = MulDiv(60, lineH, 26);
+      int opEditW = MulDiv(50, lineH, 26);
+      int opPctW = MulDiv(20, lineH, 26);
+      int opX = x + rw / 2;
+      PAGE_CTRL(9, CreateLabel(hw, L"Opacity:", opX, y, opLblW, lineH, hFont, false));
+      HWND hEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", opBuf,
+        WS_CHILD | WS_TABSTOP | ES_NUMBER | ES_RIGHT,
+        opX + opLblW + 2, y, opEditW, lineH, hw,
+        (HMENU)(INT_PTR)IDC_MW_DISP_OPACITY, GetModuleHandle(NULL), NULL);
+      if (hEdit && hFont) SendMessage(hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
+      PAGE_CTRL(9, hEdit);
+      // Up-down (spin) control buddy
+      HWND hSpin = CreateWindowExW(0, UPDOWN_CLASSW, NULL,
+        WS_CHILD | WS_VISIBLE | UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS,
+        0, 0, 0, 0, hw,
+        (HMENU)(INT_PTR)IDC_MW_DISP_OPACITY_SPIN, GetModuleHandle(NULL), NULL);
+      if (hSpin) {
+        SendMessage(hSpin, UDM_SETBUDDY, (WPARAM)hEdit, 0);
+        SendMessage(hSpin, UDM_SETRANGE32, 1, 100);
+        SendMessage(hSpin, UDM_SETPOS32, 0, m_nMirrorOpacity);
+      }
+      PAGE_CTRL(9, hSpin);
+      PAGE_CTRL(9, CreateLabel(hw, L"%", opX + opLblW + 2 + opEditW + 2, y, opPctW, lineH, hFont, false));
+    }
   }
 
   // ===== About tab (page 10) =====

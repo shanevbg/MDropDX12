@@ -111,6 +111,9 @@ void Engine::LoadDisplayOutputSettings()
     wchar_t* pIni = GetConfigIniFile();
 
     int count = GetPrivateProfileIntW(L"DisplayOutputs", L"Count", -1, pIni);
+    m_nMirrorOpacity = GetPrivateProfileIntW(L"DisplayOutputs", L"MirrorOpacity", 100, pIni);
+    if (m_nMirrorOpacity < 1) m_nMirrorOpacity = 1;
+    if (m_nMirrorOpacity > 100) m_nMirrorOpacity = 100;
 
     if (count < 0) {
         // Legacy migration: no [DisplayOutputs] section yet.
@@ -199,6 +202,8 @@ void Engine::SaveDisplayOutputSettings()
     wchar_t buf[64];
     swprintf(buf, 64, L"%d", count);
     WritePrivateProfileStringW(L"DisplayOutputs", L"Count", buf, pIni);
+    swprintf(buf, 64, L"%d", m_nMirrorOpacity);
+    WritePrivateProfileStringW(L"DisplayOutputs", L"MirrorOpacity", buf, pIni);
 
     for (int i = 0; i < count; i++) {
         auto& cfg = m_displayOutputs[i].config;
@@ -341,9 +346,13 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
         }
 
         // Create borderless popup window covering the target monitor
-        // WS_EX_TRANSPARENT = click-through (input passes to windows below)
+        // WS_EX_LAYERED enables SetLayeredWindowAttributes for opacity control.
+        // WS_EX_TRANSPARENT (click-through) is added dynamically via UpdateMirrorWindowStyles().
+        DWORD exStyle = WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_LAYERED;
+        if (m_bMirrorClickThrough)
+            exStyle |= WS_EX_TRANSPARENT;
         ms.hWnd = CreateWindowExW(
-            WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT,
+            exStyle,
             L"MDropDX12_Mirror",
             L"MDropDX12 Mirror",
             WS_POPUP,
@@ -354,6 +363,11 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
             out.monitorState.reset();
             return;
         }
+        // Apply opacity from settings (1-100% → 3-255)
+        BYTE alpha = (BYTE)(m_nMirrorOpacity * 255 / 100);
+        if (alpha < 3) alpha = 3;
+        SetLayeredWindowAttributes(ms.hWnd, 0, alpha, LWA_ALPHA);
+        SetWindowPos(ms.hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         ShowWindow(ms.hWnd, SW_SHOWNOACTIVATE);
 
         // Get DXGI factory from existing swap chain
@@ -492,10 +506,16 @@ void Engine::SendToDisplayOutputs()
 {
     if (!m_lpDX) return;
 
-    // Cleanup: destroy mirror windows for disabled outputs (must run on render thread)
+    // Cleanup: destroy outputs that are disabled or (for monitors) globally deactivated
     for (auto& out : m_displayOutputs) {
-        if (!out.config.bEnabled && out.monitorState)
-            DestroyDisplayOutput(out);
+        if (out.config.type == DisplayOutputType::Monitor) {
+            if ((!m_bMirrorsActive || !out.config.bEnabled) && out.monitorState)
+                DestroyDisplayOutput(out);
+        }
+        else {
+            if (!out.config.bEnabled && out.spoutState)
+                DestroyDisplayOutput(out);
+        }
     }
 
     int mainW = m_lpDX->m_client_width;
@@ -517,6 +537,9 @@ void Engine::SendToDisplayOutputs()
             out.spoutState->sender.SendDX11Resource(out.spoutState->wrappedBackBuffers[fi]);
         }
         else if (out.config.type == DisplayOutputType::Monitor) {
+            // Skip mirror creation when mirrors are globally deactivated (F9)
+            if (!m_bMirrorsActive)
+                continue;
             // Lazy init
             if (!out.monitorState) {
                 InitDisplayOutput(out);
@@ -621,6 +644,33 @@ void Engine::SendToDisplayOutputs()
     }
 }
 
+// ─── Mirror Window Style Updates ─────────────────────────────────────────────
+
+void Engine::UpdateMirrorWindowStyles()
+{
+    // Compute alpha from opacity percentage (1-100 → 3-255)
+    BYTE alpha = (BYTE)(m_nMirrorOpacity * 255 / 100);
+    if (alpha < 3) alpha = 3;  // floor at ~1% so window doesn't vanish completely
+
+    for (auto& out : m_displayOutputs) {
+        if (out.config.type != DisplayOutputType::Monitor || !out.monitorState)
+            continue;
+        HWND hWnd = out.monitorState->hWnd;
+        if (!hWnd) continue;
+
+        LONG_PTR ex = GetWindowLongPtrW(hWnd, GWL_EXSTYLE);
+        if (m_bMirrorClickThrough)
+            ex |= WS_EX_TRANSPARENT;
+        else
+            ex &= ~WS_EX_TRANSPARENT;
+        SetWindowLongPtrW(hWnd, GWL_EXSTYLE, ex);
+        SetLayeredWindowAttributes(hWnd, 0, alpha, LWA_ALPHA);
+
+        // Mirrors are always topmost — settings window (also topmost) sits above them naturally.
+        SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
 // ─── Displays Tab Refresh ─────────────────────────────────────────────────────
 
 void Engine::RefreshDisplaysTab()
@@ -636,10 +686,29 @@ void Engine::RefreshDisplaysTab()
         auto& cfg = m_displayOutputs[i].config;
         wchar_t label[256];
         const wchar_t* prefix = (cfg.type == DisplayOutputType::Monitor) ? L"[Monitor]" : L"[Spout]";
-        const wchar_t* status = cfg.bEnabled ? L"ON" : L"OFF";
+        const wchar_t* status;
+        if (cfg.type == DisplayOutputType::Monitor) {
+            if (!cfg.bEnabled)
+                status = L"OFF";
+            else if (!m_bMirrorsActive)
+                status = L"ON (not active)";
+            else
+                status = L"ACTIVE";
+        }
+        else {
+            status = cfg.bEnabled ? L"ON" : L"OFF";
+        }
         swprintf(label, 256, L"%s %s  (%s)", prefix, cfg.szName, status);
         SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)label);
     }
+
+    // Sync Activate Mirrors button text
+    HWND hBtn = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_ACTIVATE);
+    if (hBtn) SetWindowTextW(hBtn, m_bMirrorsActive ? L"Deactivate Mirrors" : L"Activate Mirrors");
+
+    // Sync click-through checkbox
+    HWND hCT = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_CLICKTHRU);
+    if (hCT) SendMessage(hCT, BM_SETCHECK, m_bMirrorClickThrough ? BST_CHECKED : BST_UNCHECKED, 0);
 }
 
 void Engine::UpdateDisplaysTabSelection(int sel)

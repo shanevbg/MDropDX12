@@ -375,6 +375,9 @@ public:
   ComPtr<ID3D12CommandAllocator>     m_mirrorCmdAllocators[DXC_FRAME_COUNT];
   ComPtr<ID3D12GraphicsCommandList>  m_mirrorCmdList;
   bool m_bMirrorClassRegistered = false;
+  bool m_bMirrorsActive = false;       // Displays tab button; always starts off
+  bool m_bMirrorClickThrough = false;  // Displays tab checkbox; not persisted
+  int  m_nMirrorOpacity = 100;         // 1-100%; persisted to INI
   void EnumerateDisplayOutputs();
   void LoadDisplayOutputSettings();
   void SaveDisplayOutputSettings();
@@ -384,6 +387,7 @@ public:
   void ResizeMirrorSwapChain(MonitorMirrorState& ms, int newW, int newH);
   void SendToDisplayOutputs() override;
   void RefreshDisplaysTab();
+  void UpdateMirrorWindowStyles();  // apply click-through + opacity to all active mirrors
   void UpdateDisplaysTabSelection(int sel);
   int  m_nDisplaysTabSel = -1;  // Selected index in Displays tab listbox
   // =========================================================
