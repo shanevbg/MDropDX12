@@ -1275,22 +1275,13 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       if (hkMod & HOTKEYF_ALT)     mod |= MOD_ALT;
       if (hkMod & HOTKEYF_CONTROL) mod |= MOD_CONTROL;
       if (hkMod & HOTKEYF_SHIFT)   mod |= MOD_SHIFT;
-      // Save binding (and register if global hotkeys are enabled)
-      HWND hRender = p->GetPluginWindow();
-      if (hRender && p->m_bGlobalHotkeysEnabled) {
-        // Unregister old first
-        UnregisterHotKey(hRender, p->m_hotkeys[sel].id);
-        if (!RegisterHotKey(hRender, p->m_hotkeys[sel].id, mod | MOD_NOREPEAT, vk)) {
-          // Re-register old binding
-          if (p->m_hotkeys[sel].vk != 0)
-            RegisterHotKey(hRender, p->m_hotkeys[sel].id, p->m_hotkeys[sel].modifiers | MOD_NOREPEAT, p->m_hotkeys[sel].vk);
-          p->AddNotification(L"Hotkey already in use by another application");
-          return 0;
-        }
-      }
+      // Save binding and ask render thread to re-register hotkeys
       p->m_hotkeys[sel].modifiers = mod;
       p->m_hotkeys[sel].vk = vk;
       p->SaveHotkeySettings();
+      HWND hRender = p->GetPluginWindow();
+      if (hRender)
+        PostMessage(hRender, WM_MW_REGISTER_HOTKEYS, 0, 0);
       // Refresh list
       std::wstring entry = p->m_hotkeys[sel].szAction;
       entry += L": ";
@@ -1308,11 +1299,12 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       HWND hList = GetDlgItem(hWnd, IDC_MW_HOTKEY_LIST);
       int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
       if (sel >= 0 && sel < HK_COUNT - 1) {
-        HWND hRender = p->GetPluginWindow();
-        if (hRender) UnregisterHotKey(hRender, p->m_hotkeys[sel].id);
         p->m_hotkeys[sel].vk = 0;
         p->m_hotkeys[sel].modifiers = 0;
         p->SaveHotkeySettings();
+        HWND hRender = p->GetPluginWindow();
+        if (hRender)
+          PostMessage(hRender, WM_MW_REGISTER_HOTKEYS, 0, 0);
         // Refresh list
         std::wstring entry = p->m_hotkeys[sel].szAction;
         entry += L": (none)";
@@ -1488,12 +1480,15 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         return 0;
       case IDC_MW_HOTKEY_ENABLE: {
         p->m_bGlobalHotkeysEnabled = bChecked;
+        // Ask render thread to register/unregister hotkeys
         HWND hRender = p->GetPluginWindow();
-        if (hRender) {
-          p->UnregisterGlobalHotkeys(hRender);
-          if (bChecked)
-            p->RegisterGlobalHotkeys(hRender);
-        }
+        if (hRender)
+          PostMessage(hRender, WM_MW_REGISTER_HOTKEYS, 0, 0);
+        // Enable/disable hotkey config controls
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_HOTKEY_LIST), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_HOTKEY_EDIT), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_HOTKEY_SET), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_HOTKEY_CLEAR), bChecked);
         p->SaveHotkeySettings();
         return 0;
       }
@@ -3125,6 +3120,14 @@ void Engine::BuildSettingsControls() {
     PAGE_CTRL(3, CreateBtn(hw, L"Set", IDC_MW_HOTKEY_SET, bx, y, btnW, lineH, hFont));
     bx += btnW + btnGap;
     PAGE_CTRL(3, CreateBtn(hw, L"Clear", IDC_MW_HOTKEY_CLEAR, bx, y, btnW, lineH, hFont));
+
+    // Disable hotkey controls if global hotkeys are not enabled
+    if (!m_bGlobalHotkeysEnabled) {
+      EnableWindow(GetDlgItem(hw, IDC_MW_HOTKEY_LIST), FALSE);
+      EnableWindow(GetDlgItem(hw, IDC_MW_HOTKEY_EDIT), FALSE);
+      EnableWindow(GetDlgItem(hw, IDC_MW_HOTKEY_SET), FALSE);
+      EnableWindow(GetDlgItem(hw, IDC_MW_HOTKEY_CLEAR), FALSE);
+    }
   }
 
   // ====== PAGE 4: Files (created hidden) ======

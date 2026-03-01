@@ -313,6 +313,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
                 if (GetMonitorInfoW(hRenderMon, &mi) &&
                     wcscmp(mi.szDevice, out.config.szDeviceName) == 0) {
                     DebugLogA("InitDisplayOutput: Skipping mirror on render window's monitor\n");
+                    out.bSkippedSameMonitor = true;
                     return;
                 }
             }
@@ -520,8 +521,10 @@ void Engine::SendToDisplayOutputs()
     // Cleanup: destroy outputs that are disabled or (for monitors) globally deactivated
     for (auto& out : m_displayOutputs) {
         if (out.config.type == DisplayOutputType::Monitor) {
-            if ((!m_bMirrorsActive || !out.config.bEnabled) && out.monitorState)
+            if ((!m_bMirrorsActive || !out.config.bEnabled) && out.monitorState) {
                 DestroyDisplayOutput(out);
+                out.bSkippedSameMonitor = false;  // Re-evaluate on next activation
+            }
         }
         else {
             if (!out.config.bEnabled && out.spoutState)
@@ -550,6 +553,9 @@ void Engine::SendToDisplayOutputs()
         else if (out.config.type == DisplayOutputType::Monitor) {
             // Skip mirror creation when mirrors are globally deactivated (F9)
             if (!m_bMirrorsActive)
+                continue;
+            // Skip if already determined to be on render window's monitor
+            if (out.bSkippedSameMonitor)
                 continue;
             // Lazy init
             if (!out.monitorState) {

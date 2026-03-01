@@ -434,6 +434,11 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     EnqueueRenderCmd(RenderCmd::RefreshDisplays);
     return 0;
 
+  case WM_MW_REGISTER_HOTKEYS:
+    UnregisterGlobalHotkeys(GetPluginWindow());
+    RegisterGlobalHotkeys(GetPluginWindow());
+    return 0;
+
   case WM_DISPLAYCHANGE:
     // Monitor connect/disconnect — re-enumerate
     PostMessage(GetPluginWindow(), WM_MW_REFRESH_DISPLAYS, 0, 0);

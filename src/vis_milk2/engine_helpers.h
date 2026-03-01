@@ -390,6 +390,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_KILL_SPRITE       (WM_APP + 12) // wParam = slot index
 #define WM_MW_TOGGLE_DISPLAY    (WM_APP + 13) // wParam = output index in m_displayOutputs
 #define WM_MW_REFRESH_DISPLAYS  (WM_APP + 14) // re-enumerate monitors
+#define WM_MW_REGISTER_HOTKEYS  (WM_APP + 15) // re-register global hotkeys on render thread
 
 // Milkwave Remote messages (sent via PostMessage from Milkwave Remote → IPC window → render window)
 #define WM_MW_NEXT_PRESET       (WM_APP + 100)

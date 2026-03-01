@@ -62,4 +62,6 @@ struct DisplayOutput {
     // Runtime state — only one is active at a time, managed by type
     std::unique_ptr<MonitorMirrorState> monitorState;
     std::unique_ptr<SpoutOutputState>   spoutState;
+
+    bool bSkippedSameMonitor = false;  // Mirror is on render window's monitor; cleared on window move
 };
