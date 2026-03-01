@@ -9,7 +9,7 @@
 ## Visualizer Features
 
 * DirectX 12 rendering backend with GPU-accelerated Direct2D text overlay
-* In-app Settings window (F2) with dark theme, 8-tab UI (General, Visual, Colors, Sound, Files, Messages, About, Remote)
+* In-app Settings window (F8) with dark theme, 8-tab UI (General, Visual, Colors, Sound, Files, Messages, About, Remote)
 * Preset browser with filtering, tagging, and subdirectory navigation
 * Milkwave Remote IPC compatibility — non-blocking hidden window receives 32+ commands via WM_COPYDATA
 * Configurable window titles for Remote discovery (Settings → Remote tab)
