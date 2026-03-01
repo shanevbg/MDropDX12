@@ -25,6 +25,9 @@ enc_temp_folder/
 # External dependencies (fetched by build.ps1)
 /external/
 
+# Large binary assets (download separately)
+resources/textures/
+
 # Runtime-generated files
 *.log
 diag_*.txt

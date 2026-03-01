@@ -1,5 +1,67 @@
 # MDropDX12 Changelog
 
+## v1.1 (2026-03-01)
+
+### Rendering & Performance
+
+- Replaced SpoutDX9 with SpoutDX12 via D3D11On12 interop for OBS compatibility
+- Replaced GDI overlay with DX12 font atlas for all HUD text rendering
+- Replaced Sleep()-based FPS limiter with high-resolution waitable timer
+- Separated render thread from message pump with fire-and-forget IPC
+- Added VSync toggle and tearing support
+- Added FPS cap dropdown to Visual tab (30/60/90/120/144/240/360/720/Unlimited) and Ctrl+Shift+F3 reset hotkey
+- Fixed all 45 build warnings (now 0 warnings)
+
+### Expression Evaluation
+
+- Replaced projectM-eval with native WDL ns-eel2 for x64 JIT compiled expression evaluation
+
+### Display & Window
+
+- Added unified Display Outputs system with monitor mirroring and multiple Spout senders
+- Added mirror mode (ALT+S) with safety controls (activation button, click-through, opacity, topmost)
+- Added per-display settings and configurable global hotkeys
+- Added idle timer / screensaver mode
+- Restored window focus after TDR device rebuild
+
+### Settings UI
+
+- Added Sprites tab with full sprite management UI (blend modes, layers, EEL code, import dialog)
+- Added Script tab with Milkwave-compatible BPM-timed script file playback
+- Added Content Base Path setting to Files tab for textures and sprites
+- Added Show Messages and Show Sprites checkboxes to Messages tab
+- Added log level radio buttons (Off/Error/Warn/Info/Verbose)
+- Added sprite layer rendering support and redesigned sprite properties panel
+
+### Input & Control
+
+- Added game controller support with JSON configuration, settings UI, 14-button mapping (Xbox reference)
+- Added media key hotkeys (play/pause/stop/next/prev/rewind/ff) and song info polling
+- Added Milkwave Remote button support
+- Fixed global hotkeys: register on render thread, disable controls when off, error feedback
+
+### Messages & Sprites
+
+- Added Send Now button and per-message randomization (position, size, font, color, effects, growth, duration)
+- Added animation and color shifting overrides to Message Overrides dialog
+- Added Spout video input mixing with background/overlay compositing
+
+### Presets
+
+- Added drag-and-drop preset loading with folder support and multi-file DND directory
+- Added Quicksave2 (Ctrl+Shift+S) slot
+
+### Project
+
+- Refactored source directory: `vis_milk2/` → `mDropDX12/`, `Milkdrop2PcmVisualizer` → `App`
+- Unified license under CC-BY-NC 4.0 (third-party components retain original licenses)
+- Renamed project from MDropDX12Visualizer to MDropDX12
+
+### Documentation
+
+- Added comprehensive Manual.md, Architecture.md, and comparison chart
+- Consolidated documentation into docs/ directory
+
 ## v1.0 (2026-02-28)
 
 Initial release. Forked from Milkwave v3.5-dev Visualizer and rebuilt as a standalone DirectX 12 application.

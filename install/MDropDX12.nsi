@@ -8,9 +8,9 @@
 !define MUI_ICON "..\resources\icons\MDropDX12.ico"
 !define MUI_UNICON "..\resources\icons\MDropDX12.ico"
 
-!define VERSION "3.5"
-!define VER_MAJOR 3
-!define VER_MINOR 5
+!define VERSION "1.1"
+!define VER_MAJOR 1
+!define VER_MINOR 1
 
 !define RELDIR "..\Release\"
 

@@ -1,6 +1,6 @@
 ﻿MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geisswerks.com/milkdrop/) visualizer engine, with GPU-accelerated text rendering, an in-app settings UI, and broad preset compatibility improvements. Works with [Milkwave](https://github.com/shanevbg/Milkwave) Remote via WM_COPYDATA IPC for extended control (messaging, wave manipulation, screenshots, and more).
 
-**Current version: 1.0** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
+**Current version: 1.1** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
 
 [**Click here**](https://github.com/shanevbg/MDropDX12/releases/latest) to get the latest version.
 
@@ -146,8 +146,9 @@ For a chronological list of MDropDX12 releases and features, read the [Changes](
 
 ## System Requirements
 
-* Windows 11 64-bit or higher
+* Windows 10 64-bit or higher (Windows 11 recommended)
 * DirectX 12 compatible GPU
+* [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe)
 * [Milkwave](https://github.com/shanevbg/Milkwave) (optional — configure window titles in Settings → Remote tab for IPC discovery)
 
 ## Support
@@ -177,7 +178,7 @@ If you believe you or someone else should be mentioned here, please let me know.
 
 [license]: #license
 
-MDropDX12 is licensed under the [3-Clause BSD License](https://opensource.org/licenses/BSD-3-Clause). See [LICENSE.txt](src/LICENSE.txt) for the full license text and [THIRD-PARTY-LICENSES.txt](THIRD-PARTY-LICENSES.txt) for third-party component licenses (Nullsoft/MilkDrop2, Cockos/ns-eel2, Spout2, loopback-capture).
+MDropDX12 is licensed under the [Creative Commons Attribution-NonCommercial 4.0 International License (CC-BY-NC 4.0)](https://creativecommons.org/licenses/by-nc/4.0/). See [LICENSE](LICENSE) for the full license text and [THIRD-PARTY-LICENSES.txt](THIRD-PARTY-LICENSES.txt) for third-party component licenses (Nullsoft/MilkDrop2, Cockos/ns-eel2, Spout2, loopback-capture).
 
 ## Public use of MilkDrop Presets
 
