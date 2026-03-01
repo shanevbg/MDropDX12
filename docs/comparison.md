@@ -187,6 +187,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Multiple Spout senders | ✅ | ❌ | ❌ |
 | Fixed-size Spout resolution | ✅ | ✅ | ❌ |
 | Monitor mirroring (DX12 copy) | ✅ | ❌ | ❌ |
+| ALT-S mirror mode (fullscreen + mirrors) | ✅ | ❌ | ❌ |
 | Unified Displays tab | ✅ | ❌ | ❌ |
 | Display output kill switch (Ctrl+F2) | ✅ | ❌ | ❌ |
 

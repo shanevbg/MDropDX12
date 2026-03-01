@@ -28,7 +28,8 @@ Press **F8** or **Ctrl+L** to open the Settings window.
 | Transparency | F12 | Black pixels become transparent |
 | Black mode | CTRL+F12 | No preset rendering (black screen) |
 | Always on top | F7 | Window stays above other windows |
-| Multi-monitor stretch | ALT+S | Stretches across all monitors |
+| Multi-monitor stretch | ALT+S | Stretches across all monitors (default) |
+| Mirror mode | ALT+S | Fullscreens primary + activates mirrors (when enabled in Displays tab) |
 
 **Opacity**: SHIFT+UP/DOWN or SHIFT+Mousewheel adjusts window opacity.
 
@@ -57,7 +58,7 @@ Press **F8** or **Ctrl+L** to open the Settings window.
 | F12 | Toggle transparency mode |
 | CTRL+F12 | Toggle black mode |
 | ALT+ENTER | Toggle fullscreen |
-| ALT+S | Toggle multi-monitor stretch |
+| ALT+S | Toggle multi-monitor stretch (or mirror mode if enabled) |
 | CTRL+F3 | Display current FPS setting |
 | CTRL+F9 | Toggle windowed fullscreen |
 | CTRL+SHIFT+F9 | Toggle watermark mode |
@@ -243,6 +244,7 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 - **Activate Mirrors**: Activate or deactivate all enabled monitor mirrors. Mirrors are always inactive at startup for safety; press this button to create the mirror windows.
 - **Click-through**: When checked, mouse events pass through mirror windows to applications behind them. Mirror windows are always topmost so they remain visible in click-through mode. Click-through is off by default at each launch (not persisted).
 - **Opacity**: Mirror window opacity (1-100%). Applied to all active mirror windows in real time. Persisted to settings.ini.
+- **Use mirrors for ALT-S**: When checked, ALT+S fullscreens the primary render window on its current monitor and activates display mirrors on all enabled outputs. ALT+S again deactivates mirrors and restores the primary window to its previous size and position. When unchecked, ALT+S uses the legacy stretch behavior (spanning one window across all monitors). Persisted to settings.ini.
 - **Sender Name**: Name visible to Spout receivers (Spout outputs only)
 - **Fixed Size**: Lock Spout output to a specific resolution (Spout outputs only)
 - **Width / Height**: Fixed resolution dimensions (Spout outputs only)
