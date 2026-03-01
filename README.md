@@ -177,10 +177,7 @@ If you believe you or someone else should be mentioned here, please let me know.
 
 [license]: #license
 
-MDropDX12 (as a BeatDrop fork) is licensed under the [3-Clause BSD License](https://opensource.org/licenses/BSD-3-Clause) with the exception of where otherwise noted. See LICENSE.txt for details.
-
-Although the original Matthew van Eerde's [loopback-capture](https://github.com/mvaneerde/blog) project didn't explicitly state the license, the author has been kind enough to provide a license clarification [here](
-https://blogs.msdn.microsoft.com/matthew_van_eerde/2014/11/05/draining-the-wasapi-capture-buffer-fully/). All changes in this repository to the original Matthew's code are published either under the terms of BSD license or the license provided by original author.
+MDropDX12 is licensed under the [3-Clause BSD License](https://opensource.org/licenses/BSD-3-Clause). See [LICENSE.txt](src/LICENSE.txt) for the full license text and [THIRD-PARTY-LICENSES.txt](THIRD-PARTY-LICENSES.txt) for third-party component licenses (Nullsoft/MilkDrop2, Cockos/ns-eel2, Spout2, loopback-capture).
 
 ## Public use of MilkDrop Presets
 
