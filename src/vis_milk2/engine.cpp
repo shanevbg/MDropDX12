@@ -1191,6 +1191,10 @@ void Engine::MyReadConfig() {
   // Spout video input
   LoadSpoutInputSettings();
 
+  // Game controller
+  LoadControllerSettings();
+  LoadControllerJSON();
+
   m_nInjectEffectMode = GetPrivateProfileIntW(L"Settings", L"nInjectEffectMode", 0, pIni);
   m_nInjectEffectMode = max(0, min(4, m_nInjectEffectMode)); // clamp to valid range
   // ======================================

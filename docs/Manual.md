@@ -189,6 +189,8 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 
 - **Audio Device**: Select from system output and input devices. Input devices appear with `[Input]` suffix.
 - **Global Hotkeys**: Configure system-wide hotkeys that work even when MDropDX12 is not the active window. Check **Enable** to activate global hotkeys. Select an action from the list, press a key combination in the capture field, and click **Set** to assign it. Click **Clear** to remove a hotkey. If a hotkey conflicts with another application, a notification appears and the previous binding is kept. Global hotkeys are disabled by default. ALT+S and ALT+ENTER always work as local shortcuts when the visualizer window has focus.
+- **Idle Timer**: Screensaver mode that activates after a configurable idle timeout (1-60 minutes). Action can be Fullscreen or Stretch/Mirror. Auto-restore returns to previous state when input is detected.
+- **Game Controller**: Map game controller buttons to visualizer commands. Check **Enable** to start polling. Select a controller from the **Device** dropdown, click **Scan** to re-enumerate connected controllers. The **Button Mapping** text editor shows the JSON configuration mapping button numbers to commands. Click **Defaults** for the default DualSense mapping, **Save** to write to `controller.json`, **Load** to read it back. The **?** button shows an Xbox controller button reference. See Game Controller section below for details.
 
 ### Files Tab
 
@@ -246,6 +248,7 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 - **Sender Name**: Name visible to Spout receivers (Spout outputs only)
 - **Fixed Size**: Lock Spout output to a specific resolution (Spout outputs only)
 - **Width / Height**: Fixed resolution dimensions (Spout outputs only)
+- **Video Input**: Composite a Spout sender as a background or overlay layer on the visualization. Check **Enable** to activate, select a sender from the dropdown (or Auto for the first available), choose **Background** or **Overlay** layer, adjust **Opacity**, and optionally enable **Luma Key** with threshold and softness controls for transparency keying.
 
 See the Display Outputs section below for details.
 
@@ -642,6 +645,97 @@ The script system plays timed preset sequences synchronized to a BPM (beats per 
 
 Manage scripts via Settings > Script tab: browse for a script file, set BPM, and use Play/Stop/Loop controls. See `script-default.txt` for a detailed description of available commands.
 
+## Game Controller
+
+MDropDX12 supports game controllers (gamepads) for hands-free control of the visualizer. Controller buttons are mapped to visualizer commands via a JSON configuration file.
+
+### Setup
+
+1. Open Settings (F8) > System tab
+2. Check **Enable** under Game Controller
+3. Click **Scan** to detect connected controllers
+4. Select your controller from the **Device** dropdown
+5. Click **Defaults** to load the default button mapping, then **Save**
+
+The **?** button next to the Game Controller label opens a reference popup showing Xbox Wireless Controller button numbers.
+
+### Button Mapping (controller.json)
+
+Button mappings are stored in `controller.json` in the application directory. The format is a flat JSON object mapping button numbers (1-based) to command strings:
+
+```json
+{
+  "1": "NEXT",
+  "2": "PREV",
+  "3": "LOCK",
+  "4": "RAND",
+  "5": "PREV",
+  "6": "NEXT",
+  "7": "",
+  "8": "",
+  "9": "PRESETINFO",
+  "10": "SETTINGS",
+  "11": "FULLSCREEN",
+  "12": "HARDCUT",
+  "13": "MASHUP",
+  "14": ""
+}
+```
+
+Lines starting with `//` are treated as comments and ignored. Empty strings disable that button. Commands are case-insensitive and leading/trailing whitespace is trimmed.
+
+### Available Commands
+
+| Command | Action |
+|---------|--------|
+| `NEXT` | Soft cut to next preset |
+| `PREV` | Go back to previous preset |
+| `HARDCUT` | Hard cut to next preset (instant) |
+| `LOCK` | Toggle preset lock |
+| `RAND` | Toggle random/sequential order |
+| `MASHUP` | Random mini mash-up |
+| `FULLSCREEN` | Toggle fullscreen (ALT+ENTER) |
+| `STRETCH` | Toggle multi-monitor stretch mode |
+| `MIRROR` | Toggle mirror mode |
+| `RESET` | Reset window to safe state (exits stretch/mirror/fullscreen) |
+| `PRESETINFO` | Toggle preset info display |
+| `SETTINGS` | Open Settings window (F8) |
+| `SEND=<n>` | Send virtual keypress (decimal VK code) |
+
+### Xbox Wireless Controller Button Numbers
+
+The Windows Multimedia API (winmm) exposes up to 32 buttons per controller. For an Xbox Wireless Controller (Model 1797), the mapping is:
+
+| Button | Xbox Control |
+|--------|-------------|
+| 1 | A |
+| 2 | B |
+| 3 | X |
+| 4 | Y |
+| 5 | Left Bumper (LB) |
+| 6 | Right Bumper (RB) |
+| 7 | Back / View |
+| 8 | Start / Menu |
+| 9 | Left Stick Press (L3) |
+| 10 | Right Stick Press (R3) |
+
+**Not available via winmm**: D-pad (reported as POV hat, not buttons), left/right triggers (reported as axes), thumbstick axes, and the Xbox button (reserved by the system).
+
+### Behavior
+
+- **Polling rate**: 20 Hz (50 ms timer on the message pump thread)
+- **Rising-edge detection**: Commands fire only on button press, not while held
+- **Hot-plug**: If a controller is disconnected, polling silently skips until reconnected
+- **Overhead**: Near-zero when disabled (early return before any winmm call)
+
+### Managing Mappings
+
+Use the **Button Mapping** text editor on the System tab to edit mappings directly:
+
+- **Defaults**: Fills the editor with the default DualSense/Xbox mapping
+- **Save**: Writes the editor contents to `controller.json` and reloads the config
+- **Load**: Reads `controller.json` from disk and fills the editor
+
 ## GPU Protection
 
 MDropDX12 includes safeguards against GPU overload:
@@ -660,6 +754,7 @@ MDropDX12 includes safeguards against GPU overload:
 | `settings.ini` | Main configuration file (section: `[Milkwave]`) |
 | `messages.ini` | Custom message definitions |
 | `sprites.ini` | Sprite definitions |
+| `controller.json` | Game controller button-to-command mappings |
 | `debug.log` | Application log (verbosity set in About tab) |
 | `resources/presets/` | Preset directory |
 | `resources/presets/Quicksave/` | Quicksave destination (CTRL+S) |

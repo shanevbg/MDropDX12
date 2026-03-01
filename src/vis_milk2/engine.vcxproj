@@ -365,6 +365,7 @@
     <ClCompile Include="engine_displays.cpp" />
     <ClCompile Include="engine_hotkeys.cpp" />
     <ClCompile Include="engine_spout_input.cpp" />
+    <ClCompile Include="engine_controller.cpp" />
     <ClCompile Include="engine_messages.cpp" />
     <ClCompile Include="engine_presets.cpp" />
     <ClCompile Include="engine_script.cpp" />

@@ -1581,6 +1581,31 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         p->m_bIdleAutoRestore = bChecked;
         p->SaveIdleTimerSettings();
         return 0;
+      case IDC_MW_CTRL_ENABLE: {
+        p->m_bControllerEnabled = bChecked;
+        p->m_dwLastControllerButtons = 0;
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_CTRL_DEVICE), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_CTRL_SCAN), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_CTRL_JSON_EDIT), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_CTRL_DEFAULTS), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_CTRL_SAVE), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_CTRL_LOAD), bChecked);
+        if (bChecked) {
+          // Parse JSON from the edit control when enabling
+          HWND hEdit = GetDlgItem(hWnd, IDC_MW_CTRL_JSON_EDIT);
+          if (hEdit) {
+            int len = GetWindowTextLengthW(hEdit);
+            std::wstring wText(len + 1, L'\0');
+            GetWindowTextW(hEdit, &wText[0], len + 1);
+            int cbNeeded = WideCharToMultiByte(CP_ACP, 0, wText.c_str(), len, NULL, 0, NULL, NULL);
+            p->m_szControllerJSONText.resize(cbNeeded);
+            WideCharToMultiByte(CP_ACP, 0, wText.c_str(), len, &p->m_szControllerJSONText[0], cbNeeded, NULL, NULL);
+            p->ParseControllerJSON(p->m_szControllerJSONText);
+          }
+        }
+        p->SaveControllerSettings();
+        return 0;
+      }
       case IDC_MW_DARK_THEME:
         p->m_bSettingsDarkTheme = bChecked;
         WritePrivateProfileStringW(L"SettingsTheme", L"DarkTheme",
@@ -2234,6 +2259,65 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         p->InitSpoutInput();
       }
       p->SaveSpoutInputSettings();
+      return 0;
+    }
+
+    // ===== Game Controller handlers =====
+    if (code == BN_CLICKED && id == IDC_MW_CTRL_HELP) {
+      p->ShowControllerHelpPopup(hWnd);
+      return 0;
+    }
+    if (code == BN_CLICKED && id == IDC_MW_CTRL_SCAN) {
+      HWND hCombo = GetDlgItem(hWnd, IDC_MW_CTRL_DEVICE);
+      if (hCombo) p->EnumerateControllers(hCombo);
+      return 0;
+    }
+    if (code == BN_CLICKED && id == IDC_MW_CTRL_DEFAULTS) {
+      HWND hEdit = GetDlgItem(hWnd, IDC_MW_CTRL_JSON_EDIT);
+      if (hEdit) {
+        std::string def = p->GetDefaultControllerJSON();
+        int wLen = MultiByteToWideChar(CP_ACP, 0, def.c_str(), (int)def.size(), NULL, 0);
+        std::wstring wDef(wLen, L'\0');
+        MultiByteToWideChar(CP_ACP, 0, def.c_str(), (int)def.size(), &wDef[0], wLen);
+        SetWindowTextW(hEdit, wDef.c_str());
+      }
+      return 0;
+    }
+    if (code == BN_CLICKED && id == IDC_MW_CTRL_SAVE) {
+      HWND hEdit = GetDlgItem(hWnd, IDC_MW_CTRL_JSON_EDIT);
+      if (hEdit) {
+        int len = GetWindowTextLengthW(hEdit);
+        std::wstring wText(len + 1, L'\0');
+        GetWindowTextW(hEdit, &wText[0], len + 1);
+        int cbNeeded = WideCharToMultiByte(CP_ACP, 0, wText.c_str(), len, NULL, 0, NULL, NULL);
+        std::string text(cbNeeded, '\0');
+        WideCharToMultiByte(CP_ACP, 0, wText.c_str(), len, &text[0], cbNeeded, NULL, NULL);
+        p->SaveControllerJSON(text);
+      }
+      return 0;
+    }
+    if (code == BN_CLICKED && id == IDC_MW_CTRL_LOAD) {
+      p->LoadControllerJSON();
+      HWND hEdit = GetDlgItem(hWnd, IDC_MW_CTRL_JSON_EDIT);
+      if (hEdit) {
+        const std::string& s = p->m_szControllerJSONText;
+        int wLen = MultiByteToWideChar(CP_ACP, 0, s.c_str(), (int)s.size(), NULL, 0);
+        std::wstring wJson(wLen, L'\0');
+        MultiByteToWideChar(CP_ACP, 0, s.c_str(), (int)s.size(), &wJson[0], wLen);
+        SetWindowTextW(hEdit, wJson.c_str());
+      }
+      return 0;
+    }
+    if (code == CBN_SELCHANGE && id == IDC_MW_CTRL_DEVICE) {
+      HWND hCombo = (HWND)lParam;
+      int sel = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
+      if (sel >= 0) {
+        int joyID = (int)SendMessage(hCombo, CB_GETITEMDATA, sel, 0);
+        p->m_nControllerDeviceID = joyID;
+        p->m_dwLastControllerButtons = 0;
+        SendMessageW(hCombo, CB_GETLBTEXT, sel, (LPARAM)p->m_szControllerName);
+        p->SaveControllerSettings();
+      }
       return 0;
     }
 
@@ -3315,6 +3399,76 @@ void Engine::BuildSettingsControls() {
       EnableWindow(GetDlgItem(hw, IDC_MW_IDLE_AUTO_RESTORE), FALSE);
     }
   }
+  y += lineH + gap + 8;
+
+  // Game Controller
+  {
+    int titleW = MulDiv(130, lineH, 26);
+    int helpW = lineH;  // square button
+    PAGE_CTRL(3, CreateLabel(hw, L"Game Controller", x, y, titleW, lineH, hFontBold, false));
+    PAGE_CTRL(3, CreateBtn(hw, L"\u2753", IDC_MW_CTRL_HELP, x + titleW + 4, y, helpW, lineH, hFont));
+  }
+  PAGE_CTRL(3, CreateCheck(hw, L"Enable", IDC_MW_CTRL_ENABLE, x + rw / 2, y, rw / 2, lineH, hFont, false, m_bControllerEnabled));
+  y += lineH + gap;
+
+  {
+    int indent = MulDiv(16, lineH, 26);
+    int lblW = MulDiv(55, lineH, 26);
+    int scanW = MulDiv(60, lineH, 26);
+    int comboW = rw - lblW - scanW - 8;
+
+    // Device combo + Scan button
+    PAGE_CTRL(3, CreateLabel(hw, L"Device:", x, y, lblW, lineH, hFont, false));
+    HWND hCtrlCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
+      WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
+      x + lblW, y, comboW, lineH * 8, hw,
+      (HMENU)(INT_PTR)IDC_MW_CTRL_DEVICE, GetModuleHandle(NULL), NULL);
+    if (hCtrlCombo && hFont) SendMessage(hCtrlCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(3, hCtrlCombo);
+    EnumerateControllers(hCtrlCombo);
+
+    PAGE_CTRL(3, CreateBtn(hw, L"Scan", IDC_MW_CTRL_SCAN, x + lblW + comboW + 4, y, scanW, lineH, hFont));
+    y += lineH + gap;
+
+    // Button Mapping label
+    PAGE_CTRL(3, CreateLabel(hw, L"Button Mapping:", x, y, rw, lineH, hFont, false));
+    y += lineH;
+
+    // Multiline JSON edit control
+    int editH = lineH * 8;
+    HWND hJsonEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL,
+      WS_CHILD | WS_TABSTOP | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL | ES_WANTRETURN,
+      x, y, rw, editH, hw,
+      (HMENU)(INT_PTR)IDC_MW_CTRL_JSON_EDIT, GetModuleHandle(NULL), NULL);
+    if (hJsonEdit && hFont) SendMessage(hJsonEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(3, hJsonEdit);
+
+    // Populate with current JSON text
+    {
+      int wLen = MultiByteToWideChar(CP_ACP, 0, m_szControllerJSONText.c_str(), (int)m_szControllerJSONText.size(), NULL, 0);
+      std::wstring wJson(wLen, L'\0');
+      MultiByteToWideChar(CP_ACP, 0, m_szControllerJSONText.c_str(), (int)m_szControllerJSONText.size(), &wJson[0], wLen);
+      SetWindowTextW(hJsonEdit, wJson.c_str());
+    }
+    y += editH + gap;
+
+    // Defaults / Save / Load buttons
+    int btnW = MulDiv(70, lineH, 26);
+    int btnGap = 6;
+    PAGE_CTRL(3, CreateBtn(hw, L"Defaults", IDC_MW_CTRL_DEFAULTS, x, y, btnW, lineH, hFont));
+    PAGE_CTRL(3, CreateBtn(hw, L"Save", IDC_MW_CTRL_SAVE, x + btnW + btnGap, y, btnW, lineH, hFont));
+    PAGE_CTRL(3, CreateBtn(hw, L"Load", IDC_MW_CTRL_LOAD, x + 2 * (btnW + btnGap), y, btnW, lineH, hFont));
+
+    // Disable sub-controls if not enabled
+    if (!m_bControllerEnabled) {
+      EnableWindow(hCtrlCombo, FALSE);
+      EnableWindow(GetDlgItem(hw, IDC_MW_CTRL_SCAN), FALSE);
+      EnableWindow(hJsonEdit, FALSE);
+      EnableWindow(GetDlgItem(hw, IDC_MW_CTRL_DEFAULTS), FALSE);
+      EnableWindow(GetDlgItem(hw, IDC_MW_CTRL_SAVE), FALSE);
+      EnableWindow(GetDlgItem(hw, IDC_MW_CTRL_LOAD), FALSE);
+    }
+  }
 
   // ====== PAGE 4: Files (created hidden) ======
   y = tabTop + 10;
@@ -4052,8 +4206,13 @@ void Engine::BuildSettingsControls() {
 
   #undef PAGE_CTRL
 
-  // Show only page 0 initially, hide all others
-  ShowSettingsPage(0);
+  // Restore last active tab from INI, or default to page 0
+  {
+    int startTab = GetPrivateProfileIntW(L"Settings", L"ActiveTab", 0, GetConfigIniFile());
+    if (startTab < 0 || startTab >= SETTINGS_NUM_PAGES) startTab = 0;
+    TabCtrl_SetCurSel(m_hSettingsTab, startTab);
+    ShowSettingsPage(startTab);
+  }
 }
 
 void Engine::RefreshIPCList(HWND hSettingsWnd) {
@@ -4083,6 +4242,10 @@ void Engine::ShowSettingsPage(int page) {
     }
   }
   m_nSettingsActivePage = page;
+
+  // Persist active tab to INI
+  wchar_t tabBuf[8]; swprintf(tabBuf, 8, L"%d", page);
+  WritePrivateProfileStringW(L"Settings", L"ActiveTab", tabBuf, GetConfigIniFile());
 
   // Refresh dynamic tab content
   if (page == 9) // Displays tab
@@ -4142,6 +4305,31 @@ void Engine::LayoutSettingsControls() {
     RECT r; GetWindowRect(hAudio, &r);
     MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
     MoveWindow(hAudio, r.left, r.top, rw, 200, TRUE);
+  }
+
+  // Stretch controller device combo + reposition Scan button
+  {
+    HWND hCtrlCombo = GetDlgItem(m_hSettingsWnd, IDC_MW_CTRL_DEVICE);
+    HWND hScan = GetDlgItem(m_hSettingsWnd, IDC_MW_CTRL_SCAN);
+    if (hCtrlCombo && hScan) {
+      RECT rc; GetWindowRect(hCtrlCombo, &rc);
+      MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&rc, 2);
+      RECT rs; GetWindowRect(hScan, &rs);
+      MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&rs, 2);
+      int scanW = rs.right - rs.left;
+      int rightEdge = rcDisplay.left + 16 + rw;
+      int comboW = rightEdge - rc.left - scanW - 4;
+      MoveWindow(hCtrlCombo, rc.left, rc.top, comboW, lineH * 8, TRUE);
+      MoveWindow(hScan, rc.left + comboW + 4, rs.top, scanW, rs.bottom - rs.top, TRUE);
+    }
+  }
+
+  // Stretch controller JSON edit
+  HWND hJsonEdit = GetDlgItem(m_hSettingsWnd, IDC_MW_CTRL_JSON_EDIT);
+  if (hJsonEdit) {
+    RECT r; GetWindowRect(hJsonEdit, &r);
+    MapWindowPoints(NULL, m_hSettingsWnd, (POINT*)&r, 2);
+    MoveWindow(hJsonEdit, r.left, r.top, rw, r.bottom - r.top, TRUE);
   }
 
   // Stretch sliders + reposition value labels

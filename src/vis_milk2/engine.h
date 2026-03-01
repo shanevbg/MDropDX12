@@ -48,6 +48,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "dx12helpers.h"  // DX12Texture
 #include <vector>
 #include <array>
+#include <map>
 #include <thread>
 #include <atomic>
 #include <string>
@@ -811,6 +812,25 @@ public:
   void EnumerateSpoutSenders(std::vector<std::string>& outNames);
   void SaveSpoutInputSettings();
   void LoadSpoutInputSettings();
+
+  // ── Game Controller ──
+  bool    m_bControllerEnabled = false;
+  int     m_nControllerDeviceID = -1;    // winmm joy ID (0-15), -1 = none
+  wchar_t m_szControllerName[256] = {};  // friendly name for INI persistence
+  DWORD   m_dwLastControllerButtons = 0; // previous frame's button state
+  std::map<int, std::string> m_controllerConfig; // button# → command
+  std::string m_szControllerJSONText;    // raw JSON text for UI edit control
+
+  void PollController();
+  void ExecuteControllerCommand(const std::string& cmd);
+  void EnumerateControllers(HWND hCombo);
+  void LoadControllerJSON();
+  void SaveControllerJSON(const std::string& jsonText);
+  void LoadControllerSettings();
+  void SaveControllerSettings();
+  std::string GetDefaultControllerJSON();
+  void ParseControllerJSON(const std::string& jsonText);
+  void ShowControllerHelpPopup(HWND hParent);
 
   int               m_nTitleTexSizeX, m_nTitleTexSizeY;
   UINT              m_adapterId;

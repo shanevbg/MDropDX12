@@ -1212,6 +1212,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   case WM_CLOSE:
   {
     KillTimer(hWnd, IDT_IDLE_CHECK);
+    KillTimer(hWnd, IDT_CONTROLLER_POLL);
     g_engine.UnregisterGlobalHotkeys(hWnd);
     g_engine.SaveWindowSizeAndPosition(hWnd);
 
@@ -1521,6 +1522,10 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       }
       return 0;
     }
+    if (wParam == IDT_CONTROLLER_POLL) {
+      g_engine.PollController();
+      return 0;
+    }
     break;
   }
 
@@ -1559,6 +1564,38 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       }
     }
     g_engine.AddNotification(L"Idle timer restored");
+    return 0;
+  }
+
+  case WM_MW_TOGGLE_STRETCH_MODE:
+  {
+    ToggleStretch(hWnd);
+    return 0;
+  }
+
+  case WM_MW_TOGGLE_MIRROR_MODE:
+  {
+    if (!g_engine.m_bMirrorsActive) {
+      if (!fullscreen) ToggleFullScreen(hWnd);
+      g_engine.m_bMirrorsActive = true;
+      g_engine.AddNotification(L"Mirror outputs active");
+    } else {
+      g_engine.m_bMirrorsActive = false;
+      if (fullscreen) ToggleFullScreen(hWnd);
+      g_engine.AddNotification(L"Mirror outputs disabled");
+    }
+    return 0;
+  }
+
+  case WM_MW_RESET_WINDOW:
+  {
+    // Exit stretch mode first (restores saved window rect)
+    if (stretch) ToggleStretch(hWnd);
+    // Deactivate mirrors
+    g_engine.m_bMirrorsActive = false;
+    // Reset to safe windowed state (same as Ctrl+F2)
+    ResetWindow(hWnd);
+    g_engine.AddNotification(L"Window reset");
     return 0;
   }
 
@@ -2159,6 +2196,9 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
 
   // Start idle check timer (1-second interval on the message pump thread)
   SetTimer(hwnd, IDT_IDLE_CHECK, 1000, NULL);
+
+  // Start controller polling timer (50ms / 20Hz on the message pump thread)
+  SetTimer(hwnd, IDT_CONTROLLER_POLL, 50, NULL);
 
   // --- Phase 3: Spawn dedicated render thread for DX12 ---
   g_bQuitRequested.store(false);

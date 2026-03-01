@@ -257,8 +257,19 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SPINPUT_LUMA_SOFT    7030
 #define IDC_MW_SPINPUT_LUMA_SOFT_LBL 7031
 
+// Game Controller control IDs
+#define IDC_MW_CTRL_ENABLE      7040
+#define IDC_MW_CTRL_DEVICE      7041
+#define IDC_MW_CTRL_SCAN        7042
+#define IDC_MW_CTRL_JSON_EDIT   7043
+#define IDC_MW_CTRL_DEFAULTS    7044
+#define IDC_MW_CTRL_SAVE        7045
+#define IDC_MW_CTRL_LOAD        7046
+#define IDC_MW_CTRL_HELP        7047
+
 #define IDT_IPC_MONITOR             10001 // Timer ID for IPC message polling
 #define IDT_IDLE_CHECK              10002 // Timer ID for idle detection (1-second interval)
+#define IDT_CONTROLLER_POLL         10003 // Timer ID for game controller polling (50ms)
 
 #define IDC_MW_MSG_PLAY             4010   // "Play/Stop" toggle button on Messages tab
 
@@ -415,6 +426,9 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_REGISTER_HOTKEYS  (WM_APP + 15) // re-register global hotkeys on render thread
 #define WM_MW_IDLE_ACTIVATE     (WM_APP + 16) // idle timer triggered — go fullscreen or activate mirrors
 #define WM_MW_IDLE_RESTORE      (WM_APP + 17) // user became active — restore previous state
+#define WM_MW_TOGGLE_STRETCH_MODE (WM_APP + 18) // toggle stretch across all monitors
+#define WM_MW_TOGGLE_MIRROR_MODE  (WM_APP + 19) // toggle per-output mirror windows
+#define WM_MW_RESET_WINDOW        (WM_APP + 20) // reset to safe windowed mode (Ctrl+F2)
 
 // Milkwave Remote messages (sent via PostMessage from Milkwave Remote → IPC window → render window)
 #define WM_MW_NEXT_PRESET       (WM_APP + 100)
