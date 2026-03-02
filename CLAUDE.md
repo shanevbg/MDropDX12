@@ -4,15 +4,18 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 
 ## Project Structure
 
-- **Standard**: C++17, Windows (Win32 API)
+- **Standard**: C++17, Windows (Win32 API), x64 only
 - **Graphics**: DirectX 12 (migrated from DX9Ex; D3D11on12 for Direct2D text)
 - **Audio**: WASAPI loopback capture
 - **Spout** integration for texture sharing
-- **Expression eval**: projectM-eval via ns-eel2 (see `src/ns-eel2/`)
+- **Expression eval**: ns-eel2 (Cockos WDL, x64 JIT) — see `src/ns-eel2/`
 - **Main source**: `src/mDropDX12/` (engine, app, overlay, text, menu)
 - **Audio source**: `src/audio/` (WASAPI loopback capture)
-- **Build**: `powershell -ExecutionPolicy Bypass -File build.ps1 Release`
-- Build outputs: Debug uses `../../Release` as working dir; Release uses exe directory
+- **Build**: `powershell -ExecutionPolicy Bypass -File build.ps1 Release x64`
+- **Build outputs**: `src/mDropDX12/Debug_x64/` (Debug), `src/mDropDX12/Release_x64/` (Release)
+- Debug uses `Release/` as working dir; Release uses exe directory
+- **IDE**: VSCodium with C/C++ extension (pre-configured in `.vscode/`)
+- **Docs**: `docs/Install.md` (end-user), `docs/Development.md` (developer setup)
 
 ## Critical Warnings
 
@@ -45,18 +48,21 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 
 - DirectX 12 rendering backend (migrated from DX9Ex)
 - GDI overlay window for HUD text (preset name, FPS, debug info, notifications)
-- In-app Settings window (F2) with dark theme, 5-tab UI, preset browser, resource viewer
+- In-app Settings window (F8 / Ctrl+L) with dark theme, 11-tab UI, preset browser, resource viewer
 - Fallback texture search paths and dedicated Random Textures Directory
 - HLSL variable shadowing fix (auto-renames variables shadowing built-in functions)
 - DX12 3D volume texture support (noisevol_lq/noisevol_hq)
-- x64 build support
 - Track info and artwork from Spotify/YouTube/media sources
 - Preset change on track change; preset tagging system
 - Window transparency, borderless, clickthrough ("watermark mode")
 - GLSL-to-HLSL shader conversion with live preview
 - MIDI automation (up to 50 controls)
+- Game controller support with JSON config
 - Hue/Saturation/Brightness color shifting
 - Shader precompiling and caching
+- Spout video input mixing (background/overlay compositing)
+- Idle timer / screensaver mode
+- Drag-and-drop presets, folders, and textures
 - Custom preset variables: `bass_smooth`, `mid_smooth`, `treb_smooth`, `vol_smooth`, `vis_intensity`, `vis_shift`, `vis_version`, `colshift_hue`
 
 ## DX12 Rendering Pipeline
@@ -78,18 +84,20 @@ See `docs/dx12-migration-status.md` for detailed migration state.
 
 ## Workflow Preferences
 
-- After code changes, always attempt a build: `powershell -ExecutionPolicy Bypass -File build.ps1 Release`
+- After code changes, always attempt a build: `powershell -ExecutionPolicy Bypass -File build.ps1 Release x64`
 - If a build is blocked by permissions (exe locked), ask the user to close the running visualizer
 - Skip song title rendering (Phase 6E) — never worked, low priority
-- Skip sprite system (Phase 6F) — low priority
 - INI section is `[Milkwave]` for backward compatibility (not renamed)
 - Reference visualizer for comparison: MilkDrop 3PRO (MilkDrop3)
 - User has custom texture files that presets reference (clipboard textures, etc.)
+- Textures (`resources/textures/`) and shader cache (`cache/`) are not tracked in git
+- Distribution is portable zip only (no installer)
 
 ## System Requirements
 
-- Windows 11 64-bit or higher
+- Windows 10 64-bit or higher (Windows 11 recommended)
 - DirectX 12 compatible GPU
+- Microsoft Visual C++ Redistributable (x64)
 
 ## License
 
