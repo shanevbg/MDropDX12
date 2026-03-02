@@ -1,238 +1,242 @@
-# Feature Comparison: MDropDX12 vs Milkwave vs MilkDrop3
+# Feature Comparison: MDropDX12 vs Milkwave vs MilkDrop3 vs projectM
 
-Comparison of three MilkDrop-based music visualizer projects.
+Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 
 | Project | Description | Graphics API | Status |
 | ------- | ----------- | ------------ | ------ |
-| **MDropDX12** | Ground-up DX12 rebuild of MilkDrop2 engine | DirectX 12 | Active (v1.1) |
+| **MDropDX12** | Ground-up DX12 rebuild of MilkDrop2 engine | DirectX 12 | Active (v1.2) |
 | **Milkwave** | Remote control app + bundled MilkDrop2 visualizer | DirectX 9Ex | Active (v3.5) |
-| **MilkDrop3** | Enhanced MilkDrop2 fork (reference visualizer) | DirectX 9Ex | Active |
+| **MilkDrop3** | Enhanced MilkDrop2 fork (reference visualizer) | DirectX 9Ex | Active (v3.31) |
+| **projectM** | Open-source MilkDrop reimplementation (SDL standalone) | OpenGL | Pre-release (lib v4.1.6) |
 
 ## Rendering
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| DirectX 12 rendering | ✅ | ❌ (DX9Ex) | ❌ (DX9Ex) |
-| x64 build | ✅ | ❌ (x86) | ❌ (x86) |
-| Fullscreen | ✅ | ✅ | ✅ |
-| Borderless windowed | ✅ | ✅ | ✅ |
-| Window transparency | ✅ | ✅ | ✅ |
-| Clickthrough / watermark mode | ✅ | ✅ | ❌ |
-| Always on top | ✅ | ✅ | ✅ |
-| Adjustable render quality | ✅ | ✅ | ✅ |
-| Auto quality (window-size adaptive) | ✅ | ✅ | ❌ |
-| Fixed window dimensions (config) | ✅ | ✅ | ❌ |
-| VSync toggle | ✅ | ✅ | ✅ |
-| FPS cap dropdown in settings UI | ✅ | ❌ | ❌ |
-| FPS cap hotkey cycling | ✅ | ✅ | ✅ |
-| Black mode (hide rendering) | ✅ | ✅ | ❌ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| DirectX 12 rendering | ✅ | ❌ (DX9Ex) | ❌ (DX9Ex) | ❌ (OpenGL) |
+| x64 build | ✅ | ❌ (x86) | ❌ (x86) | ✅ |
+| Fullscreen | ✅ | ✅ | ✅ | ✅ |
+| Borderless windowed | ✅ | ✅ | ✅ | ❌ |
+| Window transparency | ✅ | ✅ | ✅ | ❌ |
+| Clickthrough / watermark mode | ✅ | ✅ | ❌ | ❌ |
+| Always on top | ✅ | ✅ | ✅ | ❌ |
+| Adjustable render quality | ✅ | ✅ | ✅ | ❌ |
+| Auto quality (window-size adaptive) | ✅ | ✅ | ❌ | ❌ |
+| Fixed window dimensions (config) | ✅ | ✅ | ❌ | ✅ |
+| VSync toggle | ✅ | ✅ | ✅ | ❌ |
+| FPS cap dropdown in settings UI | ✅ | ❌ | ❌ | ❌ |
+| FPS cap hotkey cycling | ✅ | ✅ | ✅ | ❌ |
+| Black mode (hide rendering) | ✅ | ✅ | ❌ | ❌ |
 
 ## Audio
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| WASAPI loopback capture | ✅ | ✅ | ✅ |
-| Input device support (microphones) | ✅ | ✅ | ❌ |
-| On-the-fly device selection | ✅ | ✅ | ❌ |
-| Hi-res audio support | ✅ | ✅ | ❌ |
-| Smooth audio variables (bass/mid/treb/vol_smooth) | ✅ | ✅ | ❌ |
-| Signal amplification | ✅ | ✅ | ❌ |
-| Disable audio capture option | ✅ | ✅ | ❌ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| WASAPI loopback capture | ✅ | ✅ | ✅ | ❌ (SDL audio) |
+| Input device support (microphones) | ✅ | ✅ | ❌ | ✅ |
+| On-the-fly device selection | ✅ | ✅ | ❌ | ✅ (Ctrl+A) |
+| Hi-res audio support | ✅ | ✅ | ✅ (v3.31) | ❌ |
+| Smooth audio variables (bass/mid/treb/vol_smooth) | ✅ | ✅ | ❌ | ❌ |
+| Signal amplification | ✅ | ✅ | ❌ | ❌ |
+| Disable audio capture option | ✅ | ✅ | ❌ | ❌ |
 
 ## Presets
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| .milk preset loading | ✅ | ✅ | ✅ |
-| .milk2 double-preset format | ✅ | ❌ | ✅ |
-| Preset browser (in-app) | ✅ | ✅ | ✅ |
-| Preset browser filtering (Ctrl+F) | ✅ | ✅ | ❌ |
-| Preset tagging | ✅ | ✅ | ❌ |
-| Tag-based playlists | ✅ | ✅ | ❌ |
-| Age filter (modified within X days) | ✅ | ✅ | ❌ |
-| Text filter (presets containing text) | ✅ | ✅ | ❌ |
-| Quicksave (Ctrl+S) | ✅ | ✅ | ✅ |
-| Quicksave2 folder (Ctrl+Shift+S) | ✅ | ✅ | ❌ |
-| Preset auto-change timer | ✅ | ✅ | ✅ |
-| Preset change on track change | ✅ | ✅ | ❌ |
-| Drag-and-drop preset loading | ✅ | ❌ | ❌ |
-| Preset mode buttons (assign/recall) | ❌ | ✅ | ❌ |
-| Deep mashup (multi-layer) | ❌ | ❌ | ✅ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| .milk preset loading | ✅ | ✅ | ✅ | ✅ |
+| .milk2 double-preset format | ✅ | ❌ | ✅ | ❌ |
+| Preset browser (in-app) | ✅ | ✅ | ✅ | ❌ (WIP) |
+| Preset browser filtering (Ctrl+F) | ✅ | ✅ | ❌ | ❌ |
+| Preset tagging | ✅ | ✅ | ❌ | ❌ |
+| Tag-based playlists | ✅ | ✅ | ❌ | ❌ |
+| Age filter (modified within X days) | ✅ | ✅ | ❌ | ❌ |
+| Text filter (presets containing text) | ✅ | ✅ | ❌ | ❌ |
+| Quicksave (Ctrl+S) | ✅ | ✅ | ✅ | ❌ |
+| Quicksave2 folder (Ctrl+Shift+S) | ✅ | ✅ | ❌ | ❌ |
+| Preset auto-change timer | ✅ | ✅ | ✅ | ✅ |
+| Preset change on track change | ✅ | ✅ | ❌ | ❌ |
+| Drag-and-drop preset loading | ✅ | ❌ | ❌ | ❌ |
+| Preset mode buttons (assign/recall) | ❌ | ✅ | ❌ | ❌ |
+| Deep mashup (multi-layer) | ❌ | ❌ | ✅ | ❌ |
+| Preset lock | ✅ | ✅ | ✅ | ✅ (Space) |
 
 ## Preset Transitions
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| Soft blend transitions | ✅ | ✅ | ✅ |
-| Hard cut (H key) | ✅ | ✅ | ✅ |
-| Beat-driven hard cuts | ✅ | ✅ | ✅ |
-| 19+ blend patterns (.milk2) | ✅ | ❌ | ✅ |
-| Async shader compilation (non-blocking) | ✅ | ❌ | ❌ |
-| Compilation timeout with auto-skip | ✅ | ❌ | ❌ |
-| Force soft transition type (Mixtype) | ✅ | ✅ | ❌ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| Soft blend transitions | ✅ | ✅ | ✅ | ✅ |
+| Hard cut (H key) | ✅ | ✅ | ✅ | ✅ |
+| Beat-driven hard cuts | ✅ | ✅ | ✅ | ✅ |
+| 19+ blend patterns (.milk2) | ✅ | ❌ | ✅ | ❌ |
+| Async shader compilation (non-blocking) | ✅ | ❌ | ❌ | ❌ |
+| Compilation timeout with auto-skip | ✅ | ❌ | ❌ | ❌ |
+| Force soft transition type (Mixtype) | ✅ | ✅ | ❌ | ❌ |
 
 ## Shaders
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| Warp/comp HLSL shaders | ✅ | ✅ | ✅ |
-| GLSL-to-HLSL conversion (live) | ✅ | ✅ | ❌ |
-| Shader editor tab | ❌ | ✅ | ❌ |
-| MilkPanel shader editor | ❌ | ❌ | ✅ |
-| Shader precompiling and caching | ✅ | ✅ | ❌ |
-| HLSL variable shadowing fix | ✅ | ❌ | ❌ |
-| PSVersion=4 (AMD GPU support) | ✅ | ✅ | ❌ |
-| Shader randomize (!/@ keys) | ✅ | ✅ | ✅ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| Warp/comp HLSL shaders | ✅ | ✅ | ✅ | ❌ (GLSL) |
+| Warp/comp GLSL shaders (native) | ❌ | ❌ | ❌ | ✅ |
+| GLSL-to-HLSL conversion (live) | ✅ | ✅ | ❌ | n/a |
+| Shader editor tab | ❌ | ✅ | ❌ | ❌ |
+| MilkPanel shader editor | ❌ | ❌ | ✅ | ❌ |
+| Shader precompiling and caching | ✅ | ✅ | ✅ (v3.31) | ❌ |
+| HLSL variable shadowing fix | ✅ | ❌ | ❌ | n/a |
+| PSVersion=4 (AMD GPU support) | ✅ | ✅ | ❌ | n/a |
+| Shader randomize (!/@ keys) | ✅ | ✅ | ✅ | ❌ |
 
 ## Textures
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| Disk texture loading | ✅ | ✅ | ✅ |
-| Content Base Path (textures, sprites) | ✅ | ❌ | ❌ |
-| Fallback texture search paths | ✅ | ❌ | ❌ |
-| Random Textures Directory | ✅ | ❌ | ❌ |
-| Fallback to 1x1 white texture | ✅ | ❌ | ❌ |
-| 3D volume textures (noisevol) | ✅ | ✅ | ✅ |
-| Resource viewer | ✅ | ❌ | ❌ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| Disk texture loading | ✅ | ✅ | ✅ | ✅ |
+| Content Base Path (textures, sprites) | ✅ | ❌ | ❌ | ❌ |
+| Fallback texture search paths | ✅ | ❌ | ❌ | ❌ |
+| Random Textures Directory | ✅ | ❌ | ❌ | ❌ |
+| Fallback to 1x1 white texture | ✅ | ❌ | ❌ | ❌ |
+| 3D volume textures (noisevol) | ✅ | ✅ | ✅ | ✅ |
+| Resource viewer | ✅ | ❌ | ❌ | ❌ |
 
 ## Display & HUD
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| GDI overlay HUD | ✅ | ❌ | ❌ |
-| Preset name display | ✅ | ✅ | ✅ |
-| FPS display | ✅ | ✅ | ✅ |
-| Help screen | ✅ | ✅ | ✅ |
-| Notifications | ✅ | ✅ | ✅ |
-| CPU/GPU monitoring | ❌ | ✅ | ❌ |
-| Save screenshot (Ctrl+X) | ✅ | ✅ | ❌ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| GDI overlay HUD | ✅ | ❌ | ❌ | ❌ |
+| Preset name display | ✅ | ✅ | ✅ | ✅ |
+| FPS display | ✅ | ✅ | ✅ | ❌ |
+| Help screen | ✅ | ✅ | ✅ | ❌ |
+| Notifications | ✅ | ✅ | ✅ | ❌ |
+| CPU/GPU monitoring | ❌ | ✅ | ❌ | ❌ |
+| Save screenshot (Ctrl+X) | ✅ | ✅ | ❌ | ❌ |
 
 ## Text & Messages
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| Independent messages/sprites toggles | ✅ | ❌ | ❌ |
-| Message overrides (size, font, color, effects, animation) | ✅ | ✅ | ❌ |
-| Custom text messages (from Remote) | ♻️ | ✅ | ❌ |
-| Font/color customization | ♻️ | ✅ | ❌ |
-| Multiple simultaneous messages | ♻️ | ✅ | ❌ |
-| Message positioning (start/end coords) | ♻️ | ✅ | ❌ |
-| Background box for text | ♻️ | ✅ | ❌ |
-| Fade-out / burn-in timing | ♻️ | ✅ | ❌ |
-| Script file commands | ✅ | ✅ | ❌ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| Independent messages/sprites toggles | ✅ | ❌ | ❌ | ❌ |
+| Message overrides (size, font, color, effects, animation) | ✅ | ✅ | ❌ | ❌ |
+| Custom text messages (from Remote) | ♻️ | ✅ | ❌ | ❌ |
+| Font/color customization | ♻️ | ✅ | ❌ | ❌ |
+| Multiple simultaneous messages | ♻️ | ✅ | ❌ | ❌ |
+| Message positioning (start/end coords) | ♻️ | ✅ | ❌ | ❌ |
+| Background box for text | ♻️ | ✅ | ❌ | ❌ |
+| Fade-out / burn-in timing | ♻️ | ✅ | ❌ | ❌ |
+| Script file commands | ✅ | ✅ | ❌ | ❌ |
 
 ## Color & Visual Effects
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| Hue/Saturation/Brightness shifting | ✅ | ✅ | ❌ |
-| Auto hue cycling | ♻️ | ✅ | ❌ |
-| Brighten/darken/solarize/invert | ✅ | ✅ | ✅ |
-| Custom preset vars (vis_intensity, vis_shift, vis_version) | ✅ | ✅ | ❌ |
-| colshift_hue preset variable | ✅ | ✅ | ❌ |
-| Screen-dependent render mode | ✅ | ✅ | ❌ |
-| Color/monochrome display toggle | ❌ | ✅ | ❌ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| Hue/Saturation/Brightness shifting | ✅ | ✅ | ❌ | ❌ |
+| Auto hue cycling | ♻️ | ✅ | ❌ | ❌ |
+| Brighten/darken/solarize/invert | ✅ | ✅ | ✅ | ❌ |
+| Custom preset vars (vis_intensity, vis_shift, vis_version) | ✅ | ✅ | ❌ | ❌ |
+| colshift_hue preset variable | ✅ | ✅ | ❌ | ❌ |
+| Screen-dependent render mode | ✅ | ✅ | ❌ | ❌ |
+| Color/monochrome display toggle | ❌ | ✅ | ❌ | ❌ |
 
 ## Sprites
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| Static sprites | ✅ | ✅ | ✅ |
-| Animated sprites | ✅ | ✅ | ✅ |
-| Sprite management UI (import, properties, defaults) | ✅ | ❌ | ❌ |
-| Sprite layer control (behind/on top of text) | ✅ | ❌ | ❌ |
-| Sprite selection from Remote | ✅ | ✅ | ❌ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| Static sprites | ✅ | ✅ | ✅ | ❌ |
+| Animated sprites | ✅ | ✅ | ✅ | ❌ |
+| Sprite management UI (import, properties, defaults) | ✅ | ❌ | ❌ | ❌ |
+| Sprite layer control (behind/on top of text) | ✅ | ❌ | ❌ | ❌ |
+| Sprite selection from Remote | ✅ | ✅ | ❌ | ❌ |
 
 ## Shapes & Waves
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| Custom shapes (per_frame/per_point) | ✅ | ✅ | ✅ |
-| Custom waves (per_frame/per_point) | ✅ | ✅ | ✅ |
-| Live wave manipulation | ♻️ | ✅ | ❌ |
-| Mouse interaction mode (Ctrl+M) | ❌ | ✅ | ❌ |
-| Expanded variable ranges | ❌ | ❌ | ✅ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| Custom shapes (per_frame/per_point) | ✅ | ✅ | ✅ | ✅ |
+| Custom waves (per_frame/per_point) | ✅ | ✅ | ✅ | ✅ |
+| Live wave manipulation | ♻️ | ✅ | ❌ | ❌ |
+| Mouse interaction mode (Ctrl+M) | ❌ | ✅ | ❌ | ❌ |
+| Expanded variable ranges | ❌ | ❌ | ✅ | ❌ |
 
 ## Input Mixing
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| Webcam / video input mixing | ❌ | ✅ | ❌ |
-| Spout sender input mixing | ✅ | ✅ | ❌ |
-| Layer order and blending modes | ✅ (background/overlay) | ✅ | ❌ |
-| Luma key blending | ✅ | ✅ | ❌ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| Webcam / video input mixing | ❌ | ✅ | ❌ | ❌ |
+| Spout sender input mixing | ✅ | ✅ | ❌ | ❌ |
+| Layer order and blending modes | ✅ (background/overlay) | ✅ | ❌ | ❌ |
+| Luma key blending | ✅ | ✅ | ❌ | ❌ |
 
 ## MIDI & Controllers
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| MIDI automation (up to 50 controls) | ❌ | ✅ | ❌ |
-| MIDI tab in Remote | ❌ | ✅ | ❌ |
-| Game controller support | ✅ | ✅ | ❌ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| MIDI automation (up to 50 controls) | ❌ | ✅ | ❌ | ❌ |
+| MIDI tab in Remote | ❌ | ✅ | ❌ | ❌ |
+| Game controller support | ✅ | ✅ | ❌ | ❌ |
 
 ## Media Integration
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| Now Playing track info | ✅ | ✅ | ❌ |
-| Album artwork display | ✅ | ✅ | ❌ |
-| Song info (Spotify/YouTube/media) | ✅ | ✅ | ❌ |
-| Window title regex parsing (named profiles) | ✅ | ❌ | ❌ |
-| Windows Media Play/Pause/Stop keys | ✅ | ✅ | ❌ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| Now Playing track info | ✅ | ✅ | ❌ | ❌ |
+| Album artwork display | ✅ | ✅ | ❌ | ❌ |
+| Song info (Spotify/YouTube/media) | ✅ | ✅ | ❌ | ❌ |
+| Window title regex parsing (named profiles) | ✅ | ❌ | ❌ | ❌ |
+| Windows Media Play/Pause/Stop keys | ✅ | ✅ | ❌ | ❌ |
 
 ## Remote Control
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| Milkwave Remote compatibility | ♻️ | ✅ (built-in) | ❌ |
-| WM_COPYDATA IPC protocol | ♻️ | ✅ | ❌ |
-| Tabbed Remote UI | 🤝 | ✅ | ❌ |
-| Button panel (Remote buttons) | ♻️ | ✅ | ❌ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| Milkwave Remote compatibility | ♻️ | ✅ (built-in) | ❌ | ❌ |
+| WM_COPYDATA IPC protocol | ♻️ | ✅ | ❌ | ❌ |
+| Tabbed Remote UI | 🤝 | ✅ | ❌ | ❌ |
+| Button panel (Remote buttons) | ♻️ | ✅ | ❌ | ❌ |
 
 ## Display Outputs
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| Spout texture output | ✅ (DX12 via D3D11On12) | ✅ (DX9) | ❌ |
-| Multiple Spout senders | ✅ | ❌ | ❌ |
-| Fixed-size Spout resolution | ✅ | ✅ | ❌ |
-| Monitor mirroring (DX12 copy) | ✅ | ❌ | ❌ |
-| ALT-S mirror mode (fullscreen + mirrors) | ✅ | ❌ | ❌ |
-| Unified Displays tab | ✅ | ❌ | ❌ |
-| Display output kill switch (Ctrl+F2) | ✅ | ❌ | ❌ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| Spout texture output | ✅ (DX12 via D3D11On12) | ✅ (DX9) | ❌ | ❌ |
+| Multiple Spout senders | ✅ | ❌ | ❌ | ❌ |
+| Fixed-size Spout resolution | ✅ | ✅ | ❌ | ❌ |
+| Monitor mirroring (DX12 copy) | ✅ | ❌ | ❌ | ❌ |
+| ALT-S mirror mode (fullscreen + mirrors) | ✅ | ❌ | ❌ | ❌ |
+| Unified Displays tab | ✅ | ❌ | ❌ | ❌ |
+| Display output kill switch (Ctrl+F2) | ✅ | ❌ | ❌ | ❌ |
 
 ## GPU Protection
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| TDR recovery (device lost handling) | ✅ | ❌ | ❌ |
-| Focus restoration after TDC rebuild | ✅ | ❌ | ❌ |
-| Device restart from settings UI | ✅ | ❌ | ❌ |
-| Async compilation (prevents GPU stall) | ✅ | ❌ | ❌ |
-| Shader compile timeout | ✅ | ❌ | ❌ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| TDR recovery (device lost handling) | ✅ | ❌ | ❌ | ❌ |
+| Focus restoration after TDC rebuild | ✅ | ❌ | ❌ | ❌ |
+| Device restart from settings UI | ✅ | ❌ | ❌ | ❌ |
+| Async compilation (prevents GPU stall) | ✅ | ❌ | ❌ | ❌ |
+| Shader compile timeout | ✅ | ❌ | ❌ | ❌ |
 
 ## Settings & Configuration
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| In-app settings window (F8) | ✅ | ✅ | ✅ |
-| Dark theme settings UI | ✅ | ❌ | ❌ |
-| Multi-tab settings (11 tabs) | ✅ | ✅ | ✅ |
-| Per-display opacity and click-through | ✅ | ❌ | ❌ |
-| Configurable global hotkeys | ✅ | ❌ | ❌ |
-| Idle timer / screensaver mode | ✅ | ❌ | ❌ |
-| Settings tab memory | ✅ | ❌ | ❌ |
-| Game controller config UI | ✅ | ❌ (Remote-side) | ❌ |
-| Verbose logging (LogLevel=2) | ✅ | ✅ | ❌ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| In-app settings window (F8) | ✅ | ✅ | ✅ | ✅ (WIP) |
+| Dark theme settings UI | ✅ | ❌ | ❌ | ❌ |
+| Multi-tab settings (11 tabs) | ✅ | ✅ | ✅ | ❌ |
+| Per-display opacity and click-through | ✅ | ❌ | ❌ | ❌ |
+| Configurable global hotkeys | ✅ | ❌ | ❌ | ❌ |
+| Idle timer / screensaver mode | ✅ | ❌ | ❌ | ❌ |
+| Settings tab memory | ✅ | ❌ | ❌ | ❌ |
+| Game controller config UI | ✅ | ❌ (Remote-side) | ❌ | ❌ |
+| Verbose logging (LogLevel=2) | ✅ | ✅ | ❌ | ❌ |
 
 ## Expression Evaluation
 
-| Feature | MDropDX12 | Milkwave | MilkDrop3 |
-| ------- | --------- | -------- | --------- |
-| ns-eel2 (native, x64 JIT) | ✅ | ❌ | ❌ |
-| ns-eel2 (native, x86) | ❌ | ❌ | ✅ |
-| projectM-eval (via ns-eel2 shim) | ❌ | ✅ | ❌ |
+| Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
+| ------- | --------- | -------- | --------- | -------- |
+| ns-eel2 (native, x64 JIT) | ✅ | ❌ | ❌ | ❌ |
+| ns-eel2 (native, x86) | ❌ | ❌ | ✅ | ❌ |
+| projectM-eval (via ns-eel2 shim) | ❌ | ✅ | ❌ | ❌ |
+| projectM-eval (native) | ❌ | ❌ | ❌ | ✅ |
 
 ---
 
@@ -244,13 +248,18 @@ Milkwave Remote finds the Visualizer window using `EnumWindows()` + `GetWindowTe
 
 ### .milk2 Double-Preset Format
 
-MilkDrop3 supports `.milk2` files which contain two presets blended together with 19+ blend patterns. Neither MDropDX12 nor Milkwave currently support this format. Adding .milk2 support to MDropDX12 is a planned feature.
+MilkDrop3 introduced `.milk2` files which contain two presets blended together with 19+ blend patterns. MDropDX12 also supports `.milk2` loading and blend transitions. Milkwave and projectM do not support this format.
+
+### projectM on Windows
+
+The projectM standalone visualizer ([frontend-sdl-cpp](https://github.com/projectM-visualizer/frontend-sdl-cpp)) is an SDL2-based application using the libprojectM rendering library (v4.1.6). On Windows it uses SDL audio capture rather than native WASAPI loopback, so it captures input devices (microphones) but does not capture desktop/system audio natively. The standalone app and its settings UI are still under active development (pre-release). projectM uses OpenGL and its own GLSL shader pipeline rather than HLSL — presets with HLSL warp/comp shaders will not render correctly. projectM does not implement sprites, the MilkDrop text message system, or Spout integration.
 
 ### Architectural Differences
 
-- **MDropDX12**: DirectX 12, x64, GDI overlay for text, no DX9 half-texel offset, no projection matrix (clip-space passthrough); built-in Spout input mixing, game controller support, idle timer
-- **Milkwave**: Bundles a modified MilkDrop2 (DX9Ex) visualizer with a separate .NET 8 Remote control app; adds input mixing, game controller support, MIDI automation
-- **MilkDrop3**: DirectX 9Ex, x86, adds .milk2 format, MilkPanel shader editor, deep mashup system, expanded variable ranges
+- **MDropDX12 v1.2**: DirectX 12, x64, native ns-eel2 (x64 JIT), GDI overlay for text, no DX9 half-texel offset, no projection matrix (clip-space passthrough); built-in Spout input mixing via D3D11On12, monitor mirroring, game controller support, idle timer, window title regex parsing
+- **Milkwave v3.5**: Bundles a modified MilkDrop2 (DX9Ex) visualizer with a separate .NET 8 Remote control app; adds input mixing, game controller support, MIDI automation, projectM-eval expression engine
+- **MilkDrop3 v3.31**: DirectX 9Ex, x86, native ns-eel2 (x86), adds .milk2 format, MilkPanel shader editor, deep mashup system, expanded variable ranges, shader caching (v3.31), hi-res audio (v3.31), 5 sprite layers with blend modes
+- **projectM v4.1.6**: OpenGL, x64, cross-platform (Windows/macOS/Linux), projectM-eval expression engine, GLSL shader pipeline, SDL2 audio; reimplements MilkDrop2 rendering from scratch without using original MilkDrop2 code
 
 ### Feature Overlap
 
