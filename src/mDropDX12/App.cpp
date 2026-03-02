@@ -2019,17 +2019,9 @@ void RenderFrame() {
       }
 
       ShowSongInfoOverlay();
-      g_engine.m_bSongInfoRefreshNeeded = false;
     }
 
     mdropdx12.updated = false;
-  }
-
-  // Re-display "Always Show" track info after device recovery / startup
-  // (ClearErrors in AllocateDX9Stuff wipes the overlay; this re-adds it)
-  if (g_engine.m_bSongInfoRefreshNeeded && g_engine.m_bSongInfoAlwaysShow) {
-    g_engine.m_bSongInfoRefreshNeeded = false;
-    ShowSongInfoOverlay();
   }
 
   g_engine.PluginRender(

@@ -1148,10 +1148,8 @@ void Engine::MyPreInitialize() {
   m_bShowSongLen = false;
   m_fShowRatingUntilThisTime = -1.0f;
   ClearErrors();
-  m_bSongInfoRefreshNeeded = true;
   m_szDebugMessage[0] = 0;
-  m_szSongTitle[0] = 0;
-  m_szSongTitlePrev[0] = 0;
+  // m_szSongTitle preserved across resize — track info has its own bucket
 
   m_lpVS[0] = NULL;
   m_lpVS[1] = NULL;

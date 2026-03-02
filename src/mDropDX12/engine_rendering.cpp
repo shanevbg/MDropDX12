@@ -320,12 +320,18 @@ void Engine::AddNotificationColored(wchar_t* szMsg, float time, DWORD color) {
 void Engine::ClearErrors(int category)  // 0=all categories
 {
   int N = (int)m_errors.size();
-  for (int i = 0; i < N; i++)
-    if (category == ERR_ALL || m_errors[i].category == category) {
+  for (int i = 0; i < N; i++) {
+    int cat = m_errors[i].category;
+    // Track info (BOTTOM_EXTRA) has its own bucket — only cleared explicitly
+    if (category == ERR_ALL &&
+        (cat == ERR_MSG_BOTTOM_EXTRA_1 || cat == ERR_MSG_BOTTOM_EXTRA_2 || cat == ERR_MSG_BOTTOM_EXTRA_3))
+      continue;
+    if (category == ERR_ALL || cat == category) {
       m_errors.erase(m_errors.begin() + i);
       i--;
       N--;
     }
+  }
 }
 
 void Engine::MyRenderUI(
