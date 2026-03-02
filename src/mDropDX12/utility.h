@@ -101,5 +101,9 @@ void DebugLogInit(const wchar_t* baseDir);
 void DebugLogSetLevel(int level);
 void DebugLogW(const wchar_t* msg, int level = LOG_INFO);
 void DebugLogA(const char* msg, int level); // default (= LOG_INFO) is in d3dx9compat.h (included above)
+void DebugLogWFmt(const wchar_t* fmt, ...);
+void DebugLogWFmt(int level, const wchar_t* fmt, ...);
+void DebugLogAFmt(const char* fmt, ...);
+void DebugLogAFmt(int level, const char* fmt, ...);
 
 #endif

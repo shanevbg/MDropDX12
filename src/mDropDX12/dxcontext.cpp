@@ -733,12 +733,7 @@ DX12Texture DXContext::CreateRenderTargetTexture(UINT width, UINT height, DXGI_F
     D3D12_CPU_DESCRIPTOR_HANDLE srvCpuHandle = AllocateSrvCpu();
     tex.srvIndex = m_nextFreeSrvSlot;
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Format                  = format;
-    srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Texture2D.MipLevels     = 1;
-    m_device->CreateShaderResourceView(tex.resource.Get(), &srvDesc, srvCpuHandle);
+    CreateSRV2D(m_device.Get(), tex.resource.Get(), format, srvCpuHandle);
 
     AllocateSrvGpu();  // bump the slot counter
 
@@ -1111,12 +1106,7 @@ bool DXContext::CreateNullTexture(int fallbackStyle)
     D3D12_CPU_DESCRIPTOR_HANDLE srvCpuHandle = AllocateSrvCpu();
     m_nullTexture.srvIndex = m_nextFreeSrvSlot;
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Texture2D.MipLevels = 1;
-    m_device->CreateShaderResourceView(m_nullTexture.resource.Get(), &srvDesc, srvCpuHandle);
+    CreateSRV2D(m_device.Get(), m_nullTexture.resource.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, srvCpuHandle);
 
     AllocateSrvGpu(); // bump counter
 
@@ -1270,7 +1260,7 @@ bool DXContext::CreateNullTexture(int fallbackStyle)
     D3D12_CPU_DESCRIPTOR_HANDLE fbSrvCpu = AllocateSrvCpu();
     m_fallbackTexture.srvIndex = m_nextFreeSrvSlot;
 
-    m_device->CreateShaderResourceView(m_fallbackTexture.resource.Get(), &srvDesc, fbSrvCpu);
+    CreateSRV2D(m_device.Get(), m_fallbackTexture.resource.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, fbSrvCpu);
     AllocateSrvGpu();
 
     m_fallbackTexture.currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
@@ -1395,12 +1385,7 @@ DX12Texture DXContext::CreateTextureFromPixels(const void* pixels, UINT width, U
     D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = AllocateSrvCpu();
     tex.srvIndex = m_nextFreeSrvSlot;
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = format;
-    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Texture2D.MipLevels = 1;
-    m_device->CreateShaderResourceView(tex.resource.Get(), &srvDesc, srvCpu);
+    CreateSRV2D(m_device.Get(), tex.resource.Get(), format, srvCpu);
     AllocateSrvGpu(); // bump counter
 
     tex.currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;

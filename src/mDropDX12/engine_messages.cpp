@@ -23,7 +23,6 @@
 #include <mmdeviceapi.h>
 #include <propsys.h>
 #include <functiondiscoverykeys_devpkey.h>
-#include "AMDDetection.h"
 #include <commctrl.h>
 #include <commdlg.h>
 #include <uxtheme.h>
@@ -2902,18 +2901,6 @@ void Engine::SetAudioDeviceDisplayName(const wchar_t* displayName, bool isRender
   }
 
   wcsncpy_s(m_szAudioDeviceDisplayName, MAX_PATH, sanitized.c_str(), _TRUNCATE);
-}
-
-void Engine::SetAMDFlag() {
-  if (m_AMDDetectionMode == 0) {
-    m_IsAMD = is_amd_ati();
-  }
-  else if (m_AMDDetectionMode == 1) {
-    m_IsAMD = true;
-  }
-  else {
-    m_IsAMD = false;
-  }
 }
 
 int Engine::GetPresetCount() { return m_nPresets; }

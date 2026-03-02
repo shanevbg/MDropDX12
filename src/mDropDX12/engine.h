@@ -356,7 +356,6 @@ public:
   void SpoutReleaseWraps(); // Release wrapped backbuffers and mark not ready
   void OpenMDropDX12Remote();
   void SetAudioDeviceDisplayName(const wchar_t* displayName, bool isRenderDevice);
-  void SetAMDFlag();
   void ExecuteRenderCommand(const RenderCommand& cmd) override;
   int  GetPresetCount() override;
   int  GetCurrentPresetIndex() override;
@@ -534,7 +533,6 @@ public:
   int m_MinPSVersionConfig = 2;
   int m_MaxPSVersionConfig = 4;
   bool m_ShowUpArrowInDescriptionIfPSMinVersionForced = true;
-  bool m_IsAMD = false;
 
   // GPU Protection Settings
   int  m_nMaxShapeInstances = 0;         // Cap per-shape instance count (0=unlimited, e.g. 512)
@@ -892,7 +890,6 @@ public:
   texmgr      m_texmgr;		// for user sprites
   
   bool m_blackmode = false;
-  int m_AMDDetectionMode = 0; // 0 = Auto detect, 1 = Force AMD, 2 = Force non-AMD
 
   IDirect3DTexture9* m_tracer_tex;
 

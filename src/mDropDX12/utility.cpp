@@ -865,3 +865,39 @@ void DebugLogA(const char* msg, int level) {
   MultiByteToWideChar(CP_ACP, 0, msg, -1, buf, 2048);
   DebugLogW(buf, level);
 }
+
+void DebugLogWFmt(const wchar_t* fmt, ...) {
+  wchar_t buf[2048];
+  va_list args;
+  va_start(args, fmt);
+  _vsnwprintf_s(buf, _countof(buf), _TRUNCATE, fmt, args);
+  va_end(args);
+  DebugLogW(buf, LOG_INFO);
+}
+
+void DebugLogWFmt(int level, const wchar_t* fmt, ...) {
+  wchar_t buf[2048];
+  va_list args;
+  va_start(args, fmt);
+  _vsnwprintf_s(buf, _countof(buf), _TRUNCATE, fmt, args);
+  va_end(args);
+  DebugLogW(buf, level);
+}
+
+void DebugLogAFmt(const char* fmt, ...) {
+  char buf[2048];
+  va_list args;
+  va_start(args, fmt);
+  _vsnprintf_s(buf, _countof(buf), _TRUNCATE, fmt, args);
+  va_end(args);
+  DebugLogA(buf, LOG_INFO);
+}
+
+void DebugLogAFmt(int level, const char* fmt, ...) {
+  char buf[2048];
+  va_list args;
+  va_start(args, fmt);
+  _vsnprintf_s(buf, _countof(buf), _TRUNCATE, fmt, args);
+  va_end(args);
+  DebugLogA(buf, level);
+}

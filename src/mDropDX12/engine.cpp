@@ -637,7 +637,6 @@ std::chrono::steady_clock::time_point LastSentMDropDX12Message{};
 #include <mmdeviceapi.h>
 #include <propsys.h>
 #include <functiondiscoverykeys_devpkey.h>
-#include "AMDDetection.h"
 #include <cstdint>
 #include <commctrl.h>  // Trackbar, tab, and list-view controls
 #include <commdlg.h>   // ChooseFont, ChooseColor common dialogs
@@ -1445,7 +1444,6 @@ void Engine::MyReadConfig() {
   GetPrivateProfileStringW(L"Milkwave", L"RemoteWindowTitle", L"", m_szRemoteWindowTitle, 256, pIni);
 
   m_blackmode = GetPrivateProfileBoolW(L"Milkwave", L"BlackMode", m_blackmode, pIni);
-  m_AMDDetectionMode = GetPrivateProfileIntW(L"Milkwave", L"AMDDetectionMode", m_AMDDetectionMode, pIni);
 
   m_MessageDefaultBurnTime = GetPrivateProfileFloatW(L"Milkwave", L"MessageDefaultBurnTime", m_MessageDefaultBurnTime, pIni);
   m_MessageDefaultFadeinTime = GetPrivateProfileFloatW(L"Milkwave", L"MessageDefaultFadeinTime", m_MessageDefaultFadeinTime, pIni);
@@ -2171,7 +2169,7 @@ int Engine::AllocateMyDX9Stuff() {
     }
 
     // Load the FALLBACK shaders...
-    int PSVersion = m_IsAMD ? m_nMaxPSVersion_DX9 : 2;
+    int PSVersion = 2;
     if (!RecompilePShader(m_szDefaultWarpPShaderText, &m_fallbackShaders_ps.warp, SHADER_WARP, true, PSVersion, false)) {
       wchar_t szSM[64];
       switch (m_nMaxPSVersion_DX9) {
@@ -2738,12 +2736,7 @@ int Engine::AllocateMyDX9Stuff() {
       D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_lpDX->AllocateSrvCpu();
       m_dx12Title[i].srvIndex = m_lpDX->m_nextFreeSrvSlot;
 
-      D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-      srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-      srvDesc.Format            = DXGI_FORMAT_B8G8R8A8_UNORM;
-      srvDesc.ViewDimension     = D3D12_SRV_DIMENSION_TEXTURE2D;
-      srvDesc.Texture2D.MipLevels = 1;
-      dev->CreateShaderResourceView(m_dx12Title[i].resource.Get(), &srvDesc, srvCpu);
+      CreateSRV2D(dev, m_dx12Title[i].resource.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, srvCpu);
       m_lpDX->AllocateSrvGpu();
 
       m_lpDX->CreateBindingBlockForTexture(m_dx12Title[i]);

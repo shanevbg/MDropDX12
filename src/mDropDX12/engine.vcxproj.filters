@@ -94,9 +94,6 @@
     <ClCompile Include="mdropdx12.cpp">
       <Filter>library\sources</Filter>
     </ClCompile>
-    <ClCompile Include="AMDDetection.cpp">
-      <Filter>library\sources</Filter>
-    </ClCompile>
     <ClCompile Include="..\ns-eel2\nseel-compiler.c">
       <Filter>library\ns-eel</Filter>
     </ClCompile>

@@ -348,7 +348,6 @@
     <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutUtils.cpp" />
     <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX.cpp" />
     <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12\SpoutDX12.cpp" />
-    <ClCompile Include="AMDDetection.cpp" />
     <ClCompile Include="dx12pipeline.cpp" />
     <ClCompile Include="dxcontext.cpp" />
     <ClCompile Include="fft.cpp" />

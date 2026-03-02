@@ -1069,8 +1069,6 @@ int EngineShell::PluginPreInitialize(HWND hWinampWnd, HINSTANCE hWinampInstance)
   ReadConfig();
   MyPreInitialize();
   MyReadConfig();
-  SetAMDFlag();
-
   //-----
 
   return TRUE;
@@ -1406,12 +1404,7 @@ void EngineShell::DrawAndDisplay(int redraw) {
   // DX12 frame: open command list, record all draw calls, then execute + present.
   if (m_lpDX->BeginFrame()) {
     // Set viewport on the command list
-    D3D12_VIEWPORT vp = { 0.f, 0.f,
-        (float)m_lpDX->m_client_width, (float)m_lpDX->m_client_height,
-        0.f, 1.f };
-    D3D12_RECT scissor = { 0, 0, m_lpDX->m_client_width, m_lpDX->m_client_height };
-    m_lpDX->m_commandList->RSSetViewports(1, &vp);
-    m_lpDX->m_commandList->RSSetScissorRects(1, &scissor);
+    SetViewportAndScissor(m_lpDX->m_commandList.Get(), m_lpDX->m_client_width, m_lpDX->m_client_height);
 
     // Clear the back buffer
     {
@@ -1935,12 +1928,7 @@ bool EngineShell::CreateHelpTexture() {
   D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_lpDX->AllocateSrvCpu();
   m_helpTexture.srvIndex = m_lpDX->m_nextFreeSrvSlot;
 
-  D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-  srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-  srvDesc.Format                  = DXGI_FORMAT_B8G8R8A8_UNORM;
-  srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
-  srvDesc.Texture2D.MipLevels     = 1;
-  device->CreateShaderResourceView(m_helpTexture.resource.Get(), &srvDesc, srvCpu);
+  CreateSRV2D(device, m_helpTexture.resource.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, srvCpu);
   m_lpDX->AllocateSrvGpu();
 
   // Create 16-entry binding block for texture binding

@@ -300,4 +300,23 @@ protected:
 #define DXC_ERR_CREATEDEV_NOT_AVAIL -12
 #define DXC_ERR_CREATEDDRAW  -13
 
+// --- DX12 helpers to reduce duplication ---
+
+inline void SetViewportAndScissor(ID3D12GraphicsCommandList* cl, UINT w, UINT h) {
+  D3D12_VIEWPORT vp = { 0.0f, 0.0f, (float)w, (float)h, 0.0f, 1.0f };
+  D3D12_RECT sc = { 0, 0, (LONG)w, (LONG)h };
+  cl->RSSetViewports(1, &vp);
+  cl->RSSetScissorRects(1, &sc);
+}
+
+inline void CreateSRV2D(ID3D12Device* dev, ID3D12Resource* res,
+    DXGI_FORMAT fmt, D3D12_CPU_DESCRIPTOR_HANDLE cpu) {
+  D3D12_SHADER_RESOURCE_VIEW_DESC d = {};
+  d.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  d.Format = fmt;
+  d.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  d.Texture2D.MipLevels = 1;
+  dev->CreateShaderResourceView(res, &d, cpu);
+}
+
 #endif // MDROP_DXCONTEXT_H

@@ -232,7 +232,6 @@ protected:
   virtual void DrawOnTopSprites() {} // override in Engine for layer-1 sprite rendering
   virtual void SendToDisplayOutputs() {} // override in Engine for display mirrors + Spout
   virtual void UpdateScript() {}    // override in Engine for script playback
-  virtual void SetAMDFlag() = 0;
   // Preset list accessors for RenderPlaylist() — override in Engine
   virtual int  GetPresetCount() { return 0; }
   virtual int  GetCurrentPresetIndex() { return -1; }

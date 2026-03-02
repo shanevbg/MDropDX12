@@ -89,12 +89,7 @@ void Engine::RenderInjectEffect()
   cl->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
   // 7. Set viewport + scissor
-  float bbW = (float)m_lpDX->m_backbuffer_width;
-  float bbH = (float)m_lpDX->m_backbuffer_height;
-  D3D12_VIEWPORT vp     = { 0.f, 0.f, bbW, bbH, 0.f, 1.f };
-  D3D12_RECT     scissor = { 0, 0, (LONG)bbW, (LONG)bbH };
-  cl->RSSetViewports(1, &vp);
-  cl->RSSetScissorRects(1, &scissor);
+  SetViewportAndScissor(cl, m_lpDX->m_backbuffer_width, m_lpDX->m_backbuffer_height);
 
   // 8. Set PSO + root signature
   cl->SetPipelineState(m_pInjectEffectPSO.Get());

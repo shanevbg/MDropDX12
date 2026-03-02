@@ -158,25 +158,13 @@ void Engine::UpdateSpoutInputTexture()
                 m_lpDX->AllocateSrvGpu(); // bump GPU handle in lockstep
                 si.dx12InputTex.srvIndex = m_lpDX->m_nextFreeSrvSlot - 1;
 
-                D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-                srvDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-                srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                srvDesc.Texture2D.MipLevels = 1;
-                m_lpDX->m_device->CreateShaderResourceView(
-                    si.dx12InputTex.resource.Get(), &srvDesc, srvCpu);
+                CreateSRV2D(m_lpDX->m_device.Get(), si.dx12InputTex.resource.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, srvCpu);
 
                 m_lpDX->CreateBindingBlockForTexture(si.dx12InputTex);
             } else {
                 // Re-create SRV in-place at existing index
                 D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_lpDX->GetSrvCpuHandleAt(si.dx12InputTex.srvIndex);
-                D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-                srvDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-                srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                srvDesc.Texture2D.MipLevels = 1;
-                m_lpDX->m_device->CreateShaderResourceView(
-                    si.dx12InputTex.resource.Get(), &srvDesc, srvCpu);
+                CreateSRV2D(m_lpDX->m_device.Get(), si.dx12InputTex.resource.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, srvCpu);
 
                 // Update binding block slot 0 to point to new SRV
                 m_lpDX->UpdateBindingBlockTexture(si.dx12InputTex.bindingBlockStart, si.dx12InputTex.srvIndex);

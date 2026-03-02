@@ -211,7 +211,6 @@ static HMODULE module = nullptr;
 static std::atomic<HANDLE> threadRender = nullptr;
 static std::atomic<HANDLE> threadSetup = nullptr;
 static unsigned threadId = 0;
-static std::mutex pcmMutex;
 static unsigned char pcmLeftIn[SAMPLE_SIZE];
 static unsigned char pcmRightIn[SAMPLE_SIZE];
 static unsigned char pcmLeftOut[SAMPLE_SIZE];
@@ -1969,13 +1968,11 @@ void RenderFrame() {
     return;
   }
 
-  {
-    std::unique_lock<std::mutex> lock(pcmMutex);
-    memcpy(pcmLeftOut, pcmLeftIn, SAMPLE_SIZE);
-    memcpy(pcmRightOut, pcmRightIn, SAMPLE_SIZE);
-    memset(pcmLeftIn, 128, SAMPLE_SIZE);   // 128 = silence in unsigned 8-bit PCM
-    memset(pcmRightIn, 128, SAMPLE_SIZE);
-  }
+  // pcmLeftIn/pcmRightIn are only accessed on this (render) thread — no mutex needed
+  memcpy(pcmLeftOut, pcmLeftIn, SAMPLE_SIZE);
+  memcpy(pcmRightOut, pcmRightIn, SAMPLE_SIZE);
+  memset(pcmLeftIn, 128, SAMPLE_SIZE);   // 128 = silence in unsigned 8-bit PCM
+  memset(pcmRightIn, 128, SAMPLE_SIZE);
 
   // Poll track info based on selected source
   if (g_engine.m_nTrackInfoSource == Engine::TRACK_SOURCE_SMTC) {

@@ -592,10 +592,7 @@ bool Engine::RecompileVShader(const char* szShadersText, VShaderInfo* si, int sh
   si->Clear();
 
   char ver[16];
-  if (m_IsAMD)
-    lstrcpy(ver, "vs_3_0");
-  else
-    lstrcpy(ver, "vs_1_1");
+  lstrcpy(ver, "vs_1_1");
 
   // LOAD SHADER
   if (!LoadShaderFromMemory(szShadersText, "VS", ver, &si->CT, (void**)&si->ptr, shaderType, bHardErrors, bCompileOnly, nullptr))

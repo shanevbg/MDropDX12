@@ -124,13 +124,8 @@ int texmgr::LoadTex(wchar_t* szFilename, int iSlot, char* szInitCode, char* szCo
 
         // Write a new SRV at this slot's pre-allocated descriptor and update its binding block
         if (m_lpDX12 && m_tex[iSlot].dx12Surface.srvIndex != UINT_MAX) {
-          D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-          srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-          srvDesc.Format            = m_tex[x].dx12Surface.format;
-          srvDesc.ViewDimension     = D3D12_SRV_DIMENSION_TEXTURE2D;
-          srvDesc.Texture2D.MipLevels = 1;
-          m_lpDX12->m_device->CreateShaderResourceView(
-              m_tex[iSlot].dx12Surface.resource.Get(), &srvDesc,
+          CreateSRV2D(m_lpDX12->m_device.Get(), m_tex[iSlot].dx12Surface.resource.Get(),
+              m_tex[x].dx12Surface.format,
               m_lpDX12->GetSrvCpuHandleAt(m_tex[iSlot].dx12Surface.srvIndex));
           m_lpDX12->UpdateBindingBlockTexture(
               m_tex[iSlot].dx12Surface.bindingBlockStart,
@@ -291,12 +286,7 @@ int texmgr::LoadTex(wchar_t* szFilename, int iSlot, char* szInitCode, char* szCo
 
     // Write SRV at pre-allocated descriptor slot (no bump allocation)
     {
-      D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-      srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-      srvDesc.Format            = DXGI_FORMAT_B8G8R8A8_UNORM;
-      srvDesc.ViewDimension     = D3D12_SRV_DIMENSION_TEXTURE2D;
-      srvDesc.Texture2D.MipLevels = 1;
-      dev->CreateShaderResourceView(m_tex[iSlot].dx12Surface.resource.Get(), &srvDesc,
+      CreateSRV2D(dev, m_tex[iSlot].dx12Surface.resource.Get(), DXGI_FORMAT_B8G8R8A8_UNORM,
           m_lpDX12->GetSrvCpuHandleAt(m_tex[iSlot].dx12Surface.srvIndex));
 
       // Update binding block in-place (slot 0 = texture, slots 1-15 = null)

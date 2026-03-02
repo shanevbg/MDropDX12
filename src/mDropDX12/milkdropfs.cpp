@@ -1752,10 +1752,7 @@ void mdrop::Engine::DX12_BlurPasses()
     D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lpDX->GetRtvCpuHandle(dstTex);
     cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-    D3D12_VIEWPORT vp = { 0, 0, (float)dstTex.width, (float)dstTex.height, 0.f, 1.f };
-    D3D12_RECT scissor = { 0, 0, (LONG)dstTex.width, (LONG)dstTex.height };
-    cmdList->RSSetViewports(1, &vp);
-    cmdList->RSSetScissorRects(1, &scissor);
+    SetViewportAndScissor(cmdList, dstTex.width, dstTex.height);
 
     // Set blur PSO: even passes = horizontal (blur1), odd = vertical (blur2)
     cmdList->SetPipelineState(m_dx12BlurPSO[i % 2].Get());
@@ -1889,10 +1886,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       m_lpDX->TransitionResource(m_dx12VS[0], D3D12_RESOURCE_STATE_RENDER_TARGET);
       D3D12_CPU_DESCRIPTOR_HANDLE rtv = m_lpDX->GetRtvCpuHandle(m_dx12VS[0]);
       cmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
-      D3D12_VIEWPORT vpBg = { 0, 0, (float)m_nTexSizeX, (float)m_nTexSizeY, 0.f, 1.f };
-      D3D12_RECT scBg = { 0, 0, (LONG)m_nTexSizeX, (LONG)m_nTexSizeY };
-      cmdList->RSSetViewports(1, &vpBg);
-      cmdList->RSSetScissorRects(1, &scBg);
+      SetViewportAndScissor(cmdList, m_nTexSizeX, m_nTexSizeY);
       CompositeSpoutInput(true);
       m_lpDX->TransitionResource(m_dx12VS[0], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     }
@@ -1906,10 +1900,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lpDX->GetRtvCpuHandle(m_dx12VS[1]);
     cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-    D3D12_VIEWPORT vp = { 0, 0, (float)m_nTexSizeX, (float)m_nTexSizeY, 0.f, 1.f };
-    D3D12_RECT scissor = { 0, 0, (LONG)m_nTexSizeX, (LONG)m_nTexSizeY };
-    cmdList->RSSetViewports(1, &vp);
-    cmdList->RSSetScissorRects(1, &scissor);
+    SetViewportAndScissor(cmdList, m_nTexSizeX, m_nTexSizeY);
 
     // Set descriptor heaps, root sig, PSO
     ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
@@ -2067,10 +2058,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lpDX->GetRtvCpuHandle(m_dx12VS[1]);
     cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-    D3D12_VIEWPORT vp = { 0, 0, (float)m_nTexSizeX, (float)m_nTexSizeY, 0.f, 1.f };
-    D3D12_RECT scissor = { 0, 0, (LONG)m_nTexSizeX, (LONG)m_nTexSizeY };
-    cmdList->RSSetViewports(1, &vp);
-    cmdList->RSSetScissorRects(1, &scissor);
+    SetViewportAndScissor(cmdList, m_nTexSizeX, m_nTexSizeY);
 
     DX12_DrawCustomShapes();
     DX12_DrawCustomWaves();
@@ -2103,11 +2091,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     bbRtv.ptr += (SIZE_T)m_lpDX->m_frameIndex * m_lpDX->m_rtvDescriptorSize;
     cmdList->OMSetRenderTargets(1, &bbRtv, FALSE, nullptr);
 
-    D3D12_VIEWPORT vp = { 0, 0,
-        (float)m_lpDX->m_client_width, (float)m_lpDX->m_client_height, 0.f, 1.f };
-    D3D12_RECT scissor = { 0, 0, m_lpDX->m_client_width, m_lpDX->m_client_height };
-    cmdList->RSSetViewports(1, &vp);
-    cmdList->RSSetScissorRects(1, &scissor);
+    SetViewportAndScissor(cmdList, m_lpDX->m_client_width, m_lpDX->m_client_height);
 
     // Use preset comp PSO if available, else Phase 4 passthrough.
     // The comp quad uses MYVERTEX data, so PSO_TEXTURED_MYVERTEX is correct.
@@ -6205,10 +6189,7 @@ void mdrop::Engine::DrawUserSprites(int targetLayer)	// from system memory, to b
         D3D12_CPU_DESCRIPTOR_HANDLE vs1Rtv = m_lpDX->GetRtvCpuHandle(m_dx12VS[1]);
         cmdList->OMSetRenderTargets(1, &vs1Rtv, FALSE, nullptr);
 
-        D3D12_VIEWPORT burnVp = { 0, 0, (float)m_nTexSizeX, (float)m_nTexSizeY, 0.f, 1.f };
-        D3D12_RECT burnScissor = { 0, 0, (LONG)m_nTexSizeX, (LONG)m_nTexSizeY };
-        cmdList->RSSetViewports(1, &burnVp);
-        cmdList->RSSetScissorRects(1, &burnScissor);
+        SetViewportAndScissor(cmdList, m_nTexSizeX, m_nTexSizeY);
 
         SPRITEVERTEX burnVerts[6] = { triVerts[0], triVerts[1], triVerts[2],
                                       triVerts[3], triVerts[4], triVerts[5] };
@@ -6219,11 +6200,7 @@ void mdrop::Engine::DrawUserSprites(int targetLayer)	// from system memory, to b
         bbRtv.ptr += (SIZE_T)m_lpDX->m_frameIndex * m_lpDX->m_rtvDescriptorSize;
         cmdList->OMSetRenderTargets(1, &bbRtv, FALSE, nullptr);
 
-        D3D12_VIEWPORT bbVp = { 0, 0,
-            (float)m_lpDX->m_client_width, (float)m_lpDX->m_client_height, 0.f, 1.f };
-        D3D12_RECT bbScissor = { 0, 0, m_lpDX->m_client_width, m_lpDX->m_client_height };
-        cmdList->RSSetViewports(1, &bbVp);
-        cmdList->RSSetScissorRects(1, &bbScissor);
+        SetViewportAndScissor(cmdList, m_lpDX->m_client_width, m_lpDX->m_client_height);
       }
 
       if (bKillSprite) {
