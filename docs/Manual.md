@@ -160,7 +160,15 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 - **Lock Preset on Startup**: Start with preset locked
 - **Sequential Preset Order**: Play presets in order instead of random
 - **Messages/Sprites Mode**: Off / Messages / Sprites / Messages and Sprites
+- **Song Info Source**: Select how track info is obtained — SMTC (Windows media sessions), IPC (from Milkwave Remote), or Window Title (regex-based parsing)
+- **Profile / Edit**: When source is Window Title, select a named profile and open the Artist-Title Match Editor to configure window matching and parsing regex patterns (see Track Info section below)
 - **Song Title Animations**: Animated display when track changes
+- **Overlay Notifications**: Show track info as an overlay notification on track change
+- **Show Cover Art**: Display album artwork on track change
+- **Always Show Track Info**: Keep track info visible permanently instead of fading out
+- **Display Corner**: Choose which screen corner shows track info (Top-Left, Top-Right, Bottom-Left, Bottom-Right)
+- **Display Seconds**: How long track info remains visible (0.5-60 seconds)
+- **Show Now**: Force-display current track info immediately
 - **Change Preset with Song**: Auto-advance when a new track starts
 - **Show FPS / Always on Top / Borderless / Dark Theme**: Toggle checkboxes
 - **Font +/- buttons**: Adjust HUD overlay font size
@@ -297,6 +305,119 @@ Presets are `.milk` files that define visual behavior through per-frame equation
 ### Preset Lock
 
 Press **`` ` ``** or **`~`** (or SCROLL LOCK) to lock the current preset, preventing auto-advance.
+
+## Track Info
+
+MDropDX12 can display current track information (artist, title, album) and album artwork as an overlay. Track info is obtained from one of three sources, configured in Settings > General > Song Info Source.
+
+### Sources
+
+- **SMTC** (default): Windows System Media Transport Controls. Automatically detects track info from Spotify, YouTube (in browsers), Windows Media Player, and any app that reports to Windows media sessions. No configuration needed.
+- **IPC**: Receives track info from Milkwave Remote via the WM_COPYDATA protocol.
+- **Window Title**: Parses track info from any application's window title using configurable regex patterns. Useful for media players that don't report to SMTC (internet radio apps, niche players, etc.).
+
+### Window Title Profiles
+
+When the source is set to Window Title, MDropDX12 uses named profiles to match windows and extract track info. Each profile contains:
+
+- **Profile Name**: A label for the profile (e.g., "Spotify", "RarmaRadio", "foobar2000")
+- **Window Match regex**: A regular expression to find the target window via EnumWindows
+- **Parse Regex**: A regex with named capture groups `(?<artist>...)`, `(?<title>...)`, and `(?<album>...)` to extract fields from the matched window title
+- **Poll Interval**: How often to check the window title (1-10 seconds)
+
+Multiple profiles can be created for different media players. Select the active profile from the dropdown on the General tab.
+
+### Artist-Title Match Editor
+
+Click **Edit** next to the profile dropdown to open the Artist-Title Match Editor. The editor provides:
+
+- **Profile selector** with New/Delete buttons for managing multiple profiles
+- **Windows dropdown**: Lists all visible windows on your system. Selecting a window auto-fills the Window Match field with an escaped regex pattern.
+- **Window Match**: Regex to find the target window. Use `.*keyword.*` for broad matching.
+- **Matched**: Shows the first window title that matches (live preview).
+- **Parse Regex**: Regex with named capture groups to extract artist/title/album.
+- **Parsed**: Shows the extracted fields (live preview).
+- **Poll Interval**: Check interval in seconds (1-10).
+- **Regex Help**: Opens MDN regex documentation in your browser.
+
+Changes take effect when you click **OK**.
+
+### Parse Regex Examples
+
+The parse regex uses ECMAScript regex syntax with named capture groups: `(?<artist>...)`, `(?<title>...)`, `(?<album>...)`. Groups are matched by name and mapped to the corresponding track info field.
+
+**RarmaRadio** — title format: `Di.fm Vocal Trance - Artist Name - Song Title - 2.77.7 - RarmaRadio`
+
+```text
+Window Match: .*RarmaRadio.*
+Parse Regex:  ^.+? - (?<artist>.+?) - (?<title>.+?) - .+? - RarmaRadio
+Result:       Artist: Artist Name | Title: Song Title
+```
+
+**Spotify** — title format: `Song Title - Artist Name - Spotify`
+
+```text
+Window Match: .*Spotify.*
+Parse Regex:  ^(?<title>.+?) - (?<artist>.+?) - Spotify
+Result:       Artist: Artist Name | Title: Song Title
+```
+
+**foobar2000** — title format: `Artist Name - Song Title [foobar2000]`
+
+```text
+Window Match: .*foobar2000.*
+Parse Regex:  ^(?<artist>.+?) - (?<title>.+?) \[foobar2000\]
+Result:       Artist: Artist Name | Title: Song Title
+```
+
+**VLC media player** — title format: `Song Title - VLC media player`
+
+```text
+Window Match: .*VLC media player.*
+Parse Regex:  ^(?<title>.+?) - VLC media player
+Result:       Title: Song Title
+```
+
+**AIMP** — title format: `Artist Name - Song Title - AIMP`
+
+```text
+Window Match: .*AIMP.*
+Parse Regex:  ^(?<artist>.+?) - (?<title>.+?) - AIMP
+Result:       Artist: Artist Name | Title: Song Title
+```
+
+**Winamp** — title format: `123. Artist Name - Song Title - Winamp`
+
+```text
+Window Match: .*Winamp.*
+Parse Regex:  ^\d+\.\s+(?<artist>.+?) - (?<title>.+?) - Winamp
+Result:       Artist: Artist Name | Title: Song Title
+```
+
+**YouTube in browser** — title format: `Song Title - YouTube - Google Chrome`
+
+```text
+Window Match: .*YouTube.*Chrome.*
+Parse Regex:  ^(?<title>.+?) - YouTube
+Result:       Title: Song Title
+```
+
+**Generic "Artist - Title" fallback** — works with any `Artist - Title` format:
+
+```text
+Window Match: .*YourPlayer.*
+Parse Regex:  (?<artist>.+?) - (?<title>.+)
+Result:       Artist: Artist Name | Title: Song Title
+```
+
+### Tips
+
+- Use `.*keyword.*` for window matching — it's simpler and more reliable than escaping the full title.
+- The Window Match regex is case-insensitive. The Parse Regex is case-sensitive.
+- Named groups are optional. If you use plain groups like `(.+?) - (.+)`, group 1 maps to artist, group 2 to title, group 3 to album.
+- Special regex characters (`\.`, `\(`, `\)`, `\[`, `\]`, `\+`, `\*`) need backslash escaping when matching literal text.
+- The live preview in the editor updates as you type, so you can test patterns interactively.
+- SMTC is recommended for most users since it works automatically with Spotify, YouTube, and modern media apps. Use Window Title profiles only for apps that don't report to Windows media sessions.
 
 ## Messages
 

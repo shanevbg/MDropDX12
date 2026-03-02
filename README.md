@@ -9,7 +9,7 @@
 ## Visualizer Features
 
 * DirectX 12 rendering backend with GPU-accelerated Direct2D text overlay
-* In-app Settings window (F8) with dark theme, 8-tab UI (General, Visual, Colors, Sound, Files, Messages, About, Remote)
+* In-app Settings window (F8) with dark theme, 11-tab UI (General, Visual, Colors, System, Files, Messages, Sprites, Remote, Script, Displays, About)
 * Preset browser with filtering, tagging, and subdirectory navigation
 * Milkwave Remote IPC compatibility — non-blocking hidden window receives 32+ commands via WM_COPYDATA
 * Configurable window titles for Remote discovery (Settings → Remote tab)
@@ -17,6 +17,7 @@
 * TDR recovery and GPU protection with automatic device restart
 * Async shader compilation — non-blocking preset transitions, no render stalls
 * Display current track information and artwork from Spotify, YouTube or other media sources playing on your PC
+* Window title regex parsing with named profiles — extract artist/title/album from any media player's window title using configurable regex patterns with named capture groups
 * Change preset on track change
 * Set window transparency, borderless, and clickthrough ("watermark mode")
 * HLSL variable shadowing fix for improved preset compatibility

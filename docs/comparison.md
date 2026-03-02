@@ -4,7 +4,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 
 | Project | Description | Graphics API | Status |
 | ------- | ----------- | ------------ | ------ |
-| **MDropDX12** | Ground-up DX12 rebuild of MilkDrop2 engine | DirectX 12 | Active (v1.0) |
+| **MDropDX12** | Ground-up DX12 rebuild of MilkDrop2 engine | DirectX 12 | Active (v1.1) |
 | **Milkwave** | Remote control app + bundled MilkDrop2 visualizer | DirectX 9Ex | Active (v3.5) |
 | **MilkDrop3** | Enhanced MilkDrop2 fork (reference visualizer) | DirectX 9Ex | Active |
 
@@ -178,6 +178,7 @@ Comparison of three MilkDrop-based music visualizer projects.
 | Now Playing track info | ✅ | ✅ | ❌ |
 | Album artwork display | ✅ | ✅ | ❌ |
 | Song info (Spotify/YouTube/media) | ✅ | ✅ | ❌ |
+| Window title regex parsing (named profiles) | ✅ | ❌ | ❌ |
 | Windows Media Play/Pause/Stop keys | ✅ | ✅ | ❌ |
 
 ## Remote Control
