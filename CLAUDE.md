@@ -9,8 +9,7 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - **Audio**: WASAPI loopback capture
 - **Spout** integration for texture sharing
 - **Expression eval**: ns-eel2 (Cockos WDL, x64 JIT) — see `src/ns-eel2/`
-- **Main source**: `src/mDropDX12/` (engine, app, overlay, text, menu)
-- **Audio source**: `src/audio/` (WASAPI loopback capture)
+- **Main source**: `src/mDropDX12/` (engine, app, overlay, text, menu, audio capture)
 - **Build**: `powershell -ExecutionPolicy Bypass -File build.ps1 Release x64`
 - **Build outputs**: `src/mDropDX12/Debug_x64/` (Debug), `src/mDropDX12/Release_x64/` (Release)
 - Debug uses `Release/` as working dir; Release uses exe directory
@@ -48,7 +47,8 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 
 - DirectX 12 rendering backend (migrated from DX9Ex)
 - GDI overlay window for HUD text (preset name, FPS, debug info, notifications)
-- In-app Settings window (F8 / Ctrl+L) with dark theme, 11-tab UI, preset browser, resource viewer
+- In-app Settings window (F8 / Ctrl+L) with dark theme, 11-tab UI, preset browser, resource viewer, path display on About tab
+- Self-bootstrapping exe with embedded shaders (no external .fx files required)
 - Fallback texture search paths and dedicated Random Textures Directory
 - HLSL variable shadowing fix (auto-renames variables shadowing built-in functions)
 - DX12 3D volume texture support (noisevol_lq/noisevol_hq)
@@ -89,7 +89,8 @@ See `docs/dx12-migration-status.md` for detailed migration state.
 - INI section is `[Milkwave]` for backward compatibility (not renamed)
 - Reference visualizer for comparison: MilkDrop 3PRO (MilkDrop3)
 - User has custom texture files that presets reference (clipboard textures, etc.)
-- Textures (`resources/textures/`) and shader cache (`cache/`) are not tracked in git
+- Textures (`resources/textures/`) tracked in git; shader cache (`cache/`) is not
+- Shader .fx files are embedded in the exe (self-bootstrapping); `resources/data/` no longer shipped
 - Distribution is portable zip only (no installer)
 
 ## System Requirements

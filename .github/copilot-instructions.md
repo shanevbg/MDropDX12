@@ -9,8 +9,8 @@
 - **Standard**: C++17
 - **Platform**: Windows (Win32 API)
 - **Graphics**: DirectX 12 (D3D11on12 for Direct2D text)
-- **Audio**: WASAPI loopback capture
-- **Main source**: `src/mDropDX12/`
+- **Audio**: WASAPI loopback capture (`src/mDropDX12/audio_capture.h/cpp`)
+- **Main source**: `src/mDropDX12/` (includes audio capture)
 
 ## Common Patterns
 

@@ -6,13 +6,13 @@
 - **GPU**: DirectX 12 compatible graphics card (dedicated GPU recommended; Intel UHD integrated graphics will work but may struggle with complex presets)
 - **Runtime**: [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) (x64) -- required if not already installed
 - **Audio**: Any audio output device (speakers, headphones, virtual audio cable)
-- **Disk**: ~150 MB for base install, ~500 MB with all preset packs
+- **Disk**: ~2 MB for base install (portable zip); add preset packs as needed
 
 MDropDX12 captures audio from your system's default output device via WASAPI loopback — no special audio setup is needed. If sound is playing on your PC, MDropDX12 can visualize it.
 
 ## Download
 
-Download `MDropDX12-1.1-Portable.zip` from the [GitHub Releases](https://github.com/shanevbg/MDropDX12/releases/latest) page.
+Download `MDropDX12-1.3-Portable.zip` from the [GitHub Releases](https://github.com/shanevbg/MDropDX12/releases/latest) page.
 
 ## Installation
 
@@ -51,7 +51,7 @@ After extracting, your MDropDX12 folder contains:
 
 ```
 MDropDX12/
-  MDropDX12.exe          — The visualizer application
+  MDropDX12.exe          — The visualizer (self-bootstrapping, shaders embedded)
   README.txt             — Quick reference guide
   settings.ini           — Main configuration (auto-created on first run)
   messages.ini           — Custom message definitions (slots 00-99)
@@ -60,17 +60,11 @@ MDropDX12/
   midi-default.txt       — MIDI automation mappings
   precompile.txt         — Presets to precompile on startup
   resources/
-    data/                — Shader source files (blur, warp, comp, include.fx)
-    docs/                — Preset authoring guides and license files
-    presets/             — Preset collections in subdirectories
-      MDropDX12/         — Built-in presets (including Shader/ subfolder)
-      BeatDrop/          — Community presets (optional)
-      Butterchurn/       — Community presets (optional)
-      ...
-    sprites/             — Sprite image files
+    presets/             — Preset collections (.milk files)
     textures/            — Texture files referenced by presets
-    icons/               — Application icons
 ```
+
+The exe embeds all required shaders (blur, warp, comp, include.fx). No external `resources/data/` directory is needed. If a `resources/data/` directory exists with .fx files, those serve as user overrides.
 
 ## Configuration Files
 
@@ -121,7 +115,7 @@ Delete the folder. No registry entries or system files are affected.
 ### No audio response
 
 - MDropDX12 captures audio from your default output device. Make sure audio is actually playing.
-- Open Settings (F8) → Sound tab and verify the correct audio device is selected.
+- Open Settings (F8) → General tab and verify the correct audio device is selected.
 - If using a virtual audio cable or routing software, ensure audio is passing through the default device.
 
 ### GPU timeout / TDR crash

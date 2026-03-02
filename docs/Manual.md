@@ -539,7 +539,7 @@ The flow for each frame is:
 There are three ways to toggle Spout output:
 
 - **Keyboard**: Press **F10** or **CTRL+Z**
-- **Settings UI**: Check **Spout Output** in Settings > Sound tab
+- **Settings UI**: Check **Spout Output** in Settings > System tab
 - **IPC command**: Send `SPOUT_ACTIVE=1` or `SPOUT_ACTIVE=0` via WM_COPYDATA
 
 A notification appears on screen confirming the state change.
@@ -555,7 +555,7 @@ For example, you can send a full 1920x1080 stream to OBS while keeping the visua
 To enable fixed resolution:
 
 - **Keyboard**: Press **SHIFT+F10** or **SHIFT+CTRL+Z** to toggle
-- **Settings UI**: Check **Fixed Size** in Settings > Sound tab, then enter Width and Height
+- **Settings UI**: Check **Fixed Size** in Settings > System tab, then enter Width and Height
 - **IPC command**: Send `SPOUT_FIXEDSIZE=1` and `SPOUT_RESOLUTION=1920x1080`
 
 The supported resolution range is **64x64 to 7680x4320**.
@@ -566,10 +566,10 @@ When fixed resolution is active, the entire rendering pipeline operates at the f
 
 | Setting | Location | Default | Description |
 |---------|----------|---------|-------------|
-| Spout Output | Sound tab / F10 / CTRL+Z | Enabled | Master on/off toggle |
-| Fixed Size | Sound tab / SHIFT+F10 | Disabled | Decouple output from window size |
-| Width | Sound tab | 1280 | Fixed output width (64-7680) |
-| Height | Sound tab | 720 | Fixed output height (64-4320) |
+| Spout Output | System tab / F10 / CTRL+Z | Enabled | Master on/off toggle |
+| Fixed Size | System tab / SHIFT+F10 | Disabled | Decouple output from window size |
+| Width | System tab | 1280 | Fixed output width (64-7680) |
+| Height | System tab | 720 | Fixed output height (64-4320) |
 
 ### INI Configuration
 
@@ -888,7 +888,7 @@ MDropDX12 includes safeguards against GPU overload:
 
 ## Troubleshooting
 
-**No audio response**: Check Settings > Sound tab to ensure the correct audio device is selected. Press CTRL+D to reset to default. Verify music is playing through that device.
+**No audio response**: Check Settings > System tab to ensure the correct audio device is selected. Press CTRL+D to reset to default. Verify music is playing through that device.
 
 **Presets render black**: This may be caused by missing textures. Check Settings > Files tab to configure fallback search paths. Missing textures fall back to a 1x1 white texture to prevent black-screen artifacts.
 

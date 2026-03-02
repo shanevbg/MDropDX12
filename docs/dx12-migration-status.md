@@ -15,8 +15,8 @@
 
 ### Phase 6: HUD & Overlay
 - GDI overlay window for HUD text (preset name, FPS, debug info, notifications)
-- Song title animation — SKIPPED (never worked, low priority)
-- Sprite system — SKIPPED (low priority)
+- Sprite system working (blend modes, layers, EEL code)
+- Song title animation working (DX12 warped text)
 
 ### Phase 7: Texture System
 - Custom disk texture loading via DX12 (WIC-based)
@@ -94,6 +94,25 @@ MilkDrop2077 presets (e.g., `MilkDrop2077.Classic.Spectrum.Dots.Middle.004.milk`
 | Noise texture gen | `plugin.cpp` | `AddNoiseTex()` ~line 2788, `AddNoiseVol()` ~line 2927 |
 | White fallback tex | `dxcontext.cpp` | `CreateWhiteFallbackTexture()` |
 | Texture registry | `plugin.h` | `m_textures` — `std::vector<TexInfo>` ~line 470 |
+
+### Self-Bootstrapping (v1.3)
+
+- All shader .fx files (blur, warp, comp, include.fx) are embedded in the exe
+- `ReadFileToString()` in engine.cpp checks embedded data first, then disk override
+- No external `resources/data/` directory required — exe is fully self-contained
+- Disk .fx files in `resources/data/` serve as user overrides if present
+
+### Audio Consolidation (v1.3)
+
+- Merged 11-file `src/audio/` into `src/mDropDX12/audio_capture.h` and `audio_capture.cpp`
+- Removed CPrefs command-line parser, WAV recording, duplicate logging
+- WASAPI loopback capture with RAII cleanup classes
+
+### Render Loop Performance (v1.3)
+
+- Removed per-frame debug calls (sprintf/DebugLog) from render hot path
+- Diagnostic blocks gated with `m_bPresetDiagLogged` flag (once per preset, not per frame)
+- Audio smoothing uses O(1) ring buffer instead of O(n) vector::erase(begin())
 
 ## Build Notes
 

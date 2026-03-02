@@ -4,8 +4,6 @@
 
 [**Click here**](https://github.com/shanevbg/MDropDX12/releases/latest) to get the latest version.
 
-![VSync off — 630 FPS](resources/screenshots/vsync-off-1110fps.png)
-
 ## Visualizer Features
 
 * DirectX 12 rendering backend with GPU-accelerated Direct2D text overlay
@@ -20,10 +18,11 @@
 * Window title regex parsing with named profiles — extract artist/title/album from any media player's window title using configurable regex patterns with named capture groups
 * Change preset on track change
 * Set window transparency, borderless, and clickthrough ("watermark mode")
+* Self-bootstrapping exe with embedded shaders (no external .fx files required)
 * HLSL variable shadowing fix for improved preset compatibility
 * 3D volume texture support (noisevol_lq/noisevol_hq)
 * Fallback texture search paths, Random Textures Directory, and resource viewer
-* Over 5000 presets from skilled artists (more presets [here](https://github.com/projectM-visualizer/projectm?tab=readme-ov-file#presets))
+* Ships with curated texture-mix presets (more presets [here](https://github.com/projectM-visualizer/projectm?tab=readme-ov-file#presets))
 * Improved window handling, input methods and stability
 * Use independently or with [Milkwave](https://github.com/shanevbg/Milkwave) Remote for extended control (messaging, MIDI, shader conversion, wave manipulation, and more)
 

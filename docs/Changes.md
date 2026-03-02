@@ -1,5 +1,34 @@
 # MDropDX12 Changelog
 
+## v1.3 (2026-03-02)
+
+### Performance
+
+- Removed per-frame debug overhead from render loop (unconditional sprintf/DebugLog calls)
+- Gated diagnostic logging with once-per-preset flag instead of per-frame time checks
+- Replaced O(n) vector::erase(begin()) with O(1) ring buffer for audio band smoothing (bass_smooth, mid_smooth, treb_smooth)
+- Cached QPC frequency; standardized all throttles to std::chrono::steady_clock
+
+### Audio
+
+- Consolidated 11-file src/audio/ into 2 files (audio_capture.h/cpp) inside src/mDropDX12/
+- Removed dead weight: CPrefs command-line parser, WAV file recording, duplicate logging system
+
+### Engine
+
+- Self-bootstrapping exe with embedded shaders — no external .fx files required
+- Disk .fx files in resources/data/ now serve as user overrides (embedded shaders are primary)
+
+### Settings UI
+
+- About tab now shows active paths (Base Dir, Settings INI, Presets directory)
+
+### Resources
+
+- Pared down bundled resources — ships curated texture-mix presets and textures only
+- Removed legacy buttons, icons, docs, shapes, waves, sprites, and BeatDrop preset pack
+- Removed resources/data/ shader files (now embedded in exe)
+
 ## v1.2 (2026-03-01)
 
 ### Media Integration
@@ -111,7 +140,7 @@ Initial release. Forked from Milkwave v3.5-dev Visualizer and rebuilt as a stand
 
 ### Settings Window (F8)
 
-- Dark theme UI with 10 tabs: General, Visual, Colors, Sound, Files, Messages, Sprites, Remote, Script, About
+- Dark theme UI with 11 tabs: General, Visual, Colors, System, Files, Messages, Sprites, Remote, Script, Displays, About
 - Preset browser with directory navigation
 - Resource viewer showing all preset textures with load status and paths
 - Fallback texture search paths and Random Textures Directory

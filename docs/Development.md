@@ -122,20 +122,17 @@ MDropDX12/
       engine.cpp/h       -- Core engine, render loop, state management
       dxcontext.cpp/h    -- DX12 device, swap chain, descriptor heaps
       milkdropfs.cpp     -- Preset shader generation (warp/comp/blur)
-      engine_settings_ui.cpp -- Settings window (8-tab dark theme UI)
+      engine_settings_ui.cpp -- Settings window (11-tab dark theme UI)
       engine_input.cpp   -- Keyboard/mouse/hotkey handlers
       engine_presets.cpp  -- Preset loading, parsing, cross-fading
       state.cpp/h        -- Preset state and parameter storage
       overlay.cpp/h      -- GDI layered window for HUD text
       ...
-    audio/               -- WASAPI loopback audio capture
     ns-eel2/             -- Expression evaluator (Cockos WDL ns-eel2, x64 JIT)
   external/              -- Auto-fetched dependencies (Spout2 SDK)
   resources/
-    data/                -- Shader source files (blur, warp, comp, include.fx)
     presets/              -- Preset collections (.milk files)
-    textures/            -- Texture files (not in git; download separately)
-    sprites/             -- Sprite image files
+    textures/            -- Texture files referenced by presets
   config/                -- Default config files and build helpers
   docs/                  -- Documentation
   install/               -- NSIS installer script
@@ -188,5 +185,5 @@ The project targets Windows SDK `10.0.26100.0`. If you have a different SDK vers
 ### Build succeeds but exe won't start
 
 - Make sure you ran `Developer-Setup.cmd` (Debug builds need `Release/` populated)
-- Check that `Release/resources/data/` contains shader files (include.fx, blur*.fx, etc.)
+- The exe embeds all required shaders — no external `resources/data/` directory is needed
 - Check `Release/debug.log` for error details
