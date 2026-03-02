@@ -77,9 +77,7 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 
 | Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
 | ------- | --------- | -------- | --------- | -------- |
-| Warp/comp HLSL shaders | ✅ | ✅ | ✅ | ❌ (GLSL) |
-| Warp/comp GLSL shaders (native) | ❌ | ❌ | ❌ | ✅ |
-| GLSL-to-HLSL conversion (live) | ✅ | ✅ | ❌ | n/a |
+| Warp/comp HLSL shaders | ✅ | ✅ | ✅ | ✅ (HLSL→GLSL transpilation) |
 | Shader editor tab | ❌ | ✅ | ❌ | ❌ |
 | MilkPanel shader editor | ❌ | ❌ | ✅ | ❌ |
 | Shader precompiling and caching | ✅ | ✅ | ✅ (v3.31) | ❌ |
@@ -252,7 +250,7 @@ MilkDrop3 introduced `.milk2` files which contain two presets blended together w
 
 ### projectM on Windows
 
-The projectM standalone visualizer ([frontend-sdl-cpp](https://github.com/projectM-visualizer/frontend-sdl-cpp)) is an SDL2-based application using the libprojectM rendering library (v4.1.6). On Windows it uses SDL audio capture rather than native WASAPI loopback, so it captures input devices (microphones) but does not capture desktop/system audio natively. The standalone app and its settings UI are still under active development (pre-release). projectM uses OpenGL and its own GLSL shader pipeline rather than HLSL — presets with HLSL warp/comp shaders will not render correctly. projectM does not implement sprites, the MilkDrop text message system, or Spout integration.
+The projectM standalone visualizer ([frontend-sdl-cpp](https://github.com/projectM-visualizer/frontend-sdl-cpp)) is an SDL2-based application using the libprojectM rendering library (v4.1.6). On Windows it uses SDL audio capture rather than native WASAPI loopback, so it captures input devices (microphones) but does not capture desktop/system audio natively. The standalone app and its settings UI are still under active development (pre-release). projectM renders via OpenGL — it transpiles HLSL shader code from .milk presets to GLSL at runtime using an internal HLSL→GLSL transpiler (formerly Cg, now hlsltranslator). All .milk presets store HLSL shader bodies; no .milk presets in the wild use native GLSL. projectM does not implement sprites, the MilkDrop text message system, or Spout integration.
 
 ### Architectural Differences
 

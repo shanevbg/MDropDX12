@@ -19,7 +19,6 @@
 #include <Windows.h>
 #include <cstdint>
 #include <fstream>
-
 namespace mdrop {
 
 extern Engine g_engine;

@@ -44,7 +44,7 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - Logging via `mdropdx12.LogInfo()`, `mdropdx12.LogException()`, etc.
 - `settings.ini`: `LogLevel=2` for verbose logging
 
-## Key Features (current: v1.1)
+## Key Features (current: v1.2)
 
 - DirectX 12 rendering backend (migrated from DX9Ex)
 - GDI overlay window for HUD text (preset name, FPS, debug info, notifications)
@@ -56,8 +56,7 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - Animated song title rendering (DX12 warped text) with selectable track info sources
 - Preset change on track change; preset tagging system
 - Window transparency, borderless, clickthrough ("watermark mode")
-- GLSL-to-HLSL shader conversion with live preview
-- MIDI automation (up to 50 controls)
+- Window title regex parsing with named profiles for track info extraction
 - Game controller support with JSON config
 - Hue/Saturation/Brightness color shifting
 - Shader precompiling and caching
