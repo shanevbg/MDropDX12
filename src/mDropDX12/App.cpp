@@ -1439,6 +1439,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     switch (id) {
     case HK_TOGGLE_FULLSCREEN:
       ToggleFullScreen(hWnd);
+      SetForegroundWindow(hWnd);
       break;
     case HK_TOGGLE_STRETCH:
       if (g_engine.m_bMirrorModeForAltS) {
@@ -1461,6 +1462,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       } else {
         ToggleStretch(hWnd);
       }
+      SetForegroundWindow(hWnd);
       break;
     }
     break;
@@ -1918,6 +1920,43 @@ static void PollWindowTitle() {
   }
 }
 
+// Helper: display song info overlay messages using the current track info.
+// Called on track change, explicit poll, and to refresh "Always Show" after device recovery.
+static void ShowSongInfoOverlay() {
+  if (!g_engine.m_bSongInfoOverlay) return;
+  if (mdropdx12.currentTitle.empty() && mdropdx12.currentArtist.empty()) return;
+
+  float displayDur = g_engine.m_bSongInfoAlwaysShow ? 999999.0f : g_engine.m_SongInfoDisplaySeconds;
+  wchar_t buf[512];
+
+  std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+  std::string format = converter.to_bytes(g_engine.m_SongInfoFormat);
+  std::istringstream stream(format);
+  std::vector<std::string> tokens;
+  std::string token;
+  while (std::getline(stream, token, ';'))
+    tokens.push_back(token);
+
+  g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_1);
+  g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_2);
+  g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_3);
+
+  for (auto it = tokens.rbegin(); it != tokens.rend(); ++it) {
+    std::string cur = *it;
+    std::transform(cur.begin(), cur.end(), cur.begin(), ::tolower);
+    if (cur == "artist" && mdropdx12.currentArtist.length() > 0) {
+      wcscpy(buf, mdropdx12.currentArtist.c_str());
+      g_engine.AddError(buf, displayDur, ERR_MSG_BOTTOM_EXTRA_1, false);
+    } else if (cur == "title" && mdropdx12.currentTitle.length() > 0) {
+      wcscpy(buf, mdropdx12.currentTitle.c_str());
+      g_engine.AddError(buf, displayDur, ERR_MSG_BOTTOM_EXTRA_2, false);
+    } else if (cur == "album" && mdropdx12.currentAlbum.length() > 0) {
+      wcscpy(buf, mdropdx12.currentAlbum.c_str());
+      g_engine.AddError(buf, displayDur, ERR_MSG_BOTTOM_EXTRA_3, false);
+    }
+  }
+}
+
 void RenderFrame() {
 
   // Process any commands enqueued from the message pump thread
@@ -1966,28 +2005,9 @@ void RenderFrame() {
 
     mdropdx12.doPollExplicit = false;
 
-    // Only display song info on actual track change or explicit user request
-    // (skip initial detection on startup to avoid showing stale media titles)
-    if (mdropdx12.isSongChange || wasExplicit) {
-      wchar_t buf[512];
-
-      // Convert wchar_t array to std::string
-      std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
-      std::string format = converter.to_bytes(g_engine.m_SongInfoFormat);
-      std::istringstream stream(format);
-      std::vector<std::string> tokens;
-      std::string token;
-
-      // Split the string into tokens
-      while (std::getline(stream, token, ';')) {
-        tokens.push_back(token);
-      }
-
-      // remove existing song info display
-      g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_1);
-      g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_2);
-      g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_3);
-
+    // Display song info on track change, explicit user request,
+    // or when "Always Show" is enabled (includes initial detection)
+    if (mdropdx12.isSongChange || wasExplicit || g_engine.m_bSongInfoAlwaysShow) {
       // Build "Artist - Title" for the animated song title system
       {
         std::wstring songTitle;
@@ -1998,40 +2018,18 @@ void RenderFrame() {
         lstrcpynW(g_engine.m_szSongTitle, songTitle.c_str(), 511);
       }
 
-      // Show overlay notifications if enabled
-      if (g_engine.m_bSongInfoOverlay) {
-        float displayDur = g_engine.m_bSongInfoAlwaysShow ? 999999.0f : g_engine.m_SongInfoDisplaySeconds;
-
-        // Iterate over tokens in reverse order
-        for (auto it = tokens.rbegin(); it != tokens.rend(); ++it) {
-          std::string currentToken = *it;
-
-          // Convert token to lowercase for case-insensitive comparison
-          std::transform(currentToken.begin(), currentToken.end(), currentToken.begin(), ::tolower);
-
-          if (currentToken == "artist") {
-            if (mdropdx12.currentArtist.length() > 0) {
-              wcscpy(buf, mdropdx12.currentArtist.c_str());
-              g_engine.AddError(buf, displayDur, ERR_MSG_BOTTOM_EXTRA_1, false);
-            }
-          }
-          else if (currentToken == "title") {
-            if (mdropdx12.currentTitle.length() > 0) {
-              wcscpy(buf, mdropdx12.currentTitle.c_str());
-              g_engine.AddError(buf, displayDur, ERR_MSG_BOTTOM_EXTRA_2, false);
-            }
-          }
-          else if (currentToken == "album") {
-            if (mdropdx12.currentAlbum.length() > 0) {
-              wcscpy(buf, mdropdx12.currentAlbum.c_str());
-              g_engine.AddError(buf, displayDur, ERR_MSG_BOTTOM_EXTRA_3, false);
-            }
-          }
-        }
-      }
+      ShowSongInfoOverlay();
+      g_engine.m_bSongInfoRefreshNeeded = false;
     }
 
     mdropdx12.updated = false;
+  }
+
+  // Re-display "Always Show" track info after device recovery / startup
+  // (ClearErrors in AllocateDX9Stuff wipes the overlay; this re-adds it)
+  if (g_engine.m_bSongInfoRefreshNeeded && g_engine.m_bSongInfoAlwaysShow) {
+    g_engine.m_bSongInfoRefreshNeeded = false;
+    ShowSongInfoOverlay();
   }
 
   g_engine.PluginRender(

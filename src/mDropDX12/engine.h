@@ -526,6 +526,7 @@ public:
   bool m_ChangePresetWithSong = true;
   float m_SongInfoDisplaySeconds = 5.0f;
   bool m_bSongInfoAlwaysShow = false;
+  bool m_bSongInfoRefreshNeeded = true;  // re-display "Always Show" overlay after ClearErrors
   bool m_DisplayCover = true;
   bool m_DisplayCoverWhenPressingB = true;
   float m_MediaKeyNotifyTime = 1.0f;  // seconds to show media key notification
