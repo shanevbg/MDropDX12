@@ -4,7 +4,7 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 
 | Project | Description | Graphics API | Status |
 | ------- | ----------- | ------------ | ------ |
-| **MDropDX12** | Ground-up DX12 rebuild of MilkDrop2 engine | DirectX 12 | Active (v1.2) |
+| **MDropDX12** | Ground-up DX12 rebuild of MilkDrop2 engine | DirectX 12 | Active (v1.3) |
 | **Milkwave** | Remote control app + bundled MilkDrop2 visualizer | DirectX 9Ex | Active (v3.5) |
 | **MilkDrop3** | Enhanced MilkDrop2 fork (reference visualizer) | DirectX 9Ex | Active (v3.31) |
 | **projectM** | Open-source MilkDrop reimplementation (SDL standalone) | OpenGL | Pre-release (lib v4.1.6) |
@@ -254,7 +254,7 @@ The projectM standalone visualizer ([frontend-sdl-cpp](https://github.com/projec
 
 ### Architectural Differences
 
-- **MDropDX12 v1.2**: DirectX 12, x64, native ns-eel2 (x64 JIT), GDI overlay for text, no DX9 half-texel offset, no projection matrix (clip-space passthrough); built-in Spout input mixing via D3D11On12, monitor mirroring, game controller support, idle timer, window title regex parsing
+- **MDropDX12 v1.3**: DirectX 12, x64, native ns-eel2 (x64 JIT), GDI overlay for text, no DX9 half-texel offset, no projection matrix (clip-space passthrough); built-in Spout input mixing via D3D11On12, monitor mirroring, game controller support, idle timer, window title regex parsing
 - **Milkwave v3.5**: Bundles a modified MilkDrop2 (DX9Ex) visualizer with a separate .NET 8 Remote control app; adds input mixing, game controller support, MIDI automation, projectM-eval expression engine
 - **MilkDrop3 v3.31**: DirectX 9Ex, x86, native ns-eel2 (x86), adds .milk2 format, MilkPanel shader editor, deep mashup system, expanded variable ranges, shader caching (v3.31), hi-res audio (v3.31), 5 sprite layers with blend modes
 - **projectM v4.1.6**: OpenGL, x64, cross-platform (Windows/macOS/Linux), projectM-eval expression engine, GLSL shader pipeline, SDL2 audio; reimplements MilkDrop2 rendering from scratch without using original MilkDrop2 code

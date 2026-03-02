@@ -4449,7 +4449,7 @@ void Engine::BuildSettingsControls() {
   PAGE_CTRL(10, CreateLabel(hw, L"MDropDX12", x, y, rw, 24, hFontBold, false));
   y += 28;
 
-  PAGE_CTRL(10, CreateLabel(hw, L"Version 1.2", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(10, CreateLabel(hw, L"Version 1.3", x, y, rw, lineH, hFont, false));
   y += lineH + 4;
 
   {
