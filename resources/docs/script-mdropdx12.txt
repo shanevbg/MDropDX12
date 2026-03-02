@@ -1,4 +1,4 @@
-# Script file used for the MDropDX12 3.1 YouTube video
+# Script file used for the MDropDX12
 # 
 # Lines starting with # are ignored when parsing this file.
 # You can load other files by right-clicking "From File" in the MDropDX12 Remote window.
