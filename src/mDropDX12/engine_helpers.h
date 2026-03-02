@@ -246,6 +246,20 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_IDLE_ACTION         2153  // ComboBox: Fullscreen / Stretch-Mirror
 #define IDC_MW_IDLE_AUTO_RESTORE   2154  // Checkbox: auto-restore on input
 
+// Song Info controls (General tab)
+#define IDC_MW_SONG_SOURCE         2160  // ComboBox: SMTC / IPC / Window Title
+#define IDC_MW_SONG_WINDOW_TITLE   2161  // Edit: window title to scrape
+#define IDC_MW_SONG_OVERLAY        2162  // Checkbox: overlay notifications
+#define IDC_MW_SONG_COVER          2163  // Checkbox: show cover art sprite
+#define IDC_MW_SONG_CORNER         2164  // ComboBox: display corner
+#define IDC_MW_SONG_DISPLAY_SEC    2165  // Edit: display seconds
+#define IDC_MW_CURRENT_PRESET      2166  // Edit: current/startup preset
+#define IDC_MW_BROWSE_PRESET       2167  // Button: browse for preset file
+#define IDC_MW_SONG_SHOW_NOW       2168  // Button: force display current track info
+#define IDC_MW_SONG_ALWAYS_SHOW    2169  // Checkbox: always show track info
+#define IDC_MW_SONG_WT_PREVIEW     2170  // Static label: window title parse preview
+#define IDC_MW_SONG_WT_LABEL       2171  // Static label: "Window Title:" (for show/hide)
+
 // Spout Video Input controls (Displays tab)
 #define IDC_MW_SPINPUT_ENABLE       7020
 #define IDC_MW_SPINPUT_SENDER       7021

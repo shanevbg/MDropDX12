@@ -495,11 +495,17 @@ public:
   bool m_RemotePresetLink = false;
   bool m_bAlwaysOnTop = false;
 
+  enum TrackInfoSource { TRACK_SOURCE_SMTC = 0, TRACK_SOURCE_IPC = 1, TRACK_SOURCE_WINDOW = 2 };
+  int m_nTrackInfoSource = TRACK_SOURCE_SMTC;
+  bool m_bSongInfoOverlay = true;           // show overlay text notifications on track change
+  wchar_t m_szTrackWindowTitle[256] = {};   // window title to scrape (TRACK_SOURCE_WINDOW)
+
   bool m_SongInfoPollingEnabled = true;
   int m_SongInfoDisplayCorner = 3;
 
   bool m_ChangePresetWithSong = true;
   float m_SongInfoDisplaySeconds = 5.0f;
+  bool m_bSongInfoAlwaysShow = false;
   bool m_DisplayCover = true;
   bool m_DisplayCoverWhenPressingB = true;
   float m_MediaKeyNotifyTime = 1.0f;  // seconds to show media key notification

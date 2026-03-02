@@ -1789,6 +1789,50 @@ static void PerformDeviceRecovery() {
   g_engine.AddError(msg, 8.0f, ERR_NOTIFY, true);
 }
 
+// Poll track info from a window title (TRACK_SOURCE_WINDOW)
+// Finds window by title, reads its title bar, parses "Artist - Title" format.
+// Uses same 2-second interval as SMTC polling.
+static void PollWindowTitle() {
+  using namespace std::chrono;
+  static steady_clock::time_point lastPoll = steady_clock::now();
+
+  if (!mdropdx12.doPollExplicit) {
+    auto now = steady_clock::now();
+    if (duration_cast<seconds>(now - lastPoll).count() < 2)
+      return;
+    lastPoll = now;
+  }
+
+  if (g_engine.m_szTrackWindowTitle[0] == L'\0') return;
+
+  HWND hTarget = FindWindowW(NULL, g_engine.m_szTrackWindowTitle);
+  if (!hTarget) return;
+
+  wchar_t windowText[512] = {};
+  GetWindowTextW(hTarget, windowText, _countof(windowText));
+  if (windowText[0] == L'\0') return;
+
+  // Parse "Artist - Title" format (split on first " - ")
+  std::wstring text(windowText);
+  std::wstring artist, title;
+  size_t sep = text.find(L" - ");
+  if (sep != std::wstring::npos) {
+    artist = text.substr(0, sep);
+    title = text.substr(sep + 3);
+  } else {
+    title = text;
+  }
+
+  // Check for change
+  if (mdropdx12.doPollExplicit || artist != mdropdx12.currentArtist || title != mdropdx12.currentTitle) {
+    mdropdx12.isSongChange = mdropdx12.currentArtist.length() || mdropdx12.currentTitle.length();
+    mdropdx12.currentArtist = artist;
+    mdropdx12.currentTitle = title;
+    mdropdx12.currentAlbum.clear();
+    mdropdx12.updated = true;
+  }
+}
+
 void RenderFrame() {
 
   // Process any commands enqueued from the message pump thread
@@ -1809,7 +1853,12 @@ void RenderFrame() {
     memset(pcmRightIn, 128, SAMPLE_SIZE);
   }
 
-  mdropdx12.PollMediaInfo();
+  // Poll track info based on selected source
+  if (g_engine.m_nTrackInfoSource == Engine::TRACK_SOURCE_SMTC) {
+    mdropdx12.PollMediaInfo();
+  } else if (g_engine.m_nTrackInfoSource == Engine::TRACK_SOURCE_WINDOW) {
+    PollWindowTitle();
+  }
   if (mdropdx12.coverUpdated) {
     g_engine.PostMessageToMDropDX12Remote(WM_USER_COVER_CHANGED);
     mdropdx12.coverUpdated = false;
@@ -1854,29 +1903,44 @@ void RenderFrame() {
       g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_2);
       g_engine.ClearErrors(ERR_MSG_BOTTOM_EXTRA_3);
 
-      // Iterate over tokens in reverse order
-      for (auto it = tokens.rbegin(); it != tokens.rend(); ++it) {
-        std::string currentToken = *it;
+      // Build "Artist - Title" for the animated song title system
+      {
+        std::wstring songTitle;
+        if (mdropdx12.currentArtist.length() > 0 && mdropdx12.currentTitle.length() > 0)
+          songTitle = mdropdx12.currentArtist + L" - " + mdropdx12.currentTitle;
+        else if (mdropdx12.currentTitle.length() > 0)
+          songTitle = mdropdx12.currentTitle;
+        lstrcpynW(g_engine.m_szSongTitle, songTitle.c_str(), 511);
+      }
 
-        // Convert token to lowercase for case-insensitive comparison
-        std::transform(currentToken.begin(), currentToken.end(), currentToken.begin(), ::tolower);
+      // Show overlay notifications if enabled
+      if (g_engine.m_bSongInfoOverlay) {
+        float displayDur = g_engine.m_bSongInfoAlwaysShow ? 999999.0f : g_engine.m_SongInfoDisplaySeconds;
 
-        if (currentToken == "artist") {
-          if (mdropdx12.currentArtist.length() > 0) {
-            wcscpy(buf, mdropdx12.currentArtist.c_str());
-            g_engine.AddError(buf, g_engine.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_1, false);
+        // Iterate over tokens in reverse order
+        for (auto it = tokens.rbegin(); it != tokens.rend(); ++it) {
+          std::string currentToken = *it;
+
+          // Convert token to lowercase for case-insensitive comparison
+          std::transform(currentToken.begin(), currentToken.end(), currentToken.begin(), ::tolower);
+
+          if (currentToken == "artist") {
+            if (mdropdx12.currentArtist.length() > 0) {
+              wcscpy(buf, mdropdx12.currentArtist.c_str());
+              g_engine.AddError(buf, displayDur, ERR_MSG_BOTTOM_EXTRA_1, false);
+            }
           }
-        }
-        else if (currentToken == "title") {
-          if (mdropdx12.currentTitle.length() > 0) {
-            wcscpy(buf, mdropdx12.currentTitle.c_str());
-            g_engine.AddError(buf, g_engine.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_2, false);
+          else if (currentToken == "title") {
+            if (mdropdx12.currentTitle.length() > 0) {
+              wcscpy(buf, mdropdx12.currentTitle.c_str());
+              g_engine.AddError(buf, displayDur, ERR_MSG_BOTTOM_EXTRA_2, false);
+            }
           }
-        }
-        else if (currentToken == "album") {
-          if (mdropdx12.currentAlbum.length() > 0) {
-            wcscpy(buf, mdropdx12.currentAlbum.c_str());
-            g_engine.AddError(buf, g_engine.m_SongInfoDisplaySeconds, ERR_MSG_BOTTOM_EXTRA_3, false);
+          else if (currentToken == "album") {
+            if (mdropdx12.currentAlbum.length() > 0) {
+              wcscpy(buf, mdropdx12.currentAlbum.c_str());
+              g_engine.AddError(buf, displayDur, ERR_MSG_BOTTOM_EXTRA_3, false);
+            }
           }
         }
       }

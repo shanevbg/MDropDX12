@@ -1601,7 +1601,15 @@ void Engine::MyRenderUI(
               swprintf(buf, L"%s ", m_errors[i].msg.c_str());
 
               // 0..1
-              float age_rel = (t - m_errors[i].birthTime) / (m_errors[i].expireTime - m_errors[i].birthTime);
+              float totalDuration = m_errors[i].expireTime - m_errors[i].birthTime;
+              float age_rel;
+              if (totalDuration > 3600.0f) {
+                // Always-show: 0.5s fade in, then full alpha permanently
+                float age = t - m_errors[i].birthTime;
+                age_rel = (age < 0.5f) ? (age / 0.5f) * 0.05f : 0.5f;
+              } else {
+                age_rel = (t - m_errors[i].birthTime) / totalDuration;
+              }
               DWORD cr = m_fontinfo[fontIndex].R;
               DWORD cg = m_fontinfo[fontIndex].G;
               DWORD cb = m_fontinfo[fontIndex].B;

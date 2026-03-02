@@ -52,7 +52,8 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - Fallback texture search paths and dedicated Random Textures Directory
 - HLSL variable shadowing fix (auto-renames variables shadowing built-in functions)
 - DX12 3D volume texture support (noisevol_lq/noisevol_hq)
-- Track info and artwork from Spotify/YouTube/media sources
+- Track info and artwork from Spotify/YouTube/media sources (SMTC, IPC, window title scraping)
+- Animated song title rendering (DX12 warped text) with selectable track info sources
 - Preset change on track change; preset tagging system
 - Window transparency, borderless, clickthrough ("watermark mode")
 - GLSL-to-HLSL shader conversion with live preview
@@ -86,7 +87,6 @@ See `docs/dx12-migration-status.md` for detailed migration state.
 
 - After code changes, always attempt a build: `powershell -ExecutionPolicy Bypass -File build.ps1 Release x64`
 - If a build is blocked by permissions (exe locked), ask the user to close the running visualizer
-- Skip song title rendering (Phase 6E) — never worked, low priority
 - INI section is `[Milkwave]` for backward compatibility (not renamed)
 - Reference visualizer for comparison: MilkDrop 3PRO (MilkDrop3)
 - User has custom texture files that presets reference (clipboard textures, etc.)

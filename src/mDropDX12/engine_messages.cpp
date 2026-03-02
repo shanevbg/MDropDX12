@@ -2102,6 +2102,32 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     if (!g_engine.m_bShowPresetInfo) g_engine.m_bShowPresetInfo = true;
     g_engine.AddNotification(L"This is a notification");
   }
+  else if (wcsncmp(sMessage, L"TRACK|", 6) == 0) {
+    // TRACK|artist=...|title=...|album=...  — track info from Milkwave Remote
+    if (m_nTrackInfoSource == TRACK_SOURCE_IPC && mdropdx12) {
+      std::wstring message(sMessage + 6);
+      std::wstring artist, title, album;
+      std::wistringstream ss(message);
+      std::wstring token;
+      while (std::getline(ss, token, L'|')) {
+        size_t eq = token.find(L'=');
+        if (eq == std::wstring::npos) continue;
+        std::wstring key = token.substr(0, eq);
+        std::wstring val = token.substr(eq + 1);
+        if (key == L"artist") artist = val;
+        else if (key == L"title") title = val;
+        else if (key == L"album") album = val;
+      }
+      bool isChange = (artist != mdropdx12->currentArtist || title != mdropdx12->currentTitle || album != mdropdx12->currentAlbum);
+      if (isChange) {
+        mdropdx12->isSongChange = mdropdx12->currentArtist.length() || mdropdx12->currentTitle.length();
+        mdropdx12->currentArtist = artist;
+        mdropdx12->currentTitle = title;
+        mdropdx12->currentAlbum = album;
+        mdropdx12->updated = true;
+      }
+    }
+  }
   else if (wcsncmp(sMessage, L"CLEARPRESET", 11) == 0) {
     ClearPreset();
   }
@@ -2742,13 +2768,7 @@ void Engine::DoCustomSoundAnalysis() {
 
 
 void Engine::GetSongTitle(wchar_t* szSongTitle, int nSize) {
-  //if (playbackService &&
-  //    playbackService->GetPlaybackState() == musik::core::sdk::PlaybackStopped)
-  //{
-  //    emulatedWinampSongTitle = "Playback Stopped";
-  //}
-  emulatedWinampSongTitle = "";
-  lstrcpynW(szSongTitle, AutoWide(emulatedWinampSongTitle.c_str(), CP_UTF8), nSize);
+  lstrcpynW(szSongTitle, m_szSongTitle, nSize);
 }
 
 // =========================================================

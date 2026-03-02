@@ -57,6 +57,55 @@ static void FormatSpriteSectionA(char* buf, int bufSize, int index) {
     sprintf_s(buf, bufSize, "img%d", index);
 }
 
+// EnumWindows callback: collects visible window titles for the Window Title combo
+static BOOL CALLBACK EnumVisibleWindowTitlesProc(HWND hwnd, LPARAM lParam) {
+  if (!IsWindowVisible(hwnd)) return TRUE;
+  wchar_t title[256] = {};
+  int len = GetWindowTextW(hwnd, title, _countof(title));
+  if (len < 3) return TRUE;
+  if (wcsstr(title, L"MDropDX12") != nullptr) return TRUE;
+  auto* titles = reinterpret_cast<std::vector<std::wstring>*>(lParam);
+  titles->push_back(title);
+  return TRUE;
+}
+
+// Fills the Window Title CBS_DROPDOWN combo with all visible window titles
+static void PopulateWindowTitleCombo(HWND hCombo, const wchar_t* currentTitle) {
+  wchar_t editText[256] = {};
+  if (currentTitle && currentTitle[0])
+    lstrcpynW(editText, currentTitle, _countof(editText));
+  else
+    GetWindowTextW(hCombo, editText, _countof(editText));
+  SendMessage(hCombo, CB_RESETCONTENT, 0, 0);
+  std::vector<std::wstring> titles;
+  EnumWindows(EnumVisibleWindowTitlesProc, (LPARAM)&titles);
+  std::sort(titles.begin(), titles.end(), [](const std::wstring& a, const std::wstring& b) {
+    return _wcsicmp(a.c_str(), b.c_str()) < 0;
+  });
+  for (const auto& t : titles)
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)t.c_str());
+  SetWindowTextW(hCombo, editText);
+}
+
+// Updates the preview label with parsed artist/title from the named window
+static void UpdateWindowTitlePreview(HWND hSettingsWnd, const wchar_t* windowTitle) {
+  HWND hPreview = GetDlgItem(hSettingsWnd, IDC_MW_SONG_WT_PREVIEW);
+  if (!hPreview) return;
+  if (!windowTitle || !windowTitle[0]) { SetWindowTextW(hPreview, L""); return; }
+  HWND hTarget = FindWindowW(NULL, windowTitle);
+  if (!hTarget) { SetWindowTextW(hPreview, L"(window not found)"); return; }
+  wchar_t windowText[512] = {};
+  GetWindowTextW(hTarget, windowText, _countof(windowText));
+  if (!windowText[0]) { SetWindowTextW(hPreview, L"(empty window text)"); return; }
+  std::wstring text(windowText), preview;
+  size_t sep = text.find(L" - ");
+  if (sep != std::wstring::npos)
+    preview = L"Artist: " + text.substr(0, sep) + L"  |  Title: " + text.substr(sep + 3);
+  else
+    preview = L"Title: " + text;
+  SetWindowTextW(hPreview, preview.c_str());
+}
+
 void Engine::WriteRealtimeConfig() {
   // WritePrivateProfileIntW(m_bShowSongTitle, L"bShowSongTitle", GetConfigIniFile(), L"Settings");
   // WritePrivateProfileIntW(m_bShowSongTime, L"bShowSongTime", GetConfigIniFile(), L"Settings");
@@ -888,6 +937,32 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
+    // Browse Preset file
+    if (id == IDC_MW_BROWSE_PRESET && code == BN_CLICKED) {
+      wchar_t szFile[MAX_PATH] = {};
+      OPENFILENAMEW ofn = {};
+      ofn.lStructSize = sizeof(ofn);
+      ofn.hwndOwner = hWnd;
+      ofn.lpstrFilter = L"Preset Files (*.milk)\0*.milk\0All Files (*.*)\0*.*\0";
+      ofn.lpstrFile = szFile;
+      ofn.nMaxFile = MAX_PATH;
+      ofn.lpstrInitialDir = p->m_szPresetDir;
+      ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+      if (GetOpenFileNameW(&ofn)) {
+        p->LoadPreset(szFile, p->m_fBlendTimeUser);
+        // Update current preset display
+        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_CURRENT_PRESET), p->m_szCurrentPresetFile);
+      }
+      return 0;
+    }
+
+    // Show Now button: force display current track info
+    if (id == IDC_MW_SONG_SHOW_NOW && code == BN_CLICKED) {
+      extern MDropDX12 mdropdx12;
+      mdropdx12.doPollExplicit = true;
+      return 0;
+    }
+
     // Preset listbox selection
     if (id == IDC_MW_PRESET_LIST && code == LBN_SELCHANGE) {
       int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
@@ -899,6 +974,8 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         wchar_t szFile[MAX_PATH];
         swprintf(szFile, MAX_PATH, L"%s%s", p->m_szPresetDir, p->m_presets[sel].szFilename.c_str());
         p->LoadPreset(szFile, p->m_fBlendTimeUser);
+        // Update current preset display
+        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_CURRENT_PRESET), p->m_szCurrentPresetFile);
       }
       return 0;
     }
@@ -1233,6 +1310,62 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
+    // Song Info source combo box
+    if (id == IDC_MW_SONG_SOURCE && code == CBN_SELCHANGE) {
+      int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
+      if (sel >= 0 && sel <= 2) {
+        p->m_nTrackInfoSource = sel;
+        WritePrivateProfileIntW(sel, L"TrackInfoSource", p->GetConfigIniFile(), L"Milkwave");
+        bool showWT = (sel == Engine::TRACK_SOURCE_WINDOW);
+        int sw = showWT ? SW_SHOW : SW_HIDE;
+        HWND h;
+        if ((h = GetDlgItem(hWnd, IDC_MW_SONG_WT_LABEL)))     ShowWindow(h, sw);
+        if ((h = GetDlgItem(hWnd, IDC_MW_SONG_WINDOW_TITLE)))  ShowWindow(h, sw);
+        if ((h = GetDlgItem(hWnd, IDC_MW_SONG_WT_PREVIEW)))    ShowWindow(h, sw);
+        if (showWT) UpdateWindowTitlePreview(hWnd, p->m_szTrackWindowTitle);
+      }
+      return 0;
+    }
+
+    // Window Title combo: populate dropdown when user opens it
+    if (id == IDC_MW_SONG_WINDOW_TITLE && code == CBN_DROPDOWN) {
+      PopulateWindowTitleCombo((HWND)lParam, p->m_szTrackWindowTitle);
+      return 0;
+    }
+
+    // Window Title combo: user selected an item from dropdown
+    if (id == IDC_MW_SONG_WINDOW_TITLE && code == CBN_SELENDOK) {
+      int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
+      if (sel >= 0) {
+        wchar_t selText[256] = {};
+        SendMessageW((HWND)lParam, CB_GETLBTEXT, sel, (LPARAM)selText);
+        lstrcpynW(p->m_szTrackWindowTitle, selText, _countof(p->m_szTrackWindowTitle));
+        WritePrivateProfileStringW(L"Milkwave", L"TrackWindowTitle", p->m_szTrackWindowTitle, p->GetConfigIniFile());
+        UpdateWindowTitlePreview(hWnd, p->m_szTrackWindowTitle);
+      }
+      return 0;
+    }
+
+    // Window Title combo: user typed/edited text manually
+    if (id == IDC_MW_SONG_WINDOW_TITLE && code == CBN_EDITCHANGE) {
+      wchar_t wtBuf[256] = {};
+      GetWindowTextW((HWND)lParam, wtBuf, _countof(wtBuf));
+      lstrcpynW(p->m_szTrackWindowTitle, wtBuf, _countof(p->m_szTrackWindowTitle));
+      WritePrivateProfileStringW(L"Milkwave", L"TrackWindowTitle", p->m_szTrackWindowTitle, p->GetConfigIniFile());
+      UpdateWindowTitlePreview(hWnd, p->m_szTrackWindowTitle);
+      return 0;
+    }
+
+    // Song Info display corner combo box
+    if (id == IDC_MW_SONG_CORNER && code == CBN_SELCHANGE) {
+      int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
+      if (sel >= 0 && sel <= 3) {
+        p->m_SongInfoDisplayCorner = sel + 1;  // 0-indexed combo -> 1-indexed corner
+        WritePrivateProfileIntW(p->m_SongInfoDisplayCorner, L"SongInfoDisplayCorner", p->GetConfigIniFile(), L"Milkwave");
+      }
+      return 0;
+    }
+
     // Idle timer action combo box
     if (id == IDC_MW_IDLE_ACTION && code == CBN_SELCHANGE) {
       int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
@@ -1424,6 +1557,26 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       case IDC_MW_CHANGE_SONG:
         p->m_ChangePresetWithSong = bChecked;
         p->SaveSettingToINI(SET_CHANGE_WITH_SONG);
+        return 0;
+      case IDC_MW_SONG_OVERLAY:
+        p->m_bSongInfoOverlay = bChecked;
+        WritePrivateProfileIntW(bChecked, L"SongInfoOverlay", p->GetConfigIniFile(), L"Milkwave");
+        return 0;
+      case IDC_MW_SONG_COVER:
+        p->m_DisplayCover = bChecked;
+        WritePrivateProfileIntW(bChecked, L"DisplayCover", p->GetConfigIniFile(), L"Milkwave");
+        return 0;
+      case IDC_MW_SONG_ALWAYS_SHOW:
+        p->m_bSongInfoAlwaysShow = bChecked;
+        WritePrivateProfileIntW(bChecked, L"SongInfoAlwaysShow", p->GetConfigIniFile(), L"Milkwave");
+        if (!bChecked) {
+          p->ClearErrors(ERR_MSG_BOTTOM_EXTRA_1);
+          p->ClearErrors(ERR_MSG_BOTTOM_EXTRA_2);
+          p->ClearErrors(ERR_MSG_BOTTOM_EXTRA_3);
+        } else {
+          extern MDropDX12 mdropdx12;
+          mdropdx12.doPollExplicit = true;
+        }
         return 0;
       case IDC_MW_SHOW_FPS:
         p->m_bShowFPS = bChecked;
@@ -2045,6 +2198,22 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         p->m_AutoHueSeconds = (float)_wtof(buf);
         if (p->m_AutoHueSeconds < 0.001f) p->m_AutoHueSeconds = 0.001f;
         return 0;
+      case IDC_MW_SONG_DISPLAY_SEC:
+        p->m_SongInfoDisplaySeconds = (float)_wtof(buf);
+        if (p->m_SongInfoDisplaySeconds < 0.5f) p->m_SongInfoDisplaySeconds = 0.5f;
+        if (p->m_SongInfoDisplaySeconds > 60.0f) p->m_SongInfoDisplaySeconds = 60.0f;
+        { wchar_t sb[32]; swprintf(sb, 32, L"%.1f", p->m_SongInfoDisplaySeconds);
+          WritePrivateProfileStringW(L"Milkwave", L"SongInfoDisplaySeconds", sb, p->GetConfigIniFile()); }
+        return 0;
+      case IDC_MW_SONG_WINDOW_TITLE: {
+        wchar_t wtBuf[256] = {};
+        HWND hCombo = GetDlgItem(hWnd, IDC_MW_SONG_WINDOW_TITLE);
+        if (hCombo) GetWindowTextW(hCombo, wtBuf, _countof(wtBuf));
+        lstrcpynW(p->m_szTrackWindowTitle, wtBuf, _countof(p->m_szTrackWindowTitle));
+        WritePrivateProfileStringW(L"Milkwave", L"TrackWindowTitle", p->m_szTrackWindowTitle, p->GetConfigIniFile());
+        UpdateWindowTitlePreview(hWnd, p->m_szTrackWindowTitle);
+        return 0;
+      }
       case IDC_MW_MSG_INTERVAL: {
         float val = (float)_wtof(buf);
         if (val < 1.0f) val = 1.0f;
@@ -3029,40 +3198,42 @@ void Engine::BuildSettingsControls() {
   // ====== PAGE 0: General ======
   y = tabTop + 10;
 
+  // Current/Startup Preset + Browse
+  PAGE_CTRL(0, CreateLabel(hw, L"Current Preset:", x, y, lw, lineH, hFont));
+  PAGE_CTRL(0, CreateEdit(hw, m_szCurrentPresetFile, IDC_MW_CURRENT_PRESET, x + lw + 4, y, rw - lw - 74, lineH, hFont, ES_READONLY));
+  PAGE_CTRL(0, CreateBtn(hw, L"Browse", IDC_MW_BROWSE_PRESET, x + rw - 65, y, 65, lineH, hFont));
+  y += lineH + gap;
+
   // Preset directory + browse
-  PAGE_CTRL(0, CreateLabel(hw, L"Preset Directory:", x, y, rw, lineH, hFont));
-  y += lineH;
-  PAGE_CTRL(0, CreateEdit(hw, m_szPresetDir, IDC_MW_PRESET_DIR, x, y, rw - 70, lineH, hFont, ES_READONLY));
+  PAGE_CTRL(0, CreateLabel(hw, L"Preset Directory:", x, y, lw, lineH, hFont));
+  PAGE_CTRL(0, CreateEdit(hw, m_szPresetDir, IDC_MW_PRESET_DIR, x + lw + 4, y, rw - lw - 74, lineH, hFont, ES_READONLY));
   PAGE_CTRL(0, CreateBtn(hw, L"Browse", IDC_MW_BROWSE_DIR, x + rw - 65, y, 65, lineH, hFont));
   y += lineH + gap;
 
   // Preset listbox
   {
-    int listH = 8 * lineH;  // ~192px
+    int listH = 8 * lineH;
     HWND hList = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", NULL,
       WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
       x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_PRESET_LIST, GetModuleHandle(NULL), NULL);
     if (hList && hFont) SendMessage(hList, WM_SETFONT, (WPARAM)hFont, TRUE);
-    // Populate with preset filenames
     for (int i = 0; i < m_nPresets; i++) {
       if (m_presets[i].szFilename.empty()) continue;
       SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)m_presets[i].szFilename.c_str());
     }
-    // Select current preset
     if (m_nCurrentPreset >= 0 && m_nCurrentPreset < m_nPresets)
       SendMessage(hList, LB_SETCURSEL, m_nCurrentPreset, 0);
     PAGE_CTRL(0, hList);
     y += listH + gap;
   }
 
-  // Nav buttons: ◄  ►  ✂ (copy path)  |  ▲ Up  ▼ Into
+  // Nav buttons
   {
     int btnW = MulDiv(40, lineH, 26);
     int btnGap = 6;
     PAGE_CTRL(0, CreateBtn(hw, L"\x25C4", IDC_MW_PRESET_PREV, x, y, btnW, lineH + 4, hFont));
     PAGE_CTRL(0, CreateBtn(hw, L"\x25BA", IDC_MW_PRESET_NEXT, x + btnW + btnGap, y, btnW, lineH + 4, hFont));
     PAGE_CTRL(0, CreateBtn(hw, L"\x2702", IDC_MW_PRESET_COPY, x + 2 * (btnW + btnGap), y, btnW, lineH + 4, hFont));
-    // Directory navigation: Up (parent) and Into (selected subfolder)
     int dirBtnX = x + 3 * (btnW + btnGap) + 10;
     int dirBtnW = MulDiv(55, lineH, 26);
     PAGE_CTRL(0, CreateBtn(hw, L"\x25B2 Up", IDC_MW_PRESET_UP, dirBtnX, y, dirBtnW, lineH + 4, hFont));
@@ -3070,7 +3241,7 @@ void Engine::BuildSettingsControls() {
     y += lineH + 4 + gap + 4;
   }
 
-  // Settings
+  // Preset settings
   PAGE_CTRL(0, CreateLabel(hw, L"Audio Sensitivity (-1=Auto):", x, y, lw, lineH, hFont));
   swprintf(buf, 64, L"%g", (double)m_fAudioSensitivity);
   PAGE_CTRL(0, CreateEdit(hw, buf, IDC_MW_AUDIO_SENS, x + lw + 4, y, 60, lineH, hFont));
@@ -3089,6 +3260,93 @@ void Engine::BuildSettingsControls() {
   PAGE_CTRL(0, CreateCheck(hw, L"Hard Cuts Disabled",      IDC_MW_HARD_CUTS,    x, y, rw, lineH, hFont, m_bHardCutsDisabled)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Preset Lock on Startup",  IDC_MW_PRESET_LOCK,  x, y, rw, lineH, hFont, m_bPresetLockOnAtStartup)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Sequential Preset Order", IDC_MW_SEQ_ORDER,    x, y, rw, lineH, hFont, m_bSequentialPresetOrder)); y += lineH + 2;
+
+  // ── Song Info ──
+  PAGE_CTRL(0, CreateLabel(hw, L"Song Info", x, y, rw, lineH, hFontBold));
+  y += lineH + 2;
+
+  PAGE_CTRL(0, CreateLabel(hw, L"Source:", x, y, lw, lineH, hFont));
+  {
+    HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
+      x + lw + 4, y, rw - lw - 4, lineH + 4 * lineH, hw, (HMENU)(INT_PTR)IDC_MW_SONG_SOURCE,
+      GetModuleHandle(NULL), NULL);
+    if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"SMTC (Windows)");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"IPC (Remote)");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Window Title");
+    SendMessageW(hCombo, CB_SETCURSEL, m_nTrackInfoSource, 0);
+    PAGE_CTRL(0, hCombo);
+  }
+  y += lineH + 2;
+
+  // Window Title dropdown + preview (only visible when source = Window Title)
+  {
+    bool showWT = (m_nTrackInfoSource == TRACK_SOURCE_WINDOW);
+    DWORD vis = showWT ? WS_VISIBLE : 0;
+
+    // Label with ID so we can show/hide it
+    HWND hWTLabel = CreateWindowExW(0, L"STATIC", L"Window Title:",
+      WS_CHILD | vis, x, y, lw, lineH, hw,
+      (HMENU)(INT_PTR)IDC_MW_SONG_WT_LABEL, GetModuleHandle(NULL), NULL);
+    if (hWTLabel && hFont) SendMessage(hWTLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(0, hWTLabel);
+
+    // CBS_DROPDOWN combo (editable + dropdown list)
+    HWND hWTCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
+      WS_CHILD | vis | WS_TABSTOP | CBS_DROPDOWN | CBS_HASSTRINGS | CBS_AUTOHSCROLL,
+      x + lw + 4, y, rw - lw - 4, lineH + 12 * lineH, hw,
+      (HMENU)(INT_PTR)IDC_MW_SONG_WINDOW_TITLE, GetModuleHandle(NULL), NULL);
+    if (hWTCombo && hFont) SendMessage(hWTCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SetWindowTextW(hWTCombo, m_szTrackWindowTitle);
+    PAGE_CTRL(0, hWTCombo);
+    y += lineH + 2;
+
+    // Preview label showing parsed artist/title
+    HWND hPreview = CreateWindowExW(0, L"STATIC", L"",
+      WS_CHILD | vis | SS_LEFT | SS_NOPREFIX,
+      x + lw + 4, y, rw - lw - 4, lineH, hw,
+      (HMENU)(INT_PTR)IDC_MW_SONG_WT_PREVIEW, GetModuleHandle(NULL), NULL);
+    if (hPreview && hFont) SendMessage(hPreview, WM_SETFONT, (WPARAM)hFont, TRUE);
+    PAGE_CTRL(0, hPreview);
+    if (showWT && m_szTrackWindowTitle[0])
+      UpdateWindowTitlePreview(hw, m_szTrackWindowTitle);
+  }
+  y += lineH + 2;
+
+  PAGE_CTRL(0, CreateCheck(hw, L"Song Title Animations",   IDC_MW_SONG_TITLE,        x, y, rw, lineH, hFont, m_bSongTitleAnims)); y += lineH + 2;
+  PAGE_CTRL(0, CreateCheck(hw, L"Overlay Notifications",   IDC_MW_SONG_OVERLAY,      x, y, rw, lineH, hFont, m_bSongInfoOverlay)); y += lineH + 2;
+  PAGE_CTRL(0, CreateCheck(hw, L"Change Preset w/ Song",   IDC_MW_CHANGE_SONG,       x, y, rw, lineH, hFont, m_ChangePresetWithSong)); y += lineH + 2;
+  PAGE_CTRL(0, CreateCheck(hw, L"Show Cover Art",          IDC_MW_SONG_COVER,        x, y, rw, lineH, hFont, m_DisplayCover)); y += lineH + 2;
+  PAGE_CTRL(0, CreateCheck(hw, L"Always Show Track Info",  IDC_MW_SONG_ALWAYS_SHOW,  x, y, rw, lineH, hFont, m_bSongInfoAlwaysShow)); y += lineH + 2;
+
+  PAGE_CTRL(0, CreateLabel(hw, L"Display Corner:", x, y, lw, lineH, hFont));
+  {
+    HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
+      x + lw + 4, y, rw - lw - 4, lineH + 5 * lineH, hw, (HMENU)(INT_PTR)IDC_MW_SONG_CORNER,
+      GetModuleHandle(NULL), NULL);
+    if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Top-Left");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Top-Right");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Bottom-Left");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Bottom-Right");
+    SendMessageW(hCombo, CB_SETCURSEL, m_SongInfoDisplayCorner - 1, 0);
+    PAGE_CTRL(0, hCombo);
+  }
+  y += lineH + 2;
+
+  PAGE_CTRL(0, CreateLabel(hw, L"Display Seconds:", x, y, lw, lineH, hFont));
+  swprintf(buf, 64, L"%.1f", m_SongInfoDisplaySeconds);
+  PAGE_CTRL(0, CreateEdit(hw, buf, IDC_MW_SONG_DISPLAY_SEC, x + lw + 4, y, 100, lineH, hFont));
+  {
+    int showBtnX = x + lw + 4 + 100 + 8;
+    int showBtnW = MulDiv(80, lineH, 26);
+    PAGE_CTRL(0, CreateBtn(hw, L"Show Now", IDC_MW_SONG_SHOW_NOW, showBtnX, y, showBtnW, lineH, hFont));
+  }
+  y += lineH + gap + 4;
+
+  // ── Other ──
   PAGE_CTRL(0, CreateLabel(hw, L"Messages/Sprites:", x, y, lw, lineH, hFont));
   {
     HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
@@ -3104,8 +3362,6 @@ void Engine::BuildSettingsControls() {
     PAGE_CTRL(0, hCombo);
   }
   y += lineH + 2;
-  PAGE_CTRL(0, CreateCheck(hw, L"Song Title Animations",   IDC_MW_SONG_TITLE,   x, y, rw, lineH, hFont, m_bSongTitleAnims)); y += lineH + 2;
-  PAGE_CTRL(0, CreateCheck(hw, L"Change Preset w/ Song",   IDC_MW_CHANGE_SONG,  x, y, rw, lineH, hFont, m_ChangePresetWithSong)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Show FPS",                IDC_MW_SHOW_FPS,     x, y, rw, lineH, hFont, m_bShowFPS)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Always On Top",           IDC_MW_ALWAYS_TOP,   x, y, rw, lineH, hFont, m_bAlwaysOnTop)); y += lineH + 2;
   PAGE_CTRL(0, CreateCheck(hw, L"Borderless Window",       IDC_MW_BORDERLESS,   x, y, rw, lineH, hFont, m_WindowBorderless)); y += lineH + 2;

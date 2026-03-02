@@ -1319,6 +1319,10 @@ void Engine::MyReadConfig() {
   // MDropDX12:
   GetPrivateProfileStringW(L"Milkwave", L"AudioDevice", m_szAudioDevice, m_szAudioDevice, sizeof(m_szAudioDevice), pIni);
   m_nAudioDeviceRequestType = GetPrivateProfileIntW(L"Milkwave", L"AudioDeviceRequestType", m_nAudioDeviceRequestType, pIni);
+  m_nTrackInfoSource = GetPrivateProfileIntW(L"Milkwave", L"TrackInfoSource", m_nTrackInfoSource, pIni);
+  if (m_nTrackInfoSource < 0 || m_nTrackInfoSource > 2) m_nTrackInfoSource = TRACK_SOURCE_SMTC;
+  m_bSongInfoOverlay = GetPrivateProfileBoolW(L"Milkwave", L"SongInfoOverlay", m_bSongInfoOverlay, pIni);
+  GetPrivateProfileStringW(L"Milkwave", L"TrackWindowTitle", L"", m_szTrackWindowTitle, _countof(m_szTrackWindowTitle), pIni);
   m_SongInfoPollingEnabled = GetPrivateProfileBoolW(L"Milkwave", L"SongInfoPollingEnabled", m_SongInfoPollingEnabled, pIni);
   m_SongInfoDisplayCorner = GetPrivateProfileIntW(L"Milkwave", L"SongInfoDisplayCorner", m_SongInfoDisplayCorner, pIni);
   GetPrivateProfileStringW(L"Milkwave", L"SongInfoFormat", L"Artist;Title;Album", m_SongInfoFormat, sizeof(m_SongInfoFormat), pIni);
@@ -1326,6 +1330,7 @@ void Engine::MyReadConfig() {
   m_SongInfoDisplaySeconds = GetPrivateProfileFloatW(L"Milkwave", L"SongInfoDisplaySeconds", m_SongInfoDisplaySeconds, pIni);
   m_DisplayCover = GetPrivateProfileBoolW(L"Milkwave", L"DisplayCover", m_DisplayCover, pIni);
   m_DisplayCoverWhenPressingB = GetPrivateProfileBoolW(L"Milkwave", L"DisplayCoverWhenPressingB", m_DisplayCoverWhenPressingB, pIni);
+  m_bSongInfoAlwaysShow = GetPrivateProfileBoolW(L"Milkwave", L"SongInfoAlwaysShow", m_bSongInfoAlwaysShow, pIni);
   m_HideNotificationsWhenRemoteActive = GetPrivateProfileBoolW(L"Milkwave", L"HideNotificationsWhenRemoteActive", m_HideNotificationsWhenRemoteActive, pIni);
 
   m_ShowLockSymbol = GetPrivateProfileBoolW(L"Milkwave", L"ShowLockSymbol", m_ShowLockSymbol, pIni);
@@ -1531,11 +1536,18 @@ void Engine::MyWriteConfig() {
   WritePrivateProfileIntW(m_nAudioDeviceRequestType, L"AudioDeviceRequestType", pIni, L"Milkwave");
   { wchar_t asBuf[32]; swprintf(asBuf, 32, L"%g", (double)m_fAudioSensitivity);
     WritePrivateProfileStringW(L"Milkwave", L"AudioSensitivity", asBuf, pIni); }
+  WritePrivateProfileIntW(m_nTrackInfoSource, L"TrackInfoSource", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_bSongInfoOverlay, L"SongInfoOverlay", pIni, L"Milkwave");
+  WritePrivateProfileStringW(L"Milkwave", L"TrackWindowTitle", m_szTrackWindowTitle, pIni);
   WritePrivateProfileIntW(m_SongInfoPollingEnabled, L"SongInfoPollingEnabled", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_SongInfoDisplayCorner, L"SongInfoDisplayCorner", pIni, L"Milkwave");
+  WritePrivateProfileStringW(L"Milkwave", L"SongInfoFormat", m_SongInfoFormat, pIni);
+  { wchar_t secBuf[32]; swprintf(secBuf, 32, L"%.1f", m_SongInfoDisplaySeconds);
+    WritePrivateProfileStringW(L"Milkwave", L"SongInfoDisplaySeconds", secBuf, pIni); }
   WritePrivateProfileIntW(m_ChangePresetWithSong, L"ChangePresetWithSong", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_DisplayCover, L"DisplayCover", pIni, L"Milkwave");
-  //WritePrivateProfileIntW(m_DisplayCoverWhenPressingB, L"mDisplayCoverWhenPressingB", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_DisplayCoverWhenPressingB, L"DisplayCoverWhenPressingB", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_bSongInfoAlwaysShow, L"SongInfoAlwaysShow", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_blackmode, L"BlackMode", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_CheckDirectXOnStartup, L"CheckDirectXOnStartup", pIni, L"Milkwave");
 
