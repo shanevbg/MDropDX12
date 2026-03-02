@@ -1,34 +1,35 @@
-MDropDX12 - Advanced MilkDrop2 Visualizer with Remote Control
+MDropDX12 - DirectX 12 MilkDrop2 Music Visualizer
+Maintained by shanevbg — https://github.com/shanevbg/MDropDX12
 
-MDropDX12.exe: 
-The Visualizer. You may run and use this independently without the Remote. You can press F8 (or Right+Middle Mouse Button) anytime to start the Remote.
+MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 visualizer
+engine, originally derived from IkeC's Milkwave (which was itself derived
+from BeatDrop and MilkDrop2). The rendering backend, text pipeline, settings
+UI, texture management, and shader compilation have all been rewritten.
 
-MDropDX12Remote.exe: 
-The program to remotely control the Visualizer. When you start this, Visualizer will be started automatically if it's not already running.
+MDropDX12.exe:
+The Visualizer. Run this to start. Press F8 to open the Settings window.
+Works standalone or with Milkwave Remote for extended control.
 
 settings.ini:
 Settings for the Visualizer. Feel free to edit.
 
-settings-remote.json:
-Settings for the Remote. Feel free to edit.
-
-tags-remote.json:
-Use the Remote to tag your presets. You may also share this file with others, or delete the file to reset all existing tags.
-
-script-default.txt:
-An example script file that can be automatically run by the Remote line by line using the "Autoplay"-button, showcasing many of the possibilites regarding messaging and automation. You can edit this file to create your own scripts, or create new ones and load them by right-clicking the "From file"-label on the "Messages"-Tab.
-
 sprites.ini:
-Sprites definition file for the Visualizer. To display your own images, you must add a definition in this file and put the image in resources\sprites. You can trigger them by typing 00..99 in the Visualizer window when Sprite Mode is selected, or using the number buttons on the Remote.
+Sprites definition file for the Visualizer. To display your own images,
+add a definition in this file and put the image in resources\sprites.
+Trigger them by typing 00..99 in the Visualizer window when Sprite Mode
+is selected.
 
 messages.ini:
-Messages definition file for the Visualizer. This is the standard MilkDrop way to display pre-defined messages. You can trigger them by typing 00..99 in the Visualizer window when Message Mode is selected. Using the Remote messaging features is more flexible and works in either mode, but this still works great eg. for assigning certain messages to fixed buttons.
+Messages definition file for the Visualizer. This is the standard MilkDrop
+way to display pre-defined messages. Trigger them by typing 00..99 in the
+Visualizer window when Message Mode is selected.
 
 precompile.txt:
-A list of presets that will be precompiled (once) when you start the Visualizer. Feel free to edit.
+A list of presets that will be precompiled (once) when you start the
+Visualizer. Feel free to edit.
 
-For further information please visit the MDropDX12 page on GitHub: https://github.com/shanevbg/MDropDX12 or click the "Help" link at the bottom of the Remote window.
+For the full manual, keyboard shortcuts, and feature documentation:
+https://github.com/shanevbg/MDropDX12/blob/main/docs/Manual.md
 
-If you need help, please check if your question or problem is already answered on GitHub: https://github.com/shanevbg/MDropDX12/issues. If not, feel free to open a new issue there. You may also contact me on https://bit.ly/Ikes-Discord if you like.
-
-- IkeC
+If you find bugs or have feature requests, open an issue on GitHub:
+https://github.com/shanevbg/MDropDX12/issues
