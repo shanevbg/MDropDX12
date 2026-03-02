@@ -1,0 +1,37 @@
+wavecode_0_enabled=1
+wavecode_0_samples=512
+wavecode_0_sep=0
+wavecode_0_bSpectrum=1
+wavecode_0_bUseDots=0
+wavecode_0_bDrawThick=1
+wavecode_0_bAdditive=0
+wavecode_0_scaling=1.00000
+wavecode_0_smoothing=0.00000
+wavecode_0_r=1.000
+wavecode_0_g=1.000
+wavecode_0_b=1.000
+wavecode_0_a=1.000
+wave_0_per_point1=//q1 = state;
+wave_0_per_point2=//q2 = basstime;
+wave_0_per_point3=
+wave_0_per_point4=q1 =0;
+wave_0_per_point5=speed = 0.01*bass_att;
+wave_0_per_point6=v = sample*100 + (value1*bass);
+wave_0_per_point7=
+wave_0_per_point8=//state 0 elipse
+wave_0_per_point9=xs = xs + (equal(0,q1))*sin(v*0.1 + time)*speed;
+wave_0_per_point10=ys = ys + (equal(0,q1))*cos(v*1.2 + time)*speed;
+wave_0_per_point11=
+wave_0_per_point12=x = 0.5 + 0.5*cos(xs*0.02 +0.1*time)*sin(time*2 + xs);
+wave_0_per_point13=y = 0.5 + 0.5*cos(ys*0.02 + 0.2*time)*cos(time + xs);
+wave_0_per_point14=
+wave_0_per_point15=
+wave_0_per_point16=r = r + 0.5*sin(time*5.52);
+wave_0_per_point17=g = g + 0.5*sin(time*5.107);
+wave_0_per_point18=b = g + 0.5*sin(time*5.359 + (-0.5-x)*(0.5-y));
+wave_0_per_point19=
+wave_0_per_point20=x = x*0.7 + 0.15;
+wave_0_per_point21=y = y*0.7 + 0.15;
+wave_0_per_point22=
+wave_0_per_point23=xs = if(above(xs,1000),0 ,xs);
+wave_0_per_point24=ys = if(above(ys,800),0 ,ys);

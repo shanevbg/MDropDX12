@@ -1,0 +1,66 @@
+wavecode_0_enabled=1
+wavecode_0_samples=512
+wavecode_0_sep=0
+wavecode_0_bSpectrum=1
+wavecode_0_bUseDots=1
+wavecode_0_bDrawThick=0
+wavecode_0_bAdditive=1
+wavecode_0_scaling=2.44415
+wavecode_0_smoothing=0.00000
+wavecode_0_r=1.000
+wavecode_0_g=1.000
+wavecode_0_b=1.000
+wavecode_0_a=1.000
+wave_0_init1=t2 = 0;
+wave_0_init2=t3 = 0;
+wave_0_init3=t4 = 0;
+wave_0_init4=cl = 0;
+wave_0_per_frame1=
+wave_0_per_frame2=cl1 = cl1 + 0.002;
+wave_0_per_frame3=cl1 = if(above(cl1,1),0,cl1);
+wave_0_per_frame4=cl1 = if(below(cl1,0),1,cl1);
+wave_0_per_frame5=t8 = cl1;
+wave_0_per_frame6=
+wave_0_per_frame7=w = 50;
+wave_0_per_frame8=d = (3)*0.02 - 0.005;
+wave_0_per_frame9=
+wave_0_per_frame10=cl2 = cl2 + q1*0.5;
+wave_0_per_frame11=cl2 = if(above(cl2,1),0,cl2);
+wave_0_per_frame12=cl2 = if(below(cl2,0),1,cl2);
+wave_0_per_frame13=t7 = cl2;
+wave_0_per_frame14=
+wave_0_per_frame15=cl3 = cl3 + 0.002;
+wave_0_per_frame16=cl3 = if(above(cl3,1),0,cl3);
+wave_0_per_frame17=cl3 = if(below(cl3,0),1,cl3);
+wave_0_per_frame18=t6 = cl3;
+wave_0_per_point1=xx = ((sample*0983624912364)%10000000+100)/10000000;
+wave_0_per_point2=yy = ((xx*1896575575)%10000000+100)/10000000;
+wave_0_per_point3=zz = ((yy*58652340875)%10000000+100)/10000000;
+wave_0_per_point4=
+wave_0_per_point5=
+wave_0_per_point6=d = sqrt(sqr(xx)+sqr(yy)+sqr(zz));
+wave_0_per_point7=
+wave_0_per_point8=zz = zz + t8 - if(above(zz+t8,1),1,0) - 0.5;
+wave_0_per_point9=xx = xx + t7 - if(above(xx+t7,1),1,0) - 0.5;
+wave_0_per_point10=yy = yy + t6 - if(above(yy+t6,1),1,0) - 0.5;
+wave_0_per_point11=
+wave_0_per_point12=v = 0.001;
+wave_0_per_point13=
+wave_0_per_point14=w = 1;// (sample*sin(time*0.3)*0.01-1);
+wave_0_per_point15=bb = d*d*0.5;
+wave_0_per_point16=n= 0.3;
+wave_0_per_point17=s1 = sin(sin(t2*w+bb)*n);
+wave_0_per_point18=s2 = sin(sin(t3*w+bb)*n);
+wave_0_per_point19=s3 = sin(sin(t4*w+bb)*n);
+wave_0_per_point20=c1 = cos(sin(t2*w+bb)*n);
+wave_0_per_point21=c2 = cos(sin(t3*w+bb)*n);
+wave_0_per_point22=c3 = cos(sin(t4*w+bb)*n);
+wave_0_per_point23=
+wave_0_per_point24=z = (c3*s1*c2 + s3*s2)*xx - (c3*s1*s2-s3*c2)*yy + c3*c1*zz;
+wave_0_per_point25=x1 = (c1*c2*xx + c1*s2*yy - s1*zz);
+wave_0_per_point26=y1 = ((s3*s1*c2 - c3*s2)*xx + (s3*s1*s2+c3*c2)*yy + s3*c1*zz);
+wave_0_per_point27=
+wave_0_per_point28=zoom = .5*(1/(z+0.5));
+wave_0_per_point29=x = 0.5 + zoom*x1 + sin(time*0.1)*0.;;
+wave_0_per_point30=y = 0.5 + zoom*y1 + cos(time*0.16801)*0.;
+wave_0_per_point31=a = -z+0.7;

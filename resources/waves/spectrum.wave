@@ -1,0 +1,19 @@
+wavecode_0_enabled=1
+wavecode_0_samples=128
+wavecode_0_sep=10
+wavecode_0_bSpectrum=1
+wavecode_0_bUseDots=0
+wavecode_0_bDrawThick=1
+wavecode_0_bAdditive=1
+wavecode_0_scaling=12.45337
+wavecode_0_smoothing=0.00000
+wavecode_0_r=1.000
+wavecode_0_g=1.000
+wavecode_0_b=1.000
+wavecode_0_a=0.900
+wave_0_per_frame1=t1 = 0;
+wave_0_per_point1=gmegabuf(t1) = gmegabuf(t1)*.7 + 0.3*(value1 + value2);
+wave_0_per_point2=x = sample;
+wave_0_per_point3=y = 0.3 + gmegabuf(t1)*.1;
+wave_0_per_point4=
+wave_0_per_point5=t1 += 1;

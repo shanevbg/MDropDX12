@@ -1,0 +1,55 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=4
+comp_1=// kishimisu + IkeC - Shader Art Coding Introduction / https://www.shadertoy.com/view/mtyGWy
+comp_2=// Transpiled to HLSL using Milkwave
+comp_3=
+comp_4=float3 palette( float t ) {
+comp_5=  float3 a = float3(0.5, 0.5, 0.5);
+comp_6=  float3 b = float3(0.5, 0.5, 0.5);
+comp_7=  float3 c = float3(1.0, 1.0, 1.0);
+comp_8=  float3 d = float3(0.263,0.416,0.557);
+comp_9=
+comp_10=  return a + b*cos( 6.28318*(c*t+d) );
+comp_11=}
+comp_12=
+comp_13=shader_body {
+comp_14=  float4 fragColor;
+comp_15=  float2 fragCoord;
+comp_16=  // CONV: Center on screen, then try some aspect correction
+comp_17=  uv = (uv*2) - 1;
+comp_18=  uv *= aspect.xy;
+comp_19=  // CONV: Adjust this to flip the output (±uv.x, ±uv.y)
+comp_20=  uv = float2(uv.x, -uv.y);
+comp_21=
+comp_22=  // float2 uv = (fragCoord * 2.0 - texsize.xy) / texsize.y;
+comp_23=  float2 uv0 = uv;
+comp_24=  float3 finalColor = float3(0.0, 0.0, 0.0);
+comp_25=
+comp_26=  #ifdef bass_smooth
+comp_27=    float fac = (int)vis_version > 2 ? 1+vis_intensity*0.1+vis_shift : (0.8+smoothstep(0,2,(int)vis_version == 1 ? bass_smooth : bass_att)*0.5)*vis_intensity+vis_shift;
+comp_28=  #else
+comp_29=    float fac = 1+smoothstep(0,2,bass_att)*0.1;
+comp_30=  #endif
+comp_31=  
+comp_32=  for (float i = 0.0; i < 4.0; i++) {
+comp_33=    uv = frac(uv * 1.5) - 0.5;
+comp_34=
+comp_35=    float d = length(uv) * exp(-length(uv0));
+comp_36=
+comp_37=    float3 col = palette(length(uv0) + i*.4 + time*.4);
+comp_38=
+comp_39=    d = sin(d*8. + time)/8.;
+comp_40=    d = abs(d);
+comp_41=    d = pow(0.01 / d, 1.2);
+comp_42=
+comp_43=    finalColor += col * d;
+comp_44=    finalColor.r *= fac;
+comp_45=  }
+comp_46=
+comp_47=
+comp_48=
+comp_49=  finalColor.r *= fac;
+comp_50=  ret = float4(finalColor, 1.0);
+comp_51=}

@@ -1,0 +1,23 @@
+wavecode_0_enabled=1
+wavecode_0_samples=512
+wavecode_0_sep=0
+wavecode_0_bSpectrum=0
+wavecode_0_bUseDots=1
+wavecode_0_bDrawThick=1
+wavecode_0_bAdditive=1
+wavecode_0_scaling=1.00000
+wavecode_0_smoothing=0.50000
+wavecode_0_r=1.000
+wavecode_0_g=0.200
+wavecode_0_b=0.000
+wavecode_0_a=1.000
+wave_0_per_point1=tm=(time)*0.15;
+wave_0_per_point2=phs=sample*0.24;
+wave_0_per_point3=
+wave_0_per_point4=x=sin(tm+phs) * sin((tm+phs)*3.6) ;
+wave_0_per_point5=y=cos((tm+phs)*1.3) * sin((tm+phs)*6.7);
+wave_0_per_point6=
+wave_0_per_point7=x=x*0.35 + 0.5;
+wave_0_per_point8=y=1-(y*0.35 + 0.5);
+wave_0_per_point9=
+wave_0_per_point10=a=(sample)
