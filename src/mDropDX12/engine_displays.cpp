@@ -104,6 +104,61 @@ void Engine::EnumerateDisplayOutputs()
     EnumDisplayMonitors(NULL, NULL, EnumMonitorCB, reinterpret_cast<LPARAM>(&ctx));
 }
 
+// ─── Mirror Activation Failsafe ──────────────────────────────────────────────
+
+Engine::MirrorActivateResult Engine::TryActivateMirrors(HWND hRenderWnd)
+{
+    // Count monitor outputs
+    int totalMonitors = 0;
+    int enabledMonitors = 0;
+    for (auto& o : m_displayOutputs) {
+        if (o.config.type == DisplayOutputType::Monitor) {
+            totalMonitors++;
+            if (o.config.bEnabled)
+                enabledMonitors++;
+        }
+    }
+
+    // Case 1: Some monitors already enabled — proceed normally
+    if (enabledMonitors > 0)
+        return MirrorActivated;
+
+    // Case 2: No other monitors at all — fullscreen only
+    if (totalMonitors == 0)
+        return MirrorFullscreenOnly;
+
+    // Case 3: Monitors exist but none enabled
+    if (m_bMirrorPromptDisabled) {
+        // Auto-enable all monitors
+        for (auto& o : m_displayOutputs)
+            if (o.config.type == DisplayOutputType::Monitor)
+                o.config.bEnabled = true;
+        SaveDisplayOutputSettings();
+        return MirrorActivated;
+    }
+
+    // Show prompt
+    wchar_t msg[256];
+    swprintf(msg, 256,
+        L"No mirrors enabled.\nFound %d display(s).\n\nMirror to all?",
+        totalMonitors);
+    int result = MessageBoxW(hRenderWnd, msg, L"MDropDX12",
+        MB_YESNOCANCEL | MB_ICONQUESTION | MB_TOPMOST);
+
+    if (result == IDYES) {
+        for (auto& o : m_displayOutputs)
+            if (o.config.type == DisplayOutputType::Monitor)
+                o.config.bEnabled = true;
+        SaveDisplayOutputSettings();
+        return MirrorActivated;
+    }
+
+    if (result == IDNO)
+        return MirrorFullscreenOnly;
+
+    return MirrorCancelled;
+}
+
 // ─── INI Persistence ──────────────────────────────────────────────────────────
 
 void Engine::LoadDisplayOutputSettings()
@@ -115,6 +170,7 @@ void Engine::LoadDisplayOutputSettings()
     if (legacyOpacity < 1) legacyOpacity = 1;
     if (legacyOpacity > 100) legacyOpacity = 100;
     m_bMirrorModeForAltS = GetPrivateProfileBoolW(L"DisplayOutputs", L"MirrorModeForAltS", false, pIni);
+    m_bMirrorPromptDisabled = GetPrivateProfileBoolW(L"DisplayOutputs", L"MirrorPromptDisabled", false, pIni);
 
     if (count < 0) {
         // Legacy migration: no [DisplayOutputs] section yet.
@@ -211,6 +267,8 @@ void Engine::SaveDisplayOutputSettings()
     WritePrivateProfileStringW(L"DisplayOutputs", L"Count", buf, pIni);
     swprintf(buf, 64, L"%d", m_bMirrorModeForAltS ? 1 : 0);
     WritePrivateProfileStringW(L"DisplayOutputs", L"MirrorModeForAltS", buf, pIni);
+    swprintf(buf, 64, L"%d", m_bMirrorPromptDisabled ? 1 : 0);
+    WritePrivateProfileStringW(L"DisplayOutputs", L"MirrorPromptDisabled", buf, pIni);
 
     for (int i = 0; i < count; i++) {
         auto& cfg = m_displayOutputs[i].config;

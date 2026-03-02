@@ -1486,9 +1486,16 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     case HK_TOGGLE_STRETCH:
       if (g_engine.m_bMirrorModeForAltS) {
         if (!g_engine.m_bMirrorsActive) {
-          if (!fullscreen) ToggleFullScreen(hWnd);
-          g_engine.m_bMirrorsActive = true;
-          g_engine.AddNotification(L"Mirror outputs active");
+          auto result = g_engine.TryActivateMirrors(hWnd);
+          if (result != Engine::MirrorCancelled) {
+            if (!fullscreen) ToggleFullScreen(hWnd);
+          }
+          if (result == Engine::MirrorActivated) {
+            g_engine.m_bMirrorsActive = true;
+            g_engine.AddNotification(L"Mirror outputs active");
+          } else if (result == Engine::MirrorFullscreenOnly) {
+            g_engine.AddNotification(L"Fullscreen (no mirrors)");
+          }
         } else {
           g_engine.m_bMirrorsActive = false;
           if (fullscreen) ToggleFullScreen(hWnd);
@@ -1607,9 +1614,16 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     else if (wParam == 'S' || wParam == 's') {
       if (g_engine.m_bMirrorModeForAltS) {
         if (!g_engine.m_bMirrorsActive) {
-          if (!fullscreen) ToggleFullScreen(hWnd);
-          g_engine.m_bMirrorsActive = true;
-          g_engine.AddNotification(L"Mirror outputs active");
+          auto result = g_engine.TryActivateMirrors(hWnd);
+          if (result != Engine::MirrorCancelled) {
+            if (!fullscreen) ToggleFullScreen(hWnd);
+          }
+          if (result == Engine::MirrorActivated) {
+            g_engine.m_bMirrorsActive = true;
+            g_engine.AddNotification(L"Mirror outputs active");
+          } else if (result == Engine::MirrorFullscreenOnly) {
+            g_engine.AddNotification(L"Fullscreen (no mirrors)");
+          }
         } else {
           g_engine.m_bMirrorsActive = false;
           if (fullscreen) ToggleFullScreen(hWnd);

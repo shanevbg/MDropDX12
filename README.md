@@ -34,7 +34,7 @@
 | Key | Action | Status |
 | --- | ------ | ------ |
 | Alt+Enter | Toggle fullscreen (or double-click) | ✅ |
-| Alt+S | Toggle multi-monitor stretch | ✅ |
+| Alt+S | Toggle multi-monitor stretch (or mirror mode with failsafe prompt) | ✅ |
 | Shift+Up/Down | Increase/decrease window opacity | ✅ |
 | F1 | Show/hide help (2 pages) | ✅ |
 | F2 | Toggle borderless window | ✅ |
