@@ -1792,43 +1792,157 @@ static void PerformDeviceRecovery() {
 // Poll track info from a window title (TRACK_SOURCE_WINDOW)
 // Finds window by title, reads its title bar, parses "Artist - Title" format.
 // Uses same 2-second interval as SMTC polling.
+// Build a map of named capture group name → group index from a regex pattern string.
+// Scans for (?<name>...) or (?'name'...) syntax used in ECMAScript named groups.
+static std::map<std::wstring, int> BuildNamedGroupMap(const std::wstring& pattern) {
+  std::map<std::wstring, int> nameMap;
+  int groupIndex = 0;
+  for (size_t i = 0; i < pattern.size(); i++) {
+    if (pattern[i] == L'\\') { i++; continue; } // skip escaped chars
+    if (pattern[i] == L'(') {
+      if (i + 1 < pattern.size() && pattern[i + 1] == L'?') {
+        // Check for named group: (?<name>...) or (?'name'...)
+        if (i + 2 < pattern.size() && (pattern[i + 2] == L'<' || pattern[i + 2] == L'\'')) {
+          wchar_t delim = (pattern[i + 2] == L'<') ? L'>' : L'\'';
+          size_t nameStart = i + 3;
+          size_t nameEnd = pattern.find(delim, nameStart);
+          if (nameEnd != std::wstring::npos) {
+            groupIndex++;
+            nameMap[pattern.substr(nameStart, nameEnd - nameStart)] = groupIndex;
+          }
+        }
+        // Non-capturing groups (?:...) etc. don't increment group index
+        // but we already handled named groups above
+      } else {
+        groupIndex++; // plain capturing group
+      }
+    }
+  }
+  return nameMap;
+}
+
+// EnumWindows callback for regex-based window matching
+struct WTMatchContext {
+  const std::wregex* pRegex;
+  HWND hMatched;
+  std::wstring matchedTitle;
+};
+
+static BOOL CALLBACK EnumWindowsMatchRegex(HWND hWnd, LPARAM lParam) {
+  auto* ctx = reinterpret_cast<WTMatchContext*>(lParam);
+  if (!IsWindowVisible(hWnd)) return TRUE;
+  wchar_t buf[512] = {};
+  int len = GetWindowTextW(hWnd, buf, _countof(buf));
+  if (len <= 0) return TRUE;
+  try {
+    if (std::regex_search(buf, *ctx->pRegex)) {
+      ctx->hMatched = hWnd;
+      ctx->matchedTitle = buf;
+      return FALSE; // stop enumeration
+    }
+  } catch (...) {}
+  return TRUE;
+}
+
 static void PollWindowTitle() {
   using namespace std::chrono;
   static steady_clock::time_point lastPoll = steady_clock::now();
+  static std::wstring cachedWindowRegex;
+  static std::wstring cachedParseRegex;
+  static std::wregex compiledWindowRegex;
+  static std::wregex compiledParseRegex;
+  static bool windowRegexValid = false;
+  static bool parseRegexValid = false;
 
+  // Get active profile
+  if (g_engine.m_windowTitleProfiles.empty()) return;
+  int idx = g_engine.m_nActiveWindowTitleProfile;
+  if (idx < 0 || idx >= (int)g_engine.m_windowTitleProfiles.size()) return;
+  const auto& profile = g_engine.m_windowTitleProfiles[idx];
+
+  // Throttle by profile's poll interval
   if (!mdropdx12.doPollExplicit) {
     auto now = steady_clock::now();
-    if (duration_cast<seconds>(now - lastPoll).count() < 2)
+    if (duration_cast<seconds>(now - lastPoll).count() < profile.nPollIntervalSec)
       return;
     lastPoll = now;
   }
 
-  if (g_engine.m_szTrackWindowTitle[0] == L'\0') return;
+  if (profile.szWindowRegex[0] == L'\0') return;
 
-  HWND hTarget = FindWindowW(NULL, g_engine.m_szTrackWindowTitle);
-  if (!hTarget) return;
+  // Recompile window regex if pattern changed
+  std::wstring windowRegexStr(profile.szWindowRegex);
+  if (windowRegexStr != cachedWindowRegex) {
+    cachedWindowRegex = windowRegexStr;
+    try {
+      compiledWindowRegex = std::wregex(windowRegexStr, std::regex_constants::ECMAScript | std::regex_constants::icase);
+      windowRegexValid = true;
+    } catch (...) {
+      windowRegexValid = false;
+    }
+  }
+  if (!windowRegexValid) return;
 
-  wchar_t windowText[512] = {};
-  GetWindowTextW(hTarget, windowText, _countof(windowText));
-  if (windowText[0] == L'\0') return;
+  // Find matching window via EnumWindows
+  WTMatchContext ctx = { &compiledWindowRegex, NULL, {} };
+  EnumWindows(EnumWindowsMatchRegex, reinterpret_cast<LPARAM>(&ctx));
+  if (!ctx.hMatched) return;
 
-  // Parse "Artist - Title" format (split on first " - ")
-  std::wstring text(windowText);
-  std::wstring artist, title;
-  size_t sep = text.find(L" - ");
-  if (sep != std::wstring::npos) {
-    artist = text.substr(0, sep);
-    title = text.substr(sep + 3);
+  // Recompile parse regex if pattern changed
+  std::wstring parseRegexStr(profile.szParseRegex);
+  if (parseRegexStr != cachedParseRegex) {
+    cachedParseRegex = parseRegexStr;
+    if (parseRegexStr.empty()) {
+      parseRegexValid = false;
+    } else {
+      try {
+        compiledParseRegex = std::wregex(parseRegexStr, std::regex_constants::ECMAScript);
+        parseRegexValid = true;
+      } catch (...) {
+        parseRegexValid = false;
+      }
+    }
+  }
+
+  std::wstring artist, title, album;
+  if (parseRegexValid) {
+    // Parse using named capture groups (resolved to numeric indices)
+    static std::map<std::wstring, int> namedGroups;
+    static std::wstring cachedParseRegexForNames;
+    if (parseRegexStr != cachedParseRegexForNames) {
+      cachedParseRegexForNames = parseRegexStr;
+      namedGroups = BuildNamedGroupMap(parseRegexStr);
+    }
+    std::wsmatch match;
+    try {
+      if (std::regex_search(ctx.matchedTitle, match, compiledParseRegex)) {
+        auto getGroup = [&](const wchar_t* name, int fallbackIdx) -> std::wstring {
+          auto it = namedGroups.find(name);
+          int idx = (it != namedGroups.end()) ? it->second : fallbackIdx;
+          return (idx > 0 && idx < (int)match.size() && match[idx].matched) ? match[idx].str() : L"";
+        };
+        artist = getGroup(L"artist", 1);
+        title = getGroup(L"title", 2);
+        album = getGroup(L"album", 3);
+      }
+    } catch (...) {}
   } else {
-    title = text;
+    // No parse regex — use simple " - " split as fallback
+    size_t sep = ctx.matchedTitle.find(L" - ");
+    if (sep != std::wstring::npos) {
+      artist = ctx.matchedTitle.substr(0, sep);
+      title = ctx.matchedTitle.substr(sep + 3);
+    } else {
+      title = ctx.matchedTitle;
+    }
   }
 
   // Check for change
-  if (mdropdx12.doPollExplicit || artist != mdropdx12.currentArtist || title != mdropdx12.currentTitle) {
+  if (mdropdx12.doPollExplicit || artist != mdropdx12.currentArtist || title != mdropdx12.currentTitle || album != mdropdx12.currentAlbum) {
     mdropdx12.isSongChange = mdropdx12.currentArtist.length() || mdropdx12.currentTitle.length();
     mdropdx12.currentArtist = artist;
     mdropdx12.currentTitle = title;
-    mdropdx12.currentAlbum.clear();
+    mdropdx12.currentAlbum = album;
     mdropdx12.updated = true;
   }
 }

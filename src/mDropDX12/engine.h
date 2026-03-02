@@ -52,6 +52,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <thread>
 #include <atomic>
 #include <string>
+#include <regex>
 #include "../ns-eel2/ns-eel.h"
 #include "mdropdx12.h"
 
@@ -74,6 +75,13 @@ struct ScriptState {
   int defaultSize = 20;
   int defaultR = 255, defaultG = 255, defaultB = 255;
   std::wstring filePath;            // current script file path
+};
+
+struct WindowTitleProfile {
+    wchar_t szName[64] = {};           // Profile name (e.g., "Spotify")
+    wchar_t szWindowRegex[256] = {};   // Regex to match window title
+    wchar_t szParseRegex[512] = {};    // Regex with named groups: (?<artist>...) (?<title>...) (?<album>...)
+    int nPollIntervalSec = 2;          // Poll interval in seconds (1-10)
 };
 
 typedef enum { TEX_DISK, TEX_VS, TEX_BLUR0, TEX_BLUR1, TEX_BLUR2, TEX_BLUR3, TEX_BLUR4, TEX_BLUR5, TEX_BLUR6, TEX_BLUR_LAST } tex_code;
@@ -498,7 +506,10 @@ public:
   enum TrackInfoSource { TRACK_SOURCE_SMTC = 0, TRACK_SOURCE_IPC = 1, TRACK_SOURCE_WINDOW = 2 };
   int m_nTrackInfoSource = TRACK_SOURCE_SMTC;
   bool m_bSongInfoOverlay = true;           // show overlay text notifications on track change
-  wchar_t m_szTrackWindowTitle[256] = {};   // window title to scrape (TRACK_SOURCE_WINDOW)
+  wchar_t m_szTrackWindowTitle[256] = {};   // window title to scrape (TRACK_SOURCE_WINDOW) — legacy, migrated to profiles
+
+  std::vector<WindowTitleProfile> m_windowTitleProfiles;
+  int m_nActiveWindowTitleProfile = 0;
 
   bool m_SongInfoPollingEnabled = true;
   int m_SongInfoDisplayCorner = 3;
@@ -1005,6 +1016,9 @@ public:
   void        ScheduleNextAutoMessage();
   void        UpdateMsgPreview(HWND hSettingsWnd, int sel);
   bool        ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew);
+
+  // Window Title Parser popup
+  void        OpenWindowTitleParserPopup(HWND hParent);
 
   // Sprites tab (page 6)
   struct SpriteEntry {

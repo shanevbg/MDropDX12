@@ -1323,6 +1323,48 @@ void Engine::MyReadConfig() {
   if (m_nTrackInfoSource < 0 || m_nTrackInfoSource > 2) m_nTrackInfoSource = TRACK_SOURCE_SMTC;
   m_bSongInfoOverlay = GetPrivateProfileBoolW(L"Milkwave", L"SongInfoOverlay", m_bSongInfoOverlay, pIni);
   GetPrivateProfileStringW(L"Milkwave", L"TrackWindowTitle", L"", m_szTrackWindowTitle, _countof(m_szTrackWindowTitle), pIni);
+
+  // Window Title Profiles
+  {
+    int profileCount = GetPrivateProfileIntW(L"Milkwave", L"WindowTitleProfileCount", 0, pIni);
+    m_nActiveWindowTitleProfile = GetPrivateProfileIntW(L"Milkwave", L"WindowTitleProfile", 0, pIni);
+    m_windowTitleProfiles.clear();
+    for (int i = 0; i < profileCount; i++) {
+      WindowTitleProfile p;
+      wchar_t key[64];
+      swprintf(key, 64, L"WTP%d_Name", i);
+      GetPrivateProfileStringW(L"Milkwave", key, L"", p.szName, _countof(p.szName), pIni);
+      swprintf(key, 64, L"WTP%d_WindowRegex", i);
+      GetPrivateProfileStringW(L"Milkwave", key, L"", p.szWindowRegex, _countof(p.szWindowRegex), pIni);
+      swprintf(key, 64, L"WTP%d_ParseRegex", i);
+      GetPrivateProfileStringW(L"Milkwave", key, L"", p.szParseRegex, _countof(p.szParseRegex), pIni);
+      swprintf(key, 64, L"WTP%d_PollInterval", i);
+      p.nPollIntervalSec = GetPrivateProfileIntW(L"Milkwave", key, 2, pIni);
+      if (p.nPollIntervalSec < 1) p.nPollIntervalSec = 1;
+      if (p.nPollIntervalSec > 10) p.nPollIntervalSec = 10;
+      m_windowTitleProfiles.push_back(p);
+    }
+    // Backward compat: migrate old TrackWindowTitle to a default profile
+    if (m_windowTitleProfiles.empty() && m_szTrackWindowTitle[0] != L'\0') {
+      WindowTitleProfile p;
+      wcscpy_s(p.szName, L"Default");
+      // Regex-escape the old exact title for window matching
+      std::wstring escaped;
+      for (const wchar_t* c = m_szTrackWindowTitle; *c; ++c) {
+        if (wcschr(L"\\^$.|?*+()[]{}", *c))
+          escaped += L'\\';
+        escaped += *c;
+      }
+      wcsncpy_s(p.szWindowRegex, escaped.c_str(), _countof(p.szWindowRegex) - 1);
+      wcscpy_s(p.szParseRegex, L"(?<artist>.+?) - (?<title>.+)");
+      p.nPollIntervalSec = 2;
+      m_windowTitleProfiles.push_back(p);
+      m_nActiveWindowTitleProfile = 0;
+    }
+    if (m_nActiveWindowTitleProfile < 0 || m_nActiveWindowTitleProfile >= (int)m_windowTitleProfiles.size())
+      m_nActiveWindowTitleProfile = 0;
+  }
+
   m_SongInfoPollingEnabled = GetPrivateProfileBoolW(L"Milkwave", L"SongInfoPollingEnabled", m_SongInfoPollingEnabled, pIni);
   m_SongInfoDisplayCorner = GetPrivateProfileIntW(L"Milkwave", L"SongInfoDisplayCorner", m_SongInfoDisplayCorner, pIni);
   GetPrivateProfileStringW(L"Milkwave", L"SongInfoFormat", L"Artist;Title;Album", m_SongInfoFormat, sizeof(m_SongInfoFormat), pIni);
@@ -1539,6 +1581,42 @@ void Engine::MyWriteConfig() {
   WritePrivateProfileIntW(m_nTrackInfoSource, L"TrackInfoSource", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_bSongInfoOverlay, L"SongInfoOverlay", pIni, L"Milkwave");
   WritePrivateProfileStringW(L"Milkwave", L"TrackWindowTitle", m_szTrackWindowTitle, pIni);
+
+  // Window Title Profiles
+  {
+    int profileCount = (int)m_windowTitleProfiles.size();
+    WritePrivateProfileIntW(profileCount, L"WindowTitleProfileCount", pIni, L"Milkwave");
+    WritePrivateProfileIntW(m_nActiveWindowTitleProfile, L"WindowTitleProfile", pIni, L"Milkwave");
+    for (int i = 0; i < profileCount; i++) {
+      const auto& p = m_windowTitleProfiles[i];
+      wchar_t key[64];
+      swprintf(key, 64, L"WTP%d_Name", i);
+      WritePrivateProfileStringW(L"Milkwave", key, p.szName, pIni);
+      swprintf(key, 64, L"WTP%d_WindowRegex", i);
+      WritePrivateProfileStringW(L"Milkwave", key, p.szWindowRegex, pIni);
+      swprintf(key, 64, L"WTP%d_ParseRegex", i);
+      WritePrivateProfileStringW(L"Milkwave", key, p.szParseRegex, pIni);
+      swprintf(key, 64, L"WTP%d_PollInterval", i);
+      wchar_t val[16]; swprintf(val, 16, L"%d", p.nPollIntervalSec);
+      WritePrivateProfileStringW(L"Milkwave", key, val, pIni);
+    }
+    // Clean up old profile keys that may be leftover from a larger set
+    for (int i = profileCount; i < profileCount + 10; i++) {
+      wchar_t key[64];
+      swprintf(key, 64, L"WTP%d_Name", i);
+      wchar_t test[4] = {};
+      GetPrivateProfileStringW(L"Milkwave", key, L"", test, 4, pIni);
+      if (test[0] == L'\0') break; // no more old keys
+      WritePrivateProfileStringW(L"Milkwave", key, NULL, pIni);
+      swprintf(key, 64, L"WTP%d_WindowRegex", i);
+      WritePrivateProfileStringW(L"Milkwave", key, NULL, pIni);
+      swprintf(key, 64, L"WTP%d_ParseRegex", i);
+      WritePrivateProfileStringW(L"Milkwave", key, NULL, pIni);
+      swprintf(key, 64, L"WTP%d_PollInterval", i);
+      WritePrivateProfileStringW(L"Milkwave", key, NULL, pIni);
+    }
+  }
+
   WritePrivateProfileIntW(m_SongInfoPollingEnabled, L"SongInfoPollingEnabled", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_SongInfoDisplayCorner, L"SongInfoDisplayCorner", pIni, L"Milkwave");
   WritePrivateProfileStringW(L"Milkwave", L"SongInfoFormat", m_SongInfoFormat, pIni);

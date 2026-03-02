@@ -87,22 +87,96 @@ static void PopulateWindowTitleCombo(HWND hCombo, const wchar_t* currentTitle) {
   SetWindowTextW(hCombo, editText);
 }
 
-// Updates the preview label with parsed artist/title from the named window
-static void UpdateWindowTitlePreview(HWND hSettingsWnd, const wchar_t* windowTitle) {
+// EnumWindows callback for regex-based window matching in settings UI
+struct SettingsWTMatchContext {
+  const std::wregex* pRegex;
+  std::wstring matchedTitle;
+};
+static BOOL CALLBACK EnumWindowsSettingsMatch(HWND hWnd, LPARAM lParam) {
+  auto* ctx = reinterpret_cast<SettingsWTMatchContext*>(lParam);
+  if (!IsWindowVisible(hWnd)) return TRUE;
+  wchar_t buf[512] = {};
+  int len = GetWindowTextW(hWnd, buf, _countof(buf));
+  if (len <= 0) return TRUE;
+  if (wcsstr(buf, L"MDropDX12") != nullptr) return TRUE;
+  try {
+    if (std::regex_search(buf, *ctx->pRegex)) {
+      ctx->matchedTitle = buf;
+      return FALSE;
+    }
+  } catch (...) {}
+  return TRUE;
+}
+
+// Updates the preview label: matches window via regex, then parses with active profile's parse regex
+static void UpdateWindowTitlePreview(HWND hSettingsWnd, const wchar_t* windowRegex) {
   HWND hPreview = GetDlgItem(hSettingsWnd, IDC_MW_SONG_WT_PREVIEW);
   if (!hPreview) return;
-  if (!windowTitle || !windowTitle[0]) { SetWindowTextW(hPreview, L""); return; }
-  HWND hTarget = FindWindowW(NULL, windowTitle);
-  if (!hTarget) { SetWindowTextW(hPreview, L"(window not found)"); return; }
-  wchar_t windowText[512] = {};
-  GetWindowTextW(hTarget, windowText, _countof(windowText));
-  if (!windowText[0]) { SetWindowTextW(hPreview, L"(empty window text)"); return; }
-  std::wstring text(windowText), preview;
-  size_t sep = text.find(L" - ");
-  if (sep != std::wstring::npos)
-    preview = L"Artist: " + text.substr(0, sep) + L"  |  Title: " + text.substr(sep + 3);
-  else
-    preview = L"Title: " + text;
+  if (!windowRegex || !windowRegex[0]) { SetWindowTextW(hPreview, L""); return; }
+
+  // Compile window match regex
+  std::wregex compiledRegex;
+  try {
+    compiledRegex = std::wregex(windowRegex, std::regex_constants::ECMAScript | std::regex_constants::icase);
+  } catch (...) {
+    SetWindowTextW(hPreview, L"(invalid regex)");
+    return;
+  }
+
+  // Find matching window
+  SettingsWTMatchContext ctx = { &compiledRegex, {} };
+  EnumWindows(EnumWindowsSettingsMatch, reinterpret_cast<LPARAM>(&ctx));
+  if (ctx.matchedTitle.empty()) { SetWindowTextW(hPreview, L"(no match)"); return; }
+
+  // Try to parse with active profile's parse regex
+  std::wstring preview;
+  int idx = g_engine.m_nActiveWindowTitleProfile;
+  if (idx >= 0 && idx < (int)g_engine.m_windowTitleProfiles.size() && g_engine.m_windowTitleProfiles[idx].szParseRegex[0]) {
+    try {
+      std::wregex parseRegex(g_engine.m_windowTitleProfiles[idx].szParseRegex, std::regex_constants::ECMAScript);
+      std::wsmatch match;
+      if (std::regex_search(ctx.matchedTitle, match, parseRegex)) {
+        // Build name→index map for named groups
+        std::wstring parseStr(g_engine.m_windowTitleProfiles[idx].szParseRegex);
+        std::map<std::wstring, int> nameMap;
+        int groupIdx = 0;
+        for (size_t i = 0; i < parseStr.size(); i++) {
+          if (parseStr[i] == L'\\') { i++; continue; }
+          if (parseStr[i] == L'(') {
+            if (i + 1 < parseStr.size() && parseStr[i + 1] == L'?') {
+              if (i + 2 < parseStr.size() && (parseStr[i + 2] == L'<' || parseStr[i + 2] == L'\'')) {
+                wchar_t delim = (parseStr[i + 2] == L'<') ? L'>' : L'\'';
+                size_t nameStart = i + 3;
+                size_t nameEnd = parseStr.find(delim, nameStart);
+                if (nameEnd != std::wstring::npos) {
+                  groupIdx++;
+                  nameMap[parseStr.substr(nameStart, nameEnd - nameStart)] = groupIdx;
+                }
+              }
+            } else { groupIdx++; }
+          }
+        }
+        auto getGroup = [&](const wchar_t* name, int fallback) -> std::wstring {
+          auto it = nameMap.find(name);
+          int gi = (it != nameMap.end()) ? it->second : fallback;
+          return (gi > 0 && gi < (int)match.size() && match[gi].matched) ? match[gi].str() : L"";
+        };
+        std::wstring artist = getGroup(L"artist", 1);
+        std::wstring title = getGroup(L"title", 2);
+        std::wstring album = getGroup(L"album", 3);
+        if (!artist.empty()) preview += L"Artist: " + artist;
+        if (!title.empty()) { if (!preview.empty()) preview += L"  |  "; preview += L"Title: " + title; }
+        if (!album.empty()) { if (!preview.empty()) preview += L"  |  "; preview += L"Album: " + album; }
+      } else {
+        preview = L"(regex didn't match: " + ctx.matchedTitle + L")";
+      }
+    } catch (...) {
+      preview = L"(invalid parse regex)";
+    }
+  } else {
+    // No parse regex — show raw matched title
+    preview = L"Matched: " + ctx.matchedTitle;
+  }
   SetWindowTextW(hPreview, preview.c_str());
 }
 
@@ -963,6 +1037,12 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
+    // "Edit Parser..." button: opens the Window Title Parser config popup
+    if (id == IDC_MW_WT_EDIT_PARSER && code == BN_CLICKED) {
+      p->OpenWindowTitleParserPopup(hWnd);
+      return 0;
+    }
+
     // Preset listbox selection
     if (id == IDC_MW_PRESET_LIST && code == LBN_SELCHANGE) {
       int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
@@ -1320,39 +1400,30 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         int sw = showWT ? SW_SHOW : SW_HIDE;
         HWND h;
         if ((h = GetDlgItem(hWnd, IDC_MW_SONG_WT_LABEL)))     ShowWindow(h, sw);
-        if ((h = GetDlgItem(hWnd, IDC_MW_SONG_WINDOW_TITLE)))  ShowWindow(h, sw);
+        if ((h = GetDlgItem(hWnd, IDC_MW_WT_PROFILE)))         ShowWindow(h, sw);
+        if ((h = GetDlgItem(hWnd, IDC_MW_WT_EDIT_PARSER)))     ShowWindow(h, sw);
         if ((h = GetDlgItem(hWnd, IDC_MW_SONG_WT_PREVIEW)))    ShowWindow(h, sw);
-        if (showWT) UpdateWindowTitlePreview(hWnd, p->m_szTrackWindowTitle);
+        if (showWT && !p->m_windowTitleProfiles.empty()) {
+          int idx = p->m_nActiveWindowTitleProfile;
+          if (idx >= 0 && idx < (int)p->m_windowTitleProfiles.size() && p->m_windowTitleProfiles[idx].szWindowRegex[0])
+            UpdateWindowTitlePreview(hWnd, p->m_windowTitleProfiles[idx].szWindowRegex);
+        }
       }
       return 0;
     }
 
-    // Window Title combo: populate dropdown when user opens it
-    if (id == IDC_MW_SONG_WINDOW_TITLE && code == CBN_DROPDOWN) {
-      PopulateWindowTitleCombo((HWND)lParam, p->m_szTrackWindowTitle);
-      return 0;
-    }
-
-    // Window Title combo: user selected an item from dropdown
-    if (id == IDC_MW_SONG_WINDOW_TITLE && code == CBN_SELENDOK) {
+    // Window Title profile selector: user selected a different profile
+    if (id == IDC_MW_WT_PROFILE && code == CBN_SELCHANGE) {
       int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
-      if (sel >= 0) {
-        wchar_t selText[256] = {};
-        SendMessageW((HWND)lParam, CB_GETLBTEXT, sel, (LPARAM)selText);
-        lstrcpynW(p->m_szTrackWindowTitle, selText, _countof(p->m_szTrackWindowTitle));
-        WritePrivateProfileStringW(L"Milkwave", L"TrackWindowTitle", p->m_szTrackWindowTitle, p->GetConfigIniFile());
-        UpdateWindowTitlePreview(hWnd, p->m_szTrackWindowTitle);
+      if (sel >= 0 && sel < (int)p->m_windowTitleProfiles.size()) {
+        p->m_nActiveWindowTitleProfile = sel;
+        WritePrivateProfileIntW(sel, L"WindowTitleProfile", p->GetConfigIniFile(), L"Milkwave");
+        // Update preview
+        if (p->m_windowTitleProfiles[sel].szWindowRegex[0])
+          UpdateWindowTitlePreview(hWnd, p->m_windowTitleProfiles[sel].szWindowRegex);
+        else
+          SetDlgItemTextW(hWnd, IDC_MW_SONG_WT_PREVIEW, L"(no window match regex)");
       }
-      return 0;
-    }
-
-    // Window Title combo: user typed/edited text manually
-    if (id == IDC_MW_SONG_WINDOW_TITLE && code == CBN_EDITCHANGE) {
-      wchar_t wtBuf[256] = {};
-      GetWindowTextW((HWND)lParam, wtBuf, _countof(wtBuf));
-      lstrcpynW(p->m_szTrackWindowTitle, wtBuf, _countof(p->m_szTrackWindowTitle));
-      WritePrivateProfileStringW(L"Milkwave", L"TrackWindowTitle", p->m_szTrackWindowTitle, p->GetConfigIniFile());
-      UpdateWindowTitlePreview(hWnd, p->m_szTrackWindowTitle);
       return 0;
     }
 
@@ -2205,15 +2276,7 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         { wchar_t sb[32]; swprintf(sb, 32, L"%.1f", p->m_SongInfoDisplaySeconds);
           WritePrivateProfileStringW(L"Milkwave", L"SongInfoDisplaySeconds", sb, p->GetConfigIniFile()); }
         return 0;
-      case IDC_MW_SONG_WINDOW_TITLE: {
-        wchar_t wtBuf[256] = {};
-        HWND hCombo = GetDlgItem(hWnd, IDC_MW_SONG_WINDOW_TITLE);
-        if (hCombo) GetWindowTextW(hCombo, wtBuf, _countof(wtBuf));
-        lstrcpynW(p->m_szTrackWindowTitle, wtBuf, _countof(p->m_szTrackWindowTitle));
-        WritePrivateProfileStringW(L"Milkwave", L"TrackWindowTitle", p->m_szTrackWindowTitle, p->GetConfigIniFile());
-        UpdateWindowTitlePreview(hWnd, p->m_szTrackWindowTitle);
-        return 0;
-      }
+      // IDC_MW_SONG_WINDOW_TITLE removed — profiles managed via Edit Parser popup
       case IDC_MW_MSG_INTERVAL: {
         float val = (float)_wtof(buf);
         if (val < 1.0f) val = 1.0f;
@@ -3280,37 +3343,54 @@ void Engine::BuildSettingsControls() {
   }
   y += lineH + 2;
 
-  // Window Title dropdown + preview (only visible when source = Window Title)
+  // Window Title profile selector + "Edit Parser..." button (only visible when source = Window Title)
   {
     bool showWT = (m_nTrackInfoSource == TRACK_SOURCE_WINDOW);
     DWORD vis = showWT ? WS_VISIBLE : 0;
 
-    // Label with ID so we can show/hide it
-    HWND hWTLabel = CreateWindowExW(0, L"STATIC", L"Window Title:",
+    // "Profile:" label
+    HWND hWTLabel = CreateWindowExW(0, L"STATIC", L"Profile:",
       WS_CHILD | vis, x, y, lw, lineH, hw,
       (HMENU)(INT_PTR)IDC_MW_SONG_WT_LABEL, GetModuleHandle(NULL), NULL);
     if (hWTLabel && hFont) SendMessage(hWTLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
     PAGE_CTRL(0, hWTLabel);
 
-    // CBS_DROPDOWN combo (editable + dropdown list)
-    HWND hWTCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
-      WS_CHILD | vis | WS_TABSTOP | CBS_DROPDOWN | CBS_HASSTRINGS | CBS_AUTOHSCROLL,
-      x + lw + 4, y, rw - lw - 4, lineH + 12 * lineH, hw,
-      (HMENU)(INT_PTR)IDC_MW_SONG_WINDOW_TITLE, GetModuleHandle(NULL), NULL);
-    if (hWTCombo && hFont) SendMessage(hWTCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
-    SetWindowTextW(hWTCombo, m_szTrackWindowTitle);
-    PAGE_CTRL(0, hWTCombo);
+    // Profile dropdown (CBS_DROPDOWNLIST — not editable)
+    int editBtnW = MulDiv(100, lineH, 26);
+    int comboW = rw - lw - 4 - editBtnW - 4;
+    HWND hProfileCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
+      WS_CHILD | vis | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
+      x + lw + 4, y, comboW, lineH + 10 * lineH, hw,
+      (HMENU)(INT_PTR)IDC_MW_WT_PROFILE, GetModuleHandle(NULL), NULL);
+    if (hProfileCombo && hFont) SendMessage(hProfileCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    // Populate profile names
+    for (int i = 0; i < (int)m_windowTitleProfiles.size(); i++) {
+      const wchar_t* name = m_windowTitleProfiles[i].szName;
+      SendMessageW(hProfileCombo, CB_ADDSTRING, 0, (LPARAM)(name[0] ? name : L"(unnamed)"));
+    }
+    if (!m_windowTitleProfiles.empty())
+      SendMessageW(hProfileCombo, CB_SETCURSEL, m_nActiveWindowTitleProfile, 0);
+    PAGE_CTRL(0, hProfileCombo);
+
+    // "Edit Parser..." button
+    HWND hEditBtn = CreateBtn(hw, L"Edit Parser...", IDC_MW_WT_EDIT_PARSER,
+      x + lw + 4 + comboW + 4, y, editBtnW, lineH, hFont, showWT);
+    PAGE_CTRL(0, hEditBtn);
     y += lineH + 2;
 
-    // Preview label showing parsed artist/title
+    // Preview label showing parsed artist/title from active profile
     HWND hPreview = CreateWindowExW(0, L"STATIC", L"",
       WS_CHILD | vis | SS_LEFT | SS_NOPREFIX,
       x + lw + 4, y, rw - lw - 4, lineH, hw,
       (HMENU)(INT_PTR)IDC_MW_SONG_WT_PREVIEW, GetModuleHandle(NULL), NULL);
     if (hPreview && hFont) SendMessage(hPreview, WM_SETFONT, (WPARAM)hFont, TRUE);
     PAGE_CTRL(0, hPreview);
-    if (showWT && m_szTrackWindowTitle[0])
-      UpdateWindowTitlePreview(hw, m_szTrackWindowTitle);
+    // Update preview from active profile
+    if (showWT && !m_windowTitleProfiles.empty()) {
+      int idx = m_nActiveWindowTitleProfile;
+      if (idx >= 0 && idx < (int)m_windowTitleProfiles.size() && m_windowTitleProfiles[idx].szWindowRegex[0])
+        UpdateWindowTitlePreview(hw, m_windowTitleProfiles[idx].szWindowRegex);
+    }
   }
   y += lineH + 2;
 
@@ -6157,6 +6237,485 @@ void Engine::SaveCurrentSpriteProperties() {
 }
 
 //----------------------------------------------------------------------
+// Window Title Parser popup
+//----------------------------------------------------------------------
+
+static const wchar_t* WTP_WND_CLASS = L"MDropDX12WTParserWnd";
+static bool g_bWTPWndClassRegistered = false;
+static HWND g_hWTPWnd = NULL;
+
+// Data context for the parser popup — holds a working copy of profiles
+struct WTPContext {
+  Engine* pEngine;
+  HWND hParent;  // settings window
+  std::vector<WindowTitleProfile> profiles;  // working copy
+  int nActiveSel;
+  HFONT hFont;
+  HFONT hFontBold;
+};
+
+// Forward declarations
+static LRESULT CALLBACK WTPWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+static void WTPPopulateProfileCombo(HWND hWnd, WTPContext* ctx);
+static void WTPLoadProfileFields(HWND hWnd, WTPContext* ctx);
+static void WTPUpdateMatchedWindow(HWND hWnd, WTPContext* ctx);
+static void WTPUpdateParsedResult(HWND hWnd, WTPContext* ctx, const std::wstring& matchedTitle);
+
+void Engine::OpenWindowTitleParserPopup(HWND hParent) {
+  // If already open, bring to front
+  if (g_hWTPWnd && IsWindow(g_hWTPWnd)) {
+    SetForegroundWindow(g_hWTPWnd);
+    return;
+  }
+
+  // Register window class
+  if (!g_bWTPWndClassRegistered) {
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.lpfnWndProc = WTPWndProc;
+    wc.cbWndExtra = sizeof(LONG_PTR);  // store context pointer
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = CreateSolidBrush(RGB(30, 30, 30));
+    wc.lpszClassName = WTP_WND_CLASS;
+    if (RegisterClassExW(&wc)) g_bWTPWndClassRegistered = true;
+    else return;
+  }
+
+  // Create context
+  auto* ctx = new WTPContext();
+  ctx->pEngine = this;
+  ctx->hParent = hParent;
+  ctx->profiles = m_windowTitleProfiles; // copy
+  ctx->nActiveSel = m_nActiveWindowTitleProfile;
+  if (ctx->nActiveSel < 0 || ctx->nActiveSel >= (int)ctx->profiles.size())
+    ctx->nActiveSel = 0;
+  ctx->hFont = m_hSettingsFont;
+  ctx->hFontBold = m_hSettingsFontBold;
+
+  // Create window — resizable
+  int dpi = 96;
+  { HDC hdc = GetDC(NULL); if (hdc) { dpi = GetDeviceCaps(hdc, LOGPIXELSX); ReleaseDC(NULL, hdc); } }
+  int w = MulDiv(520, dpi, 96);
+  int h = MulDiv(400, dpi, 96);
+  RECT rcParent;
+  GetWindowRect(hParent, &rcParent);
+  int cx = rcParent.left + (rcParent.right - rcParent.left - w) / 2;
+  int cy = rcParent.top + (rcParent.bottom - rcParent.top - h) / 2;
+
+  g_hWTPWnd = CreateWindowExW(
+    WS_EX_DLGMODALFRAME,
+    WTP_WND_CLASS, L"Window Title Parser",
+    WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+    cx, cy, w, h,
+    hParent, NULL, GetModuleHandle(NULL), ctx);
+
+  if (g_hWTPWnd) {
+    ShowWindow(g_hWTPWnd, SW_SHOW);
+    UpdateWindow(g_hWTPWnd);
+  } else {
+    delete ctx;
+  }
+}
+
+static void WTPPopulateProfileCombo(HWND hWnd, WTPContext* ctx) {
+  HWND hCombo = GetDlgItem(hWnd, IDC_MW_WTP_PROFILE);
+  if (!hCombo) return;
+  SendMessage(hCombo, CB_RESETCONTENT, 0, 0);
+  for (int i = 0; i < (int)ctx->profiles.size(); i++) {
+    const wchar_t* name = ctx->profiles[i].szName;
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)(name[0] ? name : L"(unnamed)"));
+  }
+  if (!ctx->profiles.empty())
+    SendMessage(hCombo, CB_SETCURSEL, ctx->nActiveSel, 0);
+}
+
+static void WTPLoadProfileFields(HWND hWnd, WTPContext* ctx) {
+  if (ctx->nActiveSel < 0 || ctx->nActiveSel >= (int)ctx->profiles.size()) return;
+  const auto& p = ctx->profiles[ctx->nActiveSel];
+  SetDlgItemTextW(hWnd, IDC_MW_WTP_NAME, p.szName);
+  SetDlgItemTextW(hWnd, IDC_MW_WTP_WINDOW_REGEX, p.szWindowRegex);
+  SetDlgItemTextW(hWnd, IDC_MW_WTP_PARSE_REGEX, p.szParseRegex);
+  wchar_t intBuf[16];
+  swprintf(intBuf, 16, L"%d", p.nPollIntervalSec);
+  SetDlgItemTextW(hWnd, IDC_MW_WTP_INTERVAL, intBuf);
+  WTPUpdateMatchedWindow(hWnd, ctx);
+}
+
+static void WTPUpdateMatchedWindow(HWND hWnd, WTPContext* ctx) {
+  HWND hMatched = GetDlgItem(hWnd, IDC_MW_WTP_MATCHED);
+  HWND hParsed = GetDlgItem(hWnd, IDC_MW_WTP_PARSED);
+  if (!hMatched) return;
+
+  if (ctx->nActiveSel < 0 || ctx->nActiveSel >= (int)ctx->profiles.size()) {
+    SetWindowTextW(hMatched, L"(no profile)");
+    if (hParsed) SetWindowTextW(hParsed, L"");
+    return;
+  }
+
+  wchar_t regexBuf[256] = {};
+  GetDlgItemTextW(hWnd, IDC_MW_WTP_WINDOW_REGEX, regexBuf, _countof(regexBuf));
+  if (!regexBuf[0]) {
+    SetWindowTextW(hMatched, L"(empty pattern)");
+    if (hParsed) SetWindowTextW(hParsed, L"");
+    return;
+  }
+
+  std::wregex compiledRegex;
+  try {
+    compiledRegex = std::wregex(regexBuf, std::regex_constants::ECMAScript | std::regex_constants::icase);
+  } catch (const std::regex_error&) {
+    SetWindowTextW(hMatched, L"(invalid regex)");
+    if (hParsed) SetWindowTextW(hParsed, L"");
+    return;
+  }
+
+  SettingsWTMatchContext matchCtx = { &compiledRegex, {} };
+  EnumWindows(EnumWindowsSettingsMatch, reinterpret_cast<LPARAM>(&matchCtx));
+  if (matchCtx.matchedTitle.empty()) {
+    SetWindowTextW(hMatched, L"(no match)");
+    if (hParsed) SetWindowTextW(hParsed, L"");
+    return;
+  }
+
+  SetWindowTextW(hMatched, matchCtx.matchedTitle.c_str());
+  WTPUpdateParsedResult(hWnd, ctx, matchCtx.matchedTitle);
+}
+
+static void WTPUpdateParsedResult(HWND hWnd, WTPContext* ctx, const std::wstring& matchedTitle) {
+  HWND hParsed = GetDlgItem(hWnd, IDC_MW_WTP_PARSED);
+  if (!hParsed) return;
+
+  wchar_t parseBuf[512] = {};
+  GetDlgItemTextW(hWnd, IDC_MW_WTP_PARSE_REGEX, parseBuf, _countof(parseBuf));
+  if (!parseBuf[0]) {
+    SetWindowTextW(hParsed, L"(no parse regex)");
+    return;
+  }
+
+  std::wregex parseRegex;
+  try {
+    parseRegex = std::wregex(parseBuf, std::regex_constants::ECMAScript);
+  } catch (const std::regex_error&) {
+    SetWindowTextW(hParsed, L"(invalid parse regex)");
+    return;
+  }
+
+  std::wsmatch match;
+  try {
+    if (!std::regex_search(matchedTitle, match, parseRegex)) {
+      SetWindowTextW(hParsed, L"(regex didn't match)");
+      return;
+    }
+  } catch (...) {
+    SetWindowTextW(hParsed, L"(regex error)");
+    return;
+  }
+
+  // Build name→index map
+  std::wstring parseStr(parseBuf);
+  std::map<std::wstring, int> nameMap;
+  int groupIdx = 0;
+  for (size_t i = 0; i < parseStr.size(); i++) {
+    if (parseStr[i] == L'\\') { i++; continue; }
+    if (parseStr[i] == L'(') {
+      if (i + 1 < parseStr.size() && parseStr[i + 1] == L'?') {
+        if (i + 2 < parseStr.size() && (parseStr[i + 2] == L'<' || parseStr[i + 2] == L'\'')) {
+          wchar_t delim = (parseStr[i + 2] == L'<') ? L'>' : L'\'';
+          size_t nameStart = i + 3;
+          size_t nameEnd = parseStr.find(delim, nameStart);
+          if (nameEnd != std::wstring::npos) { groupIdx++; nameMap[parseStr.substr(nameStart, nameEnd - nameStart)] = groupIdx; }
+        }
+      } else { groupIdx++; }
+    }
+  }
+
+  auto getGroup = [&](const wchar_t* name, int fallback) -> std::wstring {
+    auto it = nameMap.find(name);
+    int gi = (it != nameMap.end()) ? it->second : fallback;
+    return (gi > 0 && gi < (int)match.size() && match[gi].matched) ? match[gi].str() : L"";
+  };
+
+  std::wstring artist = getGroup(L"artist", 1);
+  std::wstring title = getGroup(L"title", 2);
+  std::wstring album = getGroup(L"album", 3);
+  std::wstring preview;
+  if (!artist.empty()) preview += L"Artist: " + artist;
+  if (!title.empty()) { if (!preview.empty()) preview += L"  |  "; preview += L"Title: " + title; }
+  if (!album.empty()) { if (!preview.empty()) preview += L"  |  "; preview += L"Album: " + album; }
+  if (preview.empty()) preview = L"(no named groups matched)";
+  SetWindowTextW(hParsed, preview.c_str());
+}
+
+static LRESULT CALLBACK WTPWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+  WTPContext* ctx = (WTPContext*)GetWindowLongPtr(hWnd, 0);
+
+  switch (msg) {
+  case WM_CREATE: {
+    CREATESTRUCTW* cs = (CREATESTRUCTW*)lParam;
+    ctx = (WTPContext*)cs->lpCreateParams;
+    SetWindowLongPtr(hWnd, 0, (LONG_PTR)ctx);
+
+    HFONT hFont = ctx->hFont;
+    HFONT hFontBold = ctx->hFontBold;
+
+    // Measure line height from font
+    HDC hdc = GetDC(hWnd);
+    HFONT oldF = (HFONT)SelectObject(hdc, hFont);
+    TEXTMETRIC tm; GetTextMetrics(hdc, &tm);
+    int lineH = tm.tmHeight + tm.tmExternalLeading + 4;
+    SelectObject(hdc, oldF);
+    ReleaseDC(hWnd, hdc);
+
+    RECT rc; GetClientRect(hWnd, &rc);
+    int pad = MulDiv(10, lineH, 26);
+    int x = pad, y = pad;
+    int fullW = rc.right - 2 * pad;
+    int lw = MulDiv(110, lineH, 26); // label width
+    int btnW = MulDiv(60, lineH, 26);
+    int rw = fullW;
+
+    // Profile row: combo + New + Delete
+    {
+      CreateLabel(hWnd, L"Profile:", x, y, lw, lineH, hFont);
+      int comboW = fullW - lw - 4 - btnW * 2 - 8;
+      HWND hCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
+        x + lw + 4, y, comboW, lineH + 10 * lineH, hWnd,
+        (HMENU)(INT_PTR)IDC_MW_WTP_PROFILE, GetModuleHandle(NULL), NULL);
+      if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+      CreateBtn(hWnd, L"New", IDC_MW_WTP_NEW, x + lw + 4 + comboW + 4, y, btnW, lineH, hFont);
+      CreateBtn(hWnd, L"Delete", IDC_MW_WTP_DELETE, x + lw + 4 + comboW + 4 + btnW + 4, y, btnW, lineH, hFont);
+    }
+    y += lineH + 6;
+
+    // Profile Name
+    CreateLabel(hWnd, L"Profile Name:", x, y, lw, lineH, hFont);
+    CreateEdit(hWnd, L"", IDC_MW_WTP_NAME, x + lw + 4, y, rw - lw - 4, lineH, hFont);
+    y += lineH + 4;
+
+    // Window Match regex
+    CreateLabel(hWnd, L"Window Match:", x, y, lw, lineH, hFont);
+    CreateEdit(hWnd, L"", IDC_MW_WTP_WINDOW_REGEX, x + lw + 4, y, rw - lw - 4, lineH, hFont);
+    y += lineH + 4;
+
+    // Matched Window (read-only)
+    CreateLabel(hWnd, L"Matched:", x, y, lw, lineH, hFont);
+    {
+      HWND hStatic = CreateWindowExW(0, L"STATIC", L"(no match)",
+        WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
+        x + lw + 4, y, rw - lw - 4, lineH, hWnd,
+        (HMENU)(INT_PTR)IDC_MW_WTP_MATCHED, GetModuleHandle(NULL), NULL);
+      if (hStatic && hFont) SendMessage(hStatic, WM_SETFONT, (WPARAM)hFont, TRUE);
+    }
+    y += lineH + 6;
+
+    // Parse Regex
+    CreateLabel(hWnd, L"Parse Regex:", x, y, lw, lineH, hFont);
+    CreateEdit(hWnd, L"", IDC_MW_WTP_PARSE_REGEX, x + lw + 4, y, rw - lw - 4, lineH, hFont);
+    y += lineH + 4;
+
+    // Parsed Result (read-only)
+    CreateLabel(hWnd, L"Parsed:", x, y, lw, lineH, hFont);
+    {
+      HWND hStatic = CreateWindowExW(0, L"STATIC", L"",
+        WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
+        x + lw + 4, y, rw - lw - 4, lineH, hWnd,
+        (HMENU)(INT_PTR)IDC_MW_WTP_PARSED, GetModuleHandle(NULL), NULL);
+      if (hStatic && hFont) SendMessage(hStatic, WM_SETFONT, (WPARAM)hFont, TRUE);
+    }
+    y += lineH + 6;
+
+    // Poll Interval
+    CreateLabel(hWnd, L"Poll Interval:", x, y, lw, lineH, hFont);
+    {
+      HWND hEdit = CreateEdit(hWnd, L"2", IDC_MW_WTP_INTERVAL, x + lw + 4, y, MulDiv(40, lineH, 26), lineH, hFont);
+      (void)hEdit;
+      CreateLabel(hWnd, L"seconds (1-10)", x + lw + 4 + MulDiv(44, lineH, 26), y, MulDiv(120, lineH, 26), lineH, hFont);
+    }
+    y += lineH + 10;
+
+    // Bottom row: Regex Help + OK + Cancel
+    {
+      int helpW = MulDiv(85, lineH, 26);
+      int okW = MulDiv(70, lineH, 26);
+      int cancelW = MulDiv(70, lineH, 26);
+      CreateBtn(hWnd, L"Regex Help", IDC_MW_WTP_HELP, x, y, helpW, lineH, hFont);
+      CreateBtn(hWnd, L"OK", IDC_MW_WTP_OK, rw + pad - okW - cancelW - 4, y, okW, lineH, hFont);
+      CreateBtn(hWnd, L"Cancel", IDC_MW_WTP_CANCEL, rw + pad - cancelW, y, cancelW, lineH, hFont);
+    }
+
+    // Populate and load
+    WTPPopulateProfileCombo(hWnd, ctx);
+    WTPLoadProfileFields(hWnd, ctx);
+    return 0;
+  }
+
+  case WM_CTLCOLORSTATIC:
+  case WM_CTLCOLOREDIT:
+  case WM_CTLCOLORLISTBOX:
+  case WM_CTLCOLORBTN: {
+    HDC hdcCtrl = (HDC)wParam;
+    SetTextColor(hdcCtrl, RGB(220, 220, 220));
+    SetBkColor(hdcCtrl, RGB(45, 45, 45));
+    static HBRUSH hDarkBrush = CreateSolidBrush(RGB(45, 45, 45));
+    return (LRESULT)hDarkBrush;
+  }
+
+  case WM_COMMAND: {
+    if (!ctx) break;
+    int id = LOWORD(wParam);
+    int code = HIWORD(wParam);
+
+    // Profile combo: selection changed
+    if (id == IDC_MW_WTP_PROFILE && code == CBN_SELCHANGE) {
+      // Save current fields before switching
+      if (ctx->nActiveSel >= 0 && ctx->nActiveSel < (int)ctx->profiles.size()) {
+        auto& p = ctx->profiles[ctx->nActiveSel];
+        GetDlgItemTextW(hWnd, IDC_MW_WTP_NAME, p.szName, _countof(p.szName));
+        GetDlgItemTextW(hWnd, IDC_MW_WTP_WINDOW_REGEX, p.szWindowRegex, _countof(p.szWindowRegex));
+        GetDlgItemTextW(hWnd, IDC_MW_WTP_PARSE_REGEX, p.szParseRegex, _countof(p.szParseRegex));
+        wchar_t intBuf[16] = {};
+        GetDlgItemTextW(hWnd, IDC_MW_WTP_INTERVAL, intBuf, _countof(intBuf));
+        p.nPollIntervalSec = _wtoi(intBuf);
+        if (p.nPollIntervalSec < 1) p.nPollIntervalSec = 1;
+        if (p.nPollIntervalSec > 10) p.nPollIntervalSec = 10;
+      }
+      int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
+      if (sel >= 0 && sel < (int)ctx->profiles.size()) {
+        ctx->nActiveSel = sel;
+        WTPLoadProfileFields(hWnd, ctx);
+      }
+      return 0;
+    }
+
+    // New profile
+    if (id == IDC_MW_WTP_NEW && code == BN_CLICKED) {
+      // Save current before adding
+      if (ctx->nActiveSel >= 0 && ctx->nActiveSel < (int)ctx->profiles.size()) {
+        auto& p = ctx->profiles[ctx->nActiveSel];
+        GetDlgItemTextW(hWnd, IDC_MW_WTP_NAME, p.szName, _countof(p.szName));
+        GetDlgItemTextW(hWnd, IDC_MW_WTP_WINDOW_REGEX, p.szWindowRegex, _countof(p.szWindowRegex));
+        GetDlgItemTextW(hWnd, IDC_MW_WTP_PARSE_REGEX, p.szParseRegex, _countof(p.szParseRegex));
+        wchar_t intBuf[16] = {};
+        GetDlgItemTextW(hWnd, IDC_MW_WTP_INTERVAL, intBuf, _countof(intBuf));
+        p.nPollIntervalSec = _wtoi(intBuf);
+        if (p.nPollIntervalSec < 1) p.nPollIntervalSec = 1;
+        if (p.nPollIntervalSec > 10) p.nPollIntervalSec = 10;
+      }
+      WindowTitleProfile newP;
+      wcscpy_s(newP.szName, L"New Profile");
+      wcscpy_s(newP.szParseRegex, L"(?<artist>.+?) - (?<title>.+)");
+      ctx->profiles.push_back(newP);
+      ctx->nActiveSel = (int)ctx->profiles.size() - 1;
+      WTPPopulateProfileCombo(hWnd, ctx);
+      WTPLoadProfileFields(hWnd, ctx);
+      return 0;
+    }
+
+    // Delete profile
+    if (id == IDC_MW_WTP_DELETE && code == BN_CLICKED) {
+      if (ctx->profiles.size() <= 1) {
+        MessageBoxW(hWnd, L"Cannot delete the last profile.", L"Window Title Parser", MB_OK | MB_ICONWARNING);
+        return 0;
+      }
+      if (ctx->nActiveSel >= 0 && ctx->nActiveSel < (int)ctx->profiles.size()) {
+        ctx->profiles.erase(ctx->profiles.begin() + ctx->nActiveSel);
+        if (ctx->nActiveSel >= (int)ctx->profiles.size())
+          ctx->nActiveSel = (int)ctx->profiles.size() - 1;
+        WTPPopulateProfileCombo(hWnd, ctx);
+        WTPLoadProfileFields(hWnd, ctx);
+      }
+      return 0;
+    }
+
+    // Window regex edit change — live update matched window
+    if (id == IDC_MW_WTP_WINDOW_REGEX && code == EN_CHANGE) {
+      WTPUpdateMatchedWindow(hWnd, ctx);
+      return 0;
+    }
+
+    // Parse regex edit change — live update parsed result
+    if (id == IDC_MW_WTP_PARSE_REGEX && code == EN_CHANGE) {
+      // Get current matched title and re-parse
+      wchar_t matchedBuf[512] = {};
+      GetDlgItemTextW(hWnd, IDC_MW_WTP_MATCHED, matchedBuf, _countof(matchedBuf));
+      std::wstring matched(matchedBuf);
+      if (!matched.empty() && matched[0] != L'(')
+        WTPUpdateParsedResult(hWnd, ctx, matched);
+      return 0;
+    }
+
+    // Regex Help button
+    if (id == IDC_MW_WTP_HELP && code == BN_CLICKED) {
+      ShellExecuteW(NULL, L"open", L"https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions/Groups_and_backreferences#types", NULL, NULL, SW_SHOWNORMAL);
+      return 0;
+    }
+
+    // OK button
+    if (id == IDC_MW_WTP_OK && code == BN_CLICKED) {
+      // Save current fields
+      if (ctx->nActiveSel >= 0 && ctx->nActiveSel < (int)ctx->profiles.size()) {
+        auto& p = ctx->profiles[ctx->nActiveSel];
+        GetDlgItemTextW(hWnd, IDC_MW_WTP_NAME, p.szName, _countof(p.szName));
+        GetDlgItemTextW(hWnd, IDC_MW_WTP_WINDOW_REGEX, p.szWindowRegex, _countof(p.szWindowRegex));
+        GetDlgItemTextW(hWnd, IDC_MW_WTP_PARSE_REGEX, p.szParseRegex, _countof(p.szParseRegex));
+        wchar_t intBuf[16] = {};
+        GetDlgItemTextW(hWnd, IDC_MW_WTP_INTERVAL, intBuf, _countof(intBuf));
+        p.nPollIntervalSec = _wtoi(intBuf);
+        if (p.nPollIntervalSec < 1) p.nPollIntervalSec = 1;
+        if (p.nPollIntervalSec > 10) p.nPollIntervalSec = 10;
+      }
+      // Apply to engine
+      ctx->pEngine->m_windowTitleProfiles = ctx->profiles;
+      ctx->pEngine->m_nActiveWindowTitleProfile = ctx->nActiveSel;
+      // Save to INI
+      ctx->pEngine->MyWriteConfig();
+      // Update profile combo on General tab
+      HWND hProfileCombo = GetDlgItem(ctx->hParent, IDC_MW_WT_PROFILE);
+      if (hProfileCombo) {
+        SendMessage(hProfileCombo, CB_RESETCONTENT, 0, 0);
+        for (int i = 0; i < (int)ctx->profiles.size(); i++) {
+          const wchar_t* name = ctx->profiles[i].szName;
+          SendMessageW(hProfileCombo, CB_ADDSTRING, 0, (LPARAM)(name[0] ? name : L"(unnamed)"));
+        }
+        SendMessage(hProfileCombo, CB_SETCURSEL, ctx->nActiveSel, 0);
+      }
+      // Update preview on General tab
+      if (!ctx->profiles.empty() && ctx->nActiveSel >= 0 && ctx->nActiveSel < (int)ctx->profiles.size()) {
+        if (ctx->profiles[ctx->nActiveSel].szWindowRegex[0])
+          UpdateWindowTitlePreview(ctx->hParent, ctx->profiles[ctx->nActiveSel].szWindowRegex);
+      }
+      DestroyWindow(hWnd);
+      return 0;
+    }
+
+    // Cancel button
+    if (id == IDC_MW_WTP_CANCEL && code == BN_CLICKED) {
+      DestroyWindow(hWnd);
+      return 0;
+    }
+    break;
+  }
+
+  case WM_DESTROY: {
+    if (ctx) {
+      delete ctx;
+      SetWindowLongPtr(hWnd, 0, 0);
+    }
+    g_hWTPWnd = NULL;
+    return 0;
+  }
+
+  case WM_CLOSE:
+    DestroyWindow(hWnd);
+    return 0;
+  }
+
+  return DefWindowProc(hWnd, msg, wParam, lParam);
+}
 
 
 } // namespace mdrop

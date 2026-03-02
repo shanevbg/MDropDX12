@@ -259,6 +259,22 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SONG_ALWAYS_SHOW    2169  // Checkbox: always show track info
 #define IDC_MW_SONG_WT_PREVIEW     2170  // Static label: window title parse preview
 #define IDC_MW_SONG_WT_LABEL       2171  // Static label: "Window Title:" (for show/hide)
+#define IDC_MW_WT_PROFILE          2172  // ComboBox: profile selector (General tab)
+#define IDC_MW_WT_EDIT_PARSER      2173  // Button: "Edit Parser..." (General tab)
+
+// Window Title Parser popup controls
+#define IDC_MW_WTP_PROFILE         2180  // ComboBox: profile selector
+#define IDC_MW_WTP_NEW             2181  // Button: New profile
+#define IDC_MW_WTP_DELETE          2182  // Button: Delete profile
+#define IDC_MW_WTP_NAME            2183  // Edit: profile name
+#define IDC_MW_WTP_WINDOW_REGEX    2184  // Edit: window match regex
+#define IDC_MW_WTP_MATCHED         2185  // Static: matched window display
+#define IDC_MW_WTP_PARSE_REGEX     2186  // Edit: parse regex
+#define IDC_MW_WTP_PARSED          2187  // Static: parsed result display
+#define IDC_MW_WTP_INTERVAL        2188  // Edit: poll interval
+#define IDC_MW_WTP_HELP            2189  // Button: regex help link
+#define IDC_MW_WTP_OK              2190  // Button: OK
+#define IDC_MW_WTP_CANCEL          2191  // Button: Cancel
 
 // Spout Video Input controls (Displays tab)
 #define IDC_MW_SPINPUT_ENABLE       7020
