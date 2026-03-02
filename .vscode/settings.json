@@ -5,8 +5,8 @@
     "*.ini": "ini"
   },
   "C_Cpp.default.configurationProvider": "ms-vscode.cpptools",
-  "C_Cpp.default.intelliSenseMode": "windows-msvc-x86",
+  "C_Cpp.default.intelliSenseMode": "windows-msvc-x64",
   "C_Cpp.default.cppStandard": "c++17",
   "C_Cpp.errorSquiggles": "enabled",
-  "msbuild.configuration.architecture": "Win32"
+  "msbuild.configuration.architecture": "x64"
 }

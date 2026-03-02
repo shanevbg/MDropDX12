@@ -97,7 +97,7 @@ MilkDrop2077 presets (e.g., `MilkDrop2077.Classic.Spectrum.Dots.Middle.004.milk`
 
 ## Build Notes
 
-- Platform: Win32 (not x64 for primary dev)
+- Platform: x64
 - Toolset: v143 (VS2022)
-- Build command: `powershell -ExecutionPolicy Bypass -File build.ps1 Release`
-- Output: `src/mDropDX12/Release/MDropDX12.exe`
+- Build command: `powershell -ExecutionPolicy Bypass -File build.ps1 Release x64`
+- Output: `src/mDropDX12/Release_x64/MDropDX12.exe`

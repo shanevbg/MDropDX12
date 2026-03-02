@@ -1,7 +1,7 @@
 {
   "configurations": [
     {
-      "name": "Win32",
+      "name": "x64",
       "includePath": [
         "${workspaceFolder}/**",
         "${workspaceFolder}/src/mDropDX12",
@@ -16,6 +16,7 @@
       "defines": [
         "_DEBUG",
         "WIN32",
+        "_WIN64",
         "_WINDOWS",
         "USE_VIS_HDR_HWND",
         "_CRT_SECURE_NO_WARNINGS",
@@ -27,7 +28,7 @@
       "compilerPath": "cl.exe",
       "cStandard": "c17",
       "cppStandard": "c++17",
-      "intelliSenseMode": "windows-msvc-x86",
+      "intelliSenseMode": "windows-msvc-x64",
       "browse": {
         "path": [
           "${workspaceFolder}"

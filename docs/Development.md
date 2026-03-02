@@ -28,7 +28,7 @@ When the Visual Studio Installer opens, select:
 
 - **Workload**: "Desktop development with C++"
 - **Individual Components** (verify these are checked):
-  - MSVC v143 - VS 2022 C++ x64/x86 build tools
+  - MSVC v143 - VS 2022 C++ x64 build tools
   - Windows 11 SDK (10.0.26100.0)
 
 ### 3. VSCodium
@@ -72,7 +72,7 @@ The Spout2 SDK (the only external dependency) is automatically fetched by the bu
 powershell -ExecutionPolicy Bypass -File build.ps1 Release x64
 ```
 
-Arguments: `[Debug|Release]` `[Win32|x64]` `[Clean]`
+Arguments: `[Debug|Release]` `[x64]` `[Clean]`
 
 The build script will:
 
@@ -84,7 +84,7 @@ The build script will:
 
 The project includes pre-configured build tasks in `.vscode/tasks.json`.
 
-- **Ctrl+Shift+B** -- runs the default build task (Debug|Win32)
+- **Ctrl+Shift+B** -- runs the default build task (Debug|x64)
 - **Ctrl+Shift+P** > "Tasks: Run Task" -- shows all available tasks:
   - Build Visualizer (Debug)
   - Build Visualizer (Release)
@@ -117,7 +117,7 @@ MDropDX12/
   MDropDX12.sln          -- Visual Studio solution file
   CLAUDE.md              -- AI assistant project context and critical warnings
   src/
-    mDropDX12/           -- Main visualizer engine (C++17, DX12, Win32)
+    mDropDX12/           -- Main visualizer engine (C++17, DX12, Win32 API)
       engine.vcxproj     -- MSBuild project file
       engine.cpp/h       -- Core engine, render loop, state management
       dxcontext.cpp/h    -- DX12 device, swap chain, descriptor heaps
@@ -145,12 +145,10 @@ MDropDX12/
 
 ## Build Output Paths
 
-| Configuration  | Output Directory              |
-| -------------- | ----------------------------- |
-| Debug\|Win32   | `src/mDropDX12/Debug/`        |
-| Release\|Win32 | `src/mDropDX12/Release/`      |
-| Debug\|x64     | `src/mDropDX12/Debug_x64/`    |
-| Release\|x64   | `src/mDropDX12/Release_x64/`  |
+| Configuration | Output Directory             |
+| ------------- | ---------------------------- |
+| Debug\|x64    | `src/mDropDX12/Debug_x64/`   |
+| Release\|x64  | `src/mDropDX12/Release_x64/` |
 
 ## Troubleshooting
 

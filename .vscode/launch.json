@@ -5,7 +5,7 @@
       "name": "Debug Visualizer",
       "type": "cppvsdbg",
       "request": "launch",
-      "program": "${workspaceFolder}\\src\\mDropDX12\\Debug\\MDropDX12.exe",
+      "program": "${workspaceFolder}\\src\\mDropDX12\\Debug_x64\\MDropDX12.exe",
       "args": [],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}\\Release",
