@@ -1348,14 +1348,17 @@ void Engine::MyReadConfig() {
     if (m_windowTitleProfiles.empty() && m_szTrackWindowTitle[0] != L'\0') {
       WindowTitleProfile p;
       wcscpy_s(p.szName, L"Default");
-      // Regex-escape the old exact title for window matching
-      std::wstring escaped;
+      // Use a simple .*title.* pattern so it broadly matches
+      // (the old value was an exact window title for FindWindowW)
+      std::wstring pattern = L".*";
+      // Regex-escape special chars in the old title
       for (const wchar_t* c = m_szTrackWindowTitle; *c; ++c) {
         if (wcschr(L"\\^$.|?*+()[]{}", *c))
-          escaped += L'\\';
-        escaped += *c;
+          pattern += L'\\';
+        pattern += *c;
       }
-      wcsncpy_s(p.szWindowRegex, escaped.c_str(), _countof(p.szWindowRegex) - 1);
+      pattern += L".*";
+      wcsncpy_s(p.szWindowRegex, pattern.c_str(), _countof(p.szWindowRegex) - 1);
       wcscpy_s(p.szParseRegex, L"(?<artist>.+?) - (?<title>.+)");
       p.nPollIntervalSec = 2;
       m_windowTitleProfiles.push_back(p);

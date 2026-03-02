@@ -6472,7 +6472,7 @@ static LRESULT CALLBACK WTPWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
     int pad = MulDiv(10, lineH, 26);
     int x = pad, y = pad;
     int fullW = rc.right - 2 * pad;
-    int lw = MulDiv(110, lineH, 26); // label width
+    int lw = MulDiv(130, lineH, 26); // label width — wide enough for "Window Match:"
     int btnW = MulDiv(60, lineH, 26);
     int rw = fullW;
 
@@ -6553,15 +6553,41 @@ static LRESULT CALLBACK WTPWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
     return 0;
   }
 
-  case WM_CTLCOLORSTATIC:
   case WM_CTLCOLOREDIT:
   case WM_CTLCOLORLISTBOX:
-  case WM_CTLCOLORBTN: {
-    HDC hdcCtrl = (HDC)wParam;
-    SetTextColor(hdcCtrl, RGB(220, 220, 220));
-    SetBkColor(hdcCtrl, RGB(45, 45, 45));
-    static HBRUSH hDarkBrush = CreateSolidBrush(RGB(45, 45, 45));
-    return (LRESULT)hDarkBrush;
+    if (ctx && ctx->pEngine->m_hBrSettingsCtrlBg) {
+      SetTextColor((HDC)wParam, ctx->pEngine->m_colSettingsText);
+      SetBkColor((HDC)wParam, ctx->pEngine->m_colSettingsCtrlBg);
+      return (LRESULT)ctx->pEngine->m_hBrSettingsCtrlBg;
+    }
+    break;
+
+  case WM_CTLCOLORSTATIC:
+    if (ctx && ctx->pEngine->m_hBrSettingsBg) {
+      SetTextColor((HDC)wParam, ctx->pEngine->m_colSettingsText);
+      SetBkColor((HDC)wParam, ctx->pEngine->m_colSettingsBg);
+      return (LRESULT)ctx->pEngine->m_hBrSettingsBg;
+    }
+    break;
+
+  case WM_DRAWITEM: {
+    DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
+    if (pDIS && pDIS->CtlType == ODT_BUTTON && ctx) {
+      Engine* p = ctx->pEngine;
+      bool bIsCheck = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheck");
+      bool bIsRadio = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsRadio");
+      if (bIsCheck)
+        DrawOwnerCheckbox(pDIS, p->m_bSettingsDarkTheme,
+          p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
+      else if (bIsRadio)
+        DrawOwnerRadio(pDIS, p->m_bSettingsDarkTheme,
+          p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
+      else
+        DrawOwnerButton(pDIS, p->m_bSettingsDarkTheme,
+          p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
+      return TRUE;
+    }
+    break;
   }
 
   case WM_COMMAND: {
