@@ -1113,8 +1113,8 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   }
   if (pShaderByteCode == NULL) {
     DebugLogA("DX12: LoadShaderFromMemory: compiling shader with D3DCompile...", LOG_VERBOSE);
-    LARGE_INTEGER compileStart, compileEnd, compileFreq;
-    QueryPerformanceFrequency(&compileFreq);
+    LARGE_INTEGER compileStart, compileEnd;
+    LONGLONG compileFreq = GetCachedQPF();
     QueryPerformanceCounter(&compileStart);
 
     HRESULT hresult = D3DXCompileShader(
@@ -1130,7 +1130,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
       ppConstTable);
 
     QueryPerformanceCounter(&compileEnd);
-    double compileMs = (double)(compileEnd.QuadPart - compileStart.QuadPart) * 1000.0 / (double)compileFreq.QuadPart;
+    double compileMs = (double)(compileEnd.QuadPart - compileStart.QuadPart) * 1000.0 / (double)compileFreq;
 
     {
       char dbg[256];

@@ -27,7 +27,7 @@ namespace mdrop {
 
 extern Engine g_engine;
 extern int NumTotalPresetsLoaded;
-extern uint64_t LastSentMDropDX12Message;
+extern std::chrono::steady_clock::time_point LastSentMDropDX12Message;
 
 // Thread globals — defined in engine.cpp
 extern volatile HANDLE g_hThread;
@@ -1776,10 +1776,10 @@ int Engine::SendMessageToMDropDX12Remote(const wchar_t* messageToSend, bool doFo
       return 0;
 
     // Throttle: skip if sent too recently (unless forced)
-    uint64_t Now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-    if (!doForce && Now - LastSentMDropDX12Message < 100)
+    auto now = steady_clock::now();
+    if (!doForce && duration_cast<milliseconds>(now - LastSentMDropDX12Message).count() < 100)
       return 0;
-    LastSentMDropDX12Message = Now;
+    LastSentMDropDX12Message = now;
 
     // Fire-and-forget: copy the string and enqueue for the IPC worker thread.
     // The worker does the blocking SendMessage(WM_COPYDATA) off the render path.

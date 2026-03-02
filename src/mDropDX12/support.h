@@ -88,10 +88,19 @@ typedef struct _SPRITEVERTEX {
 
 void    FormatSongTime(double seconds, wchar_t* dst);
 
+inline LONGLONG GetCachedQPF() {
+    static LONGLONG freq = []() {
+        LARGE_INTEGER f;
+        QueryPerformanceFrequency(&f);
+        return f.QuadPart;
+    }();
+    return freq;
+}
+
 //#define PROFILING
 #ifdef PROFILING
-#define PROFILE_BEGIN    LARGE_INTEGER tx, freq, ty; QueryPerformanceCounter(&tx); QueryPerformanceFrequency(&freq);
-#define PROFILE_END(s)   { QueryPerformanceCounter(&ty); float dt = (float)((double)(ty.QuadPart - tx.QuadPart) / (double)freq.QuadPart); char buf[256]; sprintf(buf, "  %s = %.1f ms\n", s, dt*1000 ); OutputDebugString(buf); tx = ty; }
+#define PROFILE_BEGIN    LARGE_INTEGER tx, ty; QueryPerformanceCounter(&tx); LONGLONG _prof_freq = GetCachedQPF();
+#define PROFILE_END(s)   { QueryPerformanceCounter(&ty); float dt = (float)((double)(ty.QuadPart - tx.QuadPart) / (double)_prof_freq); char buf[256]; sprintf(buf, "  %s = %.1f ms\n", s, dt*1000 ); OutputDebugString(buf); tx = ty; }
 #else
 #define PROFILE_BEGIN
 #define PROFILE_END(s)

@@ -2662,13 +2662,14 @@ void Engine::DoCustomSoundAnalysis() {
   myfft.time_to_frequency_domain(fWaveRight, mysound.fSpecRight);
   //for (i=0; i<MY_FFT_SAMPLES; i++) fSpecLeft[i] = sqrtf(fSpecLeft[i]*fSpecLeft[i] + fSpecTemp[i]*fSpecTemp[i]);
 
-  // DeepSeek - Update the sample rate (we don't need to check HRESULT every frame)
-  static DWORD lastCheck = 0;
-  DWORD currentTime = GetTickCount();
-  if (currentTime - lastCheck > 5000) // Check once per second
+  // Update the sample rate (we don't need to check HRESULT every frame)
+  using namespace std::chrono;
+  static steady_clock::time_point lastCheck = steady_clock::now();
+  auto now = steady_clock::now();
+  if (duration_cast<seconds>(now - lastCheck).count() >= 5) // Check every 5 seconds
   {
     DetectSampleRate();
-    lastCheck = currentTime;
+    lastCheck = now;
   }
 
   // sum spectrum up into 3 bands

@@ -629,7 +629,7 @@ int beatcount;
 bool TranspaMode = false;
 int NumTotalPresetsLoaded = 0;
 bool AutoLockedPreset = false;
-uint64_t LastSentMDropDX12Message = 0;
+std::chrono::steady_clock::time_point LastSentMDropDX12Message{};
 
 //For Sample Rate auto-detection
 #include <windows.h>
