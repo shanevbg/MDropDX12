@@ -4449,12 +4449,8 @@ void Engine::BuildSettingsControls() {
   PAGE_CTRL(10, CreateLabel(hw, L"MDropDX12", x, y, rw, 24, hFontBold, false));
   y += 28;
 
-  {
-    wchar_t szVersion[128];
-    swprintf(szVersion, 128, L"Version %d.%d", INT_VERSION / 100, INT_SUBVERSION);
-    PAGE_CTRL(10, CreateLabel(hw, szVersion, x, y, rw, lineH, hFont, false));
-    y += lineH + 4;
-  }
+  PAGE_CTRL(10, CreateLabel(hw, L"Version 1.2", x, y, rw, lineH, hFont, false));
+  y += lineH + 4;
 
   {
     wchar_t szBuild[128];

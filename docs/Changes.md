@@ -1,5 +1,25 @@
 # MDropDX12 Changelog
 
+## v1.2 (2026-03-01)
+
+### Media Integration
+
+- Added song title rendering with selectable track info sources (Spotify, System Media, Window Title)
+- Added Window Title regex profiles with configurable parse patterns and named capture groups
+- Added Artist-Title Match Editor popup with live preview, enumerated windows dropdown, and profile management
+- Added per-profile poll interval (1-10 seconds) for window title polling
+
+### Display & Window
+
+- Added Alt+S mirror mode failsafe: prompts to enable all monitors when none are enabled
+- Added "Don't ask when no mirrors are enabled" checkbox on Displays tab to auto-enable all monitors
+
+### Documentation & Project
+
+- Clarified project attribution and derivation chain (MilkDrop2 → BeatDrop → Milkwave → MDropDX12)
+- Rewrote bundled README.txt for MDropDX12 with correct maintainer and project info
+- Removed ambiguous first-person references inherited from upstream projects
+
 ## v1.1 (2026-03-01)
 
 ### Rendering & Performance
