@@ -804,16 +804,11 @@ static std::wstring MakeRelativeSpritePath(const wchar_t* szAbsPath,
 
 void SettingsWindow::DoDestroy() {
   KillTimer(m_hWnd, IDT_IPC_MONITOR);
-  if (m_pEngine->m_hSpriteImageList) { ImageList_Destroy((HIMAGELIST)m_pEngine->m_hSpriteImageList); m_pEngine->m_hSpriteImageList = NULL; }
-  m_pEngine->m_hSpriteList = NULL;
   m_pEngine->CleanupSettingsThemeBrushes();
 }
 
 void SettingsWindow::RebuildFonts() {
   if (!m_hWnd) return;
-  // Clean up sprite resources before rebuild (base handles tab save/restore)
-  m_pEngine->m_hSpriteList = NULL;
-  if (m_pEngine->m_hSpriteImageList) { ImageList_Destroy((HIMAGELIST)m_pEngine->m_hSpriteImageList); m_pEngine->m_hSpriteImageList = NULL; }
   ToolWindow::RebuildFonts();
 }
 
@@ -826,16 +821,6 @@ LRESULT SettingsWindow::DoNotify(HWND hWnd, NMHDR* pnm) {
     if (newVal > 60) newVal = 60;
     m_pEngine->m_nIdleTimeoutMinutes = newVal;
     m_pEngine->SaveIdleTimerSettings();
-  }
-  // Sprite ListView selection change
-  if (pnm->idFrom == IDC_MW_SPR_LIST && pnm->code == LVN_ITEMCHANGED) {
-    NMLISTVIEW* pnmv = (NMLISTVIEW*)pnm;
-    if ((pnmv->uNewState & LVIS_SELECTED) && !(pnmv->uOldState & LVIS_SELECTED)) {
-      if (m_pEngine->m_nSpriteSelected >= 0)
-        m_pEngine->SaveCurrentSpriteProperties();
-      m_pEngine->m_nSpriteSelected = pnmv->iItem;
-      m_pEngine->UpdateSpriteProperties(pnmv->iItem);
-    }
   }
   return 0;
 }
@@ -945,26 +930,6 @@ LRESULT SettingsWindow::DoMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lP
 LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
   Engine* p = m_pEngine;
 
-    // Browse button
-    if (id == IDC_MW_BROWSE_DIR && code == BN_CLICKED) {
-      p->OpenFolderPickerForPresetDir();
-      wchar_t szShort[MAX_PATH];
-      ShortenDirectoryPath(p->m_szPresetDir, szShort, MAX_PATH);
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_PRESET_DIR), szShort);
-      // Repopulate preset listbox after directory change
-      HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
-      if (hList) {
-        SendMessage(hList, LB_RESETCONTENT, 0, 0);
-        for (int i = 0; i < p->m_nPresets; i++) {
-          if (p->m_presets[i].szFilename.empty()) continue;
-          SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
-        }
-        if (p->m_nCurrentPreset >= 0 && p->m_nCurrentPreset < p->m_nPresets)
-          SendMessage(hList, LB_SETCURSEL, p->m_nCurrentPreset, 0);
-      }
-      return 0;
-    }
-
     // Browse Preset file
     if (id == IDC_MW_BROWSE_PRESET && code == BN_CLICKED) {
       wchar_t szFile[MAX_PATH] = {};
@@ -980,119 +945,6 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         p->LoadPreset(szFile, p->m_fBlendTimeUser);
         // Update current preset display
         SetWindowTextW(GetDlgItem(hWnd, IDC_MW_CURRENT_PRESET), p->m_szCurrentPresetFile);
-      }
-      return 0;
-    }
-
-    // Preset listbox selection
-    if (id == IDC_MW_PRESET_LIST && code == LBN_SELCHANGE) {
-      int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
-      if (sel >= 0 && sel < p->m_nPresets) {
-        // Skip directory entries (prefixed with '*') — don't try to load them
-        if (p->m_presets[sel].szFilename.c_str()[0] == L'*')
-          return 0;
-        p->m_nCurrentPreset = sel;
-        wchar_t szFile[MAX_PATH];
-        swprintf(szFile, MAX_PATH, L"%s%s", p->m_szPresetDir, p->m_presets[sel].szFilename.c_str());
-        p->LoadPreset(szFile, p->m_fBlendTimeUser);
-        // Update current preset display
-        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_CURRENT_PRESET), p->m_szCurrentPresetFile);
-      }
-      return 0;
-    }
-
-    // Preset listbox double-click: navigate into directories or load preset
-    if (id == IDC_MW_PRESET_LIST && code == LBN_DBLCLK) {
-      int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
-      if (sel >= 0 && sel < p->m_nPresets) {
-        if (p->m_presets[sel].szFilename.c_str()[0] == L'*') {
-          // Directory entry
-          if (wcscmp(p->m_presets[sel].szFilename.c_str(), L"*..") == 0)
-            NavigatePresetDirUp();
-          else
-            NavigatePresetDirInto(sel);
-        } else {
-          // Regular preset — load it
-          p->m_nCurrentPreset = sel;
-          wchar_t szFile[MAX_PATH];
-          swprintf(szFile, MAX_PATH, L"%s%s", p->m_szPresetDir, p->m_presets[sel].szFilename.c_str());
-          p->LoadPreset(szFile, p->m_fBlendTimeUser);
-        }
-      }
-      return 0;
-    }
-
-    // Preset nav: prev
-    if (id == IDC_MW_PRESET_PREV && code == BN_CLICKED) {
-      p->PrevPreset(p->m_fBlendTimeUser);
-      HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
-      if (hList && p->m_nCurrentPreset >= 0)
-        SendMessage(hList, LB_SETCURSEL, p->m_nCurrentPreset, 0);
-      return 0;
-    }
-
-    // Preset nav: next
-    if (id == IDC_MW_PRESET_NEXT && code == BN_CLICKED) {
-      p->NextPreset(p->m_fBlendTimeUser);
-      HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
-      if (hList && p->m_nCurrentPreset >= 0)
-        SendMessage(hList, LB_SETCURSEL, p->m_nCurrentPreset, 0);
-      return 0;
-    }
-
-    // Preset nav: copy path to clipboard
-    if (id == IDC_MW_PRESET_COPY && code == BN_CLICKED) {
-      HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
-      int sel = hList ? (int)SendMessage(hList, LB_GETCURSEL, 0, 0) : -1;
-      if (sel >= 0 && sel < p->m_nPresets) {
-        wchar_t szFile[MAX_PATH];
-        swprintf(szFile, MAX_PATH, L"%s%s", p->m_szPresetDir, p->m_presets[sel].szFilename.c_str());
-        if (OpenClipboard(hWnd)) {
-          EmptyClipboard();
-          size_t len = (wcslen(szFile) + 1) * sizeof(wchar_t);
-          HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
-          if (hMem) {
-            memcpy(GlobalLock(hMem), szFile, len);
-            GlobalUnlock(hMem);
-            SetClipboardData(CF_UNICODETEXT, hMem);
-          }
-          CloseClipboard();
-        }
-      }
-      return 0;
-    }
-
-    // Directory nav: go up to parent directory
-    if (id == IDC_MW_PRESET_UP && code == BN_CLICKED) {
-      NavigatePresetDirUp();
-      return 0;
-    }
-
-    // Directory nav: enter selected subdirectory
-    if (id == IDC_MW_PRESET_INTO && code == BN_CLICKED) {
-      HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
-      int sel = hList ? (int)SendMessage(hList, LB_GETCURSEL, 0, 0) : -1;
-      NavigatePresetDirInto(sel);
-      return 0;
-    }
-
-    // Preset filter: cycle All → .milk → .milk2
-    if (id == IDC_MW_PRESET_FILTER && code == BN_CLICKED) {
-      p->m_nPresetFilter = (p->m_nPresetFilter + 1) % 3;
-      const wchar_t* filterLabels[] = { L"All", L".milk", L".milk2" };
-      SetWindowTextW((HWND)lParam, filterLabels[p->m_nPresetFilter]);
-      // Rescan directory with new filter
-      p->UpdatePresetList(false, true);
-      // Repopulate listbox
-      HWND hList = GetDlgItem(hWnd, IDC_MW_PRESET_LIST);
-      if (hList) {
-        SendMessage(hList, LB_RESETCONTENT, 0, 0);
-        for (int i = 0; i < p->m_nPresets; i++) {
-          if (p->m_presets[i].szFilename.empty()) continue;
-          SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
-        }
-        if (p->m_nCurrentPreset >= 0 && p->m_nCurrentPreset < p->m_nPresets)
-          SendMessage(hList, LB_SETCURSEL, p->m_nCurrentPreset, 0);
       }
       return 0;
     }
@@ -1204,6 +1056,26 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
 
     if (id == IDC_MW_OPEN_SONGINFO && code == BN_CLICKED) {
       p->OpenSongInfoWindow();
+      return 0;
+    }
+
+    if (id == IDC_MW_OPEN_BOARD && code == BN_CLICKED) {
+      p->OpenBoardWindow();
+      return 0;
+    }
+
+    if (id == IDC_MW_OPEN_PRESETS && code == BN_CLICKED) {
+      p->OpenPresetsWindow();
+      return 0;
+    }
+
+    if (id == IDC_MW_OPEN_SPRITES && code == BN_CLICKED) {
+      p->OpenSpritesWindow();
+      return 0;
+    }
+
+    if (id == IDC_MW_OPEN_MESSAGES && code == BN_CLICKED) {
+      p->OpenMessagesWindow();
       return 0;
     }
 
@@ -1337,8 +1209,6 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       if (sel >= 0 && sel <= 3) {
         p->m_nSpriteMessagesMode = sel;
         p->SaveSettingToINI(SET_SPRITES_MESSAGES);
-        CheckDlgButton(hWnd, IDC_MW_MSG_SHOW_MESSAGES, (sel & 1) ? BST_CHECKED : BST_UNCHECKED);
-        CheckDlgButton(hWnd, IDC_MW_MSG_SHOW_SPRITES, (sel & 2) ? BST_CHECKED : BST_UNCHECKED);
       }
       return 0;
     }
@@ -1641,212 +1511,6 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         return 0;
       }
       // IDC_MW_DARK_THEME handled as CBN_SELCHANGE combo above
-      case IDC_MW_MSG_AUTOPLAY:
-        p->m_bMsgAutoplay = bChecked;
-        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_MSG_PLAY), bChecked ? L"Stop" : L"Play");
-        if (bChecked)
-          p->ScheduleNextAutoMessage();
-        else
-          p->m_fNextAutoMsgTime = -1.0f;
-        p->SaveMsgAutoplaySettings();
-        return 0;
-      case IDC_MW_MSG_SEQUENTIAL:
-        p->m_bMsgSequential = bChecked;
-        p->m_nNextSequentialMsg = 0;
-        p->SaveMsgAutoplaySettings();
-        return 0;
-      case IDC_MW_MSG_AUTOSIZE:
-        p->m_bMessageAutoSize = bChecked;
-        p->SaveMsgAutoplaySettings();
-        return 0;
-      case IDC_MW_MSG_SHOW_MESSAGES:
-        p->m_nSpriteMessagesMode = (p->m_nSpriteMessagesMode & ~1) | (bChecked ? 1 : 0);
-        p->SaveSettingToINI(SET_SPRITES_MESSAGES);
-        { HWND hCombo = GetDlgItem(hWnd, IDC_MW_SPRITES_MESSAGES);
-          if (hCombo) SendMessage(hCombo, CB_SETCURSEL, p->m_nSpriteMessagesMode, 0); }
-        return 0;
-      case IDC_MW_MSG_SHOW_SPRITES:
-        p->m_nSpriteMessagesMode = (p->m_nSpriteMessagesMode & ~2) | (bChecked ? 2 : 0);
-        p->SaveSettingToINI(SET_SPRITES_MESSAGES);
-        { HWND hCombo = GetDlgItem(hWnd, IDC_MW_SPRITES_MESSAGES);
-          if (hCombo) SendMessage(hCombo, CB_SETCURSEL, p->m_nSpriteMessagesMode, 0); }
-        return 0;
-
-      // Messages tab button handlers (non-checkbox)
-      case IDC_MW_MSG_PUSH: {
-        HWND hMsgList = GetDlgItem(hWnd, IDC_MW_MSG_LIST);
-        int sel = hMsgList ? (int)SendMessage(hMsgList, LB_GETCURSEL, 0, 0) : -1;
-        if (sel >= 0 && sel < p->m_nMsgAutoplayCount) {
-          int msgIdx = p->m_nMsgAutoplayOrder[sel];
-          HWND hw = p->GetPluginWindow();
-          if (hw) PostMessage(hw, WM_MW_PUSH_MESSAGE, msgIdx, 0);
-        }
-        return 0;
-      }
-      case IDC_MW_MSG_UP: {
-        HWND hMsgList = GetDlgItem(hWnd, IDC_MW_MSG_LIST);
-        int sel = hMsgList ? (int)SendMessage(hMsgList, LB_GETCURSEL, 0, 0) : -1;
-        if (sel > 0 && sel < p->m_nMsgAutoplayCount) {
-          std::swap(p->m_nMsgAutoplayOrder[sel], p->m_nMsgAutoplayOrder[sel - 1]);
-          p->PopulateMsgListBox(hMsgList);
-          SendMessage(hMsgList, LB_SETCURSEL, sel - 1, 0);
-          p->SaveMsgAutoplaySettings();
-        }
-        return 0;
-      }
-      case IDC_MW_MSG_DOWN: {
-        HWND hMsgList = GetDlgItem(hWnd, IDC_MW_MSG_LIST);
-        int sel = hMsgList ? (int)SendMessage(hMsgList, LB_GETCURSEL, 0, 0) : -1;
-        if (sel >= 0 && sel < p->m_nMsgAutoplayCount - 1) {
-          std::swap(p->m_nMsgAutoplayOrder[sel], p->m_nMsgAutoplayOrder[sel + 1]);
-          p->PopulateMsgListBox(hMsgList);
-          SendMessage(hMsgList, LB_SETCURSEL, sel + 1, 0);
-          p->SaveMsgAutoplaySettings();
-        }
-        return 0;
-      }
-      case IDC_MW_MSG_ADD: {
-        int freeSlot = -1;
-        for (int i = 0; i < MAX_CUSTOM_MESSAGES; i++) {
-          if (p->m_CustomMessage[i].szText[0] == 0) { freeSlot = i; break; }
-        }
-        if (freeSlot < 0) { MessageBoxW(hWnd, L"All 100 message slots are full.", L"Messages", MB_OK); return 0; }
-        if (p->ShowMessageEditDialog(hWnd, freeSlot, true)) {
-          p->BuildMsgPlaybackOrder();
-          HWND hMsgList = GetDlgItem(hWnd, IDC_MW_MSG_LIST);
-          p->PopulateMsgListBox(hMsgList);
-          p->WriteCustomMessages();
-        }
-        return 0;
-      }
-      case IDC_MW_MSG_EDIT: {
-        HWND hMsgList = GetDlgItem(hWnd, IDC_MW_MSG_LIST);
-        int sel = hMsgList ? (int)SendMessage(hMsgList, LB_GETCURSEL, 0, 0) : -1;
-        if (sel >= 0 && sel < p->m_nMsgAutoplayCount) {
-          int msgIdx = p->m_nMsgAutoplayOrder[sel];
-          if (p->ShowMessageEditDialog(hWnd, msgIdx, false)) {
-            p->PopulateMsgListBox(hMsgList);
-            SendMessage(hMsgList, LB_SETCURSEL, sel, 0);
-            p->UpdateMsgPreview(hWnd, sel);
-            p->WriteCustomMessages();
-          }
-        }
-        return 0;
-      }
-      case IDC_MW_MSG_DELETE: {
-        HWND hMsgList = GetDlgItem(hWnd, IDC_MW_MSG_LIST);
-        int sel = hMsgList ? (int)SendMessage(hMsgList, LB_GETCURSEL, 0, 0) : -1;
-        if (sel >= 0 && sel < p->m_nMsgAutoplayCount) {
-          int msgIdx = p->m_nMsgAutoplayOrder[sel];
-          p->m_CustomMessage[msgIdx].szText[0] = 0;
-          p->BuildMsgPlaybackOrder();
-          p->PopulateMsgListBox(hMsgList);
-          p->WriteCustomMessages();
-          SetWindowTextW(GetDlgItem(hWnd, IDC_MW_MSG_PREVIEW), L"");
-        }
-        return 0;
-      }
-      case IDC_MW_MSG_RELOAD:
-        p->ReadCustomMessages();
-        p->BuildMsgPlaybackOrder();
-        p->PopulateMsgListBox(GetDlgItem(hWnd, IDC_MW_MSG_LIST));
-        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_MSG_PREVIEW), L"");
-        return 0;
-      case IDC_MW_MSG_OPENINI: {
-        // Temporarily drop TOPMOST so the editor window appears in front
-        SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-        HINSTANCE hr = ShellExecuteW(NULL, L"open", p->m_szMsgIniFile, NULL, NULL, SW_SHOWNORMAL);
-        if ((INT_PTR)hr <= 32)
-          ShellExecuteW(NULL, L"open", L"notepad.exe", p->m_szMsgIniFile, NULL, SW_SHOWNORMAL);
-        // Restore TOPMOST after a brief delay so editor gets focus first
-        SetTimer(hWnd, 9999, 500, NULL);
-        return 0;
-      }
-      case IDC_MW_MSG_PASTE: {
-        if (!OpenClipboard(hWnd)) return 0;
-        HANDLE hData = GetClipboardData(CF_UNICODETEXT);
-        if (!hData) { CloseClipboard(); return 0; }
-        wchar_t* pText = (wchar_t*)GlobalLock(hData);
-        if (!pText) { CloseClipboard(); return 0; }
-
-        std::wstring clipText(pText);
-        GlobalUnlock(hData);
-        CloseClipboard();
-
-        int added = 0;
-        size_t pos = 0;
-        while (pos < clipText.size()) {
-          size_t end = clipText.find_first_of(L"\r\n", pos);
-          if (end == std::wstring::npos) end = clipText.size();
-          if (end > pos && (end - pos) < 256) {
-            // Find free slot
-            int freeSlot = -1;
-            for (int i = 0; i < MAX_CUSTOM_MESSAGES; i++) {
-              if (p->m_CustomMessage[i].szText[0] == 0) { freeSlot = i; break; }
-            }
-            if (freeSlot < 0) break;
-
-            wcsncpy(p->m_CustomMessage[freeSlot].szText, clipText.c_str() + pos, end - pos);
-            p->m_CustomMessage[freeSlot].szText[end - pos] = 0;
-            p->m_CustomMessage[freeSlot].nFont = 0;
-            p->m_CustomMessage[freeSlot].fSize = 50.0f;
-            p->m_CustomMessage[freeSlot].x = 0.5f;
-            p->m_CustomMessage[freeSlot].y = 0.5f;
-            p->m_CustomMessage[freeSlot].randx = 0;
-            p->m_CustomMessage[freeSlot].randy = 0;
-            p->m_CustomMessage[freeSlot].growth = 1.0f;
-            p->m_CustomMessage[freeSlot].fTime = 5.0f;
-            p->m_CustomMessage[freeSlot].fFade = 1.0f;
-            p->m_CustomMessage[freeSlot].fFadeOut = 1.0f;
-            p->m_CustomMessage[freeSlot].fBurnTime = 0;
-            p->m_CustomMessage[freeSlot].nColorR = -1;
-            p->m_CustomMessage[freeSlot].nColorG = -1;
-            p->m_CustomMessage[freeSlot].nColorB = -1;
-            p->m_CustomMessage[freeSlot].nRandR = 0;
-            p->m_CustomMessage[freeSlot].nRandG = 0;
-            p->m_CustomMessage[freeSlot].nRandB = 0;
-            p->m_CustomMessage[freeSlot].bOverrideFace = 0;
-            p->m_CustomMessage[freeSlot].bOverrideBold = 0;
-            p->m_CustomMessage[freeSlot].bOverrideItal = 0;
-            p->m_CustomMessage[freeSlot].bOverrideColorR = 0;
-            p->m_CustomMessage[freeSlot].bOverrideColorG = 0;
-            p->m_CustomMessage[freeSlot].bOverrideColorB = 0;
-            p->m_CustomMessage[freeSlot].bBold = -1;
-            p->m_CustomMessage[freeSlot].bItal = -1;
-            p->m_CustomMessage[freeSlot].szFace[0] = 0;
-            added++;
-          }
-          pos = end;
-          while (pos < clipText.size() && (clipText[pos] == L'\r' || clipText[pos] == L'\n')) pos++;
-        }
-
-        if (added > 0) {
-          p->BuildMsgPlaybackOrder();
-          p->PopulateMsgListBox(GetDlgItem(hWnd, IDC_MW_MSG_LIST));
-          p->WriteCustomMessages();
-          wchar_t msg[64];
-          swprintf(msg, 64, L"Pasted %d message(s) from clipboard.", added);
-          MessageBoxW(hWnd, msg, L"Messages", MB_OK | MB_ICONINFORMATION);
-        } else {
-          MessageBoxW(hWnd, L"No text found on clipboard (or all slots full).", L"Messages", MB_OK);
-        }
-        return 0;
-      }
-      case IDC_MW_MSG_PLAY: {
-        p->m_bMsgAutoplay = !p->m_bMsgAutoplay;
-        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_MSG_PLAY), p->m_bMsgAutoplay ? L"Stop" : L"Play");
-        CheckDlgButton(hWnd, IDC_MW_MSG_AUTOPLAY, p->m_bMsgAutoplay ? BST_CHECKED : BST_UNCHECKED);
-        if (p->m_bMsgAutoplay)
-          p->ScheduleNextAutoMessage();
-        else
-          p->m_fNextAutoMsgTime = -1.0f;
-        p->SaveMsgAutoplaySettings();
-        return 0;
-      }
-      case IDC_MW_MSG_OVERRIDES: {
-        p->ShowMsgOverridesDialog(hWnd);
-        return 0;
-      }
       }
     }
 
@@ -2052,13 +1716,6 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       return 0;
     }
 
-    // Messages tab listbox selection (different notification code)
-    if (id == IDC_MW_MSG_LIST && code == LBN_SELCHANGE) {
-      int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
-      p->UpdateMsgPreview(hWnd, sel);
-      return 0;
-    }
-
     // Edit control changes (apply on focus lost)
     if (code == EN_KILLFOCUS) {
       wchar_t buf[64];
@@ -2125,22 +1782,6 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         p->m_AutoHueSeconds = (float)_wtof(buf);
         if (p->m_AutoHueSeconds < 0.001f) p->m_AutoHueSeconds = 0.001f;
         return 0;
-      case IDC_MW_MSG_INTERVAL: {
-        float val = (float)_wtof(buf);
-        if (val < 1.0f) val = 1.0f;
-        if (val > 9999.0f) val = 9999.0f;
-        p->m_fMsgAutoplayInterval = val;
-        p->SaveMsgAutoplaySettings();
-        return 0;
-      }
-      case IDC_MW_MSG_JITTER: {
-        float val = (float)_wtof(buf);
-        if (val < 0.0f) val = 0.0f;
-        if (val > 9999.0f) val = 9999.0f;
-        p->m_fMsgAutoplayJitter = val;
-        p->SaveMsgAutoplaySettings();
-        return 0;
-      }
       case IDC_MW_IPC_TITLE: {
         wchar_t tbuf[256];
         GetWindowTextW((HWND)lParam, tbuf, 256);
@@ -2223,261 +1864,6 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         p->SaveControllerSettings();
       }
       return 0;
-    }
-
-    // ===== Sprites tab button handlers (BN_CLICKED) =====
-    if (code == BN_CLICKED) {
-      switch (id) {
-      case IDC_MW_SPR_ADD: {
-        // Drop TOPMOST so file dialog appears in front
-        SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-        IFileOpenDialog* pDlg = NULL;
-        HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pDlg));
-        if (SUCCEEDED(hr) && pDlg) {
-          COMDLG_FILTERSPEC filters[] = {
-            { L"Image Files", L"*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.dds;*.gif" },
-            { L"All Files", L"*.*" }
-          };
-          pDlg->SetFileTypes(2, filters);
-          pDlg->SetTitle(L"Add Sprite Image");
-          if (SUCCEEDED(pDlg->Show(hWnd))) {
-            IShellItem* pItem = NULL;
-            if (SUCCEEDED(pDlg->GetResult(&pItem))) {
-              LPWSTR pPath = NULL;
-              if (SUCCEEDED(pItem->GetDisplayName(SIGDN_FILESYSPATH, &pPath))) {
-                std::set<int> used;
-                for (auto& e : p->m_spriteEntries) used.insert(e.nIndex);
-                int newIdx = 0;
-                while (used.count(newIdx) && newIdx < 100000) newIdx++;
-                if (newIdx < 100000) {
-                  Engine::SpriteEntry entry = {};
-                  entry.nIndex = newIdx;
-                  // Convert to relative path when possible
-                  std::wstring relPath = MakeRelativeSpritePath(pPath, p->m_szContentBasePath, p->m_szMilkdrop2Path);
-                  wcscpy_s(entry.szImg, relPath.c_str());
-                  entry.nColorkey = 0;
-                  entry.szInitCode = "blendmode = 0;\r\nx = 0.5; y = 0.5;\r\nsx = 0.5; sy = 0.5; rot = 0;\r\nr = 1; g = 1; b = 1; a = 1;";
-                  p->m_spriteEntries.push_back(entry);
-                  p->PopulateSpriteListView();
-                  int newSel = (int)p->m_spriteEntries.size() - 1;
-                  ListView_SetItemState(p->m_hSpriteList, newSel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
-                  ListView_EnsureVisible(p->m_hSpriteList, newSel, FALSE);
-                }
-                CoTaskMemFree(pPath);
-              }
-              pItem->Release();
-            }
-          }
-          pDlg->Release();
-        }
-        // Restore TOPMOST after dialog closes
-        SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        return 0;
-      }
-
-      case IDC_MW_SPR_IMPORT: {
-        // Show import settings dialog first
-        SpriteImportDlgData impData = {};
-        if (!ShowSpriteImportDialog(hWnd, p, impData)) {
-          // User cancelled
-          return 0;
-        }
-
-        // Build init code from dialog property values
-        char initBuf[512];
-        sprintf(initBuf, "blendmode = %d;\r\nx = %.6g; y = %.6g;\r\nsx = %.6g; sy = %.6g; rot = %.6g;\r\n"
-          "r = %.6g; g = %.6g; b = %.6g; a = %.6g;",
-          impData.nBlendMode, impData.x, impData.y, impData.sx, impData.sy, impData.rot,
-          impData.r, impData.g, impData.b, impData.a);
-        std::string defaultInitCode = initBuf;
-        if (impData.nLayer != 0) { char lb[64]; sprintf(lb, "\r\nlayer = %d;", impData.nLayer); defaultInitCode += lb; }
-
-        // If replacing, clear existing entries
-        if (impData.bReplace) {
-          p->m_spriteEntries.clear();
-          p->m_nSpriteSelected = -1;
-        }
-
-        // Now open folder picker
-        SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-        IFileOpenDialog* pDlg = NULL;
-        HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pDlg));
-        if (SUCCEEDED(hr) && pDlg) {
-          DWORD options = 0;
-          pDlg->GetOptions(&options);
-          pDlg->SetOptions(options | FOS_PICKFOLDERS);
-          pDlg->SetTitle(L"Select Folder to Import");
-          if (SUCCEEDED(pDlg->Show(hWnd))) {
-            IShellItem* pItem = NULL;
-            if (SUCCEEDED(pDlg->GetResult(&pItem))) {
-              LPWSTR pFolder = NULL;
-              if (SUCCEEDED(pItem->GetDisplayName(SIGDN_FILESYSPATH, &pFolder))) {
-                std::set<int> used;
-                for (auto& e : p->m_spriteEntries) used.insert(e.nIndex);
-
-                const wchar_t* exts[] = { L"*.png", L"*.jpg", L"*.jpeg", L"*.bmp", L"*.tga", L"*.dds", L"*.gif" };
-                int added = 0;
-                int maxAdd = impData.nMaxSprites;
-                for (const wchar_t* ext : exts) {
-                  if (added >= maxAdd) break;
-                  wchar_t searchPath[MAX_PATH];
-                  swprintf(searchPath, MAX_PATH, L"%s\\%s", pFolder, ext);
-                  WIN32_FIND_DATAW fd;
-                  HANDLE hFind = FindFirstFileW(searchPath, &fd);
-                  if (hFind != INVALID_HANDLE_VALUE) {
-                    do {
-                      if (added >= maxAdd) break;
-                      if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-                      int newIdx = 0;
-                      while (used.count(newIdx) && newIdx < 100000) newIdx++;
-                      if (newIdx >= 100000) break;
-
-                      Engine::SpriteEntry entry = {};
-                      entry.nIndex = newIdx;
-                      wchar_t absPath[512];
-                      swprintf(absPath, 512, L"%s\\%s", pFolder, fd.cFileName);
-                      std::wstring relPath = MakeRelativeSpritePath(absPath, p->m_szContentBasePath, p->m_szMilkdrop2Path);
-                      wcscpy_s(entry.szImg, relPath.c_str());
-                      entry.nColorkey = 0;
-                      entry.szInitCode = defaultInitCode;
-                      p->m_spriteEntries.push_back(entry);
-                      used.insert(newIdx);
-                      added++;
-                    } while (FindNextFileW(hFind, &fd));
-                    FindClose(hFind);
-                  }
-                }
-                if (added > 0 || impData.bReplace) p->PopulateSpriteListView();
-                CoTaskMemFree(pFolder);
-              }
-              pItem->Release();
-            }
-          }
-          pDlg->Release();
-        }
-        SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        return 0;
-      }
-
-      case IDC_MW_SPR_DELETE: {
-        if (p->m_nSpriteSelected >= 0 && p->m_nSpriteSelected < (int)p->m_spriteEntries.size()) {
-          p->m_spriteEntries.erase(p->m_spriteEntries.begin() + p->m_nSpriteSelected);
-          p->m_nSpriteSelected = -1;
-          p->PopulateSpriteListView();
-        }
-        return 0;
-      }
-
-      case IDC_MW_SPR_PUSH: {
-        if (p->m_nSpriteSelected >= 0 && p->m_nSpriteSelected < (int)p->m_spriteEntries.size()) {
-          p->SaveCurrentSpriteProperties();
-          p->SaveSpritesToINI();
-          // Flush INI cache to ensure file is written before render thread reads it
-          WritePrivateProfileStringW(NULL, NULL, NULL, p->m_szImgIniFile);
-
-          auto& entry = p->m_spriteEntries[p->m_nSpriteSelected];
-          int sprNum = entry.nIndex;
-          { wchar_t dbg[1024]; wchar_t sec[64]; FormatSpriteSection(sec, 64, sprNum);
-            swprintf(dbg, 1024, L"Sprites: Push [%s] img=%s", sec, entry.szImg); DebugLogW(dbg, LOG_VERBOSE); }
-          HWND hRender = p->GetPluginWindow();
-          if (hRender) PostMessage(hRender, WM_MW_PUSH_SPRITE, sprNum, -1);
-        }
-        return 0;
-      }
-
-      case IDC_MW_SPR_KILL: {
-        if (p->m_nSpriteSelected >= 0 && p->m_nSpriteSelected < (int)p->m_spriteEntries.size()) {
-          int sprNum = p->m_spriteEntries[p->m_nSpriteSelected].nIndex;
-          for (int s = 0; s < NUM_TEX; s++) {
-            if (p->m_texmgr.m_tex[s].pSurface && p->m_texmgr.m_tex[s].nUserData == sprNum) {
-              HWND hRender = p->GetPluginWindow();
-              if (hRender) PostMessage(hRender, WM_MW_KILL_SPRITE, s, 0);
-              break;
-            }
-          }
-        }
-        return 0;
-      }
-
-      case IDC_MW_SPR_KILLALL: {
-        HWND hRender = p->GetPluginWindow();
-        if (hRender) {
-          for (int s = 0; s < NUM_TEX; s++) {
-            if (p->m_texmgr.m_tex[s].pSurface)
-              PostMessage(hRender, WM_MW_KILL_SPRITE, s, 0);
-          }
-        }
-        return 0;
-      }
-
-      case IDC_MW_SPR_DEFAULTS: {
-        if (p->m_nSpriteSelected >= 0 && p->m_nSpriteSelected < (int)p->m_spriteEntries.size()) {
-          auto& e = p->m_spriteEntries[p->m_nSpriteSelected];
-          e.szInitCode = "blendmode = 0;\r\nx = 0.5; y = 0.5;\r\nsx = 0.5; sy = 0.5; rot = 0;\r\nr = 1; g = 1; b = 1; a = 1;";
-          e.szFrameCode.clear();
-          e.nColorkey = 0;
-          p->UpdateSpriteProperties(p->m_nSpriteSelected);
-        }
-        return 0;
-      }
-
-      case IDC_MW_SPR_SAVE: {
-        if (p->m_nSpriteSelected >= 0)
-          p->SaveCurrentSpriteProperties();
-        p->SaveSpritesToINI();
-        return 0;
-      }
-
-      case IDC_MW_SPR_RELOAD: {
-        p->m_nSpriteSelected = -1;
-        p->LoadSpritesFromINI();
-        p->PopulateSpriteListView();
-        return 0;
-      }
-
-      case IDC_MW_SPR_OPENINI: {
-        SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-        HINSTANCE hr = ShellExecuteW(NULL, L"open", p->m_szImgIniFile, NULL, NULL, SW_SHOWNORMAL);
-        if ((INT_PTR)hr <= 32)
-          ShellExecuteW(NULL, L"open", L"notepad.exe", p->m_szImgIniFile, NULL, SW_SHOWNORMAL);
-        SetTimer(hWnd, 9999, 500, NULL);
-        return 0;
-      }
-
-      case IDC_MW_SPR_IMG_BROWSE: {
-        if (p->m_nSpriteSelected < 0 || p->m_nSpriteSelected >= (int)p->m_spriteEntries.size()) return 0;
-        SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-        IFileOpenDialog* pDlg = NULL;
-        HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pDlg));
-        if (SUCCEEDED(hr) && pDlg) {
-          COMDLG_FILTERSPEC filters[] = {
-            { L"Image Files", L"*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.dds;*.gif" },
-            { L"All Files", L"*.*" }
-          };
-          pDlg->SetFileTypes(2, filters);
-          pDlg->SetTitle(L"Browse for Sprite Image");
-          if (SUCCEEDED(pDlg->Show(hWnd))) {
-            IShellItem* pItem = NULL;
-            if (SUCCEEDED(pDlg->GetResult(&pItem))) {
-              LPWSTR pPath = NULL;
-              if (SUCCEEDED(pItem->GetDisplayName(SIGDN_FILESYSPATH, &pPath))) {
-                // Convert to relative path when possible
-                std::wstring relPath = MakeRelativeSpritePath(pPath, p->m_szContentBasePath, p->m_szMilkdrop2Path);
-                wcscpy_s(p->m_spriteEntries[p->m_nSpriteSelected].szImg, relPath.c_str());
-                SetDlgItemTextW(hWnd, IDC_MW_SPR_IMG_PATH, relPath.c_str());
-                p->PopulateSpriteListView();
-                ListView_SetItemState(p->m_hSpriteList, p->m_nSpriteSelected, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
-                CoTaskMemFree(pPath);
-              }
-              pItem->Release();
-            }
-          }
-          pDlg->Release();
-        }
-        SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        return 0;
-      }
-      } // end sprite BN_CLICKED switch
     }
 
     return -1;  // not handled
@@ -2600,9 +1986,6 @@ void SettingsWindow::DoBuildControls() {
   HWND hw = m_hWnd;
   if (!hw) return;
 
-  m_pEngine->m_hSpriteList = NULL;
-  if (m_pEngine->m_hSpriteImageList) { ImageList_Destroy((HIMAGELIST)m_pEngine->m_hSpriteImageList); m_pEngine->m_hSpriteImageList = NULL; }
-
   RECT rcWnd;
   GetClientRect(hw, &rcWnd);
   int clientW = rcWnd.right;
@@ -2623,7 +2006,7 @@ void SettingsWindow::DoBuildControls() {
   HFONT hFontBold = m_hFontBold;
 
   // Tab control (base handles creation, subclass, dark theme)
-  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"System", L"Files", L"Messages", L"Sprites", L"Remote", L"Script", L"About" };
+  const wchar_t* tabNames[] = { L"General", L"Visual", L"Colors", L"System", L"Files", L"Remote", L"Script", L"About" };
   RECT rcDisplay = BuildTabControl(IDC_MW_TAB, tabNames, SETTINGS_NUM_PAGES,
                                     0, 0, clientW, clientH);
   int tabTop = rcDisplay.top;
@@ -2731,99 +2114,35 @@ void SettingsWindow::DoBuildControls() {
   #define m_szRandomTexDir _e->m_szRandomTexDir
   #define m_nFallbackTexStyle _e->m_nFallbackTexStyle
   #define m_szFallbackTexFile _e->m_szFallbackTexFile
-  #define m_bMsgAutoplay _e->m_bMsgAutoplay
-  #define m_bMsgSequential _e->m_bMsgSequential
-  #define m_bMessageAutoSize _e->m_bMessageAutoSize
-  #define m_fMsgAutoplayInterval _e->m_fMsgAutoplayInterval
-  #define m_fMsgAutoplayJitter _e->m_fMsgAutoplayJitter
-  #define m_hSpriteList _e->m_hSpriteList
-  #define m_hSpriteImageList _e->m_hSpriteImageList
-  #define m_spriteEntries _e->m_spriteEntries
   #define m_colSettingsCtrlBg _e->m_colSettingsCtrlBg
   #define m_colSettingsText _e->m_colSettingsText
   #define m_script _e->m_script
   #define GetConfigIniFile _e->GetConfigIniFile
   #define EnumerateControllers _e->EnumerateControllers
-  #define PopulateMsgListBox _e->PopulateMsgListBox
-  #define LoadSpritesFromINI _e->LoadSpritesFromINI
-  #define PopulateSpriteListView _e->PopulateSpriteListView
 
   // ====== PAGE 0: General ======
   y = tabTop + 10;
+
+  // ── Launcher buttons row (prominent, always visible) ──
+  {
+    int bx = x, bg = 4;
+    int bw1 = MulDiv(130, lineH, 26);
+    int bw2 = MulDiv(95, lineH, 26);
+    int bw3 = MulDiv(80, lineH, 26);
+    PAGE_CTRL(0, CreateBtn(hw, L"Displays...",  IDC_MW_OPEN_DISPLAYS, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
+    PAGE_CTRL(0, CreateBtn(hw, L"Song Info...", IDC_MW_OPEN_SONGINFO, bx, y, bw2, lineH, hFont)); bx += bw2 + bg;
+    PAGE_CTRL(0, CreateBtn(hw, L"Presets...",   IDC_MW_OPEN_PRESETS,  bx, y, bw3, lineH, hFont)); bx += bw3 + bg;
+    PAGE_CTRL(0, CreateBtn(hw, L"Sprites...",  IDC_MW_OPEN_SPRITES,  bx, y, bw3, lineH, hFont)); bx += bw3 + bg;
+    PAGE_CTRL(0, CreateBtn(hw, L"Messages...", IDC_MW_OPEN_MESSAGES, bx, y, bw3, lineH, hFont)); bx += bw3 + bg;
+    PAGE_CTRL(0, CreateBtn(hw, L"Board...",     IDC_MW_OPEN_BOARD,    bx, y, bw3, lineH, hFont));
+  }
+  y += lineH + gap + 2;
 
   // Current/Startup Preset + Browse
   PAGE_CTRL(0, CreateLabel(hw, L"Current Preset:", x, y, lw, lineH, hFont));
   PAGE_CTRL(0, CreateEdit(hw, m_szCurrentPresetFile, IDC_MW_CURRENT_PRESET, x + lw + 4, y, rw - lw - 74, lineH, hFont, ES_READONLY));
   PAGE_CTRL(0, CreateBtn(hw, L"Browse", IDC_MW_BROWSE_PRESET, x + rw - 65, y, 65, lineH, hFont));
   y += lineH + gap;
-
-  // Preset directory + browse
-  PAGE_CTRL(0, CreateLabel(hw, L"Preset Dir:", x, y, lw, lineH, hFont));
-  {
-    // Show shortened path: just the last 2 directory components
-    wchar_t szShort[MAX_PATH];
-    ShortenDirectoryPath(m_szPresetDir, szShort, MAX_PATH);
-    PAGE_CTRL(0, CreateEdit(hw, szShort, IDC_MW_PRESET_DIR, x + lw + 4, y, rw - lw - 84, lineH, hFont, ES_READONLY));
-  }
-  PAGE_CTRL(0, CreateBtn(hw, L"Browse...", IDC_MW_BROWSE_DIR, x + rw - 75, y, 75, lineH, hFont));
-  y += lineH + gap;
-
-  // Preset listbox
-  {
-    int listH = 8 * lineH;
-    HWND hList = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", NULL,
-      WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
-      x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_PRESET_LIST, GetModuleHandle(NULL), NULL);
-    if (hList && hFont) SendMessage(hList, WM_SETFONT, (WPARAM)hFont, TRUE);
-    for (int i = 0; i < m_nPresets; i++) {
-      if (m_presets[i].szFilename.empty()) continue;
-      SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)m_presets[i].szFilename.c_str());
-    }
-    if (m_nCurrentPreset >= 0 && m_nCurrentPreset < m_nPresets)
-      SendMessage(hList, LB_SETCURSEL, m_nCurrentPreset, 0);
-    PAGE_CTRL(0, hList);
-    y += listH + gap;
-  }
-
-  // Nav buttons
-  {
-    int btnW = MulDiv(40, lineH, 26);
-    int btnGap = 6;
-    PAGE_CTRL(0, CreateBtn(hw, L"\x25C4", IDC_MW_PRESET_PREV, x, y, btnW, lineH + 4, hFont));
-    PAGE_CTRL(0, CreateBtn(hw, L"\x25BA", IDC_MW_PRESET_NEXT, x + btnW + btnGap, y, btnW, lineH + 4, hFont));
-    PAGE_CTRL(0, CreateBtn(hw, L"\x2702", IDC_MW_PRESET_COPY, x + 2 * (btnW + btnGap), y, btnW, lineH + 4, hFont));
-    int dirBtnX = x + 3 * (btnW + btnGap) + 10;
-    int dirBtnW = MulDiv(55, lineH, 26);
-    PAGE_CTRL(0, CreateBtn(hw, L"\x25B2 Up", IDC_MW_PRESET_UP, dirBtnX, y, dirBtnW, lineH + 4, hFont));
-    PAGE_CTRL(0, CreateBtn(hw, L"\x25BC Into", IDC_MW_PRESET_INTO, dirBtnX + dirBtnW + btnGap, y, dirBtnW, lineH + 4, hFont));
-    // Preset filter button (right-aligned): cycles All → .milk → .milk2
-    {
-      const wchar_t* filterLabels[] = { L"All", L".milk", L".milk2" };
-      int filterW = MulDiv(50, lineH, 26);
-      PAGE_CTRL(0, CreateBtn(hw, filterLabels[m_nPresetFilter], IDC_MW_PRESET_FILTER, x + rw - filterW, y, filterW, lineH + 4, hFont));
-    }
-    y += lineH + 4 + gap + 4;
-  }
-
-  // Preset settings
-  PAGE_CTRL(0, CreateLabel(hw, L"Audio Sensitivity (-1=Auto):", x, y, lw, lineH, hFont));
-  swprintf(buf, 64, L"%g", (double)m_fAudioSensitivity);
-  PAGE_CTRL(0, CreateEdit(hw, buf, IDC_MW_AUDIO_SENS, x + lw + 4, y, 60, lineH, hFont));
-  y += lineH + gap;
-
-  PAGE_CTRL(0, CreateLabel(hw, L"Blend Time (s):", x, y, lw, lineH, hFont));
-  swprintf(buf, 64, L"%.1f", m_fBlendTimeAuto);
-  PAGE_CTRL(0, CreateEdit(hw, buf, IDC_MW_BLEND_TIME, x + lw + 4, y, 60, lineH, hFont));
-  y += lineH + gap;
-
-  PAGE_CTRL(0, CreateLabel(hw, L"Time Between (s):", x, y, lw, lineH, hFont));
-  swprintf(buf, 64, L"%.0f", m_fTimeBetweenPresets);
-  PAGE_CTRL(0, CreateEdit(hw, buf, IDC_MW_TIME_BETWEEN, x + lw + 4, y, 60, lineH, hFont));
-  y += lineH + gap + 4;
-
-  PAGE_CTRL(0, CreateCheck(hw, L"Hard Cuts Disabled",      IDC_MW_HARD_CUTS,    x, y, rw, lineH, hFont, m_bHardCutsDisabled)); y += lineH + 2;
-  PAGE_CTRL(0, CreateCheck(hw, L"Preset Lock on Startup",  IDC_MW_PRESET_LOCK,  x, y, rw, lineH, hFont, m_bPresetLockOnAtStartup)); y += lineH + 2;
-  PAGE_CTRL(0, CreateCheck(hw, L"Sequential Preset Order", IDC_MW_SEQ_ORDER,    x, y, rw, lineH, hFont, m_bSequentialPresetOrder)); y += lineH + 2;
 
   // ── Other ──
   PAGE_CTRL(0, CreateLabel(hw, L"Messages/Sprites:", x, y, lw, lineH, hFont));
@@ -2874,13 +2193,6 @@ void SettingsWindow::DoBuildControls() {
     PAGE_CTRL(0, CreateBtn(hw, L"Reset Window", IDC_MW_RESET_WINDOW, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
     PAGE_CTRL(0, CreateBtn(hw, L"Font +", IDC_MW_FONT_PLUS, bx, y, bw2, lineH, hFont)); bx += bw2 + bg;
     PAGE_CTRL(0, CreateBtn(hw, L"Font \x2013", IDC_MW_FONT_MINUS, bx, y, bw2, lineH, hFont));
-  }
-  y += lineH + gap;
-  {
-    int bw = MulDiv(160, lineH, 26), bg = 4;
-    PAGE_CTRL(0, CreateBtn(hw, L"Spout / Displays...", IDC_MW_OPEN_DISPLAYS, x, y, bw, lineH, hFont));
-    int bw2 = MulDiv(120, lineH, 26);
-    PAGE_CTRL(0, CreateBtn(hw, L"Song Info...", IDC_MW_OPEN_SONGINFO, x + bw + bg, y, bw2, lineH, hFont));
   }
 
   // ====== PAGE 1: Visual (created hidden) ======
@@ -3337,310 +2649,29 @@ void SettingsWindow::DoBuildControls() {
     }
   }
 
-  // ===== Messages tab (page 5) =====
-  y = tabTop + 10;
-
-  // Show Messages / Show Sprites toggles
-  {
-    int halfW = rw / 2 - 2;
-    PAGE_CTRL(5, CreateCheck(hw, L"Show Messages", IDC_MW_MSG_SHOW_MESSAGES, x, y, halfW, lineH, hFont, (m_nSpriteMessagesMode & 1) != 0, false));
-    PAGE_CTRL(5, CreateCheck(hw, L"Show Sprites", IDC_MW_MSG_SHOW_SPRITES, x + halfW + 4, y, halfW, lineH, hFont, (m_nSpriteMessagesMode & 2) != 0, false));
-  }
-  y += lineH + gap;
-
-  PAGE_CTRL(5, CreateLabel(hw, L"Custom Messages:", x, y, rw, lineH, hFont, false));
-  y += lineH + 2;
-  {
-    int listH = 10 * lineH;
-    HWND hMsgList = CreateWindowExW(0, L"LISTBOX", L"",
-      WS_CHILD | WS_BORDER | WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_NOTIFY,
-      x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_MSG_LIST,
-      GetModuleHandle(NULL), NULL);
-    if (hMsgList && hFont) SendMessage(hMsgList, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PopulateMsgListBox(hMsgList);
-    PAGE_CTRL(5, hMsgList);
-  }
-  y += 10 * lineH + 4;
-
-  // Button row 1: Push Now, Up, Down, Add, Edit, Delete, Play
-  {
-    int bx = x, btnGap = 4;
-    int pushW = MulDiv(75, lineH, 26), arrowW = MulDiv(30, lineH, 26);
-    int smallW = MulDiv(40, lineH, 26), medW = MulDiv(50, lineH, 26);
-    PAGE_CTRL(5, CreateBtn(hw, L"Push Now", IDC_MW_MSG_PUSH, bx, y, pushW, lineH, hFont));
-    bx += pushW + btnGap;
-    PAGE_CTRL(5, CreateBtn(hw, L"\x25B2", IDC_MW_MSG_UP, bx, y, arrowW, lineH, hFont));
-    bx += arrowW + btnGap;
-    PAGE_CTRL(5, CreateBtn(hw, L"\x25BC", IDC_MW_MSG_DOWN, bx, y, arrowW, lineH, hFont));
-    bx += arrowW + btnGap;
-    PAGE_CTRL(5, CreateBtn(hw, L"Add", IDC_MW_MSG_ADD, bx, y, smallW, lineH, hFont));
-    bx += smallW + btnGap;
-    PAGE_CTRL(5, CreateBtn(hw, L"Edit", IDC_MW_MSG_EDIT, bx, y, smallW, lineH, hFont));
-    bx += smallW + btnGap;
-    PAGE_CTRL(5, CreateBtn(hw, L"Delete", IDC_MW_MSG_DELETE, bx, y, medW, lineH, hFont));
-    bx += medW + btnGap;
-    PAGE_CTRL(5, CreateBtn(hw, m_bMsgAutoplay ? L"Stop" : L"Play", IDC_MW_MSG_PLAY, bx, y, medW, lineH, hFont));
-  }
-  y += lineH + gap;
-
-  {
-    int bx = x, btnGap = 4;
-    int bw1 = MulDiv(130, lineH, 26), bw2 = MulDiv(55, lineH, 26);
-    int bw3 = MulDiv(70, lineH, 26), bw4 = MulDiv(75, lineH, 26);
-    PAGE_CTRL(5, CreateBtn(hw, L"Reload from File", IDC_MW_MSG_RELOAD, bx, y, bw1, lineH, hFont)); bx += bw1 + btnGap;
-    PAGE_CTRL(5, CreateBtn(hw, L"Paste", IDC_MW_MSG_PASTE, bx, y, bw2, lineH, hFont)); bx += bw2 + btnGap;
-    PAGE_CTRL(5, CreateBtn(hw, L"Open INI", IDC_MW_MSG_OPENINI, bx, y, bw3, lineH, hFont)); bx += bw3 + btnGap;
-    PAGE_CTRL(5, CreateBtn(hw, L"Overrides", IDC_MW_MSG_OVERRIDES, bx, y, bw4, lineH, hFont));
-  }
-  y += lineH + gap + 4;
-
-  PAGE_CTRL(5, CreateLabel(hw, L"Font size: 50 = normal, <50 = smaller, >50 = larger (0.01\x2013" L"100)", x, y, rw, lineH, hFont, false));
-  y += lineH + gap;
-
-  // Autoplay controls
-  PAGE_CTRL(5, CreateCheck(hw, L"Autoplay Messages", IDC_MW_MSG_AUTOPLAY, x, y, rw, lineH, hFont, m_bMsgAutoplay, false));
-  y += lineH + 2;
-  PAGE_CTRL(5, CreateCheck(hw, L"Sequential Order", IDC_MW_MSG_SEQUENTIAL, x, y, rw, lineH, hFont, m_bMsgSequential, false));
-  y += lineH + 2;
-  PAGE_CTRL(5, CreateCheck(hw, L"Auto-size messages to fit screen width", IDC_MW_MSG_AUTOSIZE, x, y, rw, lineH, hFont, m_bMessageAutoSize, false));
-  y += lineH + gap;
-
-  // Interval + Jitter on same row
-  {
-    HWND hLbl = CreateLabel(hw, L"Interval (s):", x, y, 90, lineH, hFont, false);
-    if (hLbl) SetWindowLongPtr(hLbl, GWL_ID, IDC_MW_MSG_INTERVAL_LBL);
-    if (hLbl) { m_pageCtrls[5].push_back(hLbl); TrackControl(hLbl); }
-  }
-  swprintf(buf, 64, L"%.1f", m_fMsgAutoplayInterval);
-  PAGE_CTRL(5, CreateEdit(hw, buf, IDC_MW_MSG_INTERVAL, x + 94, y, 60, lineH, hFont, 0));
-  {
-    HWND hLbl = CreateLabel(hw, L"+/- (s):", x + 170, y, 60, lineH, hFont, false);
-    if (hLbl) SetWindowLongPtr(hLbl, GWL_ID, IDC_MW_MSG_JITTER_LBL);
-    if (hLbl) { m_pageCtrls[5].push_back(hLbl); TrackControl(hLbl); }
-  }
-  swprintf(buf, 64, L"%.1f", m_fMsgAutoplayJitter);
-  PAGE_CTRL(5, CreateEdit(hw, buf, IDC_MW_MSG_JITTER, x + 234, y, 60, lineH, hFont, 0));
-  y += lineH + gap;
-
-  // Preview area
-  {
-    HWND hPrev = CreateWindowExW(0, L"STATIC", L"(select a message to preview)",
-      WS_CHILD | SS_LEFT, x, y, rw, lineH * 3, hw,
-      (HMENU)(INT_PTR)IDC_MW_MSG_PREVIEW, GetModuleHandle(NULL), NULL);
-    if (hPrev && hFont) SendMessage(hPrev, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(5, hPrev);
-  }
-
-  // ===== Sprites tab (page 6) =====
-  // (built below after About/Remote to keep insertion order, but PAGE_CTRL(6,...) groups them)
-  y = tabTop + 10;
-
-  PAGE_CTRL(6, CreateLabel(hw, L"Sprites (sprites.ini):", x, y, rw, lineH, hFontBold, false));
-  y += lineH + 2;
-
-  // ListView for sprite entries
-  {
-    int listH = 8 * lineH;
-    m_hSpriteList = CreateThemedListView(IDC_MW_SPR_LIST, x, y, rw, listH, false);
-    PAGE_CTRL(6, m_hSpriteList);
-
-    // Create ImageList for thumbnails (32x32)
-    m_hSpriteImageList = (void*)ImageList_Create(32, 32, ILC_COLOR32, 100, 10);
-    ListView_SetImageList(m_hSpriteList, (HIMAGELIST)m_hSpriteImageList, LVSIL_SMALL);
-
-    // Columns: #, Image, Path
-    LVCOLUMNW col = {};
-    col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
-    col.fmt = LVCFMT_LEFT; col.cx = 60; col.pszText = (LPWSTR)L"#";
-    SendMessageW(m_hSpriteList, LVM_INSERTCOLUMNW, 0, (LPARAM)&col);
-    col.cx = 160; col.pszText = (LPWSTR)L"Image";
-    SendMessageW(m_hSpriteList, LVM_INSERTCOLUMNW, 1, (LPARAM)&col);
-    col.cx = rw - 240; col.pszText = (LPWSTR)L"Path";
-    SendMessageW(m_hSpriteList, LVM_INSERTCOLUMNW, 2, (LPARAM)&col);
-
-    LoadSpritesFromINI();
-    PopulateSpriteListView();
-  }
-  y += 8 * lineH + 4;
-
-  // Button row 1: Push, Kill, Kill All, Defaults
-  {
-    int bx = x, bg = 4;
-    int bw = MulDiv(55, lineH, 26), bwL = MulDiv(65, lineH, 26);
-    PAGE_CTRL(6, CreateBtn(hw, L"Push", IDC_MW_SPR_PUSH, bx, y, bw, lineH, hFont)); bx += bw + bg;
-    PAGE_CTRL(6, CreateBtn(hw, L"Kill", IDC_MW_SPR_KILL, bx, y, bw, lineH, hFont)); bx += bw + bg;
-    PAGE_CTRL(6, CreateBtn(hw, L"Kill All", IDC_MW_SPR_KILLALL, bx, y, bwL, lineH, hFont)); bx += bwL + bg;
-    PAGE_CTRL(6, CreateBtn(hw, L"\u267B Defaults", IDC_MW_SPR_DEFAULTS, bx, y, bwL + MulDiv(14, lineH, 26), lineH, hFont));
-  }
-  y += lineH + gap;
-
-  // Button row 2: Add, Import Folder, Delete, Save, Reload, Open INI
-  {
-    int bx = x, bg = 4;
-    int bw1 = MulDiv(50, lineH, 26), bw2 = MulDiv(100, lineH, 26);
-    int bw3 = MulDiv(55, lineH, 26), bw4 = MulDiv(60, lineH, 26), bw5 = MulDiv(75, lineH, 26);
-    PAGE_CTRL(6, CreateBtn(hw, L"Add", IDC_MW_SPR_ADD, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
-    PAGE_CTRL(6, CreateBtn(hw, L"Import Folder", IDC_MW_SPR_IMPORT, bx, y, bw2, lineH, hFont)); bx += bw2 + bg;
-    PAGE_CTRL(6, CreateBtn(hw, L"Delete", IDC_MW_SPR_DELETE, bx, y, bw3, lineH, hFont)); bx += bw3 + bg;
-    PAGE_CTRL(6, CreateBtn(hw, L"Save", IDC_MW_SPR_SAVE, bx, y, bw1, lineH, hFont)); bx += bw1 + bg;
-    PAGE_CTRL(6, CreateBtn(hw, L"Reload", IDC_MW_SPR_RELOAD, bx, y, bw4, lineH, hFont)); bx += bw4 + bg;
-    PAGE_CTRL(6, CreateBtn(hw, L"Open INI", IDC_MW_SPR_OPENINI, bx, y, bw5, lineH, hFont));
-  }
-  y += lineH + gap + 4;
-
-  // Image path row
-  {
-    int imgLblW = MulDiv(50, lineH, 26);
-    int browseW = MulDiv(65, lineH, 26);
-    PAGE_CTRL(6, CreateLabel(hw, L"Image:", x, y, imgLblW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"", IDC_MW_SPR_IMG_PATH, x + imgLblW + 4, y, rw - imgLblW - browseW - 8, lineH, hFont, ES_READONLY, false));
-    PAGE_CTRL(6, CreateBtn(hw, L"Browse", IDC_MW_SPR_IMG_BROWSE, x + rw - browseW, y, browseW, lineH, hFont));
-  }
-  y += lineH + 2;
-
-  // Scaled dimensions for property rows (base lineH = 26)
-  int propLblW = MulDiv(80, lineH, 26);   // "Position X:", "Colorkey:", etc.
-  int propEditW = MulDiv(55, lineH, 26);   // numeric edit fields
-  int propComboW = MulDiv(120, lineH, 26); // blend/layer combos
-  int propComboLblW = MulDiv(48, lineH, 26); // "Blend:", "Layer:"
-  int propCol2 = x + rw / 2;              // right column start
-
-  // Properties row 1: Blend, Layer
-  {
-    PAGE_CTRL(6, CreateLabel(hw, L"Blend:", x, y, propComboLblW, lineH, hFont, false));
-    HWND hBlend = CreateWindowExW(0, L"COMBOBOX", L"",
-      WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
-      x + propComboLblW, y, propComboW, 200, hw, (HMENU)(INT_PTR)IDC_MW_SPR_BLENDMODE,
-      GetModuleHandle(NULL), NULL);
-    if (hBlend && hFont) SendMessage(hBlend, WM_SETFONT, (WPARAM)hFont, TRUE);
-    const wchar_t* blendNames[] = { L"0: Blend", L"1: Decal", L"2: Additive", L"3: SrcColor", L"4: ColorKey" };
-    for (int i = 0; i < 5; i++) SendMessageW(hBlend, CB_ADDSTRING, 0, (LPARAM)blendNames[i]);
-    PAGE_CTRL(6, hBlend);
-
-    PAGE_CTRL(6, CreateLabel(hw, L"Layer:", propCol2, y, propComboLblW, lineH, hFont, false));
-    HWND hLayer = CreateWindowExW(0, L"COMBOBOX", L"",
-      WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
-      propCol2 + propComboLblW, y, propComboW + MulDiv(20, lineH, 26), 200, hw, (HMENU)(INT_PTR)IDC_MW_SPR_LAYER,
-      GetModuleHandle(NULL), NULL);
-    if (hLayer && hFont) SendMessage(hLayer, WM_SETFONT, (WPARAM)hFont, TRUE);
-    SendMessageW(hLayer, CB_ADDSTRING, 0, (LPARAM)L"0: Behind Text");
-    SendMessageW(hLayer, CB_ADDSTRING, 0, (LPARAM)L"1: On Top of Text");
-    PAGE_CTRL(6, hLayer);
-  }
-  y += lineH + 2;
-
-  // Properties row 2: Position X, Position Y
-  {
-    PAGE_CTRL(6, CreateLabel(hw, L"Position X:", x, y, propLblW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"0.5", IDC_MW_SPR_X, x + propLblW, y, propEditW, lineH, hFont, 0, false));
-
-    PAGE_CTRL(6, CreateLabel(hw, L"Position Y:", propCol2, y, propLblW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"0.5", IDC_MW_SPR_Y, propCol2 + propLblW, y, propEditW, lineH, hFont, 0, false));
-  }
-  y += lineH + 2;
-
-  // Properties row 3: Scale X, Scale Y
-  {
-    PAGE_CTRL(6, CreateLabel(hw, L"Scale X:", x, y, propLblW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"1.0", IDC_MW_SPR_SX, x + propLblW, y, propEditW, lineH, hFont, 0, false));
-
-    PAGE_CTRL(6, CreateLabel(hw, L"Scale Y:", propCol2, y, propLblW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"1.0", IDC_MW_SPR_SY, propCol2 + propLblW, y, propEditW, lineH, hFont, 0, false));
-  }
-  y += lineH + 2;
-
-  // Properties row 4: Rotation, Colorkey
-  {
-    int ckEditW = MulDiv(70, lineH, 26);
-    PAGE_CTRL(6, CreateLabel(hw, L"Rotation:", x, y, propLblW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"0", IDC_MW_SPR_ROT, x + propLblW, y, propEditW, lineH, hFont, 0, false));
-
-    PAGE_CTRL(6, CreateLabel(hw, L"Colorkey:", propCol2, y, propLblW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"0x000000", IDC_MW_SPR_COLORKEY, propCol2 + propLblW, y, ckEditW, lineH, hFont, 0, false));
-  }
-  y += lineH + 2;
-
-  // Properties row 5: Red, Green, Blue, Alpha
-  {
-    int clrLblW = MulDiv(50, lineH, 26);
-    int clrEditW = MulDiv(40, lineH, 26);
-    int clrCol2 = x + rw / 4, clrCol3 = x + rw / 2, clrCol4 = x + 3 * rw / 4;
-
-    PAGE_CTRL(6, CreateLabel(hw, L"Red:", x, y, clrLblW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_R, x + clrLblW, y, clrEditW, lineH, hFont, 0, false));
-
-    PAGE_CTRL(6, CreateLabel(hw, L"Green:", clrCol2, y, clrLblW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_G, clrCol2 + clrLblW, y, clrEditW, lineH, hFont, 0, false));
-
-    PAGE_CTRL(6, CreateLabel(hw, L"Blue:", clrCol3, y, clrLblW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_B, clrCol3 + clrLblW, y, clrEditW, lineH, hFont, 0, false));
-
-    PAGE_CTRL(6, CreateLabel(hw, L"Alpha:", clrCol4, y, clrLblW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_A, clrCol4 + clrLblW, y, clrEditW, lineH, hFont, 0, false));
-  }
-  y += lineH + 2;
-
-  // Properties row 6: Flip X, Flip Y, Burn, Repeat X, Repeat Y
-  {
-    int chkW = MulDiv(55, lineH, 26), chkGap = MulDiv(4, lineH, 26);
-    int chkBurnW = MulDiv(50, lineH, 26);
-    int repLblW = MulDiv(70, lineH, 26), repEditW = MulDiv(40, lineH, 26);
-    int cx = x;
-    PAGE_CTRL(6, CreateCheck(hw, L"Flip X", IDC_MW_SPR_FLIPX, cx, y, chkW, lineH, hFont, false, false)); cx += chkW + chkGap;
-    PAGE_CTRL(6, CreateCheck(hw, L"Flip Y", IDC_MW_SPR_FLIPY, cx, y, chkW, lineH, hFont, false, false)); cx += chkW + chkGap;
-    PAGE_CTRL(6, CreateCheck(hw, L"Burn", IDC_MW_SPR_BURN, cx, y, chkBurnW, lineH, hFont, false, false));
-
-    PAGE_CTRL(6, CreateLabel(hw, L"Repeat X:", propCol2, y, repLblW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_REPEATX, propCol2 + repLblW, y, repEditW, lineH, hFont, 0, false));
-
-    int repYx = propCol2 + repLblW + repEditW + chkGap;
-    PAGE_CTRL(6, CreateLabel(hw, L"Repeat Y:", repYx, y, repLblW, lineH, hFont, false));
-    PAGE_CTRL(6, CreateEdit(hw, L"1", IDC_MW_SPR_REPEATY, repYx + repLblW, y, repEditW, lineH, hFont, 0, false));
-  }
-  y += lineH + gap;
-
-  // Init Code editor
-  PAGE_CTRL(6, CreateLabel(hw, L"Init", x, y, 30, lineH, hFont, false));
-  y += lineH;
-  {
-    int codeH = 4 * lineH;
-    PAGE_CTRL(6, CreateEdit(hw, L"", IDC_MW_SPR_INIT_CODE, x, y, rw, codeH, hFont,
-      ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL, false));
-  }
-  y += 4 * lineH + 4;
-
-  // Per-Frame Code editor
-  PAGE_CTRL(6, CreateLabel(hw, L"Per-Frame", x, y, 80, lineH, hFont, false));
-  y += lineH;
-  {
-    int codeH = 4 * lineH;
-    PAGE_CTRL(6, CreateEdit(hw, L"", IDC_MW_SPR_FRAME_CODE, x, y, rw, codeH, hFont,
-      ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL, false));
-  }
-
-  // ===== Script tab (page 8) =====
+  // ===== Script tab (page 6) =====
   y = tabTop + 10;
 
   // Script file path + Browse
-  PAGE_CTRL(8, CreateLabel(hw, L"Script File:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(8, CreateEdit(hw, L"", IDC_MW_SCRIPT_FILE, x + lw + 4, y, rw - lw - 4 - 80 - 4, lineH, hFont, ES_READONLY, false));
-  PAGE_CTRL(8, CreateBtn(hw, L"Browse...", IDC_MW_SCRIPT_BROWSE, x + rw - 80, y, 80, lineH, hFont, false));
+  PAGE_CTRL(6, CreateLabel(hw, L"Script File:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(6, CreateEdit(hw, L"", IDC_MW_SCRIPT_FILE, x + lw + 4, y, rw - lw - 4 - 80 - 4, lineH, hFont, ES_READONLY, false));
+  PAGE_CTRL(6, CreateBtn(hw, L"Browse...", IDC_MW_SCRIPT_BROWSE, x + rw - 80, y, 80, lineH, hFont, false));
   y += lineH + gap;
 
   // Play / Stop / Loop
   {
     int btnW = MulDiv(80, lineH, 26);
-    PAGE_CTRL(8, CreateBtn(hw, L"Play", IDC_MW_SCRIPT_PLAY, x, y, btnW, lineH, hFont, false));
-    PAGE_CTRL(8, CreateBtn(hw, L"Stop", IDC_MW_SCRIPT_STOP, x + btnW + 4, y, btnW, lineH, hFont, false));
-    PAGE_CTRL(8, CreateCheck(hw, L"Loop", IDC_MW_SCRIPT_LOOP, x + btnW * 2 + 12, y, 80, lineH, hFont, false, false));
+    PAGE_CTRL(6, CreateBtn(hw, L"Play", IDC_MW_SCRIPT_PLAY, x, y, btnW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateBtn(hw, L"Stop", IDC_MW_SCRIPT_STOP, x + btnW + 4, y, btnW, lineH, hFont, false));
+    PAGE_CTRL(6, CreateCheck(hw, L"Loop", IDC_MW_SCRIPT_LOOP, x + btnW * 2 + 12, y, 80, lineH, hFont, false, false));
     y += lineH + gap;
   }
 
   // BPM + Beats
-  PAGE_CTRL(8, CreateLabel(hw, L"BPM:", x, y, 40, lineH, hFont, false));
-  PAGE_CTRL(8, CreateEdit(hw, L"120.0", IDC_MW_SCRIPT_BPM, x + 44, y, 70, lineH, hFont, 0, false));
-  PAGE_CTRL(8, CreateLabel(hw, L"Beats:", x + 130, y, 50, lineH, hFont, false));
-  PAGE_CTRL(8, CreateEdit(hw, L"4", IDC_MW_SCRIPT_BEATS, x + 184, y, 50, lineH, hFont, 0, false));
+  PAGE_CTRL(6, CreateLabel(hw, L"BPM:", x, y, 40, lineH, hFont, false));
+  PAGE_CTRL(6, CreateEdit(hw, L"120.0", IDC_MW_SCRIPT_BPM, x + 44, y, 70, lineH, hFont, 0, false));
+  PAGE_CTRL(6, CreateLabel(hw, L"Beats:", x + 130, y, 50, lineH, hFont, false));
+  PAGE_CTRL(6, CreateEdit(hw, L"4", IDC_MW_SCRIPT_BEATS, x + 184, y, 50, lineH, hFont, 0, false));
   y += lineH + gap;
 
   // Line status label (with ID for dynamic updates)
@@ -3649,7 +2680,7 @@ void SettingsWindow::DoBuildControls() {
       WS_CHILD | SS_LEFT, x, y, rw, lineH, hw,
       (HMENU)(INT_PTR)IDC_MW_SCRIPT_LINE, GetModuleHandle(NULL), NULL);
     if (hLineLabel && hFont) SendMessage(hLineLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(8, hLineLabel);
+    PAGE_CTRL(6, hLineLabel);
   }
   y += lineH + gap;
 
@@ -3660,16 +2691,16 @@ void SettingsWindow::DoBuildControls() {
       WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
       x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_SCRIPT_LIST, GetModuleHandle(NULL), NULL);
     if (hScriptList && hFont) SendMessage(hScriptList, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(8, hScriptList);
+    PAGE_CTRL(6, hScriptList);
   }
 
-  // ===== About tab (page 9) =====
+  // ===== About tab (page 7) =====
   y = tabTop + 10;
 
-  PAGE_CTRL(9, CreateLabel(hw, L"MDropDX12", x, y, rw, 24, hFontBold, false));
+  PAGE_CTRL(7, CreateLabel(hw, L"MDropDX12", x, y, rw, 24, hFontBold, false));
   y += 28;
 
-  PAGE_CTRL(9, CreateLabel(hw, L"Version 1.3", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(7, CreateLabel(hw, L"Version 1.3", x, y, rw, lineH, hFont, false));
   y += lineH + 4;
 
   {
@@ -3678,98 +2709,98 @@ void SettingsWindow::DoBuildControls() {
     MultiByteToWideChar(CP_ACP, 0, __DATE__, -1, wDate, 32);
     MultiByteToWideChar(CP_ACP, 0, __TIME__, -1, wTime, 32);
     swprintf(szBuild, 128, L"Built: %s  %s", wDate, wTime);
-    PAGE_CTRL(9, CreateLabel(hw, szBuild, x, y, rw, lineH, hFont, false));
+    PAGE_CTRL(7, CreateLabel(hw, szBuild, x, y, rw, lineH, hFont, false));
     y += lineH + 4;
   }
 
-  PAGE_CTRL(9, CreateLabel(hw, L"MilkDrop2-based music visualizer", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(7, CreateLabel(hw, L"MilkDrop2-based music visualizer", x, y, rw, lineH, hFont, false));
   y += lineH + 4;
-  PAGE_CTRL(9, CreateLabel(hw, L"DirectX 12 / Windows 11 64-bit", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(7, CreateLabel(hw, L"DirectX 12 / Windows 11 64-bit", x, y, rw, lineH, hFont, false));
   y += lineH + 12;
 
   // Paths section
-  PAGE_CTRL(9, CreateLabel(hw, L"Paths:", x, y, rw, lineH, hFontBold, false));
+  PAGE_CTRL(7, CreateLabel(hw, L"Paths:", x, y, rw, lineH, hFontBold, false));
   y += lineH + 2;
   {
     wchar_t buf[MAX_PATH + 64];
     swprintf(buf, MAX_PATH + 64, L"Base Dir:  %s", m_szBaseDir);
-    PAGE_CTRL(9, CreateLabel(hw, buf, x, y, rw, lineH, hFont, false));
+    PAGE_CTRL(7, CreateLabel(hw, buf, x, y, rw, lineH, hFont, false));
     y += lineH + 2;
     swprintf(buf, MAX_PATH + 64, L"Settings:  %s", GetConfigIniFile());
-    PAGE_CTRL(9, CreateLabel(hw, buf, x, y, rw, lineH, hFont, false));
+    PAGE_CTRL(7, CreateLabel(hw, buf, x, y, rw, lineH, hFont, false));
     y += lineH + 2;
     swprintf(buf, MAX_PATH + 64, L"Presets:   %s", m_szPresetDir);
-    PAGE_CTRL(9, CreateLabel(hw, buf, x, y, rw, lineH, hFont, false));
+    PAGE_CTRL(7, CreateLabel(hw, buf, x, y, rw, lineH, hFont, false));
     y += lineH + 2;
   }
   y += 8;
 
   // Debug Log Level radio buttons
-  PAGE_CTRL(9, CreateLabel(hw, L"Debug Log Level:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(7, CreateLabel(hw, L"Debug Log Level:", x, y, lw, lineH, hFont, false));
   {
     int rx = x + lw + 4;
     int rbw = 80;
-    PAGE_CTRL(9, CreateRadio(hw, L"Off",     IDC_MW_LOGLEVEL_OFF,     rx,            y, rbw, lineH, hFont, m_LogLevel == 0, true,  false));
+    PAGE_CTRL(7, CreateRadio(hw, L"Off",     IDC_MW_LOGLEVEL_OFF,     rx,            y, rbw, lineH, hFont, m_LogLevel == 0, true,  false));
     rx += rbw;
-    PAGE_CTRL(9, CreateRadio(hw, L"Error",   IDC_MW_LOGLEVEL_ERROR,   rx,            y, rbw, lineH, hFont, m_LogLevel == 1, false, false));
+    PAGE_CTRL(7, CreateRadio(hw, L"Error",   IDC_MW_LOGLEVEL_ERROR,   rx,            y, rbw, lineH, hFont, m_LogLevel == 1, false, false));
     rx += rbw;
-    PAGE_CTRL(9, CreateRadio(hw, L"Warn",    IDC_MW_LOGLEVEL_WARN,    rx,            y, rbw, lineH, hFont, m_LogLevel == 2, false, false));
+    PAGE_CTRL(7, CreateRadio(hw, L"Warn",    IDC_MW_LOGLEVEL_WARN,    rx,            y, rbw, lineH, hFont, m_LogLevel == 2, false, false));
     rx += rbw;
-    PAGE_CTRL(9, CreateRadio(hw, L"Info",    IDC_MW_LOGLEVEL_INFO,    rx,            y, rbw, lineH, hFont, m_LogLevel == 3, false, false));
+    PAGE_CTRL(7, CreateRadio(hw, L"Info",    IDC_MW_LOGLEVEL_INFO,    rx,            y, rbw, lineH, hFont, m_LogLevel == 3, false, false));
     rx += rbw;
-    PAGE_CTRL(9, CreateRadio(hw, L"Verbose", IDC_MW_LOGLEVEL_VERBOSE, rx,            y, rbw, lineH, hFont, m_LogLevel == 4, false, false));
+    PAGE_CTRL(7, CreateRadio(hw, L"Verbose", IDC_MW_LOGLEVEL_VERBOSE, rx,            y, rbw, lineH, hFont, m_LogLevel == 4, false, false));
   }
   y += lineH + 8;
 
   // File Association button
-  PAGE_CTRL(9, CreateLabel(hw, L"File Association:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(7, CreateLabel(hw, L"File Association:", x, y, lw, lineH, hFont, false));
   {
     int btnW = MulDiv(200, lineH, 26);
-    PAGE_CTRL(9, CreateBtn(hw, L"Register .milk / .milk2", IDC_MW_FILE_ASSOC, x + lw + 4, y, btnW, lineH, hFont, false));
+    PAGE_CTRL(7, CreateBtn(hw, L"Register .milk / .milk2", IDC_MW_FILE_ASSOC, x + lw + 4, y, btnW, lineH, hFont, false));
   }
   y += lineH + 2;
-  PAGE_CTRL(9, CreateLabel(hw, L"(Associates preset files with this exe for double-click open)", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
+  PAGE_CTRL(7, CreateLabel(hw, L"(Associates preset files with this exe for double-click open)", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
 
-  // ===== Remote tab (page 7) =====
+  // ===== Remote tab (page 5) =====
   y = tabTop + 10;
 
   // Section header
-  PAGE_CTRL(7, CreateLabel(hw, L"Milkwave Remote Compatibility", x, y, rw, lineH, hFontBold, false));
+  PAGE_CTRL(5, CreateLabel(hw, L"Milkwave Remote Compatibility", x, y, rw, lineH, hFontBold, false));
   y += lineH + gap;
 
   // Info line
-  PAGE_CTRL(7, CreateLabel(hw, L"Configure window titles so Milkwave Remote (or other controllers) can discover this instance.", x, y, rw, lineH * 2, hFont, false));
+  PAGE_CTRL(5, CreateLabel(hw, L"Configure window titles so Milkwave Remote (or other controllers) can discover this instance.", x, y, rw, lineH * 2, hFont, false));
   y += lineH * 2 + gap;
 
   // Window Title
-  PAGE_CTRL(7, CreateLabel(hw, L"Window Title:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(7, CreateEdit(hw, m_szWindowTitle, IDC_MW_IPC_TITLE, x + lw + 4, y, rw - lw - 4, lineH, hFont, 0, false));
+  PAGE_CTRL(5, CreateLabel(hw, L"Window Title:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(5, CreateEdit(hw, m_szWindowTitle, IDC_MW_IPC_TITLE, x + lw + 4, y, rw - lw - 4, lineH, hFont, 0, false));
   y += lineH + 2;
 
   // Hint
-  PAGE_CTRL(7, CreateLabel(hw, L"(empty = \"MDropDX12 Visualizer\"  |  e.g. \"Milkwave Visualizer\")", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
+  PAGE_CTRL(5, CreateLabel(hw, L"(empty = \"MDropDX12 Visualizer\"  |  e.g. \"Milkwave Visualizer\")", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
   y += lineH + gap;
 
   // Remote Window Title
-  PAGE_CTRL(7, CreateLabel(hw, L"Remote Title:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(7, CreateEdit(hw, m_szRemoteWindowTitle, IDC_MW_IPC_REMOTE_TITLE, x + lw + 4, y, rw - lw - 4, lineH, hFont, 0, false));
+  PAGE_CTRL(5, CreateLabel(hw, L"Remote Title:", x, y, lw, lineH, hFont, false));
+  PAGE_CTRL(5, CreateEdit(hw, m_szRemoteWindowTitle, IDC_MW_IPC_REMOTE_TITLE, x + lw + 4, y, rw - lw - 4, lineH, hFont, 0, false));
   y += lineH + 2;
 
   // Hint
-  PAGE_CTRL(7, CreateLabel(hw, L"(empty = \"MDropDX12 Remote\"  |  e.g. \"Milkwave Remote\")", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
+  PAGE_CTRL(5, CreateLabel(hw, L"(empty = \"MDropDX12 Remote\"  |  e.g. \"Milkwave Remote\")", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
   y += lineH + gap;
 
   // Apply button + Capture Screenshot button
   {
     int applyW = MulDiv(150, lineH, 26);
-    PAGE_CTRL(7, CreateBtn(hw, L"Apply && Restart IPC", IDC_MW_IPC_APPLY, x, y, applyW, lineH, hFont, false));
+    PAGE_CTRL(5, CreateBtn(hw, L"Apply && Restart IPC", IDC_MW_IPC_APPLY, x, y, applyW, lineH, hFont, false));
     int captureW = MulDiv(130, lineH, 26);
-    PAGE_CTRL(7, CreateBtn(hw, L"Save Screenshot...", IDC_MW_IPC_CAPTURE, x + applyW + 8, y, captureW, lineH, hFont, false));
+    PAGE_CTRL(5, CreateBtn(hw, L"Save Screenshot...", IDC_MW_IPC_CAPTURE, x + applyW + 8, y, captureW, lineH, hFont, false));
     y += lineH + gap + 8;
   }
 
   // Active IPC Windows section
-  PAGE_CTRL(7, CreateLabel(hw, L"Active IPC Windows", x, y, rw, lineH, hFontBold, false));
+  PAGE_CTRL(5, CreateLabel(hw, L"Active IPC Windows", x, y, rw, lineH, hFontBold, false));
   y += lineH + gap;
 
   // IPC list box
@@ -3779,7 +2810,7 @@ void SettingsWindow::DoBuildControls() {
       WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
       x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_IPC_LIST, GetModuleHandle(NULL), NULL);
     if (hIPCList && hFont) SendMessage(hIPCList, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(7, hIPCList);
+    PAGE_CTRL(5, hIPCList);
     y += listH + gap;
   }
 
@@ -3791,7 +2822,7 @@ void SettingsWindow::DoBuildControls() {
       x, y, rw, groupH, hw, (HMENU)(INT_PTR)IDC_MW_IPC_MSG_GROUP,
       GetModuleHandle(NULL), NULL);
     if (hGroup && hFont) SendMessage(hGroup, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(7, hGroup);
+    PAGE_CTRL(5, hGroup);
 
     int pad = 8;
     HWND hMsgText = CreateWindowExW(0, L"EDIT", L"",
@@ -3800,7 +2831,7 @@ void SettingsWindow::DoBuildControls() {
       hw, (HMENU)(INT_PTR)IDC_MW_IPC_MSG_TEXT,
       GetModuleHandle(NULL), NULL);
     if (hMsgText && hFont) SendMessage(hMsgText, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(7, hMsgText);
+    PAGE_CTRL(5, hMsgText);
   }
 
   // Populate IPC list with current state
@@ -3868,22 +2899,11 @@ void SettingsWindow::DoBuildControls() {
   #undef m_szRandomTexDir
   #undef m_nFallbackTexStyle
   #undef m_szFallbackTexFile
-  #undef m_bMsgAutoplay
-  #undef m_bMsgSequential
-  #undef m_bMessageAutoSize
-  #undef m_fMsgAutoplayInterval
-  #undef m_fMsgAutoplayJitter
-  #undef m_hSpriteList
-  #undef m_hSpriteImageList
-  #undef m_spriteEntries
   #undef m_colSettingsCtrlBg
   #undef m_colSettingsText
   #undef m_script
   #undef GetConfigIniFile
   #undef EnumerateControllers
-  #undef PopulateMsgListBox
-  #undef LoadSpritesFromINI
-  #undef PopulateSpriteListView
 
   SelectInitialTab();
 }
@@ -3939,23 +2959,6 @@ void SettingsWindow::LayoutControls() {
     HWND hBrw = GetDlgItem(m_hWnd, IDC_MW_BROWSE_PRESET);
     if (hBrw) MoveWindow(hBrw, xMargin + rw - 65, r.top, 65, r.bottom - r.top, TRUE);
   }
-  HWND hDir = GetDlgItem(m_hWnd, IDC_MW_PRESET_DIR);
-  if (hDir) {
-    RECT r; GetWindowRect(hDir, &r);
-    MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
-    MoveWindow(hDir, r.left, r.top, xMargin + rw - 80 - r.left, r.bottom - r.top, TRUE);
-    HWND hBrw = GetDlgItem(m_hWnd, IDC_MW_BROWSE_DIR);
-    if (hBrw) MoveWindow(hBrw, xMargin + rw - 75, r.top, 75, r.bottom - r.top, TRUE);
-  }
-
-  // Stretch preset listbox
-  HWND hList = GetDlgItem(m_hWnd, IDC_MW_PRESET_LIST);
-  if (hList) {
-    RECT r; GetWindowRect(hList, &r);
-    MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
-    MoveWindow(hList, r.left, r.top, rw, r.bottom - r.top, TRUE);
-  }
-
   // Stretch audio combo
   HWND hAudio = GetDlgItem(m_hWnd, IDC_MW_AUDIO_DEVICE);
   if (hAudio) {
@@ -4054,107 +3057,6 @@ void SettingsWindow::LayoutControls() {
     HWND hCfClear = GetDlgItem(m_hWnd, IDC_MW_FALLBACK_FILE_CLEAR);
     if (hCfBrowse) MoveWindow(hCfBrowse, r.left, cfBtnY, rbw1, lineH, TRUE);
     if (hCfClear) MoveWindow(hCfClear, r.left + rbw1 + 4, cfBtnY, rbw2, lineH, TRUE);
-  }
-
-  // Stretch Messages tab ListBox and reposition all controls below it
-  HWND hMsgList = GetDlgItem(m_hWnd, IDC_MW_MSG_LIST);
-  if (hMsgList) {
-    RECT r; GetWindowRect(hMsgList, &r);
-    MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
-    int gap = 6;
-    // Reserve: gap + buttons + gap + reload + gap+4 + autoplay + 2 + sequential + gap + interval + gap + preview
-    int reserveBelow = 4 + (lineH + gap) + (lineH + gap + 4) + (lineH + 2) + (lineH + gap) + (lineH + gap) + lineH * 3;
-    int listBottom = rcDisplay.bottom - reserveBelow;
-    if (listBottom < r.top + 60) listBottom = r.top + 60;
-    MoveWindow(hMsgList, r.left, r.top, rw, listBottom - r.top, TRUE);
-
-    // Reposition all controls below the resized listbox
-    int y = listBottom + 4;
-    int x = r.left;
-    // Button row
-    int bx = x, btnGap = 4;
-    int pushW = MulDiv(75, lineH, 26), arrowW = MulDiv(30, lineH, 26);
-    int smallW = MulDiv(40, lineH, 26), medW = MulDiv(50, lineH, 26);
-    auto moveCtrl = [&](int id, int cx, int cy, int cw, int ch) {
-      HWND h = GetDlgItem(m_hWnd, id);
-      if (h) MoveWindow(h, cx, cy, cw, ch, TRUE);
-    };
-    moveCtrl(IDC_MW_MSG_PUSH, bx, y, pushW, lineH); bx += pushW + btnGap;
-    moveCtrl(IDC_MW_MSG_UP, bx, y, arrowW, lineH); bx += arrowW + btnGap;
-    moveCtrl(IDC_MW_MSG_DOWN, bx, y, arrowW, lineH); bx += arrowW + btnGap;
-    moveCtrl(IDC_MW_MSG_ADD, bx, y, smallW, lineH); bx += smallW + btnGap;
-    moveCtrl(IDC_MW_MSG_EDIT, bx, y, smallW, lineH); bx += smallW + btnGap;
-    moveCtrl(IDC_MW_MSG_DELETE, bx, y, medW, lineH); bx += medW + btnGap;
-    moveCtrl(IDC_MW_MSG_PLAY, bx, y, medW, lineH);
-    y += lineH + gap;
-    // Reload + Paste + Open INI + Overrides
-    {
-      int rbx = x;
-      int bw1 = MulDiv(130, lineH, 26), bw2 = MulDiv(55, lineH, 26);
-      int bw3 = MulDiv(70, lineH, 26), bw4 = MulDiv(75, lineH, 26);
-      moveCtrl(IDC_MW_MSG_RELOAD, rbx, y, bw1, lineH); rbx += bw1 + btnGap;
-      moveCtrl(IDC_MW_MSG_PASTE, rbx, y, bw2, lineH); rbx += bw2 + btnGap;
-      moveCtrl(IDC_MW_MSG_OPENINI, rbx, y, bw3, lineH); rbx += bw3 + btnGap;
-      moveCtrl(IDC_MW_MSG_OVERRIDES, rbx, y, bw4, lineH);
-    }
-    y += lineH + gap + 4;
-    // Checkboxes
-    moveCtrl(IDC_MW_MSG_AUTOPLAY, x, y, rw, lineH);
-    y += lineH + 2;
-    moveCtrl(IDC_MW_MSG_SEQUENTIAL, x, y, rw, lineH);
-    y += lineH + 2;
-    moveCtrl(IDC_MW_MSG_AUTOSIZE, x, y, rw, lineH);
-    y += lineH + gap;
-    // Interval + Jitter labels and edits
-    moveCtrl(IDC_MW_MSG_INTERVAL_LBL, x, y, 90, lineH);
-    moveCtrl(IDC_MW_MSG_INTERVAL, x + 94, y, 60, lineH);
-    moveCtrl(IDC_MW_MSG_JITTER_LBL, x + 170, y, 60, lineH);
-    moveCtrl(IDC_MW_MSG_JITTER, x + 234, y, 60, lineH);
-    y += lineH + gap;
-    // Preview
-    moveCtrl(IDC_MW_MSG_PREVIEW, x, y, rw, lineH * 3);
-  }
-
-  // Stretch Sprites tab ListView to fill width
-  if (m_pEngine->m_hSpriteList) {
-    RECT r; GetWindowRect(m_pEngine->m_hSpriteList, &r);
-    MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
-    MoveWindow(m_pEngine->m_hSpriteList, r.left, r.top, rw, r.bottom - r.top, TRUE);
-    // Resize the Path column to fill remaining width
-    int col0w = (int)SendMessageW(m_pEngine->m_hSpriteList, LVM_GETCOLUMNWIDTH, 0, 0);
-    int col1w = (int)SendMessageW(m_pEngine->m_hSpriteList, LVM_GETCOLUMNWIDTH, 1, 0);
-    int col2w = rw - col0w - col1w - 4;
-    if (col2w > 50)
-      SendMessageW(m_pEngine->m_hSpriteList, LVM_SETCOLUMNWIDTH, 2, col2w);
-  }
-  // Stretch sprite image path edit to fill width
-  {
-    HWND hPath = GetDlgItem(m_hWnd, IDC_MW_SPR_IMG_PATH);
-    HWND hBrowse = GetDlgItem(m_hWnd, IDC_MW_SPR_IMG_BROWSE);
-    if (hPath && hBrowse) {
-      RECT rp; GetWindowRect(hPath, &rp);
-      MapWindowPoints(NULL, m_hWnd, (POINT*)&rp, 2);
-      int browseW = 65;
-      int pathW = rw - (rp.left - rcDisplay.left) - browseW - 4;
-      if (pathW > 50) {
-        MoveWindow(hPath, rp.left, rp.top, pathW, rp.bottom - rp.top, TRUE);
-        RECT rb; GetWindowRect(hBrowse, &rb);
-        MapWindowPoints(NULL, m_hWnd, (POINT*)&rb, 2);
-        MoveWindow(hBrowse, rp.left + pathW + 4, rb.top, browseW, rb.bottom - rb.top, TRUE);
-      }
-    }
-  }
-  // Stretch sprite code editors to fill width
-  {
-    auto stretchEdit = [&](int id) {
-      HWND h = GetDlgItem(m_hWnd, id);
-      if (!h) return;
-      RECT r; GetWindowRect(h, &r);
-      MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
-      MoveWindow(h, r.left, r.top, rw, r.bottom - r.top, TRUE);
-    };
-    stretchEdit(IDC_MW_SPR_INIT_CODE);
-    stretchEdit(IDC_MW_SPR_FRAME_CODE);
   }
 
   // Stretch Remote tab edit fields and list box to fill width
@@ -4427,59 +3329,6 @@ static BOOL CALLBACK FindAltMonitorProc(HMONITOR hMon, HDC, LPRECT, LPARAM lp) {
     return FALSE; // stop enumerating
   }
   return TRUE;
-}
-
-void SettingsWindow::NavigatePresetDirUp() {
-  Engine* p = m_pEngine;
-  wchar_t* pDir = p->GetPresetDir();
-  int dirLen = lstrlenW(pDir);
-
-  // Strip trailing backslash, find previous one, truncate after it
-  wchar_t* p2 = wcsrchr(pDir, L'\\');
-  if (p2 && p2 > pDir) {
-    *p2 = 0;
-    p2 = wcsrchr(pDir, L'\\');
-    if (p2) *(p2 + 1) = 0;
-    else lstrcatW(pDir, L"\\");  // keep drive root as "X:\"
-  } else {
-    return;  // nowhere to go
-  }
-  WritePrivateProfileStringW(L"Settings", L"szPresetDir", pDir, p->GetConfigIniFile());
-  p->UpdatePresetList(false, true, false);
-  p->m_nCurrentPreset = -1;
-
-  SetWindowTextW(GetDlgItem(m_hWnd, IDC_MW_PRESET_DIR), pDir);
-  HWND hList = GetDlgItem(m_hWnd, IDC_MW_PRESET_LIST);
-  if (hList) {
-    SendMessage(hList, LB_RESETCONTENT, 0, 0);
-    for (int i = 0; i < p->m_nPresets; i++) {
-      if (p->m_presets[i].szFilename.empty()) continue;
-      SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
-    }
-  }
-}
-
-void SettingsWindow::NavigatePresetDirInto(int sel) {
-  Engine* p = m_pEngine;
-  if (sel < 0 || sel >= p->m_nPresets) return;
-  if (p->m_presets[sel].szFilename.c_str()[0] != L'*') return;
-
-  wchar_t* pDir = p->GetPresetDir();
-  lstrcatW(pDir, &p->m_presets[sel].szFilename.c_str()[1]);
-  lstrcatW(pDir, L"\\");
-  WritePrivateProfileStringW(L"Settings", L"szPresetDir", pDir, p->GetConfigIniFile());
-  p->UpdatePresetList(false, true, false);
-  p->m_nCurrentPreset = -1;
-
-  SetWindowTextW(GetDlgItem(m_hWnd, IDC_MW_PRESET_DIR), pDir);
-  HWND hList = GetDlgItem(m_hWnd, IDC_MW_PRESET_LIST);
-  if (hList) {
-    SendMessage(hList, LB_RESETCONTENT, 0, 0);
-    for (int i = 0; i < p->m_nPresets; i++) {
-      if (p->m_presets[i].szFilename.empty()) continue;
-      SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_presets[i].szFilename.c_str());
-    }
-  }
 }
 
 void SettingsWindow::EnsureVisible() {
@@ -5247,7 +4096,8 @@ void Engine::PopulateSpriteListView() {
 }
 
 void Engine::UpdateSpriteProperties(int sel) {
-  HWND hw = m_settingsWindow ? m_settingsWindow->GetHWND() : NULL;
+  HWND hw = (m_spritesWindow && m_spritesWindow->IsOpen()) ? m_spritesWindow->GetHWND() :
+            m_settingsWindow ? m_settingsWindow->GetHWND() : NULL;
   if (!hw || sel < 0 || sel >= (int)m_spriteEntries.size()) return;
 
   auto& e = m_spriteEntries[sel];
@@ -5333,7 +4183,8 @@ void Engine::UpdateSpriteProperties(int sel) {
 }
 
 void Engine::SaveCurrentSpriteProperties() {
-  HWND hw = m_settingsWindow ? m_settingsWindow->GetHWND() : NULL;
+  HWND hw = (m_spritesWindow && m_spritesWindow->IsOpen()) ? m_spritesWindow->GetHWND() :
+            m_settingsWindow ? m_settingsWindow->GetHWND() : NULL;
   if (!hw || m_nSpriteSelected < 0 || m_nSpriteSelected >= (int)m_spriteEntries.size()) return;
 
   auto& e = m_spriteEntries[m_nSpriteSelected];

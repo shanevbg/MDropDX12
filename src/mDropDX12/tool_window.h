@@ -238,8 +238,6 @@ private:
   int  m_lastSeenIPCSeq = 0;
 
   void LayoutControls();
-  void NavigatePresetDirUp();
-  void NavigatePresetDirInto(int sel);
   void RefreshIPCList();
   void UpdateVisualUI();
   void UpdateColorsUI();
@@ -327,6 +325,141 @@ private:
   void StopLearn();
   void OnMidiData(LPARAM lParam);
   static const wchar_t* KnobActionName(MidiKnobAction id);
+};
+
+// ── Concrete subclass: Sprites window ──
+
+class SpritesWindow : public ToolWindow {
+public:
+  SpritesWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Sprites"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12SpritesWnd"; }
+  const wchar_t* GetINISection() const override  { return L"SpritesWnd"; }
+  int GetPinControlID() const override       { return IDC_MW_SPRITES_WIN_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_SPRITES_WIN_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_SPRITES_WIN_FONT_MINUS; }
+  int GetMinWidth() const override  { return 480; }
+  int GetMinHeight() const override { return 500; }
+
+  void    OnResize() override;
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  LRESULT DoNotify(HWND hWnd, NMHDR* pnm) override;
+  void    DoDestroy() override;
+
+private:
+  HWND m_hList = NULL;
+  int  m_nTopY = 0;
+};
+
+// ── Concrete subclass: Messages window ──
+
+class MessagesWindow : public ToolWindow {
+public:
+  MessagesWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Messages"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12MessagesWnd"; }
+  const wchar_t* GetINISection() const override  { return L"MessagesWnd"; }
+  int GetPinControlID() const override       { return IDC_MW_MESSAGES_WIN_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_MESSAGES_WIN_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_MESSAGES_WIN_FONT_MINUS; }
+  int GetMinWidth() const override  { return 420; }
+  int GetMinHeight() const override { return 480; }
+
+  void    OnResize() override;
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  void    DoDestroy() override;
+
+private:
+  int  m_nTopY = 0;
+};
+
+// ── Concrete subclass: Presets window ──
+
+class PresetsWindow : public ToolWindow {
+public:
+  PresetsWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Presets"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12PresetsWnd"; }
+  const wchar_t* GetINISection() const override  { return L"PresetsWnd"; }
+  int GetPinControlID() const override       { return IDC_MW_PRESETS_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_PRESETS_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_PRESETS_FONT_MINUS; }
+  int GetMinWidth() const override  { return 420; }
+  int GetMinHeight() const override { return 400; }
+
+  void    OnResize() override;
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  LRESULT DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) override;
+  void    DoDestroy() override;
+
+private:
+  HWND m_hCurrentPreset = NULL, m_hBrowsePreset = NULL;
+  HWND m_hPresetDir = NULL, m_hBrowseDir = NULL;
+  HWND m_hLblPreset = NULL, m_hLblDir = NULL;
+  HWND m_hList = NULL;
+  HWND m_hBtnPrev = NULL, m_hBtnNext = NULL, m_hBtnCopy = NULL;
+  HWND m_hBtnUp = NULL, m_hBtnInto = NULL, m_hBtnFilter = NULL;
+  HWND m_hLblSens = NULL, m_hEditSens = NULL;
+  HWND m_hLblBlend = NULL, m_hEditBlend = NULL;
+  HWND m_hLblTime = NULL, m_hEditTime = NULL;
+  HWND m_hChkHardCuts = NULL, m_hChkLock = NULL, m_hChkSeq = NULL;
+  int  m_nTopY = 0;
+
+  void LayoutControls();
+  void RefreshPresetList();
+  void UpdateCurrentPresetDisplay();
+  void UpdatePresetDirDisplay();
+  void NavigatePresetDirUp();
+  void NavigatePresetDirInto(int sel);
+};
+
+// ── Concrete subclass: Button Board window ──
+
+class ButtonPanel; // forward (defined in button_panel.h)
+
+class ButtonBoardWindow : public ToolWindow {
+public:
+  ButtonBoardWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Button Board"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12BoardWnd"; }
+  const wchar_t* GetINISection() const override  { return L"BoardWnd"; }
+  int GetPinControlID() const override       { return IDC_MW_BOARD_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_BOARD_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_BOARD_FONT_MINUS; }
+  int GetMinWidth() const override  { return 300; }
+  int GetMinHeight() const override { return 250; }
+
+  void    OnResize() override;
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  void    DoDestroy() override;
+
+private:
+  ButtonPanel* m_pPanel = NULL; // owned, heap-allocated (avoids header include)
+  HWND m_hBankPrev  = NULL;
+  HWND m_hBankNext  = NULL;
+  HWND m_hBankLabel = NULL;
+  HWND m_hConfigBtn = NULL;
+  int  m_nTopY = 0; // Y below base controls, for LayoutControls
+
+  void LayoutControls();
+  void UpdateBankLabel();
+  void ExecuteSlot(int globalIndex);
+  void ShowSlotContextMenu(int globalIndex, POINT screenPt);
+  void ShowConfigMenu();
+  void ShowSlotEditDialog(int globalIndex);
+  void SaveBoard();
 };
 
 // Paint a ListView header in dark theme via NM_CUSTOMDRAW.

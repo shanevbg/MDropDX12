@@ -554,8 +554,39 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_FILE_ASSOC       2200   // Button: Register File Association (About tab)
 #define IDC_MW_PRESET_FILTER    2201   // Button: Preset extension filter (General tab)
 
+// Button Board window controls (9000-9019)
+#define IDC_MW_BOARD_PIN          9000
+#define IDC_MW_BOARD_FONT_PLUS    9001
+#define IDC_MW_BOARD_FONT_MINUS   9002
+#define IDC_MW_BOARD_PANEL        9003
+#define IDC_MW_BOARD_BANK_PREV    9004
+#define IDC_MW_BOARD_BANK_NEXT    9005
+#define IDC_MW_BOARD_BANK_LABEL   9006
+#define IDC_MW_BOARD_CONFIG       9007
+
+// Presets window controls (9020-9039)
+#define IDC_MW_PRESETS_PIN          9020
+#define IDC_MW_PRESETS_FONT_PLUS    9021
+#define IDC_MW_PRESETS_FONT_MINUS   9022
+
+// Sprites window controls (9040-9059)
+#define IDC_MW_SPRITES_WIN_PIN          9040
+#define IDC_MW_SPRITES_WIN_FONT_PLUS    9041
+#define IDC_MW_SPRITES_WIN_FONT_MINUS   9042
+
+// Messages window controls (9060-9079)
+#define IDC_MW_MESSAGES_WIN_PIN         9060
+#define IDC_MW_MESSAGES_WIN_FONT_PLUS   9061
+#define IDC_MW_MESSAGES_WIN_FONT_MINUS  9062
+
+// Launcher buttons on Settings General tab
+#define IDC_MW_OPEN_PRESETS       9080
+#define IDC_MW_OPEN_SPRITES       9081
+#define IDC_MW_OPEN_MESSAGES      9082
+#define IDC_MW_OPEN_BOARD         9083
+
 // Settings page count
-#define SETTINGS_NUM_PAGES      10
+#define SETTINGS_NUM_PAGES      8
 
 // Custom messages for thread-safe side effects (settings thread → render thread)
 #define WM_MW_SET_OPACITY       (WM_APP + 1)

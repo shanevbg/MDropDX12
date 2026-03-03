@@ -1875,6 +1875,10 @@ void Engine::CleanUpMyNonDx9Stuff() {
   CloseSongInfoWindow();
   CloseHotkeysWindow();
   CloseMidiWindow();
+  CloseBoardWindow();
+  ClosePresetsWindow();
+  CloseSpritesWindow();
+  CloseMessagesWindow();
   CloseMidiDevice();
 
   // Join any in-flight preset load thread

@@ -81,6 +81,14 @@ void Engine::BroadcastFontSync(HWND hSender) {
     PostMessage(m_hotkeysWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
   if (m_midiWindow && m_midiWindow->IsOpen() && m_midiWindow->GetHWND() != hSender)
     PostMessage(m_midiWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
+  if (m_boardWindow && m_boardWindow->IsOpen() && m_boardWindow->GetHWND() != hSender)
+    PostMessage(m_boardWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
+  if (m_presetsWindow && m_presetsWindow->IsOpen() && m_presetsWindow->GetHWND() != hSender)
+    PostMessage(m_presetsWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
+  if (m_spritesWindow && m_spritesWindow->IsOpen() && m_spritesWindow->GetHWND() != hSender)
+    PostMessage(m_spritesWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
+  if (m_messagesWindow && m_messagesWindow->IsOpen() && m_messagesWindow->GetHWND() != hSender)
+    PostMessage(m_messagesWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
 }
 
 //----------------------------------------------------------------------
@@ -94,7 +102,7 @@ void ToolWindow::LoadWindowPosition() {
   m_nWndH = GetPrivateProfileIntW(sec, L"WndH", m_nDefaultH, ini);
   m_nPosX = GetPrivateProfileIntW(sec, L"PosX", -1, ini);
   m_nPosY = GetPrivateProfileIntW(sec, L"PosY", -1, ini);
-  m_bOnTop = GetPrivateProfileIntW(sec, L"OnTop", 0, ini) != 0;
+  m_bOnTop = GetPrivateProfileIntW(sec, L"OnTop", 1, ini) != 0; // default sticky
   if (m_nWndW < GetMinWidth()) m_nWndW = GetMinWidth();
   if (m_nWndH < GetMinHeight()) m_nWndH = GetMinHeight();
 }
@@ -178,6 +186,7 @@ void ToolWindow::CreateOnThread() {
   ApplyDarkTheme();
 
   ShowWindow(m_hWnd, SW_SHOW);
+  SetForegroundWindow(m_hWnd);
   UpdateWindow(m_hWnd);
 
   // Own message pump on this thread
@@ -186,6 +195,21 @@ void ToolWindow::CreateOnThread() {
     if (msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE) {
       PostMessage(m_hWnd, WM_CLOSE, 0, 0);
       continue;
+    }
+    // Forward hotkey-like keystrokes to the render window so F1, Ctrl+key, etc. work
+    if (msg.message == WM_KEYDOWN || msg.message == WM_SYSKEYDOWN) {
+      UINT vk = (UINT)msg.wParam;
+      bool bCtrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+      bool bAlt  = (GetKeyState(VK_MENU) & 0x8000) != 0;
+      bool isFKey = (vk >= VK_F1 && vk <= VK_F24);
+      // Forward function keys and Ctrl/Alt combos (but not bare alphanumerics — those go to edits)
+      if (isFKey || bCtrl || bAlt) {
+        HWND hRender = m_pEngine->GetPluginWindow();
+        if (hRender) {
+          PostMessage(hRender, msg.message, msg.wParam, msg.lParam);
+          continue;
+        }
+      }
     }
     if (!IsDialogMessage(m_hWnd, &msg)) {
       TranslateMessage(&msg);

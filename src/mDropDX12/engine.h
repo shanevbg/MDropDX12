@@ -1071,6 +1071,26 @@ public:
   void OpenMidiWindow();
   void CloseMidiWindow();
 
+  // Presets window (ToolWindow subclass, own thread)
+  std::unique_ptr<PresetsWindow> m_presetsWindow;
+  void OpenPresetsWindow();
+  void ClosePresetsWindow();
+
+  // Sprites window (ToolWindow subclass, own thread)
+  std::unique_ptr<SpritesWindow> m_spritesWindow;
+  void OpenSpritesWindow();
+  void CloseSpritesWindow();
+
+  // Messages window (ToolWindow subclass, own thread)
+  std::unique_ptr<MessagesWindow> m_messagesWindow;
+  void OpenMessagesWindow();
+  void CloseMessagesWindow();
+
+  // Button Board window (ToolWindow subclass, own thread)
+  std::unique_ptr<ButtonBoardWindow> m_boardWindow;
+  void OpenBoardWindow();
+  void CloseBoardWindow();
+
   // Broadcast WM_MW_REBUILD_FONTS to all windows except the sender
   void BroadcastFontSync(HWND hSender);
 

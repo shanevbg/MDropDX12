@@ -117,6 +117,10 @@ void Engine::ResetHotkeyDefaults()
     HK_DEF(i++, HK_OPEN_SONGINFO,     MOD_SHIFT|MOD_CONTROL, VK_F8,        HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Song Info",        L"OpenSongInfo");
     HK_DEF(i++, HK_OPEN_HOTKEYS,      MOD_CONTROL,           VK_F7,        HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Hotkeys",          L"OpenHotkeys");
     HK_DEF(i++, HK_OPEN_MIDI,         0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open MIDI",             L"OpenMidi");
+    HK_DEF(i++, HK_OPEN_BOARD,        0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Button Board",     L"OpenBoard");
+    HK_DEF(i++, HK_OPEN_PRESETS,      0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Presets",          L"OpenPresets");
+    HK_DEF(i++, HK_OPEN_SPRITES,     0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Sprites",          L"OpenSprites");
+    HK_DEF(i++, HK_OPEN_MESSAGES,    0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Messages",         L"OpenMessages");
 
     // ── Shader/Effects ──
     HK_DEF(i++, HK_INJECT_EFFECT_CYCLE, 0,                   VK_F11,       HKSCOPE_LOCAL, HKCAT_SHADER, L"Inject Effect Cycle",  L"InjectEffectCycle");
@@ -646,6 +650,18 @@ bool Engine::DispatchHotkeyAction(int actionId)
     case HK_OPEN_MIDI:
         OpenMidiWindow();
         return true;
+    case HK_OPEN_BOARD:
+        OpenBoardWindow();
+        return true;
+    case HK_OPEN_PRESETS:
+        OpenPresetsWindow();
+        return true;
+    case HK_OPEN_SPRITES:
+        OpenSpritesWindow();
+        return true;
+    case HK_OPEN_MESSAGES:
+        OpenMessagesWindow();
+        return true;
 
     // ── Shader/Effects ──
     case HK_INJECT_EFFECT_CYCLE:
@@ -1112,10 +1128,10 @@ void Engine::GenerateHelpText()
 
     // Iterate categories (built-in hotkeys)
     for (int cat = 0; cat < HKCAT_COUNT; cat++) {
-        // Check if any built-in or user entries exist for this category
+        // Check if any bound built-in or user entries exist for this category
         bool hasBuiltIn = false;
         for (int i = 0; i < NUM_HOTKEYS; i++) {
-            if ((int)m_hotkeys[i].category == cat) { hasBuiltIn = true; break; }
+            if ((int)m_hotkeys[i].category == cat && m_hotkeys[i].vk != 0) { hasBuiltIn = true; break; }
         }
         bool hasUser = false;
         HotkeyCategory userCat = (cat == HKCAT_SCRIPT || cat == HKCAT_LAUNCH)
@@ -1123,7 +1139,7 @@ void Engine::GenerateHelpText()
         if (userCat != HKCAT_COUNT) {
             UserHotkeyType matchType = (cat == HKCAT_SCRIPT) ? USER_HK_SCRIPT : USER_HK_LAUNCH;
             for (const auto& uh : m_userHotkeys) {
-                if (uh.type == matchType) { hasUser = true; break; }
+                if (uh.type == matchType && uh.vk != 0) { hasUser = true; break; }
             }
         }
         if (!hasBuiltIn && !hasUser) continue;
@@ -1133,9 +1149,10 @@ void Engine::GenerateHelpText()
         swprintf(header, 128, L"\x2500\x2500\x2500 %s \x2500\x2500\x2500", kCategoryNames[cat]);
         appendLine(header);
 
-        // List built-in bindings in this category
+        // List built-in bindings in this category (skip unbound)
         for (int i = 0; i < NUM_HOTKEYS; i++) {
             if ((int)m_hotkeys[i].category != cat) continue;
+            if (m_hotkeys[i].vk == 0) continue;  // skip unbound hotkeys
             std::wstring key = FormatHotkeyDisplay(m_hotkeys[i].modifiers, m_hotkeys[i].vk);
             wchar_t line[160];
             swprintf(line, 160, L"  %-20s %s", key.c_str(), m_hotkeys[i].szAction);
@@ -1146,7 +1163,7 @@ void Engine::GenerateHelpText()
         if (hasUser) {
             UserHotkeyType matchType = (cat == HKCAT_SCRIPT) ? USER_HK_SCRIPT : USER_HK_LAUNCH;
             for (const auto& uh : m_userHotkeys) {
-                if (uh.type != matchType) continue;
+                if (uh.type != matchType || uh.vk == 0) continue;
                 std::wstring key = FormatHotkeyDisplay(uh.modifiers, uh.vk);
                 std::wstring actionName = uh.label;
                 if (!uh.command.empty()) {

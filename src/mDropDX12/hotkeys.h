@@ -124,6 +124,10 @@ enum HotkeyAction : int {
     // ── Misc ──
     HK_DEBUG_INFO,               // N/n
     HK_SPRITE_MODE,              // K/k — toggle sprite/message mode
+    HK_OPEN_BOARD,               // Ctrl+F9 — open Button Board window
+    HK_OPEN_PRESETS,             // (unbound) — open Presets window
+    HK_OPEN_SPRITES,             // (unbound) — open Sprites window
+    HK_OPEN_MESSAGES,            // (unbound) — open Messages window
 
     HK_COUNT  // = number of built-in actions + 1 (HK_NONE)
 };
