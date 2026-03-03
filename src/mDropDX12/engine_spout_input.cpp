@@ -9,6 +9,7 @@
 #include <d3dcompiler.h>
 #include <vector>
 #include <string>
+#include "video_capture.h"
 
 extern ID3DBlob* g_pBlurVSBlob;
 
@@ -33,7 +34,7 @@ void Engine::CompileSpoutInputPSO()
         "};\n"
         "float4 main(float2 uv : TEXCOORD0) : SV_Target {\n"
         "    float4 col = tex.Sample(samp, uv);\n"
-        "    col.a *= opacity;\n"
+        "    col.a = opacity;\n"
         "    if (lumaActive > 0.5) {\n"
         "        float luma = dot(col.rgb, float3(0.299, 0.587, 0.114));\n"
         "        col.a *= saturate((luma - lumaThreshold) / max(0.0001, lumaSoftness));\n"
@@ -121,8 +122,15 @@ void Engine::DestroySpoutInput()
 // ---------------------------------------------------------------------------
 void Engine::UpdateSpoutInputTexture()
 {
-    if (!m_bSpoutInputEnabled || !m_spoutInput || !m_spoutInput->bReceiverReady)
+    if (!m_bSpoutInputEnabled)
         return;
+
+    // Lazy-init: create receiver on first call (startup or source switch)
+    if (!m_spoutInput || !m_spoutInput->bReceiverReady) {
+        InitSpoutInput();
+        if (!m_spoutInput || !m_spoutInput->bReceiverReady)
+            return;
+    }
 
     auto& si = *m_spoutInput;
 
@@ -191,7 +199,7 @@ void Engine::UpdateSpoutInputTexture()
 }
 
 // ---------------------------------------------------------------------------
-// CompositeSpoutInput — draw video quad with luma key + opacity
+// CompositeSpoutInput — Spout-specific wrapper: delegates to CompositeVideoInput
 // ---------------------------------------------------------------------------
 void Engine::CompositeSpoutInput(bool isBackground)
 {
@@ -201,10 +209,24 @@ void Engine::CompositeSpoutInput(bool isBackground)
         return;
 
     auto& si = *m_spoutInput;
+    CompositeVideoInput(isBackground, si.dx12InputTex, si.nSenderWidth, si.nSenderHeight);
+
+    // Transition back to COPY_DEST for next frame's ReceiveDX12Resource
+    m_lpDX->TransitionResource(si.dx12InputTex, D3D12_RESOURCE_STATE_COPY_DEST);
+}
+
+// ---------------------------------------------------------------------------
+// CompositeVideoInput — draw video quad with luma key + opacity (shared)
+// ---------------------------------------------------------------------------
+void Engine::CompositeVideoInput(bool isBackground, DX12Texture& tex, UINT srcW, UINT srcH)
+{
+    if (!tex.IsValid() || !m_pSpoutInputPSO || !srcW || !srcH)
+        return;
+
     auto* cmdList = m_lpDX->m_commandList.Get();
 
     // Transition input texture to shader resource
-    m_lpDX->TransitionResource(si.dx12InputTex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    m_lpDX->TransitionResource(tex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     // Set PSO + root signature + descriptor heaps
     cmdList->SetPipelineState(m_pSpoutInputPSO.Get());
@@ -224,7 +246,7 @@ void Engine::CompositeSpoutInput(bool isBackground)
         cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
 
     // Bind input texture via binding block
-    cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetBindingBlockGpuHandle(si.dx12InputTex));
+    cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetBindingBlockGpuHandle(tex));
 
     // Compute aspect-ratio-preserving quad (cover mode: fill target, crop excess)
     float targetW, targetH;
@@ -236,17 +258,15 @@ void Engine::CompositeSpoutInput(bool isBackground)
         targetH = (float)m_lpDX->m_client_height;
     }
 
-    float inputAspect = (float)si.nSenderWidth / (float)si.nSenderHeight;
+    float inputAspect = (float)srcW / (float)srcH;
     float targetAspect = targetW / targetH;
 
     float left = -1.f, right = 1.f, top = 1.f, bottom = -1.f;
     if (inputAspect > targetAspect) {
-        // Input is wider — scale width, letterbox vertical (cover crops sides)
         float scale = inputAspect / targetAspect;
         left = -scale;
         right = scale;
     } else {
-        // Input is taller — scale height (cover crops top/bottom)
         float scale = targetAspect / inputAspect;
         top = scale;
         bottom = -scale;
@@ -260,9 +280,6 @@ void Engine::CompositeSpoutInput(bool isBackground)
     v[2].x = left;  v[2].y = bottom; v[2].z = 0.f; v[2].Diffuse = 0xFFFFFFFF; v[2].tu = 0.f; v[2].tv = 1.f;
     v[3].x = right; v[3].y = bottom; v[3].z = 0.f; v[3].Diffuse = 0xFFFFFFFF; v[3].tu = 1.f; v[3].tv = 1.f;
     m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, v, 4, sizeof(MYVERTEX));
-
-    // Transition back to COPY_DEST for next frame's ReceiveDX12Resource
-    m_lpDX->TransitionResource(si.dx12InputTex, D3D12_RESOURCE_STATE_COPY_DEST);
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +289,69 @@ void Engine::EnumerateSpoutSenders(std::vector<std::string>& outNames)
 {
     spoutDX12 temp;
     outNames = temp.GetSenderList();
+}
+
+// ---------------------------------------------------------------------------
+// InitVideoCapture — create and open webcam or video file source
+// ---------------------------------------------------------------------------
+void Engine::InitVideoCapture()
+{
+    DestroyVideoCapture();
+
+    m_videoCapture = std::make_unique<VideoCaptureSource>();
+
+    bool ok = false;
+    if (m_nVideoInputSource == VID_SOURCE_WEBCAM) {
+        ok = m_videoCapture->OpenWebcam(m_szWebcamDevice);
+        if (ok) {
+            wchar_t buf[256];
+            swprintf(buf, 256, L"Video Input: Webcam opened %ux%u",
+                     m_videoCapture->GetWidth(), m_videoCapture->GetHeight());
+            AddNotification(buf);
+        } else {
+            wchar_t msg[] = L"Video Input: Failed to open webcam";
+            AddNotification(msg);
+        }
+    } else if (m_nVideoInputSource == VID_SOURCE_FILE) {
+        m_videoCapture->m_bLoop = m_bVideoLoop;
+        ok = m_videoCapture->OpenVideoFile(m_szVideoFile);
+        if (ok) {
+            wchar_t buf[256];
+            swprintf(buf, 256, L"Video Input: File opened %ux%u",
+                     m_videoCapture->GetWidth(), m_videoCapture->GetHeight());
+            AddNotification(buf);
+        } else {
+            wchar_t msg[] = L"Video Input: Failed to open video file";
+            AddNotification(msg);
+        }
+    }
+
+    if (!ok) {
+        m_videoCapture.reset();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DestroyVideoCapture — stop capture and release resources
+// ---------------------------------------------------------------------------
+void Engine::DestroyVideoCapture()
+{
+    if (m_videoCapture) {
+        m_videoCapture->Close();
+        m_videoCapture.reset();
+        DebugLogA("VideoCapture: Destroyed");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// UpdateVideoCaptureTexture — per-frame: upload latest frame to GPU
+// ---------------------------------------------------------------------------
+void Engine::UpdateVideoCaptureTexture()
+{
+    if (!m_videoCapture || !m_videoCapture->IsConnected())
+        return;
+
+    m_videoCapture->UpdateTexture(m_lpDX);
 }
 
 // ---------------------------------------------------------------------------
@@ -303,6 +383,20 @@ void Engine::LoadSpoutInputSettings()
     if (m_fSpoutInputLumaSoftness > 1.f) m_fSpoutInputLumaSoftness = 1.f;
 
     GetPrivateProfileStringW(L"SpoutInput", L"SenderName", L"", m_szSpoutInputSender, 256, pIni);
+
+    // Video input source (new unified setting; backward compat: Enabled=1 → Source=Spout)
+    int source = GetPrivateProfileIntW(L"SpoutInput", L"Source", -1, pIni);
+    if (source >= 0) {
+        m_nVideoInputSource = source;
+    } else {
+        // Legacy: no Source key — derive from Enabled
+        m_nVideoInputSource = m_bSpoutInputEnabled ? VID_SOURCE_SPOUT : VID_SOURCE_NONE;
+    }
+    m_bSpoutInputEnabled = (m_nVideoInputSource != VID_SOURCE_NONE);
+
+    GetPrivateProfileStringW(L"SpoutInput", L"WebcamDevice", L"", m_szWebcamDevice, 256, pIni);
+    GetPrivateProfileStringW(L"SpoutInput", L"VideoFile", L"", m_szVideoFile, MAX_PATH, pIni);
+    m_bVideoLoop = GetPrivateProfileIntW(L"SpoutInput", L"VideoLoop", 1, pIni) != 0;
 }
 
 void Engine::SaveSpoutInputSettings()
@@ -325,6 +419,15 @@ void Engine::SaveSpoutInputSettings()
     WritePrivateProfileStringW(L"SpoutInput", L"LumaSoftness", buf, pIni);
 
     WritePrivateProfileStringW(L"SpoutInput", L"SenderName", m_szSpoutInputSender, pIni);
+
+    // Video input source
+    wchar_t srcBuf[8];
+    swprintf(srcBuf, 8, L"%d", m_nVideoInputSource);
+    WritePrivateProfileStringW(L"SpoutInput", L"Source", srcBuf, pIni);
+
+    WritePrivateProfileStringW(L"SpoutInput", L"WebcamDevice", m_szWebcamDevice, pIni);
+    WritePrivateProfileStringW(L"SpoutInput", L"VideoFile", m_szVideoFile, pIni);
+    WritePrivateProfileStringW(L"SpoutInput", L"VideoLoop", m_bVideoLoop ? L"1" : L"0", pIni);
 }
 
 } // namespace mdrop

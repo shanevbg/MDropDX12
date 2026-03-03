@@ -6,6 +6,7 @@
 */
 
 #include "engine.h"
+#include "video_capture.h"
 #include "engine_helpers.h"
 #include "utility.h"
 #include "support.h"
@@ -856,6 +857,7 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       p->m_hSpriteList = NULL;
       if (p->m_hSettingsFont) { DeleteObject(p->m_hSettingsFont); p->m_hSettingsFont = NULL; }
       if (p->m_hSettingsFontBold) { DeleteObject(p->m_hSettingsFontBold); p->m_hSettingsFontBold = NULL; }
+      if (p->m_hSettingsPinFont) { DeleteObject(p->m_hSettingsPinFont); p->m_hSettingsPinFont = NULL; }
       p->CleanupSettingsThemeBrushes();
     }
     PostQuitMessage(0);  // exit the settings thread's message loop
@@ -1693,6 +1695,15 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
+    // Pin button: toggle settings window always-on-top
+    if (id == IDC_MW_SETTINGS_PIN && code == BN_CLICKED) {
+      p->m_bSettingsOnTop = !p->m_bSettingsOnTop;
+      SetWindowPos(hWnd, p->m_bSettingsOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
+        0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+      InvalidateRect((HWND)lParam, NULL, TRUE);
+      return 0;
+    }
+
     // Checkbox toggles — save immediately
     // Owner-drawn checkboxes: toggle the "Checked" property on click
     if (code == BN_CLICKED) {
@@ -1701,28 +1712,43 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       bool bIsRadio = (bool)(intptr_t)GetPropW(hCtrl, L"IsRadio");
       bool bChecked;
       if (bIsRadio) {
-        // Radio buttons: uncheck siblings, check this one
-        static const int logRadioIDs[] = { IDC_MW_LOGLEVEL_OFF, IDC_MW_LOGLEVEL_ERROR, IDC_MW_LOGLEVEL_WARN, IDC_MW_LOGLEVEL_INFO, IDC_MW_LOGLEVEL_VERBOSE };
-        for (int rid : logRadioIDs) {
-          HWND hSib = GetDlgItem(hWnd, rid);
-          if (hSib) {
-            SetPropW(hSib, L"Checked", (HANDLE)(intptr_t)(hSib == hCtrl ? 1 : 0));
-            InvalidateRect(hSib, NULL, TRUE);
+        // Helper: toggle visual state for a radio group
+        auto toggleGroup = [&](const int* ids, int count) {
+          for (int i = 0; i < count; i++) {
+            HWND hSib = GetDlgItem(hWnd, ids[i]);
+            if (hSib) {
+              SetPropW(hSib, L"Checked", (HANDLE)(intptr_t)(hSib == hCtrl ? 1 : 0));
+              InvalidateRect(hSib, NULL, TRUE);
+            }
           }
+        };
+
+        // Log level radios: handle entirely here
+        static const int logRadioIDs[] = { IDC_MW_LOGLEVEL_OFF, IDC_MW_LOGLEVEL_ERROR, IDC_MW_LOGLEVEL_WARN, IDC_MW_LOGLEVEL_INFO, IDC_MW_LOGLEVEL_VERBOSE };
+        bool isLogLevel = false;
+        for (int rid : logRadioIDs) if (rid == id) { isLogLevel = true; break; }
+        if (isLogLevel) {
+          toggleGroup(logRadioIDs, _countof(logRadioIDs));
+          int newLevel = 0;
+          switch (id) {
+            case IDC_MW_LOGLEVEL_OFF:     newLevel = 0; break;
+            case IDC_MW_LOGLEVEL_ERROR:   newLevel = 1; break;
+            case IDC_MW_LOGLEVEL_WARN:    newLevel = 2; break;
+            case IDC_MW_LOGLEVEL_INFO:    newLevel = 3; break;
+            case IDC_MW_LOGLEVEL_VERBOSE: newLevel = 4; break;
+          }
+          p->m_LogLevel = newLevel;
+          DebugLogSetLevel(newLevel);
+          WritePrivateProfileIntW(newLevel, L"LogLevel", p->GetConfigIniFile(), L"Milkwave");
+          return 0;
         }
-        // Determine the selected log level and apply
-        int newLevel = 0;
-        switch (id) {
-          case IDC_MW_LOGLEVEL_OFF:     newLevel = 0; break;
-          case IDC_MW_LOGLEVEL_ERROR:   newLevel = 1; break;
-          case IDC_MW_LOGLEVEL_WARN:    newLevel = 2; break;
-          case IDC_MW_LOGLEVEL_INFO:    newLevel = 3; break;
-          case IDC_MW_LOGLEVEL_VERBOSE: newLevel = 4; break;
-        }
-        p->m_LogLevel = newLevel;
-        DebugLogSetLevel(newLevel);
-        WritePrivateProfileIntW(newLevel, L"LogLevel", p->GetConfigIniFile(), L"Milkwave");
-        return 0;
+
+        // Layer radios: toggle visual state, fall through to main switch
+        static const int layerRadioIDs[] = { IDC_MW_SPINPUT_LAYER_BG, IDC_MW_SPINPUT_LAYER_OV };
+        for (int rid : layerRadioIDs)
+          if (rid == id) { toggleGroup(layerRadioIDs, _countof(layerRadioIDs)); break; }
+
+        bChecked = true; // radio is always "checked" when clicked
       } else if (bIsCheckbox) {
         bool wasChecked = (bool)(intptr_t)GetPropW(hCtrl, L"Checked");
         bChecked = !wasChecked;
@@ -1855,29 +1881,10 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         p->m_bMirrorPromptDisabled = bChecked;
         p->SaveDisplayOutputSettings();
         return 0;
-      // ── Spout Video Input checkboxes ──
-      case IDC_MW_SPINPUT_ENABLE: {
-        p->m_bSpoutInputEnabled = bChecked;
-        // Enable/disable sub-controls
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_SENDER), bChecked);
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_REFRESH), bChecked);
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LAYER_BG), bChecked);
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LAYER_OV), bChecked);
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_OPACITY), bChecked);
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMAKEY), bChecked);
-        bool lumaOn = bChecked && p->m_bSpoutInputLumaKey;
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMA_THR), lumaOn);
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMA_SOFT), lumaOn);
-        if (bChecked)
-          p->InitSpoutInput();
-        else
-          p->DestroySpoutInput();
-        p->SaveSpoutInputSettings();
-        return 0;
-      }
+      // ── Video Input checkboxes ──
       case IDC_MW_SPINPUT_LUMAKEY: {
         p->m_bSpoutInputLumaKey = bChecked;
-        bool lumaOn = p->m_bSpoutInputEnabled && bChecked;
+        bool lumaOn = (p->m_nVideoInputSource != p->VID_SOURCE_NONE) && bChecked;
         EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMA_THR), lumaOn);
         EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMA_SOFT), lumaOn);
         p->SaveSpoutInputSettings();
@@ -1888,6 +1895,11 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         return 0;
       case IDC_MW_SPINPUT_LAYER_OV:
         if (bChecked) { p->m_bSpoutInputOnTop = true; p->SaveSpoutInputSettings(); }
+        return 0;
+      case IDC_MW_VIDINPUT_FILE_LOOP:
+        p->m_bVideoLoop = bChecked;
+        if (p->m_videoCapture) p->m_videoCapture->m_bLoop = bChecked;
+        p->SaveSpoutInputSettings();
         return 0;
       case IDC_MW_QUALITY_AUTO:
         p->bQualityAuto = bChecked;
@@ -2641,7 +2653,108 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       }
     }
 
-    // ===== Spout Video Input handlers =====
+    // ===== Video Input handlers =====
+
+    // Source combo changed
+    if (code == CBN_SELCHANGE && id == IDC_MW_VIDINPUT_SOURCE) {
+      int newSrc = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
+      if (newSrc < 0) newSrc = 0;
+      int oldSrc = p->m_nVideoInputSource;
+      if (newSrc == oldSrc) return 0;
+
+      // Tear down old source
+      if (oldSrc == p->VID_SOURCE_SPOUT) p->DestroySpoutInput();
+      else if (oldSrc == p->VID_SOURCE_WEBCAM || oldSrc == p->VID_SOURCE_FILE) p->DestroyVideoCapture();
+
+      p->m_nVideoInputSource = newSrc;
+      p->m_bSpoutInputEnabled = (newSrc != p->VID_SOURCE_NONE);
+
+      // Init new source
+      if (newSrc == p->VID_SOURCE_SPOUT) p->InitSpoutInput();
+      else if (newSrc == p->VID_SOURCE_WEBCAM || newSrc == p->VID_SOURCE_FILE) p->InitVideoCapture();
+
+      // Enable/disable source-specific controls
+      bool active = (newSrc != p->VID_SOURCE_NONE);
+      EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_SENDER), newSrc == p->VID_SOURCE_SPOUT);
+      EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_REFRESH), newSrc == p->VID_SOURCE_SPOUT);
+      EnableWindow(GetDlgItem(hWnd, IDC_MW_VIDINPUT_WEBCAM), newSrc == p->VID_SOURCE_WEBCAM);
+      EnableWindow(GetDlgItem(hWnd, IDC_MW_VIDINPUT_WEBCAM_REF), newSrc == p->VID_SOURCE_WEBCAM);
+      EnableWindow(GetDlgItem(hWnd, IDC_MW_VIDINPUT_FILE_EDIT), newSrc == p->VID_SOURCE_FILE);
+      EnableWindow(GetDlgItem(hWnd, IDC_MW_VIDINPUT_FILE_BROWSE), newSrc == p->VID_SOURCE_FILE);
+      EnableWindow(GetDlgItem(hWnd, IDC_MW_VIDINPUT_FILE_LOOP), newSrc == p->VID_SOURCE_FILE);
+      EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LAYER_BG), active);
+      EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LAYER_OV), active);
+      EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_OPACITY), active);
+      EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMAKEY), active);
+      bool lumaOn = active && p->m_bSpoutInputLumaKey;
+      EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMA_THR), lumaOn);
+      EnableWindow(GetDlgItem(hWnd, IDC_MW_SPINPUT_LUMA_SOFT), lumaOn);
+
+      p->SaveSpoutInputSettings();
+      return 0;
+    }
+
+    // Webcam device combo changed
+    if (code == CBN_SELCHANGE && id == IDC_MW_VIDINPUT_WEBCAM) {
+      HWND hCombo = (HWND)lParam;
+      int sel = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
+      if (sel <= 0) {
+        p->m_szWebcamDevice[0] = L'\0';
+      } else {
+        SendMessageW(hCombo, CB_GETLBTEXT, sel, (LPARAM)p->m_szWebcamDevice);
+      }
+      if (p->m_nVideoInputSource == p->VID_SOURCE_WEBCAM) {
+        p->DestroyVideoCapture();
+        p->InitVideoCapture();
+      }
+      p->SaveSpoutInputSettings();
+      return 0;
+    }
+
+    // Webcam refresh button
+    if (code == BN_CLICKED && id == IDC_MW_VIDINPUT_WEBCAM_REF) {
+      HWND hCombo = GetDlgItem(hWnd, IDC_MW_VIDINPUT_WEBCAM);
+      if (hCombo) {
+        wchar_t curSel[256] = {};
+        int idx = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
+        if (idx > 0) SendMessageW(hCombo, CB_GETLBTEXT, idx, (LPARAM)curSel);
+        SendMessage(hCombo, CB_RESETCONTENT, 0, 0);
+        SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"(Default)");
+        auto webcams = mdrop::VideoCaptureSource::EnumerateWebcams();
+        int newSel = 0;
+        for (int i = 0; i < (int)webcams.size(); i++) {
+          SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)webcams[i].name.c_str());
+          if (curSel[0] && _wcsicmp(webcams[i].name.c_str(), curSel) == 0) newSel = i + 1;
+        }
+        SendMessage(hCombo, CB_SETCURSEL, newSel, 0);
+      }
+      return 0;
+    }
+
+    // Video file Browse button
+    if (code == BN_CLICKED && id == IDC_MW_VIDINPUT_FILE_BROWSE) {
+      wchar_t szFile[MAX_PATH] = {};
+      wcscpy_s(szFile, p->m_szVideoFile);
+      OPENFILENAMEW ofn = {};
+      ofn.lStructSize = sizeof(ofn);
+      ofn.hwndOwner = hWnd;
+      ofn.lpstrFilter = L"Video Files (*.mp4;*.avi;*.wmv;*.mkv;*.mov)\0*.mp4;*.avi;*.wmv;*.mkv;*.mov\0All Files (*.*)\0*.*\0";
+      ofn.lpstrFile = szFile;
+      ofn.nMaxFile = MAX_PATH;
+      ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+      if (GetOpenFileNameW(&ofn)) {
+        wcscpy_s(p->m_szVideoFile, szFile);
+        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIDINPUT_FILE_EDIT), szFile);
+        if (p->m_nVideoInputSource == p->VID_SOURCE_FILE) {
+          p->DestroyVideoCapture();
+          p->InitVideoCapture();
+        }
+        p->SaveSpoutInputSettings();
+      }
+      return 0;
+    }
+
+    // Spout sender refresh button
     if (code == BN_CLICKED && id == IDC_MW_SPINPUT_REFRESH) {
       HWND hCombo = GetDlgItem(hWnd, IDC_MW_SPINPUT_SENDER);
       if (hCombo) {
@@ -2673,7 +2786,7 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         SendMessageW(hCombo, CB_GETLBTEXT, sel, (LPARAM)p->m_szSpoutInputSender);
       }
       // Reinitialize receiver with new sender name
-      if (p->m_bSpoutInputEnabled) {
+      if (p->m_nVideoInputSource == p->VID_SOURCE_SPOUT) {
         p->DestroySpoutInput();
         p->InitSpoutInput();
       }
@@ -3125,6 +3238,31 @@ LRESULT CALLBACK Engine::SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
         return TRUE;
       }
       if (pDIS && pDIS->CtlType == ODT_BUTTON) {
+        bool bIsPinBtn = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsPinBtn");
+        if (bIsPinBtn) {
+          // Draw pin icon — highlighted when pinned, dimmed when unpinned
+          HDC hdc = pDIS->hDC;
+          RECT rc = pDIS->rcItem;
+          bool pressed = (pDIS->itemState & ODS_SELECTED) != 0;
+          bool pinned = p->m_bSettingsOnTop;
+          // Fill background to match tab header
+          COLORREF bg = p->m_bSettingsDarkTheme ? p->m_colSettingsBg : GetSysColor(COLOR_BTNFACE);
+          HBRUSH hBr = CreateSolidBrush(bg);
+          FillRect(hdc, &rc, hBr);
+          DeleteObject(hBr);
+          // Draw the pin glyph
+          SetBkMode(hdc, TRANSPARENT);
+          COLORREF pinCol = pinned
+            ? (p->m_bSettingsDarkTheme ? RGB(100, 180, 255) : RGB(0, 100, 200))
+            : (p->m_bSettingsDarkTheme ? RGB(120, 120, 120) : RGB(160, 160, 160));
+          SetTextColor(hdc, pinCol);
+          HFONT hOld = p->m_hSettingsPinFont ? (HFONT)SelectObject(hdc, p->m_hSettingsPinFont) : NULL;
+          RECT textRc = rc;
+          if (pressed) OffsetRect(&textRc, 1, 1);
+          DrawTextW(hdc, L"\xE718", 1, &textRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+          if (hOld) SelectObject(hdc, hOld);
+          return TRUE;
+        }
         bool bIsCheckbox = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheckbox");
         bool bIsRadio = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsRadio");
         if (bIsCheckbox) {
@@ -3432,6 +3570,39 @@ void Engine::BuildSettingsControls() {
   RECT rcDisplay = { 0, 0, clientW, clientH };
   TabCtrl_AdjustRect(m_hSettingsTab, FALSE, &rcDisplay);
   int tabTop = rcDisplay.top;
+
+  // Pin button (always-on-top toggle) — top-right of tab header area
+  {
+    if (m_hSettingsPinFont) DeleteObject(m_hSettingsPinFont);
+    m_hSettingsPinFont = CreateFontW(tabTop - 8, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+      CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe MDL2 Assets");
+
+    int pinSize = tabTop - 2;
+    int pinX = clientW - pinSize - 2;
+    int pinY = 1;
+    HWND hPin = CreateWindowExW(0, L"BUTTON", L"\xE718",
+      WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+      pinX, pinY, pinSize, pinSize, hw,
+      (HMENU)(INT_PTR)IDC_MW_SETTINGS_PIN, GetModuleHandle(NULL), NULL);
+    if (hPin) {
+      if (m_hSettingsPinFont) SendMessage(hPin, WM_SETFONT, (WPARAM)m_hSettingsPinFont, TRUE);
+      SetPropW(hPin, L"IsPinBtn", (HANDLE)(intptr_t)1);
+      // Tooltip
+      HWND hTip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL,
+        WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+        hw, NULL, GetModuleHandle(NULL), NULL);
+      if (hTip) {
+        TTTOOLINFOW ti = { sizeof(ti) };
+        ti.uFlags = TTF_SUBCLASS | TTF_IDISHWND;
+        ti.hwnd = hw;
+        ti.uId = (UINT_PTR)hPin;
+        ti.lpszText = (LPWSTR)L"Always on top";
+        SendMessageW(hTip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
+      }
+    }
+  }
 
   int lineH = GetSettingsLineHeight();
   int gap = 6, x = 16;
@@ -4588,16 +4759,29 @@ void Engine::BuildSettingsControls() {
     IDC_MW_DISP_MIRROR_NOPROMPT, x, y, rw, lineH, hFont, false, m_bMirrorPromptDisabled));
   y += lineH + gap + 8;
 
-  // ── Video Input (Spout) ──
-  PAGE_CTRL(9, CreateLabel(hw, L"Video Input (Spout)", x, y, rw, lineH, hFontBold, false));
+  // ── Video Input ──
+  PAGE_CTRL(9, CreateLabel(hw, L"Video Input", x, y, rw, lineH, hFontBold, false));
   y += lineH + gap;
 
-  PAGE_CTRL(9, CreateCheck(hw, L"Enable", IDC_MW_SPINPUT_ENABLE, x, y, rw / 3, lineH, hFont, m_bSpoutInputEnabled, false));
-  y += lineH + gap;
-
-  // Sender combo + Refresh button
+  // Source selector combo
   {
+    bool active = (m_nVideoInputSource != VID_SOURCE_NONE);
     int sLbl = MulDiv(70, lineH, 26);
+    PAGE_CTRL(9, CreateLabel(hw, L"Source:", x, y, sLbl, lineH, hFont, false));
+    HWND hSrc = CreateWindowExW(0, L"COMBOBOX", NULL,
+      WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+      x + sLbl + 4, y, rw - sLbl - 4, lineH * 6, hw,
+      (HMENU)(INT_PTR)IDC_MW_VIDINPUT_SOURCE, GetModuleHandle(NULL), NULL);
+    if (hSrc && hFont) SendMessage(hSrc, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hSrc, CB_ADDSTRING, 0, (LPARAM)L"None");
+    SendMessageW(hSrc, CB_ADDSTRING, 0, (LPARAM)L"Spout");
+    SendMessageW(hSrc, CB_ADDSTRING, 0, (LPARAM)L"Webcam");
+    SendMessageW(hSrc, CB_ADDSTRING, 0, (LPARAM)L"Video File");
+    SendMessage(hSrc, CB_SETCURSEL, m_nVideoInputSource, 0);
+    PAGE_CTRL(9, hSrc);
+    y += lineH + gap;
+
+    // Spout sender combo + Refresh button
     int refreshW = MulDiv(72, lineH, 26);
     PAGE_CTRL(9, CreateLabel(hw, L"Sender:", x, y, sLbl, lineH, hFont, false));
     HWND hCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
@@ -4605,7 +4789,6 @@ void Engine::BuildSettingsControls() {
       x + sLbl + 4, y, rw - sLbl - 4 - refreshW - 8, lineH * 8, hw,
       (HMENU)(INT_PTR)IDC_MW_SPINPUT_SENDER, GetModuleHandle(NULL), NULL);
     if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
-    // Populate with available senders
     SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"(Auto - first available)");
     std::vector<std::string> senders;
     EnumerateSpoutSenders(senders);
@@ -4618,29 +4801,70 @@ void Engine::BuildSettingsControls() {
         selIdx = i + 1;
     }
     SendMessage(hCombo, CB_SETCURSEL, selIdx, 0);
-    if (!m_bSpoutInputEnabled) EnableWindow(hCombo, FALSE);
+    if (m_nVideoInputSource != VID_SOURCE_SPOUT) EnableWindow(hCombo, FALSE);
     PAGE_CTRL(9, hCombo);
     PAGE_CTRL(9, CreateBtn(hw, L"Refresh", IDC_MW_SPINPUT_REFRESH, x + rw - refreshW, y, refreshW, lineH, hFont));
-    if (!m_bSpoutInputEnabled) EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_REFRESH), FALSE);
-  }
-  y += lineH + gap;
+    if (m_nVideoInputSource != VID_SOURCE_SPOUT) EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_REFRESH), FALSE);
+    y += lineH + gap;
 
-  // Layer radio: Background / Overlay
-  {
+    // Webcam device combo + Refresh button
+    PAGE_CTRL(9, CreateLabel(hw, L"Webcam:", x, y, sLbl, lineH, hFont, false));
+    HWND hWebcam = CreateWindowExW(0, L"COMBOBOX", NULL,
+      WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+      x + sLbl + 4, y, rw - sLbl - 4 - refreshW - 8, lineH * 8, hw,
+      (HMENU)(INT_PTR)IDC_MW_VIDINPUT_WEBCAM, GetModuleHandle(NULL), NULL);
+    if (hWebcam && hFont) SendMessage(hWebcam, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hWebcam, CB_ADDSTRING, 0, (LPARAM)L"(Default)");
+    {
+      auto webcams = mdrop::VideoCaptureSource::EnumerateWebcams();
+      int wcSel = 0;
+      for (int i = 0; i < (int)webcams.size(); i++) {
+        SendMessageW(hWebcam, CB_ADDSTRING, 0, (LPARAM)webcams[i].name.c_str());
+        if (m_szWebcamDevice[0] && _wcsicmp(webcams[i].name.c_str(), m_szWebcamDevice) == 0)
+          wcSel = i + 1;
+      }
+      SendMessage(hWebcam, CB_SETCURSEL, wcSel, 0);
+    }
+    if (m_nVideoInputSource != VID_SOURCE_WEBCAM) EnableWindow(hWebcam, FALSE);
+    PAGE_CTRL(9, hWebcam);
+    PAGE_CTRL(9, CreateBtn(hw, L"Refresh", IDC_MW_VIDINPUT_WEBCAM_REF, x + rw - refreshW, y, refreshW, lineH, hFont));
+    if (m_nVideoInputSource != VID_SOURCE_WEBCAM) EnableWindow(GetDlgItem(hw, IDC_MW_VIDINPUT_WEBCAM_REF), FALSE);
+    y += lineH + gap;
+
+    // Video file path + Browse button
+    int browseW = MulDiv(72, lineH, 26);
+    PAGE_CTRL(9, CreateLabel(hw, L"File:", x, y, sLbl, lineH, hFont, false));
+    HWND hEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", m_szVideoFile,
+      WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_TABSTOP,
+      x + sLbl + 4, y, rw - sLbl - 4 - browseW - 8, lineH, hw,
+      (HMENU)(INT_PTR)IDC_MW_VIDINPUT_FILE_EDIT, GetModuleHandle(NULL), NULL);
+    if (hEdit && hFont) SendMessage(hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
+    if (m_nVideoInputSource != VID_SOURCE_FILE) EnableWindow(hEdit, FALSE);
+    PAGE_CTRL(9, hEdit);
+    PAGE_CTRL(9, CreateBtn(hw, L"Browse...", IDC_MW_VIDINPUT_FILE_BROWSE, x + rw - browseW, y, browseW, lineH, hFont));
+    if (m_nVideoInputSource != VID_SOURCE_FILE) EnableWindow(GetDlgItem(hw, IDC_MW_VIDINPUT_FILE_BROWSE), FALSE);
+    y += lineH + gap;
+
+    // Loop checkbox (video file only)
+    PAGE_CTRL(9, CreateCheck(hw, L"Loop video", IDC_MW_VIDINPUT_FILE_LOOP, x, y, rw / 3, lineH, hFont, m_bVideoLoop, false));
+    if (m_nVideoInputSource != VID_SOURCE_FILE) EnableWindow(GetDlgItem(hw, IDC_MW_VIDINPUT_FILE_LOOP), FALSE);
+    y += lineH + gap;
+
+    // ── Shared controls (all sources) ──
+
+    // Layer radio: Background / Overlay
     int layLbl = MulDiv(50, lineH, 26);
     int radioW = MulDiv(110, lineH, 26);
     PAGE_CTRL(9, CreateLabel(hw, L"Layer:", x, y, layLbl, lineH, hFont, false));
     PAGE_CTRL(9, CreateRadio(hw, L"Background", IDC_MW_SPINPUT_LAYER_BG, x + layLbl + 4, y, radioW, lineH, hFont, !m_bSpoutInputOnTop, true, false));
     PAGE_CTRL(9, CreateRadio(hw, L"Overlay", IDC_MW_SPINPUT_LAYER_OV, x + layLbl + 4 + radioW + 4, y, radioW, lineH, hFont, m_bSpoutInputOnTop, false, false));
-    if (!m_bSpoutInputEnabled) {
+    if (!active) {
       EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LAYER_BG), FALSE);
       EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LAYER_OV), FALSE);
     }
-  }
-  y += lineH + gap;
+    y += lineH + gap;
 
-  // Opacity slider 0-100%
-  {
+    // Opacity slider 0-100%
     int slLbl = MulDiv(80, lineH, 26);
     int valW = MulDiv(50, lineH, 26);
     PAGE_CTRL(9, CreateLabel(hw, L"Opacity:", x, y, slLbl, lineH, hFont, false));
@@ -4649,43 +4873,35 @@ void Engine::BuildSettingsControls() {
     PAGE_CTRL(9, CreateLabel(hw, buf2, x + rw - valW, y, valW, lineH, hFont, false));
     HWND hLbl = m_settingsPageCtrls[9].back();
     SetWindowLongPtrW(hLbl, GWLP_ID, IDC_MW_SPINPUT_OPACITY_LBL);
-    if (!m_bSpoutInputEnabled) EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_OPACITY), FALSE);
-  }
-  y += lineH + gap;
+    if (!active) EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_OPACITY), FALSE);
+    y += lineH + gap;
 
-  // Luma Key checkbox
-  PAGE_CTRL(9, CreateCheck(hw, L"Luma Key", IDC_MW_SPINPUT_LUMAKEY, x, y, rw / 3, lineH, hFont, m_bSpoutInputLumaKey, false));
-  if (!m_bSpoutInputEnabled) EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LUMAKEY), FALSE);
-  y += lineH + gap;
+    // Luma Key checkbox
+    PAGE_CTRL(9, CreateCheck(hw, L"Luma Key", IDC_MW_SPINPUT_LUMAKEY, x, y, rw / 3, lineH, hFont, m_bSpoutInputLumaKey, false));
+    if (!active) EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LUMAKEY), FALSE);
+    y += lineH + gap;
 
-  // Threshold slider 0-100%
-  {
+    // Threshold slider 0-100%
     int indent = MulDiv(16, lineH, 26);
-    int slLbl = MulDiv(90, lineH, 26);
-    int valW = MulDiv(50, lineH, 26);
-    PAGE_CTRL(9, CreateLabel(hw, L"Threshold:", x + indent, y, slLbl, lineH, hFont, false));
-    PAGE_CTRL(9, CreateSlider(hw, IDC_MW_SPINPUT_LUMA_THR, x + indent + slLbl + 4, y, rw - indent - slLbl - 4 - valW, lineH, 0, 100, (int)(m_fSpoutInputLumaThreshold * 100), false));
-    wchar_t buf2[32]; swprintf(buf2, 32, L"%d%%", (int)(m_fSpoutInputLumaThreshold * 100));
-    PAGE_CTRL(9, CreateLabel(hw, buf2, x + rw - valW, y, valW, lineH, hFont, false));
-    HWND hLbl = m_settingsPageCtrls[9].back();
+    int slLbl2 = MulDiv(90, lineH, 26);
+    PAGE_CTRL(9, CreateLabel(hw, L"Threshold:", x + indent, y, slLbl2, lineH, hFont, false));
+    PAGE_CTRL(9, CreateSlider(hw, IDC_MW_SPINPUT_LUMA_THR, x + indent + slLbl2 + 4, y, rw - indent - slLbl2 - 4 - valW, lineH, 0, 100, (int)(m_fSpoutInputLumaThreshold * 100), false));
+    { wchar_t b[32]; swprintf(b, 32, L"%d%%", (int)(m_fSpoutInputLumaThreshold * 100));
+    PAGE_CTRL(9, CreateLabel(hw, b, x + rw - valW, y, valW, lineH, hFont, false)); }
+    hLbl = m_settingsPageCtrls[9].back();
     SetWindowLongPtrW(hLbl, GWLP_ID, IDC_MW_SPINPUT_LUMA_THR_LBL);
-    if (!m_bSpoutInputEnabled || !m_bSpoutInputLumaKey)
+    if (!active || !m_bSpoutInputLumaKey)
       EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LUMA_THR), FALSE);
-  }
-  y += lineH + gap;
+    y += lineH + gap;
 
-  // Softness slider 0-100%
-  {
-    int indent = MulDiv(16, lineH, 26);
-    int slLbl = MulDiv(90, lineH, 26);
-    int valW = MulDiv(50, lineH, 26);
-    PAGE_CTRL(9, CreateLabel(hw, L"Softness:", x + indent, y, slLbl, lineH, hFont, false));
-    PAGE_CTRL(9, CreateSlider(hw, IDC_MW_SPINPUT_LUMA_SOFT, x + indent + slLbl + 4, y, rw - indent - slLbl - 4 - valW, lineH, 0, 100, (int)(m_fSpoutInputLumaSoftness * 100), false));
-    wchar_t buf2[32]; swprintf(buf2, 32, L"%d%%", (int)(m_fSpoutInputLumaSoftness * 100));
-    PAGE_CTRL(9, CreateLabel(hw, buf2, x + rw - valW, y, valW, lineH, hFont, false));
-    HWND hLbl = m_settingsPageCtrls[9].back();
+    // Softness slider 0-100%
+    PAGE_CTRL(9, CreateLabel(hw, L"Softness:", x + indent, y, slLbl2, lineH, hFont, false));
+    PAGE_CTRL(9, CreateSlider(hw, IDC_MW_SPINPUT_LUMA_SOFT, x + indent + slLbl2 + 4, y, rw - indent - slLbl2 - 4 - valW, lineH, 0, 100, (int)(m_fSpoutInputLumaSoftness * 100), false));
+    { wchar_t b[32]; swprintf(b, 32, L"%d%%", (int)(m_fSpoutInputLumaSoftness * 100));
+    PAGE_CTRL(9, CreateLabel(hw, b, x + rw - valW, y, valW, lineH, hFont, false)); }
+    hLbl = m_settingsPageCtrls[9].back();
     SetWindowLongPtrW(hLbl, GWLP_ID, IDC_MW_SPINPUT_LUMA_SOFT_LBL);
-    if (!m_bSpoutInputEnabled || !m_bSpoutInputLumaKey)
+    if (!active || !m_bSpoutInputLumaKey)
       EnableWindow(GetDlgItem(hw, IDC_MW_SPINPUT_LUMA_SOFT), FALSE);
   }
 
@@ -4906,6 +5122,14 @@ void Engine::LayoutSettingsControls() {
   // Get the content area inside the tab control
   RECT rcDisplay = { 0, 0, rc.right, rc.bottom };
   TabCtrl_AdjustRect(m_hSettingsTab, FALSE, &rcDisplay);
+
+  // Reposition pin button to top-right of tab header area
+  HWND hPin = GetDlgItem(m_hSettingsWnd, IDC_MW_SETTINGS_PIN);
+  if (hPin) {
+    int pinSize = rcDisplay.top - 2;
+    MoveWindow(hPin, rc.right - pinSize - 2, 1, pinSize, pinSize, TRUE);
+  }
+
   int lineH = GetSettingsLineHeight();
   int rw = rc.right - 36;  // 16px left + 20px right margin
   int lw = MulDiv(160, lineH, 26);

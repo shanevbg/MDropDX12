@@ -360,6 +360,7 @@
     <ClCompile Include="engine_displays.cpp" />
     <ClCompile Include="engine_hotkeys.cpp" />
     <ClCompile Include="engine_spout_input.cpp" />
+    <ClCompile Include="video_capture.cpp" />
     <ClCompile Include="engine_controller.cpp" />
     <ClCompile Include="engine_messages.cpp" />
     <ClCompile Include="engine_presets.cpp" />
@@ -402,6 +403,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="audio_capture.h" />
+    <ClInclude Include="video_capture.h" />
     <ClInclude Include="..\ns-eel2\ns-eel.h" />
     <ClInclude Include="..\ns-eel2\ns-eel-int.h" />
     <ClInclude Include="..\ns-eel2\ns-eel-addfuncs.h" />

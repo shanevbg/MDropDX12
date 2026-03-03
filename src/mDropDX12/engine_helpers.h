@@ -312,6 +312,16 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_WTP_CANCEL          2191  // Button: Cancel
 #define IDC_MW_WTP_WINDOWS         2192  // ComboBox: enumerated windows dropdown
 
+// Video Input source selector (Displays tab)
+#define IDC_MW_VIDINPUT_SOURCE      7050
+// Webcam controls
+#define IDC_MW_VIDINPUT_WEBCAM      7051
+#define IDC_MW_VIDINPUT_WEBCAM_REF  7052
+// Video File controls
+#define IDC_MW_VIDINPUT_FILE_EDIT   7053
+#define IDC_MW_VIDINPUT_FILE_BROWSE 7054
+#define IDC_MW_VIDINPUT_FILE_LOOP   7055
+
 // Spout Video Input controls (Displays tab)
 #define IDC_MW_SPINPUT_ENABLE       7020
 #define IDC_MW_SPINPUT_SENDER       7021
@@ -335,6 +345,9 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_CTRL_SAVE        7045
 #define IDC_MW_CTRL_LOAD        7046
 #define IDC_MW_CTRL_HELP        7047
+
+// Settings window pin (always-on-top toggle)
+#define IDC_MW_SETTINGS_PIN     7060
 
 #define IDT_IPC_MONITOR             10001 // Timer ID for IPC message polling
 #define IDT_IDLE_CHECK              10002 // Timer ID for idle detection (1-second interval)

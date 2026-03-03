@@ -147,7 +147,7 @@ Press **F8** or **Ctrl+L** to open the Settings window.
 
 ## Settings Window (F8)
 
-Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab interface with dark theme support.
+Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab interface with dark theme support. The pin icon in the top-right corner toggles always-on-top for the Settings window (on by default).
 
 ### General Tab
 
@@ -258,7 +258,7 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 - **Sender Name**: Name visible to Spout receivers (Spout outputs only)
 - **Fixed Size**: Lock Spout output to a specific resolution (Spout outputs only)
 - **Width / Height**: Fixed resolution dimensions (Spout outputs only)
-- **Video Input**: Composite a Spout sender as a background or overlay layer on the visualization. Check **Enable** to activate, select a sender from the dropdown (or Auto for the first available), choose **Background** or **Overlay** layer, adjust **Opacity**, and optionally enable **Luma Key** with threshold and softness controls for transparency keying.
+- **Video Input**: Composite a video source as a background or overlay layer on the visualization. Select a source from the **Source** dropdown: **None**, **Spout** (receive from an external Spout sender), **Webcam** (capture from a connected camera via Media Foundation), or **Video File** (play an MP4 or other video file). Choose **Background** or **Overlay** layer, adjust **Opacity**, and optionally enable **Luma Key** with threshold and softness controls for transparency keying. See the Video Input section below for details.
 
 See the Display Outputs section below for details.
 
@@ -624,6 +624,47 @@ Any application that supports Spout receiving can capture the MDropDX12 output:
 **Intermittent frames or flickering**: Lower the visualizer FPS cap to match your receiver's frame rate. If using fixed resolution, ensure the resolution is reasonable for your GPU.
 
 **High GPU usage with fixed resolution**: Large fixed resolutions (e.g., 3840x2160) require more GPU work since the entire pipeline renders at that resolution. Reduce the fixed resolution or lower render quality if needed.
+
+## Video Input
+
+MDropDX12 can composite a video source onto the visualization as a background or overlay layer. This is configured on the **Displays** tab in Settings (F8).
+
+### Source Types
+
+| Source | Description |
+|--------|-------------|
+| None | Video input disabled |
+| Spout | Receive frames from an external Spout sender (e.g., OBS, Resolume) |
+| Webcam | Capture from a connected camera via Windows Media Foundation |
+| Video File | Play an MP4 or other video file |
+
+### Layer Modes
+
+- **Background**: Video is drawn onto the render target before the warp pass, so the preset's warp distortion applies to the video. The visualization renders on top.
+- **Overlay**: Video is drawn onto the backbuffer after the comp pass, so it appears on top of the visualization.
+
+### Shared Controls
+
+All source types share the same compositing controls:
+
+- **Opacity**: Controls the transparency of the video layer (0-100%)
+- **Luma Key**: When enabled, dark areas of the video become transparent based on luminance. Use **Threshold** to set the cutoff point and **Softness** to control the transition gradient.
+
+### Webcam
+
+Select a webcam from the device dropdown. Use **Refresh** to re-enumerate devices if you connect a camera after opening Settings. The webcam captures at its native resolution using Media Foundation and delivers BGRA frames to the GPU.
+
+### Video File
+
+Click **Browse** to select a video file. Most formats supported by Windows Media Foundation work (MP4, AVI, WMV, MKV with appropriate codecs). Check **Loop** to repeat the video continuously.
+
+### Spout
+
+Select a Spout sender from the dropdown or leave it on Auto to connect to the first available sender. Use **Refresh** to update the sender list. This requires an external application sending frames via Spout (e.g., OBS with the Spout filter, Resolume, or any Spout-compatible sender).
+
+### Settings Persistence
+
+Video input settings are saved to the `[SpoutInput]` section of `settings.ini`. The `Source` key stores the active source type (0=None, 1=Spout, 2=Webcam, 3=File). All sources restore automatically on restart.
 
 ## Color Effects
 

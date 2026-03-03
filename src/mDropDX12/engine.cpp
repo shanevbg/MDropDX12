@@ -596,6 +596,7 @@ SPOUT :
 */
 
 #include "engine.h"
+#include "video_capture.h"
 #include "engine_helpers.h"
 #include "utility.h"
 #include "support.h"
@@ -3153,6 +3154,7 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
     m_pInjectEffectPSO.Reset();
     m_pSpoutInputPSO.Reset();
     DestroySpoutInput();
+    DestroyVideoCapture();
 #if (NUM_BLUR_TEX > 0)
     for (int bi = 0; bi < NUM_BLUR_TEX; bi++)
       m_dx12Blur[bi].Reset();

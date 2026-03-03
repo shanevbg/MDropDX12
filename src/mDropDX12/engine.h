@@ -46,6 +46,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "texmgr.h"
 #include "state.h"
 #include "dx12helpers.h"  // DX12Texture
+#include "video_capture.h" // VideoCaptureSource (needed for unique_ptr complete type)
 #include <vector>
 #include <array>
 #include <map>
@@ -810,7 +811,26 @@ public:
   void CreateDX12PresetPSOs();                        // creates PSOs from m_shaders bytecodes
   void DX12_BlurPasses();                             // DX12 implementation of BlurPasses()
 
-  // ── Spout Video Input ──
+  // ── Video Input (Spout / Webcam / Video File) ──
+  enum VideoInputSource {
+      VID_SOURCE_NONE   = 0,
+      VID_SOURCE_SPOUT  = 1,
+      VID_SOURCE_WEBCAM = 2,
+      VID_SOURCE_FILE   = 3
+  };
+  int     m_nVideoInputSource = VID_SOURCE_NONE; // active source type
+
+  // Webcam / Video File capture (Media Foundation)
+  std::unique_ptr<class VideoCaptureSource> m_videoCapture;
+  wchar_t m_szWebcamDevice[256] = {};   // friendly name of selected webcam
+  wchar_t m_szVideoFile[MAX_PATH] = {}; // path to video file
+  bool    m_bVideoLoop = true;          // loop video file playback
+
+  void    InitVideoCapture();
+  void    DestroyVideoCapture();
+  void    UpdateVideoCaptureTexture();   // per-frame GPU upload
+
+  // Spout receiver (source type 1)
   struct SpoutInputState {
       spoutDX12 receiver;
       ComPtr<ID3D12Resource> pReceivedTexture;
@@ -821,7 +841,8 @@ public:
   };
   std::unique_ptr<SpoutInputState> m_spoutInput;
 
-  bool    m_bSpoutInputEnabled = false;
+  // Shared video input settings (apply to all sources)
+  bool    m_bSpoutInputEnabled = false;  // kept for backward compat (maps to m_nVideoInputSource != 0)
   bool    m_bSpoutInputOnTop = false;       // false=background, true=overlay
   float   m_fSpoutInputOpacity = 1.0f;
   bool    m_bSpoutInputLumaKey = false;
@@ -834,6 +855,7 @@ public:
   void DestroySpoutInput();
   void UpdateSpoutInputTexture();
   void CompositeSpoutInput(bool isBackground);
+  void CompositeVideoInput(bool isBackground, DX12Texture& tex, UINT srcW, UINT srcH);
   void CompileSpoutInputPSO();
   void EnumerateSpoutSenders(std::vector<std::string>& outNames);
   void SaveSpoutInputSettings();
@@ -993,6 +1015,8 @@ public:
   std::vector<HWND> m_settingsPageCtrls[SETTINGS_NUM_PAGES]; // HWNDs per tab
   HFONT       m_hSettingsFont = NULL;
   HFONT       m_hSettingsFontBold = NULL;
+  HFONT       m_hSettingsPinFont = NULL;  // Segoe MDL2 Assets for pin icon
+  bool        m_bSettingsOnTop = true;    // Settings window always-on-top state
   int         m_lastSeenIPCSeq = 0;        // tracks last IPC message seq displayed in settings
   int         m_nSettingsFontSize = -16;     // Negative = pixel height (default 16px ~ 12pt)
   int         m_nSettingsWndW = 620;

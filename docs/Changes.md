@@ -1,5 +1,35 @@
 # MDropDX12 Changelog
 
+## v1.4 (2026-03-02)
+
+### Video Input
+
+- Added native webcam capture via Windows Media Foundation (no external tools needed)
+- Added video file playback (MP4, AVI, WMV, MKV) with loop option
+- Unified Spout, webcam, and video file into a single Video Input system with shared compositing controls
+- All sources share the same pixel shader pipeline (luma key, opacity, background/overlay layer)
+- Video input sources auto-restore from saved settings on startup (lazy-init on first render frame)
+
+### Settings UI
+
+- Added pin icon button (top-right of tab header) to toggle Settings window always-on-top
+- Replaced "Enable" checkbox with source selector combo (None / Spout / Webcam / Video File)
+- Added webcam device selector with refresh button
+- Added video file browser with loop checkbox
+
+### Bug Fixes
+
+- Fixed Spout input not rendering on startup (receiver was never initialized from saved settings)
+- Fixed video file playback failing for most MP4s (added stream selection, hardware transforms, proper stride handling via IMF2DBuffer)
+- Fixed video input invisible despite successful decode (MFVideoFormat_RGB32 has alpha=0; shader now sets alpha directly from opacity)
+- Fixed overlay radio button not responding (radio group handler swallowed non-log-level radio clicks)
+
+### Code
+
+- New files: video_capture.h, video_capture.cpp (Media Foundation capture with dedicated thread)
+- Linked Media Foundation libraries (mfplat.lib, mfreadwrite.lib, mfuuid.lib, mf.lib)
+- Extracted shared CompositeVideoInput() from Spout-specific CompositeSpoutInput()
+
 ## v1.3 (2026-03-02)
 
 ### Performance

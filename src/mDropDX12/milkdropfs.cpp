@@ -35,6 +35,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 #include "engine.h"
+#include "video_capture.h"
 #include "resource.h"
 #include "support.h"
 //#include "evallib\eval.h"		// for math. expr. eval - thanks Francis! (in SourceOffSite, it's the 'vis_avs\evallib' project.)
@@ -1878,16 +1879,44 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     }
   }
 
-  // ── Spout Video Input: BACKGROUND layer ──
+  // ── Video Input: BACKGROUND layer ──
   // Draw onto VS[0] before warp so video feeds through the preset's warp distortion
-  if (m_bSpoutInputEnabled && !m_bSpoutInputOnTop) {
-    UpdateSpoutInputTexture();
-    if (m_spoutInput && m_spoutInput->bConnected) {
+  if (m_nVideoInputSource != VID_SOURCE_NONE && !m_bSpoutInputOnTop) {
+    bool hasFrame = false;
+    DX12Texture* pTex = nullptr;
+    UINT srcW = 0, srcH = 0;
+
+    if (m_nVideoInputSource == VID_SOURCE_SPOUT) {
+      UpdateSpoutInputTexture();
+      if (m_spoutInput && m_spoutInput->bConnected && m_spoutInput->dx12InputTex.IsValid()) {
+        pTex = &m_spoutInput->dx12InputTex;
+        srcW = m_spoutInput->nSenderWidth;
+        srcH = m_spoutInput->nSenderHeight;
+        hasFrame = true;
+      }
+    } else if (m_nVideoInputSource == VID_SOURCE_WEBCAM || m_nVideoInputSource == VID_SOURCE_FILE) {
+      // Lazy-init: create capture source on first render (startup from saved settings)
+      if (!m_videoCapture)
+        InitVideoCapture();
+      if (m_videoCapture && m_videoCapture->IsConnected()) {
+        UpdateVideoCaptureTexture();
+        if (m_videoCapture->m_dx12Tex.IsValid()) {
+          pTex = &m_videoCapture->m_dx12Tex;
+          srcW = m_videoCapture->GetWidth();
+          srcH = m_videoCapture->GetHeight();
+          hasFrame = true;
+        }
+      }
+    }
+
+    if (hasFrame && pTex) {
       m_lpDX->TransitionResource(m_dx12VS[0], D3D12_RESOURCE_STATE_RENDER_TARGET);
       D3D12_CPU_DESCRIPTOR_HANDLE rtv = m_lpDX->GetRtvCpuHandle(m_dx12VS[0]);
       cmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
       SetViewportAndScissor(cmdList, m_nTexSizeX, m_nTexSizeY);
-      CompositeSpoutInput(true);
+      CompositeVideoInput(true, *pTex, srcW, srcH);
+      if (m_nVideoInputSource == VID_SOURCE_SPOUT)
+        m_lpDX->TransitionResource(*pTex, D3D12_RESOURCE_STATE_COPY_DEST);
       m_lpDX->TransitionResource(m_dx12VS[0], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     }
   }
@@ -2139,11 +2168,25 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, quad, 4, sizeof(MYVERTEX));
   }
 
-  // ── Spout Video Input: OVERLAY layer ──
+  // ── Video Input: OVERLAY layer ──
   // Draw onto backbuffer after comp pass (video on top of preset)
-  if (m_bSpoutInputEnabled && m_bSpoutInputOnTop) {
-    UpdateSpoutInputTexture();
-    CompositeSpoutInput(false);
+  if (m_nVideoInputSource != VID_SOURCE_NONE && m_bSpoutInputOnTop) {
+    if (m_nVideoInputSource == VID_SOURCE_SPOUT) {
+      UpdateSpoutInputTexture();
+      if (m_spoutInput && m_spoutInput->bConnected && m_spoutInput->dx12InputTex.IsValid()) {
+        CompositeVideoInput(false, m_spoutInput->dx12InputTex, m_spoutInput->nSenderWidth, m_spoutInput->nSenderHeight);
+        m_lpDX->TransitionResource(m_spoutInput->dx12InputTex, D3D12_RESOURCE_STATE_COPY_DEST);
+      }
+    } else if (m_nVideoInputSource == VID_SOURCE_WEBCAM || m_nVideoInputSource == VID_SOURCE_FILE) {
+      if (!m_videoCapture)
+        InitVideoCapture();
+      if (m_videoCapture && m_videoCapture->IsConnected()) {
+        UpdateVideoCaptureTexture();
+        if (m_videoCapture->m_dx12Tex.IsValid()) {
+          CompositeVideoInput(false, m_videoCapture->m_dx12Tex, m_videoCapture->GetWidth(), m_videoCapture->GetHeight());
+        }
+      }
+    }
   }
 
   // ── Draw behind-text sprites (layer 0) on the backbuffer ──
