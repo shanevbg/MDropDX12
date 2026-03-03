@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <string>
 
 // Category groupings for the Hotkeys window and F1 help overlay
 enum HotkeyCategory : int {
@@ -11,13 +12,14 @@ enum HotkeyCategory : int {
     HKCAT_TOOLS,             // Tool windows
     HKCAT_SHADER,            // Shader/effect control
     HKCAT_MISC,              // Miscellaneous
+    HKCAT_SCRIPT,            // User script commands
     HKCAT_LAUNCH,            // Launch App slots
     HKCAT_COUNT
 };
 
 static const wchar_t* const kCategoryNames[HKCAT_COUNT] = {
     L"Navigation", L"Visual", L"Media", L"Window",
-    L"Tools", L"Shader", L"Misc", L"Launch"
+    L"Tools", L"Shader", L"Misc", L"Script", L"Launch"
 };
 
 // Action IDs for configurable hotkey bindings.
@@ -123,16 +125,10 @@ enum HotkeyAction : int {
     HK_DEBUG_INFO,               // N/n
     HK_SPRITE_MODE,              // K/k — toggle sprite/message mode
 
-    // ── Launch ──
-    HK_LAUNCH_APP_1,
-    HK_LAUNCH_APP_2,
-    HK_LAUNCH_APP_3,
-    HK_LAUNCH_APP_4,
-
-    HK_COUNT
+    HK_COUNT  // = number of built-in actions + 1 (HK_NONE)
 };
 
-static constexpr int NUM_HOTKEYS = HK_COUNT - 1;
+static constexpr int NUM_HOTKEYS = HK_COUNT - 1;  // 84 built-in actions
 
 enum HotkeyScope : int {
     HKSCOPE_LOCAL  = 0,   // Only when render window has focus (WM_KEYDOWN lookup)
@@ -151,4 +147,22 @@ struct HotkeyBinding {
     UINT defaultMod;           // for Reset to Defaults
     UINT defaultVK;
     HotkeyScope defaultScope;
+};
+
+// Dynamic user-added hotkeys (Script Commands and Launch Apps)
+static constexpr int USER_HOTKEY_ID_BASE = 1000;
+
+enum UserHotkeyType : int {
+    USER_HK_SCRIPT = 0,   // IPC command string (e.g. "NEXT", "OPACITY=0.5")
+    USER_HK_LAUNCH = 1,   // Launch/focus application path
+};
+
+struct UserHotkey {
+    int            id;          // unique ID for RegisterHotKey (>= USER_HOTKEY_ID_BASE)
+    UserHotkeyType type;
+    UINT           modifiers;   // MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN
+    UINT           vk;          // virtual key code (0 = unbound)
+    HotkeyScope    scope;
+    std::wstring   label;       // display name (e.g. "My Script", "Launch OBS")
+    std::wstring   command;     // IPC command (Script) or full exe path (Launch)
 };

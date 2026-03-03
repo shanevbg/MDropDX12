@@ -250,18 +250,36 @@ void Engine::PollController()
 }
 
 // ---------------------------------------------------------------------------
-// ExecuteControllerCommand — dispatch a command string to an action
+// ExecuteControllerCommand — dispatch a command string to an action.
+// Supports pipe-delimited chaining: "CLEARPARAMS|SIZE=30|Boom|SIZE=60|BOOM"
 // ---------------------------------------------------------------------------
 void Engine::ExecuteControllerCommand(const std::string& cmdRaw)
 {
     if (cmdRaw.empty()) return;
 
-    // Trim leading/trailing whitespace and convert to uppercase
-    std::string cmd = cmdRaw;
-    size_t start = cmd.find_first_not_of(" \t\r\n");
-    size_t end = cmd.find_last_not_of(" \t\r\n");
+    // Split on '|' and dispatch each sub-command
+    if (cmdRaw.find('|') != std::string::npos) {
+        std::string remaining = cmdRaw;
+        size_t pos;
+        while ((pos = remaining.find('|')) != std::string::npos) {
+            std::string part = remaining.substr(0, pos);
+            remaining = remaining.substr(pos + 1);
+            ExecuteControllerCommand(part);
+        }
+        if (!remaining.empty())
+            ExecuteControllerCommand(remaining);
+        return;
+    }
+
+    // Trim leading/trailing whitespace
+    std::string trimmed = cmdRaw;
+    size_t start = trimmed.find_first_not_of(" \t\r\n");
+    size_t end = trimmed.find_last_not_of(" \t\r\n");
     if (start == std::string::npos) return;
-    cmd = cmd.substr(start, end - start + 1);
+    trimmed = trimmed.substr(start, end - start + 1);
+
+    // Uppercase copy for keyword matching
+    std::string cmd = trimmed;
     for (auto& c : cmd) c = (char)toupper((unsigned char)c);
 
     HWND hwnd = GetPluginWindow();
@@ -336,11 +354,11 @@ void Engine::ExecuteControllerCommand(const std::string& cmdRaw)
             PostMessage(hwnd, WM_KEYDOWN, (WPARAM)vk, 0);
     }
     else {
-        // Fallback: treat as IPC command string (e.g. "PRESET=foo.milk", "OPACITY=0.8")
-        RenderCommand rc;
-        rc.cmd = RenderCmd::IPCMessage;
-        rc.sParam = std::wstring(cmd.begin(), cmd.end());
-        EnqueueRenderCmd(std::move(rc));
+        // Delegate to ExecuteScriptCommand which handles CLEARPARAMS, SIZE=,
+        // FONT=, COLOR=, MSG=, PRESET=, text-as-message display, and more.
+        // Use original case (trimmed) so display text preserves capitalization.
+        std::wstring wcmd(trimmed.begin(), trimmed.end());
+        ExecuteScriptCommand(wcmd);
     }
 }
 

@@ -428,9 +428,12 @@ public:
   wchar_t m_szHelpPage2[8192] = {};
   void GenerateHelpText();
 
-  // Launch App hotkey slots (4 configurable paths)
-  wchar_t m_szLaunchApp[4][MAX_PATH] = {};
-  void LaunchOrFocusApp(int slot);
+  // Dynamic user-added hotkeys (Script Commands and Launch Apps)
+  std::vector<UserHotkey> m_userHotkeys;
+  int m_nextUserHotkeyId = USER_HOTKEY_ID_BASE;
+  int  AddUserHotkey(UserHotkeyType type);          // returns index in m_userHotkeys
+  void RemoveUserHotkey(int index);
+  void LaunchOrFocusApp(const std::wstring& path);
 
   // Idle timer (screensaver mode)
   bool m_bIdleTimerEnabled = false;

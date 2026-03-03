@@ -263,14 +263,24 @@ protected:
   int GetMinWidth() const override  { return 560; }
   int GetMinHeight() const override { return 480; }
 
-  DWORD GetCommonControlFlags() const override;
+  void    OnResize() override;
+  DWORD   GetCommonControlFlags() const override;
   void    DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
   LRESULT DoNotify(HWND hWnd, NMHDR* pnm) override;
 
 private:
-  HWND m_hPathLabel = NULL;
-  void ShowPathControls(HWND hWnd, int sel);
+  HWND m_hList = NULL;
+  HWND m_hBtnAdd = NULL;
+  HWND m_hBtnDelete = NULL;
+  HWND m_hBtnEdit = NULL;
+  HWND m_hBtnClearKey = NULL;
+  HWND m_hBtnReset = NULL;
+  int  m_headerH = 0;     // height of title + header area
+  int  m_buttonBarH = 0;  // height of bottom button row
+  void LayoutControls();
+  void OpenEditDialog(int lvItem);
+  void UpdateDeleteButton();
 };
 
 // ── Concrete subclass: MIDI window ──

@@ -369,13 +369,21 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_HOTKEYS_FONT_MINUS 7082
 #define IDC_MW_OPEN_HOTKEYS       7083  // Button on Settings System tab
 #define IDC_MW_HOTKEYS_LIST       7084  // ListView (report mode)
-#define IDC_MW_HOTKEYS_EDIT       7085  // HOTKEY_CLASS control
-#define IDC_MW_HOTKEYS_SET        7086  // Set button
-#define IDC_MW_HOTKEYS_CLEAR      7087  // Clear button
-#define IDC_MW_HOTKEYS_SCOPE      7088  // Checkbox: "Global (system-wide)"
+#define IDC_MW_HOTKEYS_ADD        7085  // "+" button (add user hotkey)
+#define IDC_MW_HOTKEYS_EDITBTN    7086  // Edit button (open modal)
+#define IDC_MW_HOTKEYS_DELETE     7087  // Delete button (user entries only)
+#define IDC_MW_HOTKEYS_CLEARKEY   7088  // Clear Key button (unbind without deleting)
 #define IDC_MW_HOTKEYS_RESET      7089  // Reset to Defaults button
-#define IDC_MW_HOTKEYS_PATH       7110  // Edit: app path for Launch App rows
-#define IDC_MW_HOTKEYS_BROWSE     7111  // Browse button for Launch App rows
+
+// Edit Hotkey modal dialog controls
+#define IDC_HK_EDIT_ACTION        8001  // Static: action name (read-only)
+#define IDC_HK_EDIT_LABEL         8002  // Edit: user label
+#define IDC_HK_EDIT_HOTKEY        8003  // HOTKEY_CLASS: key capture
+#define IDC_HK_EDIT_CLEAR         8004  // Button: clear key
+#define IDC_HK_EDIT_SCOPE         8005  // Checkbox: global
+#define IDC_HK_EDIT_COMMAND       8006  // Edit: IPC command (Script)
+#define IDC_HK_EDIT_PATH          8007  // Edit: app path (Launch)
+#define IDC_HK_EDIT_BROWSE        8008  // Button: browse for exe (Launch)
 
 // MIDI window controls (7090-7109)
 #define IDC_MW_MIDI_PIN         7090

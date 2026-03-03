@@ -12,7 +12,7 @@
 * Double-click .milk/.milk2 files in Explorer to load them (forwards to running instance via IPC)
 * One-click file association registration for .milk and .milk2 (Settings → About, no admin required)
 * Milkwave Remote IPC compatibility — non-blocking hidden window receives 32+ commands via WM_COPYDATA
-* Configurable hotkeys with per-binding local/global scope and Launch App slots (Hotkeys window, Ctrl+F7)
+* Configurable hotkeys with per-binding local/global scope, dynamic Script/Launch entries (Hotkeys window, Ctrl+F7)
 * Native MIDI input with 50 mapping slots, learn mode, button/knob actions (MIDI window from Settings)
 * Standalone Song Info window (Shift+Ctrl+F8) with track info source selector and display options
 * Standalone Displays window (Ctrl+F8) with Display Outputs and Video Input tabs

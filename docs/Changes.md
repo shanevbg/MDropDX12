@@ -64,13 +64,16 @@
 - JSON persistence (midi.json) with Save/Load/Defaults buttons
 - INI persistence for device selection and enabled state
 
-### Launch App Hotkeys
+### Dynamic Script & Launch App Hotkeys
 
-- Added 4 "Launch App" hotkey slots to the Hotkeys window for launching or focusing external programs
-- When triggered: if the program is already running, brings its window to the foreground; if not, launches it
-- Uses process enumeration (TlHelp32) for reliable detection and EnumWindows for window focusing
-- Each slot has a path edit and Browse button (shown when a Launch App row is selected)
-- Ideal for hotkeying Milkwave Remote or other companion tools
+- Replaced fixed Script (10) and Launch App (4) slots with unlimited dynamic entries
+- Click "+" button to add a Script Command or Launch App binding
+- Script commands support Browse button for script files (.txt, .bat, .cmd, .ps1)
+- Launch App entries launch or focus external programs (process enumeration + EnumWindows)
+- All editing (key assignment, scope, command/path) consolidated into a single modal Edit dialog
+- User entries can be deleted; built-in bindings cannot
+- Reset to Defaults only resets built-in keys; user entries are preserved
+- INI format upgraded to Version 3 (old Script/Launch keys cleaned out automatically)
 
 ### Input & Control
 

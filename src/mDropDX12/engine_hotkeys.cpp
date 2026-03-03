@@ -140,14 +140,7 @@ void Engine::ResetHotkeyDefaults()
     HK_DEF(i++, HK_DEBUG_INFO,        0,                     'N',          HKSCOPE_LOCAL, HKCAT_MISC, L"Debug Info",              L"DebugInfo");
     HK_DEF(i++, HK_SPRITE_MODE,       0,                     'K',          HKSCOPE_LOCAL, HKCAT_MISC, L"Sprite/Message Mode",    L"SpriteMode");
 
-    // ── Launch ──
-    HK_DEF(i++, HK_LAUNCH_APP_1,      0, 0, HKSCOPE_GLOBAL, HKCAT_LAUNCH, L"Launch App 1", L"LaunchApp1");
-    HK_DEF(i++, HK_LAUNCH_APP_2,      0, 0, HKSCOPE_GLOBAL, HKCAT_LAUNCH, L"Launch App 2", L"LaunchApp2");
-    HK_DEF(i++, HK_LAUNCH_APP_3,      0, 0, HKSCOPE_GLOBAL, HKCAT_LAUNCH, L"Launch App 3", L"LaunchApp3");
-    HK_DEF(i++, HK_LAUNCH_APP_4,      0, 0, HKSCOPE_GLOBAL, HKCAT_LAUNCH, L"Launch App 4", L"LaunchApp4");
-
-    for (int j = 0; j < 4; j++)
-        m_szLaunchApp[j][0] = L'\0';
+    // User-added hotkeys (Script/Launch) are NOT reset here — they're user-created.
 }
 
 #undef HK_DEF
@@ -159,17 +152,18 @@ void Engine::LoadHotkeySettings()
     // Start from defaults
     ResetHotkeyDefaults();
 
-    // Version marker: detects whether the INI was written by the expanded system.
-    // Version 0 (absent) = pre-expansion (only 10 hotkeys).
-    // Version 2 = full reassignable hotkeys system.
-    static constexpr int HOTKEY_INI_VERSION = 2;
+    // Version marker:
+    // 0 (absent) = pre-expansion (only 10 hotkeys)
+    // 2 = full reassignable hotkeys (fixed Script/Launch slots)
+    // 3 = dynamic user hotkeys (Script/Launch replaced by vector)
+    static constexpr int HOTKEY_INI_VERSION = 3;
     int iniVersion = GetPrivateProfileIntW(L"Hotkeys", L"Version", 0, pIni);
 
     // Migration: if old "Enabled" key exists, migrate scope for configured bindings
     int oldEnabled = GetPrivateProfileIntW(L"Hotkeys", L"Enabled", -1, pIni);
 
-    if (iniVersion >= HOTKEY_INI_VERSION) {
-        // Read overrides from INI (expanded system has written all keys)
+    if (iniVersion >= 2) {
+        // Read built-in hotkey overrides from INI
         for (int i = 0; i < NUM_HOTKEYS; i++) {
             wchar_t modKey[128], vkKey[128], scopeKey[128];
             swprintf(modKey, 128, L"%s_Mod", m_hotkeys[i].szIniKey);
@@ -181,20 +175,17 @@ void Engine::LoadHotkeySettings()
             m_hotkeys[i].scope = (HotkeyScope)GetPrivateProfileIntW(L"Hotkeys", scopeKey, (int)m_hotkeys[i].scope, pIni);
         }
     } else {
-        // Pre-expansion INI: only load the bindings that existed in the old system
-        // (ToggleFullscreen, ToggleStretch, OpenSettings, OpenDisplays, OpenSongInfo,
-        //  OpenHotkeys, LaunchApp1-4). All other bindings keep their defaults.
+        // Pre-expansion INI: only load bindings that existed in the old system
         static const wchar_t* oldKeys[] = {
             L"ToggleFullscreen", L"ToggleStretch", L"OpenSettings", L"OpenDisplays",
-            L"OpenSongInfo", L"OpenHotkeys", L"LaunchApp1", L"LaunchApp2",
-            L"LaunchApp3", L"LaunchApp4"
+            L"OpenSongInfo", L"OpenHotkeys"
         };
         for (int i = 0; i < NUM_HOTKEYS; i++) {
             bool isOldKey = false;
             for (auto* k : oldKeys) {
                 if (wcscmp(m_hotkeys[i].szIniKey, k) == 0) { isOldKey = true; break; }
             }
-            if (!isOldKey) continue;  // keep default for new bindings
+            if (!isOldKey) continue;
 
             wchar_t modKey[128], vkKey[128], scopeKey[128];
             swprintf(modKey, 128, L"%s_Mod", m_hotkeys[i].szIniKey);
@@ -205,9 +196,6 @@ void Engine::LoadHotkeySettings()
             m_hotkeys[i].vk = (UINT)GetPrivateProfileIntW(L"Hotkeys", vkKey, (int)m_hotkeys[i].vk, pIni);
             m_hotkeys[i].scope = (HotkeyScope)GetPrivateProfileIntW(L"Hotkeys", scopeKey, (int)m_hotkeys[i].scope, pIni);
         }
-
-        // Write the version marker + save all bindings so future loads use the full path
-        SaveHotkeySettings();
     }
 
     // Migration: old system had master enable toggle for first 2 bindings
@@ -220,15 +208,77 @@ void Engine::LoadHotkeySettings()
             }
         }
         WritePrivateProfileStringW(L"Hotkeys", L"Enabled", NULL, pIni);
-        SaveHotkeySettings();
     }
 
-    // Load Launch App paths
-    for (int i = 0; i < 4; i++) {
-        wchar_t key[64];
-        swprintf(key, 64, L"LaunchApp%d_Path", i + 1);
-        GetPrivateProfileStringW(L"Hotkeys", key, L"", m_szLaunchApp[i], MAX_PATH, pIni);
+    // Version 2→3 cleanup: remove old fixed Script/Launch keys
+    if (iniVersion == 2) {
+        for (int i = 1; i <= 10; i++) {
+            wchar_t key[64];
+            swprintf(key, 64, L"Script%d_Cmd", i);
+            WritePrivateProfileStringW(L"Hotkeys", key, NULL, pIni);
+            swprintf(key, 64, L"Script%d_Mod", i);
+            WritePrivateProfileStringW(L"Hotkeys", key, NULL, pIni);
+            swprintf(key, 64, L"Script%d_VK", i);
+            WritePrivateProfileStringW(L"Hotkeys", key, NULL, pIni);
+            swprintf(key, 64, L"Script%d_Scope", i);
+            WritePrivateProfileStringW(L"Hotkeys", key, NULL, pIni);
+        }
+        for (int i = 1; i <= 4; i++) {
+            wchar_t key[64];
+            swprintf(key, 64, L"LaunchApp%d_Path", i);
+            WritePrivateProfileStringW(L"Hotkeys", key, NULL, pIni);
+            swprintf(key, 64, L"LaunchApp%d_Mod", i);
+            WritePrivateProfileStringW(L"Hotkeys", key, NULL, pIni);
+            swprintf(key, 64, L"LaunchApp%d_VK", i);
+            WritePrivateProfileStringW(L"Hotkeys", key, NULL, pIni);
+            swprintf(key, 64, L"LaunchApp%d_Scope", i);
+            WritePrivateProfileStringW(L"Hotkeys", key, NULL, pIni);
+        }
     }
+
+    // Load dynamic user hotkeys (Version 3+)
+    m_userHotkeys.clear();
+    if (iniVersion >= 3) {
+        int count = GetPrivateProfileIntW(L"Hotkeys", L"UserHotkey_Count", 0, pIni);
+        m_nextUserHotkeyId = GetPrivateProfileIntW(L"Hotkeys", L"UserHotkey_NextID", USER_HOTKEY_ID_BASE, pIni);
+
+        for (int i = 0; i < count; i++) {
+            wchar_t prefix[64];
+            swprintf(prefix, 64, L"UserHotkey_%d_", i);
+
+            UserHotkey uh;
+            wchar_t keyBuf[128], valBuf[512];
+
+            swprintf(keyBuf, 128, L"%sID", prefix);
+            uh.id = GetPrivateProfileIntW(L"Hotkeys", keyBuf, USER_HOTKEY_ID_BASE + i, pIni);
+
+            swprintf(keyBuf, 128, L"%sType", prefix);
+            uh.type = (UserHotkeyType)GetPrivateProfileIntW(L"Hotkeys", keyBuf, 0, pIni);
+
+            swprintf(keyBuf, 128, L"%sMod", prefix);
+            uh.modifiers = (UINT)GetPrivateProfileIntW(L"Hotkeys", keyBuf, 0, pIni);
+
+            swprintf(keyBuf, 128, L"%sVK", prefix);
+            uh.vk = (UINT)GetPrivateProfileIntW(L"Hotkeys", keyBuf, 0, pIni);
+
+            swprintf(keyBuf, 128, L"%sScope", prefix);
+            uh.scope = (HotkeyScope)GetPrivateProfileIntW(L"Hotkeys", keyBuf, 0, pIni);
+
+            swprintf(keyBuf, 128, L"%sLabel", prefix);
+            GetPrivateProfileStringW(L"Hotkeys", keyBuf, L"", valBuf, 512, pIni);
+            uh.label = valBuf;
+
+            swprintf(keyBuf, 128, L"%sCmd", prefix);
+            GetPrivateProfileStringW(L"Hotkeys", keyBuf, L"", valBuf, 512, pIni);
+            uh.command = valBuf;
+
+            m_userHotkeys.push_back(std::move(uh));
+        }
+    }
+
+    // Save as Version 3 if upgrading
+    if (iniVersion < HOTKEY_INI_VERSION)
+        SaveHotkeySettings();
 }
 
 void Engine::SaveHotkeySettings()
@@ -236,9 +286,10 @@ void Engine::SaveHotkeySettings()
     wchar_t* pIni = GetConfigIniFile();
     wchar_t buf[64];
 
-    // Write version marker so LoadHotkeySettings knows this is the expanded system
-    WritePrivateProfileStringW(L"Hotkeys", L"Version", L"2", pIni);
+    // Write version marker
+    WritePrivateProfileStringW(L"Hotkeys", L"Version", L"3", pIni);
 
+    // Save built-in hotkey bindings
     for (int i = 0; i < NUM_HOTKEYS; i++) {
         wchar_t modKey[128], vkKey[128], scopeKey[128];
         swprintf(modKey, 128, L"%s_Mod", m_hotkeys[i].szIniKey);
@@ -253,11 +304,59 @@ void Engine::SaveHotkeySettings()
         WritePrivateProfileStringW(L"Hotkeys", scopeKey, buf, pIni);
     }
 
-    // Save Launch App paths
-    for (int i = 0; i < 4; i++) {
-        wchar_t key[64];
-        swprintf(key, 64, L"LaunchApp%d_Path", i + 1);
-        WritePrivateProfileStringW(L"Hotkeys", key, m_szLaunchApp[i], pIni);
+    // Save dynamic user hotkeys
+    int count = (int)m_userHotkeys.size();
+    swprintf(buf, 64, L"%d", count);
+    WritePrivateProfileStringW(L"Hotkeys", L"UserHotkey_Count", buf, pIni);
+    swprintf(buf, 64, L"%d", m_nextUserHotkeyId);
+    WritePrivateProfileStringW(L"Hotkeys", L"UserHotkey_NextID", buf, pIni);
+
+    for (int i = 0; i < count; i++) {
+        const auto& uh = m_userHotkeys[i];
+        wchar_t prefix[64], keyBuf[128];
+        swprintf(prefix, 64, L"UserHotkey_%d_", i);
+
+        swprintf(keyBuf, 128, L"%sID", prefix);
+        swprintf(buf, 64, L"%d", uh.id);
+        WritePrivateProfileStringW(L"Hotkeys", keyBuf, buf, pIni);
+
+        swprintf(keyBuf, 128, L"%sType", prefix);
+        swprintf(buf, 64, L"%d", (int)uh.type);
+        WritePrivateProfileStringW(L"Hotkeys", keyBuf, buf, pIni);
+
+        swprintf(keyBuf, 128, L"%sMod", prefix);
+        swprintf(buf, 64, L"%u", uh.modifiers);
+        WritePrivateProfileStringW(L"Hotkeys", keyBuf, buf, pIni);
+
+        swprintf(keyBuf, 128, L"%sVK", prefix);
+        swprintf(buf, 64, L"%u", uh.vk);
+        WritePrivateProfileStringW(L"Hotkeys", keyBuf, buf, pIni);
+
+        swprintf(keyBuf, 128, L"%sScope", prefix);
+        swprintf(buf, 64, L"%d", (int)uh.scope);
+        WritePrivateProfileStringW(L"Hotkeys", keyBuf, buf, pIni);
+
+        swprintf(keyBuf, 128, L"%sLabel", prefix);
+        WritePrivateProfileStringW(L"Hotkeys", keyBuf, uh.label.c_str(), pIni);
+
+        swprintf(keyBuf, 128, L"%sCmd", prefix);
+        WritePrivateProfileStringW(L"Hotkeys", keyBuf, uh.command.c_str(), pIni);
+    }
+
+    // Clean up any stale user hotkey entries beyond current count
+    for (int i = count; i < count + 20; i++) {
+        wchar_t keyBuf[128];
+        swprintf(keyBuf, 128, L"UserHotkey_%d_ID", i);
+        wchar_t test[16];
+        GetPrivateProfileStringW(L"Hotkeys", keyBuf, L"", test, 16, pIni);
+        if (test[0] == L'\0') break;  // no more stale entries
+        // Delete all fields for this stale entry
+        wchar_t prefix[64];
+        swprintf(prefix, 64, L"UserHotkey_%d_", i);
+        for (auto* suffix : { L"ID", L"Type", L"Mod", L"VK", L"Scope", L"Label", L"Cmd" }) {
+            swprintf(keyBuf, 128, L"%s%s", prefix, suffix);
+            WritePrivateProfileStringW(L"Hotkeys", keyBuf, NULL, pIni);
+        }
     }
 }
 
@@ -265,18 +364,22 @@ void Engine::RegisterGlobalHotkeys(HWND hwnd)
 {
     if (!hwnd) return;
     for (int i = 0; i < NUM_HOTKEYS; i++) {
-        if (m_hotkeys[i].vk != 0 && m_hotkeys[i].scope == HKSCOPE_GLOBAL) {
+        if (m_hotkeys[i].vk != 0 && m_hotkeys[i].scope == HKSCOPE_GLOBAL)
             RegisterHotKey(hwnd, m_hotkeys[i].id, m_hotkeys[i].modifiers | MOD_NOREPEAT, m_hotkeys[i].vk);
-        }
+    }
+    for (const auto& uh : m_userHotkeys) {
+        if (uh.vk != 0 && uh.scope == HKSCOPE_GLOBAL)
+            RegisterHotKey(hwnd, uh.id, uh.modifiers | MOD_NOREPEAT, uh.vk);
     }
 }
 
 void Engine::UnregisterGlobalHotkeys(HWND hwnd)
 {
     if (!hwnd) return;
-    for (int i = 0; i < NUM_HOTKEYS; i++) {
+    for (int i = 0; i < NUM_HOTKEYS; i++)
         UnregisterHotKey(hwnd, m_hotkeys[i].id);
-    }
+    for (const auto& uh : m_userHotkeys)
+        UnregisterHotKey(hwnd, uh.id);
 }
 
 bool Engine::DispatchHotkeyAction(int actionId)
@@ -662,30 +765,46 @@ bool Engine::DispatchHotkeyAction(int actionId)
         m_nNumericInputDigits = 0;
         return true;
 
-    // ── Launch ──
-    case HK_LAUNCH_APP_1: LaunchOrFocusApp(0); return true;
-    case HK_LAUNCH_APP_2: LaunchOrFocusApp(1); return true;
-    case HK_LAUNCH_APP_3: LaunchOrFocusApp(2); return true;
-    case HK_LAUNCH_APP_4: LaunchOrFocusApp(3); return true;
-
     default:
-        return false;
+        break;
     }
+
+    // Dynamic user hotkeys (Script Commands and Launch Apps)
+    if (actionId >= USER_HOTKEY_ID_BASE) {
+        for (const auto& uh : m_userHotkeys) {
+            if (uh.id == actionId) {
+                if (uh.command.empty()) {
+                    AddNotification(uh.type == USER_HK_SCRIPT
+                        ? L"No command configured" : L"No app configured");
+                    return true;
+                }
+                if (uh.type == USER_HK_SCRIPT) {
+                    char narrow[512];
+                    WideCharToMultiByte(CP_UTF8, 0, uh.command.c_str(), -1, narrow, 512, NULL, NULL);
+                    ExecuteControllerCommand(std::string(narrow));
+                } else {
+                    LaunchOrFocusApp(uh.command);
+                }
+                return true;
+            }
+        }
+    }
+
+    return false;
     #undef clamp
 }
 
-void Engine::LaunchOrFocusApp(int slot)
+void Engine::LaunchOrFocusApp(const std::wstring& path)
 {
-    if (slot < 0 || slot >= 4) return;
-    if (m_szLaunchApp[slot][0] == L'\0') {
-        AddNotification(L"No app configured for this slot");
+    if (path.empty()) {
+        AddNotification(L"No app configured");
         return;
     }
 
     // Extract exe filename from full path
-    const wchar_t* exeName = wcsrchr(m_szLaunchApp[slot], L'\\');
-    if (!exeName) exeName = wcsrchr(m_szLaunchApp[slot], L'/');
-    exeName = exeName ? exeName + 1 : m_szLaunchApp[slot];
+    const wchar_t* exeName = wcsrchr(path.c_str(), L'\\');
+    if (!exeName) exeName = wcsrchr(path.c_str(), L'/');
+    exeName = exeName ? exeName + 1 : path.c_str();
 
     // Search for a running process with matching exe name
     DWORD targetPID = 0;
@@ -727,7 +846,7 @@ void Engine::LaunchOrFocusApp(int slot)
     }
 
     // Not running — launch it
-    HINSTANCE hr = ShellExecuteW(NULL, L"open", m_szLaunchApp[slot],
+    HINSTANCE hr = ShellExecuteW(NULL, L"open", path.c_str(),
                                   NULL, NULL, SW_SHOWNORMAL);
     if ((INT_PTR)hr > 32) {
         wchar_t msg[MAX_PATH + 32];
@@ -740,6 +859,29 @@ void Engine::LaunchOrFocusApp(int slot)
     }
 }
 
+int Engine::AddUserHotkey(UserHotkeyType type)
+{
+    UserHotkey uh;
+    uh.id = m_nextUserHotkeyId++;
+    uh.type = type;
+    uh.modifiers = 0;
+    uh.vk = 0;
+    uh.scope = (type == USER_HK_LAUNCH) ? HKSCOPE_GLOBAL : HKSCOPE_LOCAL;
+    uh.label = (type == USER_HK_SCRIPT) ? L"Script Command" : L"Launch App";
+    m_userHotkeys.push_back(std::move(uh));
+    return (int)m_userHotkeys.size() - 1;
+}
+
+void Engine::RemoveUserHotkey(int index)
+{
+    if (index < 0 || index >= (int)m_userHotkeys.size()) return;
+    // Unregister if global
+    HWND hRender = GetPluginWindow();
+    if (hRender && m_userHotkeys[index].scope == HKSCOPE_GLOBAL)
+        UnregisterHotKey(hRender, m_userHotkeys[index].id);
+    m_userHotkeys.erase(m_userHotkeys.begin() + index);
+}
+
 bool Engine::LookupLocalHotkey(UINT vk, UINT modifiers)
 {
     for (int i = 0; i < NUM_HOTKEYS; i++) {
@@ -748,6 +890,15 @@ bool Engine::LookupLocalHotkey(UINT vk, UINT modifiers)
             m_hotkeys[i].scope == HKSCOPE_LOCAL)
         {
             return DispatchHotkeyAction(m_hotkeys[i].id);
+        }
+    }
+    // Also check dynamic user hotkeys
+    for (const auto& uh : m_userHotkeys) {
+        if (uh.vk == vk && uh.vk != 0 &&
+            uh.modifiers == modifiers &&
+            uh.scope == HKSCOPE_LOCAL)
+        {
+            return DispatchHotkeyAction(uh.id);
         }
     }
     return false;
@@ -871,20 +1022,61 @@ void Engine::GenerateHelpText()
     appendLine(L"MDropDX12 Keyboard Shortcuts (F1 to cycle pages, ESC to close)");
     appendLine(L"");
 
-    // Iterate categories
+    // Iterate categories (built-in hotkeys)
     for (int cat = 0; cat < HKCAT_COUNT; cat++) {
+        // Check if any built-in or user entries exist for this category
+        bool hasBuiltIn = false;
+        for (int i = 0; i < NUM_HOTKEYS; i++) {
+            if ((int)m_hotkeys[i].category == cat) { hasBuiltIn = true; break; }
+        }
+        bool hasUser = false;
+        HotkeyCategory userCat = (cat == HKCAT_SCRIPT || cat == HKCAT_LAUNCH)
+            ? (HotkeyCategory)cat : HKCAT_COUNT;
+        if (userCat != HKCAT_COUNT) {
+            UserHotkeyType matchType = (cat == HKCAT_SCRIPT) ? USER_HK_SCRIPT : USER_HK_LAUNCH;
+            for (const auto& uh : m_userHotkeys) {
+                if (uh.type == matchType) { hasUser = true; break; }
+            }
+        }
+        if (!hasBuiltIn && !hasUser) continue;
+
         // Category header
         wchar_t header[128];
         swprintf(header, 128, L"\x2500\x2500\x2500 %s \x2500\x2500\x2500", kCategoryNames[cat]);
         appendLine(header);
 
-        // List bindings in this category
+        // List built-in bindings in this category
         for (int i = 0; i < NUM_HOTKEYS; i++) {
             if ((int)m_hotkeys[i].category != cat) continue;
             std::wstring key = FormatHotkeyDisplay(m_hotkeys[i].modifiers, m_hotkeys[i].vk);
             wchar_t line[160];
             swprintf(line, 160, L"  %-20s %s", key.c_str(), m_hotkeys[i].szAction);
             appendLine(line);
+        }
+
+        // List user hotkeys under Script/Launch categories
+        if (hasUser) {
+            UserHotkeyType matchType = (cat == HKCAT_SCRIPT) ? USER_HK_SCRIPT : USER_HK_LAUNCH;
+            for (const auto& uh : m_userHotkeys) {
+                if (uh.type != matchType) continue;
+                std::wstring key = FormatHotkeyDisplay(uh.modifiers, uh.vk);
+                std::wstring actionName = uh.label;
+                if (!uh.command.empty()) {
+                    if (uh.type == USER_HK_SCRIPT) {
+                        actionName += L" (" + uh.command + L")";
+                    } else {
+                        const wchar_t* exeName = wcsrchr(uh.command.c_str(), L'\\');
+                        if (!exeName) exeName = wcsrchr(uh.command.c_str(), L'/');
+                        exeName = exeName ? exeName + 1 : uh.command.c_str();
+                        actionName += L" (";
+                        actionName += exeName;
+                        actionName += L")";
+                    }
+                }
+                wchar_t line[256];
+                swprintf(line, 256, L"  %-20s %s", key.c_str(), actionName.c_str());
+                appendLine(line);
+            }
         }
         appendLine(L"");
 
