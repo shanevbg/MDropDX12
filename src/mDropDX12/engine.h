@@ -493,7 +493,7 @@ public:
   int			m_nCustMsgsSpawned;
   bool    m_bEnablePresetStartup;
   bool    m_bEnableAudioCapture = true;
-  float   m_fAudioSensitivity = 1.0f;   // 1.0 = unity gain (matches MilkDrop3); -1 = adaptive auto-normalize
+  float   m_fAudioSensitivity = -1.0f;  // -1 = adaptive auto-normalize (default); 0.5–256 = fixed gain multiplier
   bool    m_bEnablePresetStartupSavingOnClose = true;
   bool    m_bAutoLockPresetWhenNoMusic;
   bool    m_bScreenDependentRenderMode;

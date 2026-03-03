@@ -134,19 +134,20 @@ void PresetsWindow::DoBuildControls() {
 
     // Preset settings
     wchar_t buf[64];
-    m_hLblSens = CreateLabel(hw, L"Audio Sensitivity (-1=Auto):", x, y, lw, lineH, hFont);
+    int slw = MulDiv(200, lineH, 26); // wider label for settings rows
+    m_hLblSens = CreateLabel(hw, L"Audio Gain (-1=Auto):", x, y, slw, lineH, hFont);
     swprintf(buf, 64, L"%g", (double)p->m_fAudioSensitivity);
-    m_hEditSens = CreateEdit(hw, buf, IDC_MW_AUDIO_SENS, x + lw + 4, y, 60, lineH, hFont);
+    m_hEditSens = CreateEdit(hw, buf, IDC_MW_AUDIO_SENS, x + slw + 4, y, 60, lineH, hFont);
     y += lineH + gap;
 
-    m_hLblBlend = CreateLabel(hw, L"Blend Time (s):", x, y, lw, lineH, hFont);
+    m_hLblBlend = CreateLabel(hw, L"Blend Time (s):", x, y, slw, lineH, hFont);
     swprintf(buf, 64, L"%.1f", p->m_fBlendTimeAuto);
-    m_hEditBlend = CreateEdit(hw, buf, IDC_MW_BLEND_TIME, x + lw + 4, y, 60, lineH, hFont);
+    m_hEditBlend = CreateEdit(hw, buf, IDC_MW_BLEND_TIME, x + slw + 4, y, 60, lineH, hFont);
     y += lineH + gap;
 
-    m_hLblTime = CreateLabel(hw, L"Time Between (s):", x, y, lw, lineH, hFont);
+    m_hLblTime = CreateLabel(hw, L"Time Between (s):", x, y, slw, lineH, hFont);
     swprintf(buf, 64, L"%.0f", p->m_fTimeBetweenPresets);
-    m_hEditTime = CreateEdit(hw, buf, IDC_MW_TIME_BETWEEN, x + lw + 4, y, 60, lineH, hFont);
+    m_hEditTime = CreateEdit(hw, buf, IDC_MW_TIME_BETWEEN, x + slw + 4, y, 60, lineH, hFont);
     y += lineH + gap + 4;
 
     m_hChkHardCuts = CreateCheck(hw, L"Hard Cuts Disabled",      IDC_MW_HARD_CUTS,   x, y, rw, lineH, hFont, p->m_bHardCutsDisabled); y += lineH + 2;
@@ -216,18 +217,19 @@ void PresetsWindow::LayoutControls() {
     }
     y += lineH + 4 + gap + 4;
 
-    // Settings rows
+    // Settings rows (wider label column for "Audio Sensitivity (-1=Auto):")
+    int slw = MulDiv(200, lineH, 26);
     int editW = 60;
-    MoveWindow(m_hLblSens, x, y, lw, lineH, TRUE);
-    MoveWindow(m_hEditSens, x + lw + 4, y, editW, lineH, TRUE);
+    MoveWindow(m_hLblSens, x, y, slw, lineH, TRUE);
+    MoveWindow(m_hEditSens, x + slw + 4, y, editW, lineH, TRUE);
     y += lineH + gap;
 
-    MoveWindow(m_hLblBlend, x, y, lw, lineH, TRUE);
-    MoveWindow(m_hEditBlend, x + lw + 4, y, editW, lineH, TRUE);
+    MoveWindow(m_hLblBlend, x, y, slw, lineH, TRUE);
+    MoveWindow(m_hEditBlend, x + slw + 4, y, editW, lineH, TRUE);
     y += lineH + gap;
 
-    MoveWindow(m_hLblTime, x, y, lw, lineH, TRUE);
-    MoveWindow(m_hEditTime, x + lw + 4, y, editW, lineH, TRUE);
+    MoveWindow(m_hLblTime, x, y, slw, lineH, TRUE);
+    MoveWindow(m_hEditTime, x + slw + 4, y, editW, lineH, TRUE);
     y += lineH + gap + 4;
 
     // Checkboxes
