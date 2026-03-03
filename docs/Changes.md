@@ -24,6 +24,19 @@
 - Fixed video input invisible despite successful decode (MFVideoFormat_RGB32 has alpha=0; shader now sets alpha directly from opacity)
 - Fixed overlay radio button not responding (radio group handler swallowed non-log-level radio clicks)
 
+### Input & Control
+
+- Controller buttons can now bind any IPC command (e.g. `OPACITY=0.5`, `COL_HUE=0.3`, `PRESET=name.milk`)
+- Added CAPTURE, SPOUT, BLACKOUT named controller commands
+- Updated controller help popup with full command reference
+
+### IPC / Remote Control
+
+- Handled SPOUTINPUT= IPC command (Spout sender name, enable/disable via text protocol)
+- Handled WM_ENABLESPOUTMIX, WM_SETSPOUTSENDER direct messages from Milkwave Remote
+- Handled WM_SET_INPUTMIX_ONTOP, WM_SET_INPUTMIX_OPACITY, WM_SET_INPUTMIX_LUMAKEY direct messages
+- Fixed WM_ENABLESPOUTMIX incorrectly toggling Spout output instead of Spout input
+
 ### Code
 
 - New files: video_capture.h, video_capture.cpp (Media Foundation capture with dedicated thread)

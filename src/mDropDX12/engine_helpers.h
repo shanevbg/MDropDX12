@@ -86,6 +86,7 @@ HWND CreateEdit(HWND hParent, const wchar_t* text, int id, int x, int y, int w, 
 HWND CreateCheck(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool checked, bool visible = true);
 HWND CreateRadio(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool checked, bool firstInGroup = false, bool visible = true);
 HWND CreateBtn(HWND hParent, const wchar_t* text, int id, int x, int y, int w, int h, HFONT hFont, bool visible = true);
+HWND CreateSlider(HWND hParent, int id, int x, int y, int w, int h, int rangeMin, int rangeMax, int pos, bool visible = true);
 void DrawOwnerCheckbox(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBg, COLORREF colCtrlBg, COLORREF colBorder, COLORREF colText);
 void DrawOwnerRadio(DRAWITEMSTRUCT* pDIS, bool bDark, COLORREF colBg, COLORREF colCtrlBg, COLORREF colBorder, COLORREF colText);
 void draw3DEdge(HDC hdc, const RECT& rc, COLORREF hi, COLORREF shadow, bool raised);
@@ -349,6 +350,12 @@ extern bool g_bSettingsWndClassRegistered;
 // Settings window pin (always-on-top toggle)
 #define IDC_MW_SETTINGS_PIN     7060
 
+// Spout / Displays window controls
+#define IDC_MW_DISPLAYS_PIN     7061
+#define IDC_MW_DISP_FONT_PLUS   7062
+#define IDC_MW_DISP_FONT_MINUS  7063
+#define IDC_MW_OPEN_DISPLAYS    7064  // Button on General tab to open Displays window
+
 #define IDT_IPC_MONITOR             10001 // Timer ID for IPC message polling
 #define IDT_IDLE_CHECK              10002 // Timer ID for idle detection (1-second interval)
 #define IDT_CONTROLLER_POLL         10003 // Timer ID for game controller polling (50ms)
@@ -493,7 +500,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_PRESET_FILTER    2201   // Button: Preset extension filter (General tab)
 
 // Settings page count
-#define SETTINGS_NUM_PAGES      11
+#define SETTINGS_NUM_PAGES      10
 
 // Custom messages for thread-safe side effects (settings thread → render thread)
 #define WM_MW_SET_OPACITY       (WM_APP + 1)
@@ -516,6 +523,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_TOGGLE_STRETCH_MODE (WM_APP + 18) // toggle stretch across all monitors
 #define WM_MW_TOGGLE_MIRROR_MODE  (WM_APP + 19) // toggle per-output mirror windows
 #define WM_MW_RESET_WINDOW        (WM_APP + 20) // reset to safe windowed mode (Ctrl+F2)
+#define WM_MW_REBUILD_FONTS       (WM_APP + 21) // cross-window font size sync
 
 // Milkwave Remote messages (sent via PostMessage from Milkwave Remote → IPC window → render window)
 #define WM_MW_NEXT_PRESET       (WM_APP + 100)

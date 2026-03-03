@@ -22,7 +22,11 @@ std::string Engine::GetDefaultControllerJSON()
         "// Button-to-command mapping for game controllers\r\n"
         "// Commands: NEXT, PREV, LOCK, RAND, HARDCUT, MASHUP,\r\n"
         "//           FULLSCREEN, STRETCH, MIRROR, RESET,\r\n"
-        "//           PRESETINFO, SETTINGS, SEND=<vk>\r\n"
+        "//           PRESETINFO, SETTINGS, CAPTURE, SPOUT,\r\n"
+        "//           BLACKOUT, SEND=<vk>\r\n"
+        "// Any IPC command also works as a value, e.g.:\r\n"
+        "//   OPACITY=0.5, COL_HUE=0.3, SPOUT_ACTIVE=1,\r\n"
+        "//   PRESET=name.milk, SPOUTINPUT=1|SenderName\r\n"
         "// Example values for a DualSense controller:\r\n"
         "{\r\n"
         "  \"1\": \"NEXT\",\r\n"
@@ -309,6 +313,16 @@ void Engine::ExecuteControllerCommand(const std::string& cmdRaw)
     else if (cmd == "RESET") {
         if (hwnd) PostMessage(hwnd, WM_MW_RESET_WINDOW, 0, 0);
     }
+    else if (cmd == "CAPTURE") {
+        EnqueueRenderCmd(RenderCmd::CaptureScreenshot);
+    }
+    else if (cmd == "SPOUT") {
+        EnqueueRenderCmd(RenderCmd::ToggleSpout);
+    }
+    else if (cmd == "BLACKOUT") {
+        m_blackmode = !m_blackmode;
+        AddNotification(m_blackmode ? L"Black Mode enabled" : L"Black Mode disabled");
+    }
     else if (cmd.substr(0, 5) == "SEND=") {
         std::string val = cmd.substr(5);
         int vk = 0;
@@ -320,6 +334,13 @@ void Engine::ExecuteControllerCommand(const std::string& cmdRaw)
         } catch (...) { return; }
         if (vk > 0 && hwnd)
             PostMessage(hwnd, WM_KEYDOWN, (WPARAM)vk, 0);
+    }
+    else {
+        // Fallback: treat as IPC command string (e.g. "PRESET=foo.milk", "OPACITY=0.8")
+        RenderCommand rc;
+        rc.cmd = RenderCmd::IPCMessage;
+        rc.sParam = std::wstring(cmd.begin(), cmd.end());
+        EnqueueRenderCmd(std::move(rc));
     }
 }
 
@@ -515,6 +536,37 @@ static LRESULT CALLBACK ControllerHelpWndProc(HWND hWnd, UINT uMsg, WPARAM wPara
 
         y += boxH + 12;
 
+        // Available Commands section
+        SelectObject(hdc, hFontHeader);
+        SetTextColor(hdc, clrHeader);
+        RECT rcCmdTitle = { pad, y, rcClient.right - pad, y + fsHeader + 4 };
+        DrawTextW(hdc, L"Available Commands", -1, &rcCmdTitle, DT_LEFT | DT_SINGLELINE);
+        y += fsHeader + 6;
+
+        SelectObject(hdc, hFontSmall);
+        SetTextColor(hdc, clrText);
+
+        const wchar_t* cmdLines[] = {
+            L"NEXT, PREV, HARDCUT \u2014 Preset navigation",
+            L"LOCK, RAND \u2014 Preset lock / random toggle",
+            L"MASHUP \u2014 Mashup blend mode",
+            L"FULLSCREEN, STRETCH, MIRROR, RESET \u2014 Window modes",
+            L"PRESETINFO, SETTINGS \u2014 UI toggles",
+            L"CAPTURE, SPOUT, BLACKOUT \u2014 Screenshot / Spout / black mode",
+            L"SEND=<vk> \u2014 Send arbitrary virtual keypress",
+        };
+        for (auto line : cmdLines) {
+            RECT rcLine = { pad + 8, y, rcClient.right - pad, y + warnLineH };
+            DrawTextW(hdc, line, -1, &rcLine, DT_LEFT | DT_SINGLELINE);
+            y += warnLineH;
+        }
+        y += 4;
+
+        SetTextColor(hdc, clrAccent);
+        RECT rcIpc = { pad + 8, y, rcClient.right - pad, y + warnLineH };
+        DrawTextW(hdc, L"Any IPC command also works (e.g. OPACITY=0.5, COL_HUE=0.3)", -1, &rcIpc, DT_LEFT | DT_SINGLELINE);
+        y += warnLineH + 8;
+
         // Footer tip
         SelectObject(hdc, hFontSmall);
         SetTextColor(hdc, clrDimText);
@@ -570,8 +622,8 @@ void Engine::ShowControllerHelpPopup(HWND hParent)
 
     // Scale window size relative to font size
     int fs = data->fontSize;
-    int winW = MulDiv(520, fs, 16);
-    int winH = MulDiv(560, fs, 16);
+    int winW = MulDiv(560, fs, 16);
+    int winH = MulDiv(820, fs, 16);
 
     // Position near parent window
     RECT rcParent = {};

@@ -4,6 +4,7 @@
 // Manages enumeration, INI persistence, init/destroy, and per-frame send.
 
 #include "engine.h"
+#include "tool_window.h"
 #include "engine_helpers.h"
 #include "utility.h"
 #include <algorithm>
@@ -750,9 +751,10 @@ void Engine::UpdateMirrorWindowStyles()
 
 void Engine::RefreshDisplaysTab()
 {
-    if (!m_hSettingsWnd) return;
+    HWND hWnd = m_displaysWindow ? m_displaysWindow->GetHWND() : NULL;
+    if (!hWnd) return;
 
-    HWND hList = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_LIST);
+    HWND hList = GetDlgItem(hWnd, IDC_MW_DISP_LIST);
     if (!hList) return;
 
     SendMessage(hList, LB_RESETCONTENT, 0, 0);
@@ -778,25 +780,26 @@ void Engine::RefreshDisplaysTab()
     }
 
     // Sync Activate Mirrors button text
-    HWND hBtn = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_ACTIVATE);
+    HWND hBtn = GetDlgItem(hWnd, IDC_MW_DISP_ACTIVATE);
     if (hBtn) SetWindowTextW(hBtn, m_bMirrorsActive ? L"Deactivate Mirrors" : L"Activate Mirrors");
 
 }
 
 void Engine::UpdateDisplaysTabSelection(int sel)
 {
-    if (!m_hSettingsWnd) return;
+    HWND hWnd = m_displaysWindow ? m_displaysWindow->GetHWND() : NULL;
+    if (!hWnd) return;
     m_nDisplaysTabSel = sel;
 
-    HWND hEnable    = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_ENABLE);
-    HWND hFullscr   = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_FULLSCREEN);
-    HWND hClickThru = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_CLICKTHRU);
-    HWND hOpacity   = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_OPACITY);
-    HWND hOpSpin    = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_OPACITY_SPIN);
-    HWND hName      = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_SPOUT_NAME);
-    HWND hFixed     = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_SPOUT_FIXED);
-    HWND hW         = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_SPOUT_W);
-    HWND hH         = GetDlgItem(m_hSettingsWnd, IDC_MW_DISP_SPOUT_H);
+    HWND hEnable    = GetDlgItem(hWnd, IDC_MW_DISP_ENABLE);
+    HWND hFullscr   = GetDlgItem(hWnd, IDC_MW_DISP_FULLSCREEN);
+    HWND hClickThru = GetDlgItem(hWnd, IDC_MW_DISP_CLICKTHRU);
+    HWND hOpacity   = GetDlgItem(hWnd, IDC_MW_DISP_OPACITY);
+    HWND hOpSpin    = GetDlgItem(hWnd, IDC_MW_DISP_OPACITY_SPIN);
+    HWND hName      = GetDlgItem(hWnd, IDC_MW_DISP_SPOUT_NAME);
+    HWND hFixed     = GetDlgItem(hWnd, IDC_MW_DISP_SPOUT_FIXED);
+    HWND hW         = GetDlgItem(hWnd, IDC_MW_DISP_SPOUT_W);
+    HWND hH         = GetDlgItem(hWnd, IDC_MW_DISP_SPOUT_H);
 
     // Helper: sync custom owner-drawn checkbox property + visual state
     auto SetCheckbox = [](HWND hCtrl, bool checked) {

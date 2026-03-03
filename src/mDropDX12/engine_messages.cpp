@@ -2210,6 +2210,28 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
       SetSpoutFixedSize(false, true);
     }
   }
+  else if (wcsncmp(sMessage, L"SPOUTINPUT=", 11) == 0) {
+    // Format: SPOUTINPUT=enabled|senderName  (e.g. "SPOUTINPUT=1|OBS Spout Filter")
+    std::wstring msg(sMessage + 11);
+    size_t sep = msg.find(L'|');
+    bool bEnable = (!msg.empty() && msg[0] == L'1');
+    if (sep != std::wstring::npos && sep + 1 < msg.size())
+      wcsncpy_s(m_szSpoutInputSender, msg.substr(sep + 1).c_str(), _TRUNCATE);
+    if (bEnable) {
+      int oldSrc = m_nVideoInputSource;
+      if (oldSrc == VID_SOURCE_WEBCAM || oldSrc == VID_SOURCE_FILE)
+        DestroyVideoCapture();
+      m_nVideoInputSource = VID_SOURCE_SPOUT;
+      m_bSpoutInputEnabled = true;
+      InitSpoutInput();
+    } else {
+      if (m_nVideoInputSource == VID_SOURCE_SPOUT)
+        DestroySpoutInput();
+      m_nVideoInputSource = VID_SOURCE_NONE;
+      m_bSpoutInputEnabled = false;
+    }
+    SaveSpoutInputSettings();
+  }
   else if (wcsncmp(sMessage, L"CAPTURE", 7) == 0) {
     DebugLogW(L"[CAPTURE] Message received");
     mdropdx12->LogInfo(L"CAPTURE message received, calling CaptureScreenshot()");

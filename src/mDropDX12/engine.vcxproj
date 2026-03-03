@@ -367,6 +367,8 @@
     <ClCompile Include="engine_script.cpp" />
     <ClCompile Include="engine_rendering.cpp" />
     <ClCompile Include="engine_settings_ui.cpp" />
+    <ClCompile Include="engine_displays_ui.cpp" />
+    <ClCompile Include="tool_window.cpp" />
     <ClCompile Include="engine_shaders.cpp" />
     <ClCompile Include="engine_textures.cpp" />
     <ClCompile Include="engineshell.cpp" />
@@ -434,6 +436,7 @@
     <ClInclude Include="display_output.h" />
     <ClInclude Include="hotkeys.h" />
     <ClInclude Include="engine.h" />
+    <ClInclude Include="tool_window.h" />
     <ClInclude Include="engineshell.h" />
     <ClInclude Include="render_commands.h" />
     <ClInclude Include="resource.h" />

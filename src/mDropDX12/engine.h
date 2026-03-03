@@ -47,9 +47,11 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "state.h"
 #include "dx12helpers.h"  // DX12Texture
 #include "video_capture.h" // VideoCaptureSource (needed for unique_ptr complete type)
+#include "tool_window.h"  // DisplaysWindow (needed for unique_ptr complete type)
 #include <vector>
 #include <array>
 #include <map>
+#include <memory>
 #include <thread>
 #include <atomic>
 #include <string>
@@ -1036,6 +1038,12 @@ public:
   void        NavigatePresetDirUp(HWND hSettingsWnd);
   void        NavigatePresetDirInto(HWND hSettingsWnd, int sel);
   static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+
+  // Spout / Displays window (ToolWindow subclass, own thread)
+  std::unique_ptr<DisplaysWindow> m_displaysWindow;
+  void OpenDisplaysWindow();
+  void CloseDisplaysWindow();
+
   // Remote tab
   void        RefreshIPCList(HWND hSettingsWnd);
   // Messages tab

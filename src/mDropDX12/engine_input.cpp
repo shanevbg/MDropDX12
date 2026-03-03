@@ -586,17 +586,59 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     EnqueueRenderCmd(RenderCmd::CaptureScreenshot);
     return 0;
   case WM_MW_ENABLESPOUTMIX:
-    EnqueueRenderCmd(RenderCmd::ToggleSpout);
+  {
+    bool bEnable = (wParam != 0);
+    if (bEnable) {
+      int oldSrc = m_nVideoInputSource;
+      if (oldSrc == VID_SOURCE_WEBCAM || oldSrc == VID_SOURCE_FILE)
+        DestroyVideoCapture();
+      m_nVideoInputSource = VID_SOURCE_SPOUT;
+      m_bSpoutInputEnabled = true;
+      InitSpoutInput();
+    } else {
+      if (m_nVideoInputSource == VID_SOURCE_SPOUT)
+        DestroySpoutInput();
+      m_nVideoInputSource = VID_SOURCE_NONE;
+      m_bSpoutInputEnabled = false;
+    }
+    SaveSpoutInputSettings();
     return 0;
+  }
+  case WM_MW_SET_INPUTMIX_ONTOP:
+    m_bSpoutInputOnTop = (wParam != 0);
+    SaveSpoutInputSettings();
+    return 0;
+  case WM_MW_SET_INPUTMIX_OPACITY:
+  {
+    float op = (float)(INT_PTR)wParam / 100.0f;
+    if (op < 0.0f) op = 0.0f;
+    if (op > 1.0f) op = 1.0f;
+    m_fSpoutInputOpacity = op;
+    SaveSpoutInputSettings();
+    return 0;
+  }
+  case WM_MW_SET_INPUTMIX_LUMAKEY:
+  {
+    int threshold = (int)(INT_PTR)wParam;
+    int softness = (int)(INT_PTR)lParam;
+    if (threshold < 0) {
+      m_bSpoutInputLumaKey = false;
+    } else {
+      m_bSpoutInputLumaKey = true;
+      m_fSpoutInputLumaThreshold = (float)threshold / 100.0f;
+      if (m_fSpoutInputLumaThreshold > 1.0f) m_fSpoutInputLumaThreshold = 1.0f;
+      m_fSpoutInputLumaSoftness = (float)softness / 100.0f;
+      if (m_fSpoutInputLumaSoftness > 1.0f) m_fSpoutInputLumaSoftness = 1.0f;
+    }
+    SaveSpoutInputSettings();
+    return 0;
+  }
   case WM_MW_COVER_CHANGED:
   case WM_MW_SPRITE_MODE:
   case WM_MW_MESSAGE_MODE:
   case WM_MW_SETVIDEODEVICE:
   case WM_MW_ENABLEVIDEOMIX:
   case WM_MW_SETSPOUTSENDER:
-  case WM_MW_SET_INPUTMIX_OPACITY:
-  case WM_MW_SET_INPUTMIX_LUMAKEY:
-  case WM_MW_SET_INPUTMIX_ONTOP:
     // Not yet implemented — absorb to prevent DefWindowProc handling
     return 0;
 
@@ -624,7 +666,11 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
         cmd.sParam = message;
         EnqueueRenderCmd(std::move(cmd));
       }
-      // Future: handle other dwData values (e.g., WM_SETSPOUTSENDER)
+      else if (dwData == WM_MW_SETSPOUTSENDER) {
+        // MR sends sender name via WM_COPYDATA with dwData=WM_MW_SETSPOUTSENDER
+        // Store the name; MR sends WM_ENABLESPOUTMIX next to actually enable
+        wcsncpy_s(m_szSpoutInputSender, message, _TRUNCATE);
+      }
       free(message);
     }
     return 0;

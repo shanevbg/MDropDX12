@@ -596,6 +596,7 @@ SPOUT :
 */
 
 #include "engine.h"
+#include "tool_window.h"
 #include "video_capture.h"
 #include "engine_helpers.h"
 #include "utility.h"
@@ -1866,8 +1867,9 @@ void Engine::CleanUpMyNonDx9Stuff() {
   // Be sure to clean up any objects here that were
   //   created/initialized in AllocateMyNonDx9Stuff.
 
-  // Close settings window if open
+  // Close settings window and tool windows if open
   CloseSettingsWindow();
+  CloseDisplaysWindow();
 
   // Join any in-flight preset load thread
   if (m_presetLoadThread.joinable())
@@ -3779,6 +3781,18 @@ HWND CreateBtn(HWND hParent, const wchar_t* text, int id, int x, int y, int w, i
   HWND hw = CreateWindowExW(0, L"BUTTON", text, style,
     x, y, w, h, hParent, (HMENU)(INT_PTR)id, GetModuleHandle(NULL), NULL);
   if (hw && hFont) SendMessage(hw, WM_SETFONT, (WPARAM)hFont, TRUE);
+  return hw;
+}
+
+HWND CreateSlider(HWND hParent, int id, int x, int y, int w, int h,
+                   int rangeMin, int rangeMax, int pos, bool visible) {
+  DWORD style = WS_CHILD | WS_TABSTOP | TBS_HORZ | TBS_NOTICKS | (visible ? WS_VISIBLE : 0);
+  HWND hw = CreateWindowExW(0, TRACKBAR_CLASSW, NULL, style,
+    x, y, w, h, hParent, (HMENU)(INT_PTR)id, GetModuleHandle(NULL), NULL);
+  if (hw) {
+    SendMessage(hw, TBM_SETRANGE, TRUE, MAKELPARAM(rangeMin, rangeMax));
+    SendMessage(hw, TBM_SETPOS, TRUE, pos);
+  }
   return hw;
 }
 

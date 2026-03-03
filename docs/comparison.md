@@ -294,5 +294,4 @@ Features marked ♻️ are implemented through the WM_COPYDATA IPC protocol and 
 - `SPOUT_ACTIVE=` / `SPOUT_FIXEDSIZE=` / `SPOUT_RESOLUTION=` — Spout output control
 - `CAPTURE` — Screenshot capture
 - `CLEARPRESET` / `CLEARSPRITES` / `CLEARTEXTS` / `TESTFONTS` — Utility commands
-
-**Not yet handled**: `SPOUTINPUT=`
+- `SPOUTINPUT=` — Spout input mixing (sender, enable/disable, layer, opacity, luma key)
