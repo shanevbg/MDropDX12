@@ -10,6 +10,7 @@
 #include "resource.h"
 #include "wasabi.h"
 #include <TlHelp32.h>
+#include <thread>
 
 namespace mdrop {
 
@@ -794,6 +795,29 @@ bool Engine::DispatchHotkeyAction(int actionId)
     #undef clamp
 }
 
+// Helper: robustly bring a window to the foreground (works even when caller isn't foreground)
+static void ForceForegroundWindow(HWND hwnd)
+{
+    if (IsIconic(hwnd))
+        ShowWindow(hwnd, SW_RESTORE);
+
+    HWND hFore = GetForegroundWindow();
+    if (hFore == hwnd)
+        return;
+
+    // Attach to foreground thread to bypass SetForegroundWindow restrictions
+    DWORD foreThread = GetWindowThreadProcessId(hFore, NULL);
+    DWORD targetThread = GetWindowThreadProcessId(hwnd, NULL);
+    if (foreThread != targetThread)
+        AttachThreadInput(foreThread, targetThread, TRUE);
+
+    BringWindowToTop(hwnd);
+    SetForegroundWindow(hwnd);
+
+    if (foreThread != targetThread)
+        AttachThreadInput(foreThread, targetThread, FALSE);
+}
+
 void Engine::LaunchOrFocusApp(const std::wstring& path)
 {
     if (path.empty()) {
@@ -806,7 +830,13 @@ void Engine::LaunchOrFocusApp(const std::wstring& path)
     if (!exeName) exeName = wcsrchr(path.c_str(), L'/');
     exeName = exeName ? exeName + 1 : path.c_str();
 
-    // Search for a running process with matching exe name
+    // Build title search string: exe name without extension (e.g., "MilkWave" from "MilkWave.exe")
+    std::wstring titleSearch(exeName);
+    size_t dot = titleSearch.rfind(L'.');
+    if (dot != std::wstring::npos)
+        titleSearch.erase(dot);
+
+    // Strategy 1: Search for a running process with matching exe name
     DWORD targetPID = 0;
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap != INVALID_HANDLE_VALUE) {
@@ -823,7 +853,7 @@ void Engine::LaunchOrFocusApp(const std::wstring& path)
         CloseHandle(snap);
     }
 
-    // If running, find and focus its main window
+    // Find main window by PID
     if (targetPID != 0) {
         struct FindData { DWORD pid; HWND hwnd; } fd = { targetPID, NULL };
         EnumWindows([](HWND h, LPARAM lp) -> BOOL {
@@ -838,20 +868,78 @@ void Engine::LaunchOrFocusApp(const std::wstring& path)
         }, (LPARAM)&fd);
 
         if (fd.hwnd) {
-            if (IsIconic(fd.hwnd))
-                ShowWindow(fd.hwnd, SW_RESTORE);
-            SetForegroundWindow(fd.hwnd);
+            ForceForegroundWindow(fd.hwnd);
             return;
         }
     }
 
-    // Not running — launch it
-    HINSTANCE hr = ShellExecuteW(NULL, L"open", path.c_str(),
-                                  NULL, NULL, SW_SHOWNORMAL);
-    if ((INT_PTR)hr > 32) {
+    // Strategy 2: Window title matching — find any visible top-level window whose
+    // title contains the exe name (without extension), case-insensitive.
+    // Catches apps whose process name differs from the configured path.
+    struct TitleFindData { const wchar_t* search; HWND hwnd; } tfd = { titleSearch.c_str(), NULL };
+    EnumWindows([](HWND h, LPARAM lp) -> BOOL {
+        auto* d = (TitleFindData*)lp;
+        if (!IsWindowVisible(h) || GetWindow(h, GW_OWNER) != NULL)
+            return TRUE;
+        wchar_t title[256];
+        if (GetWindowTextW(h, title, 256) > 0) {
+            // Case-insensitive substring search
+            std::wstring t(title);
+            std::wstring s(d->search);
+            for (auto& c : t) c = towlower(c);
+            for (auto& c : s) c = towlower(c);
+            if (t.find(s) != std::wstring::npos) {
+                d->hwnd = h;
+                return FALSE;
+            }
+        }
+        return TRUE;
+    }, (LPARAM)&tfd);
+
+    if (tfd.hwnd) {
+        ForceForegroundWindow(tfd.hwnd);
+        return;
+    }
+
+    // Not running — launch it.  Use ShellExecuteExW to get the process handle,
+    // wait for it to initialize, then bring its window to the foreground.
+    SHELLEXECUTEINFOW sei = {};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = L"open";
+    sei.lpFile = path.c_str();
+    sei.nShow = SW_SHOWNORMAL;
+
+    if (ShellExecuteExW(&sei) && sei.hProcess) {
         wchar_t msg[MAX_PATH + 32];
         swprintf(msg, MAX_PATH + 32, L"Launching %s", exeName);
         AddNotification(msg);
+
+        // Fire-and-forget thread: wait for the app to initialize, then focus it.
+        // Avoids blocking the message pump during WaitForInputIdle.
+        HANDLE hProc = sei.hProcess;
+        std::thread([hProc]() {
+            WaitForInputIdle(hProc, 3000);
+            DWORD newPID = GetProcessId(hProc);
+            CloseHandle(hProc);
+
+            if (newPID != 0) {
+                struct FindData { DWORD pid; HWND hwnd; } fd2 = { newPID, NULL };
+                EnumWindows([](HWND h, LPARAM lp) -> BOOL {
+                    auto* d = (FindData*)lp;
+                    DWORD pid = 0;
+                    GetWindowThreadProcessId(h, &pid);
+                    if (pid == d->pid && IsWindowVisible(h) && GetWindow(h, GW_OWNER) == NULL) {
+                        d->hwnd = h;
+                        return FALSE;
+                    }
+                    return TRUE;
+                }, (LPARAM)&fd2);
+
+                if (fd2.hwnd)
+                    ForceForegroundWindow(fd2.hwnd);
+            }
+        }).detach();
     } else {
         wchar_t msg[MAX_PATH + 64];
         swprintf(msg, MAX_PATH + 64, L"Could not launch %s", exeName);

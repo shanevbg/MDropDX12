@@ -260,9 +260,9 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SPRITES_MESSAGES     2130  // ComboBox: Messages/Sprites mode (General tab)
 #define IDC_MW_LOGLEVEL_OFF         2131  // Radio: Log Level Off
 #define IDC_MW_LOGLEVEL_ERROR       2132  // Radio: Log Level Error
-#define IDC_MW_LOGLEVEL_WARN        2140  // Radio: Log Level Warn
-#define IDC_MW_LOGLEVEL_INFO        2141  // Radio: Log Level Info
-#define IDC_MW_LOGLEVEL_VERBOSE     2142  // Radio: Log Level Verbose
+#define IDC_MW_LOGLEVEL_WARN        2144  // Radio: Log Level Warn
+#define IDC_MW_LOGLEVEL_INFO        2145  // Radio: Log Level Info
+#define IDC_MW_LOGLEVEL_VERBOSE     2146  // Radio: Log Level Verbose
 #define IDC_MW_MSG_SHOW_MESSAGES   2133  // Checkbox: Enable Messages (Messages tab)
 #define IDC_MW_MSG_SHOW_SPRITES    2134  // Checkbox: Enable Sprites (Messages tab)
 #define IDC_MW_CONTENT_BASE_LABEL  2135  // Label: Content Base Path (Files tab)
