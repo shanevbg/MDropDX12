@@ -1,6 +1,8 @@
 src/**/Debug
+src/**/Debug_x64
 src/**/Release
 src/**/Release_x64
+controller.json
 **/.vs
 **/*.opendb
 **/*.aps
