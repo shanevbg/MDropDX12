@@ -955,11 +955,112 @@ If you assign a key combination that is already used by another binding, the con
 | Displays Window | Ctrl+F8 | Local |
 | Song Info Window | Shift+Ctrl+F8 | Local |
 | Hotkeys Window | Ctrl+F7 | Local |
+| Launch App 1-4 | (none) | Global |
 
 ### Scope Behavior
 
 - **Local** hotkeys only work when the MDropDX12 render window has focus
 - **Global** hotkeys work system-wide regardless of which application is in the foreground, using the Windows RegisterHotKey API
+
+### Launch App Slots
+
+The Hotkeys window includes 4 **Launch App** slots for launching or focusing external programs via global hotkeys. This is useful for quickly switching to companion tools like Milkwave Remote.
+
+When you select a Launch App row, a path edit and **Browse...** button appear below the list:
+
+1. Click **Browse...** and select an executable (e.g., `MilkwaveRemote.exe`)
+2. Assign a global hotkey (e.g., Ctrl+Alt+R)
+3. Press the hotkey to launch the app, or bring it to the foreground if already running
+
+**Behavior**:
+
+- If the configured program is already running, its main window is brought to the foreground (restored from minimized if needed)
+- If not running, the program is launched via ShellExecute
+- The configured exe name is shown in parentheses in the hotkey list (e.g., "Launch App 1 (Remote.exe)")
+- App paths are saved to `settings.ini` under `[Hotkeys]`
+
+## MIDI Input
+
+MDropDX12 has native MIDI input support with 50 configurable mapping slots. Open the MIDI window via Settings > System > **MIDI...** button.
+
+### MIDI Setup
+
+1. Open Settings (F8) > System tab
+2. Click **MIDI...**
+3. Click **Scan** to detect connected MIDI devices
+4. Select your device from the **Device** dropdown
+5. Check **Enable** to start receiving MIDI data
+
+### Mapping Slots
+
+The MIDI window displays a ListView with 50 mapping slots (matching Milkwave Remote's 5 rows × 10 banks layout). Each slot has:
+
+| Column | Description |
+|--------|-------------|
+| # | Slot number (1-50) |
+| Active | Whether the mapping is enabled |
+| Label | User-defined name for this control |
+| Ch | MIDI channel (1-16) |
+| Val | Note number (buttons) or CC number (knobs) |
+| CC | CC number for knobs |
+| Type | Button or Knob |
+| Action | The command or parameter to control |
+
+### Learn Mode
+
+The easiest way to assign MIDI controls:
+
+1. Select a slot in the list
+2. Click **Learn**
+3. Press a button or turn a knob on your MIDI controller
+4. The channel, value, CC, and type are auto-detected and filled in
+5. Click **Learn** again (or select another slot) to stop learning
+
+### Button Actions
+
+Button mappings trigger on MIDI Note On messages (velocity > 0). Available actions:
+
+| Action | Description |
+|--------|-------------|
+| NEXT | Soft cut to next preset |
+| PREV | Go back to previous preset |
+| HARDCUT | Hard cut to next preset |
+| LOCK | Toggle preset lock |
+| RAND | Toggle random/sequential order |
+| MASHUP | Random mini mash-up |
+| FULLSCREEN | Toggle fullscreen |
+| STRETCH | Toggle multi-monitor stretch |
+| SETTINGS | Open Settings window |
+| PRESETINFO | Toggle preset info display |
+| BLACKOUT | Toggle black mode |
+| Any IPC command | e.g., `PRESET=name.milk`, `OPACITY=0.5` |
+
+### Knob Actions
+
+Knob mappings respond to MIDI Control Change (CC) messages. The MIDI value (0-127) is mapped to the parameter range. Available targets:
+
+| Knob Action | Parameter | Range |
+|-------------|-----------|-------|
+| Hue | Color shift hue | 0.0 – 1.0 |
+| Saturation | Color shift saturation | 0.0 – 1.0 |
+| Brightness | Color shift brightness | 0.0 – 1.0 |
+| Intensity | Visual intensity | 0.0 – 2.0 |
+| Shift | Visual shift | -1.0 – 1.0 |
+| Speed | Time factor | 0.0 – 5.0 |
+| FPS Factor | FPS multiplier | 0.0 – 2.0 |
+| Quality | Render quality | 0.25 – 4.0 |
+| Opacity | Window opacity | 0.0 – 1.0 |
+| Amp Left | Audio amp (left) | 0.0 – 5.0 |
+| Amp Right | Audio amp (right) | 0.0 – 5.0 |
+
+Each knob can have an **Increment** value for relative control (set to 0 for absolute mapping).
+
+### Persistence
+
+- **midi.json**: Stores all 50 mapping slot definitions (channel, value, CC, type, action, label, increment)
+- **settings.ini [MIDI]**: Stores device selection, enabled state, and buffer delay
+- **Save/Load**: Manually save or load `midi.json` from the MIDI window
+- **Defaults**: Loads mappings from `midi-default.txt` if present in the application directory
 
 ## Song Info Window
 
@@ -986,6 +1087,7 @@ MDropDX12 includes safeguards against GPU overload:
 | `messages.ini` | Custom message definitions |
 | `sprites.ini` | Sprite definitions |
 | `controller.json` | Game controller button-to-command mappings |
+| `midi.json` | MIDI controller mapping definitions (50 slots) |
 | `debug.log` | Application log (verbosity set in About tab) |
 | `resources/presets/` | Preset directory |
 | `resources/presets/Quicksave/` | Quicksave destination (CTRL+S) |

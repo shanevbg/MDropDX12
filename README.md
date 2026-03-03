@@ -12,7 +12,8 @@
 * Double-click .milk/.milk2 files in Explorer to load them (forwards to running instance via IPC)
 * One-click file association registration for .milk and .milk2 (Settings → About, no admin required)
 * Milkwave Remote IPC compatibility — non-blocking hidden window receives 32+ commands via WM_COPYDATA
-* Configurable hotkeys with per-binding local/global scope (Hotkeys window, Ctrl+F7)
+* Configurable hotkeys with per-binding local/global scope and Launch App slots (Hotkeys window, Ctrl+F7)
+* Native MIDI input with 50 mapping slots, learn mode, button/knob actions (MIDI window from Settings)
 * Standalone Song Info window (Shift+Ctrl+F8) with track info source selector and display options
 * Standalone Displays window (Ctrl+F8) with Display Outputs and Video Input tabs
 * Configurable window titles for Remote discovery (Settings → Remote tab)
@@ -29,9 +30,9 @@
 * Fallback texture search paths, Random Textures Directory, and resource viewer
 * Ships with curated texture-mix presets (more presets [here](https://github.com/projectM-visualizer/projectm?tab=readme-ov-file#presets))
 * Native webcam and video file input mixing (background/overlay compositing with luma key)
-* ToolWindow system — Settings, Displays, Song Info, and Hotkeys windows run on their own threads with sticky positions and tab memory
+* ToolWindow system — Settings, Displays, Song Info, Hotkeys, and MIDI windows run on their own threads with sticky positions and tab memory
 * Improved window handling, input methods and stability
-* Use independently or with [Milkwave](https://github.com/IkeC/Milkwave) Remote for extended control (messaging, MIDI, shader conversion, wave manipulation, and more)
+* Use independently or with [Milkwave](https://github.com/IkeC/Milkwave) Remote for extended control (messaging, shader conversion, wave manipulation, and more)
 
 ## Keyboard Shortcuts
 

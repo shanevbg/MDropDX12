@@ -53,6 +53,25 @@
 - Fixed Always Show Track Info bypassing Overlay Notifications check
 - Separated track info from error notification bucket so it survives resize/preset changes
 
+### Native MIDI Input
+
+- Added native MIDI input system with 50 mapping slots (Button/Knob actions)
+- MIDI window accessible from Settings → System → MIDI button, runs on its own ToolWindow thread
+- Device selector with Scan button, Enable checkbox, and configurable buffer delay
+- Learn mode: select a row, click Learn, then press a MIDI button or turn a knob to auto-assign
+- Button actions: NEXT, PREV, LOCK, RAND, HARDCUT, MASHUP, FULLSCREEN, STRETCH, SETTINGS, PRESETINFO, BLACKOUT, and all IPC commands
+- Knob actions: Hue, Saturation, Brightness, Intensity, Shift, Speed, FPS Factor, Quality, Opacity, Amp Left, Amp Right
+- JSON persistence (midi.json) with Save/Load/Defaults buttons
+- INI persistence for device selection and enabled state
+
+### Launch App Hotkeys
+
+- Added 4 "Launch App" hotkey slots to the Hotkeys window for launching or focusing external programs
+- When triggered: if the program is already running, brings its window to the foreground; if not, launches it
+- Uses process enumeration (TlHelp32) for reliable detection and EnumWindows for window focusing
+- Each slot has a path edit and Browse button (shown when a Launch App row is selected)
+- Ideal for hotkeying Milkwave Remote or other companion tools
+
 ### Input & Control
 
 - Controller buttons can now bind any IPC command (e.g. `OPACITY=0.5`, `COL_HUE=0.3`, `PRESET=name.milk`)
@@ -70,6 +89,8 @@
 
 - New files: video_capture.h, video_capture.cpp (Media Foundation capture with dedicated thread)
 - New files: engine_hotkeys_ui.cpp, engine_songinfo_ui.cpp (ToolWindow subclasses)
+- New files: midi_input.h, midi_input.cpp (winmm MIDI input wrapper)
+- New file: engine_midi_ui.cpp (MidiWindow ToolWindow + Engine MIDI functions)
 - Linked Media Foundation libraries (mfplat.lib, mfreadwrite.lib, mfuuid.lib, mf.lib)
 - Extracted shared CompositeVideoInput() from Spout-specific CompositeSpoutInput()
 - Extracted DX12 helper functions to reduce duplication across engine files

@@ -170,8 +170,10 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 
 | Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
 | ------- | --------- | -------- | --------- | -------- |
-| MIDI automation (up to 50 controls) | ❌ | ✅ | ❌ | ❌ |
+| Native MIDI input (50 mapping slots, learn mode) | ✅ | ❌ | ❌ | ❌ |
+| MIDI automation via Remote (50 controls) | ❌ | ✅ | ❌ | ❌ |
 | MIDI tab in Remote | ❌ | ✅ | ❌ | ❌ |
+| Launch App hotkeys (launch/focus external programs) | ✅ | ❌ | ❌ | ❌ |
 | Game controller support | ✅ | ✅ | ❌ | ❌ |
 
 ## Media Integration
@@ -258,7 +260,7 @@ The projectM standalone visualizer ([frontend-sdl-cpp](https://github.com/projec
 
 ### Architectural Differences
 
-- **MDropDX12 v1.4**: DirectX 12, x64, native ns-eel2 (x64 JIT), GDI overlay for text, no DX9 half-texel offset, no projection matrix (clip-space passthrough); ToolWindow system (Settings, Displays, Song Info, Hotkeys run on own threads), configurable hotkeys with local/global scope, tri-mode theme (Dark/Light/Follow System with WM_SETTINGCHANGE auto-detection), native webcam/video file capture via Media Foundation, Spout input mixing via D3D11On12, monitor mirroring, game controller support, idle timer, window title regex parsing
+- **MDropDX12 v1.4**: DirectX 12, x64, native ns-eel2 (x64 JIT), GDI overlay for text, no DX9 half-texel offset, no projection matrix (clip-space passthrough); ToolWindow system (Settings, Displays, Song Info, Hotkeys, MIDI run on own threads), configurable hotkeys with local/global scope and Launch App slots, native MIDI input (50 mapping slots with learn mode), tri-mode theme (Dark/Light/Follow System with WM_SETTINGCHANGE auto-detection), native webcam/video file capture via Media Foundation, Spout input mixing via D3D11On12, monitor mirroring, game controller support, idle timer, window title regex parsing
 - **Milkwave v3.5**: Bundles a modified MilkDrop2 (DX9Ex) visualizer with a separate .NET 8 Remote control app; adds input mixing, game controller support, MIDI automation, projectM-eval expression engine
 - **MilkDrop3 v3.31**: DirectX 9Ex, x86, native ns-eel2 (x86), adds .milk2 format, MilkPanel shader editor, deep mashup system, expanded variable ranges, shader caching (v3.31), hi-res audio (v3.31), 5 sprite layers with blend modes
 - **projectM v4.1.6**: OpenGL, x64, cross-platform (Windows/macOS/Linux), projectM-eval expression engine, GLSL shader pipeline, SDL2 audio; reimplements MilkDrop2 rendering from scratch without using original MilkDrop2 code
