@@ -50,7 +50,7 @@ void Engine::CloseSpritesWindow() {
 // ─── Constructor ────────────────────────────────────────────────────────
 
 SpritesWindow::SpritesWindow(Engine* pEngine)
-    : ToolWindow(pEngine, 560, 620)
+    : ToolWindow(pEngine, 560, 820)
 {
 }
 
@@ -70,13 +70,13 @@ void SpritesWindow::DoBuildControls() {
     int gap = 4;
 
     // Title
-    CreateLabel(hw, L"Sprites (sprites.ini):", x, y, rw, lineH, hFontBold, false);
+    CreateLabel(hw, L"Sprites (sprites.ini):", x, y, rw, lineH, hFontBold);
     y += lineH + 2;
 
     // ListView
     {
         int listH = 6 * lineH;
-        m_hList = CreateThemedListView(IDC_MW_SPR_LIST, x, y, rw, listH, false);
+        m_hList = CreateThemedListView(IDC_MW_SPR_LIST, x, y, rw, listH);
 
         // ImageList for thumbnails
         p->m_hSpriteImageList = (void*)ImageList_Create(32, 32, ILC_COLOR32, 100, 10);
@@ -124,8 +124,8 @@ void SpritesWindow::DoBuildControls() {
     // Image path
     {
         int imgLblW = MulDiv(50, lineH, 26), browseW = MulDiv(60, lineH, 26);
-        CreateLabel(hw, L"Image:", x, y, imgLblW, lineH, hFont, false);
-        CreateEdit(hw, L"", IDC_MW_SPR_IMG_PATH, x + imgLblW + 4, y, rw - imgLblW - browseW - 8, lineH, hFont, ES_READONLY, false);
+        CreateLabel(hw, L"Image:", x, y, imgLblW, lineH, hFont);
+        CreateEdit(hw, L"", IDC_MW_SPR_IMG_PATH, x + imgLblW + 4, y, rw - imgLblW - browseW - 8, lineH, hFont, ES_READONLY);
         CreateBtn(hw, L"Browse", IDC_MW_SPR_IMG_BROWSE, x + rw - browseW, y, browseW, lineH, hFont);
     }
     y += lineH + gap;
@@ -134,7 +134,7 @@ void SpritesWindow::DoBuildControls() {
     {
         int propLblW = MulDiv(50, lineH, 26), propComboW = MulDiv(100, lineH, 26);
         int propCol2 = x + rw / 2;
-        CreateLabel(hw, L"Blend:", x, y, propLblW, lineH, hFont, false);
+        CreateLabel(hw, L"Blend:", x, y, propLblW, lineH, hFont);
         HWND hBlend = CreateWindowExW(0, L"COMBOBOX", L"",
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
             x + propLblW, y, propComboW, 200, hw, (HMENU)(INT_PTR)IDC_MW_SPR_BLENDMODE,
@@ -143,7 +143,7 @@ void SpritesWindow::DoBuildControls() {
         const wchar_t* blendNames[] = { L"0: Blend", L"1: Decal", L"2: Additive", L"3: SrcColor", L"4: ColorKey" };
         for (int i = 0; i < 5; i++) SendMessageW(hBlend, CB_ADDSTRING, 0, (LPARAM)blendNames[i]);
 
-        CreateLabel(hw, L"Layer:", propCol2, y, propLblW, lineH, hFont, false);
+        CreateLabel(hw, L"Layer:", propCol2, y, propLblW, lineH, hFont);
         HWND hLayer = CreateWindowExW(0, L"COMBOBOX", L"",
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
             propCol2 + propLblW, y, propComboW + MulDiv(20, lineH, 26), 200, hw, (HMENU)(INT_PTR)IDC_MW_SPR_LAYER,
@@ -158,23 +158,23 @@ void SpritesWindow::DoBuildControls() {
     {
         int propLblW = MulDiv(80, lineH, 26), propEditW = MulDiv(55, lineH, 26);
         int propCol2 = x + rw / 2;
-        CreateLabel(hw, L"Position X:", x, y, propLblW, lineH, hFont, false);
-        CreateEdit(hw, L"0.5", IDC_MW_SPR_X, x + propLblW, y, propEditW, lineH, hFont, 0, false);
-        CreateLabel(hw, L"Position Y:", propCol2, y, propLblW, lineH, hFont, false);
-        CreateEdit(hw, L"0.5", IDC_MW_SPR_Y, propCol2 + propLblW, y, propEditW, lineH, hFont, 0, false);
+        CreateLabel(hw, L"Position X:", x, y, propLblW, lineH, hFont);
+        CreateEdit(hw, L"0.5", IDC_MW_SPR_X, x + propLblW, y, propEditW, lineH, hFont);
+        CreateLabel(hw, L"Position Y:", propCol2, y, propLblW, lineH, hFont);
+        CreateEdit(hw, L"0.5", IDC_MW_SPR_Y, propCol2 + propLblW, y, propEditW, lineH, hFont);
         y += lineH + gap;
 
-        CreateLabel(hw, L"Scale X:", x, y, propLblW, lineH, hFont, false);
-        CreateEdit(hw, L"1.0", IDC_MW_SPR_SX, x + propLblW, y, propEditW, lineH, hFont, 0, false);
-        CreateLabel(hw, L"Scale Y:", propCol2, y, propLblW, lineH, hFont, false);
-        CreateEdit(hw, L"1.0", IDC_MW_SPR_SY, propCol2 + propLblW, y, propEditW, lineH, hFont, 0, false);
+        CreateLabel(hw, L"Scale X:", x, y, propLblW, lineH, hFont);
+        CreateEdit(hw, L"1.0", IDC_MW_SPR_SX, x + propLblW, y, propEditW, lineH, hFont);
+        CreateLabel(hw, L"Scale Y:", propCol2, y, propLblW, lineH, hFont);
+        CreateEdit(hw, L"1.0", IDC_MW_SPR_SY, propCol2 + propLblW, y, propEditW, lineH, hFont);
         y += lineH + gap;
 
-        CreateLabel(hw, L"Rotation:", x, y, propLblW, lineH, hFont, false);
-        CreateEdit(hw, L"0", IDC_MW_SPR_ROT, x + propLblW, y, propEditW, lineH, hFont, 0, false);
+        CreateLabel(hw, L"Rotation:", x, y, propLblW, lineH, hFont);
+        CreateEdit(hw, L"0", IDC_MW_SPR_ROT, x + propLblW, y, propEditW, lineH, hFont);
         int ckLblW = MulDiv(70, lineH, 26), ckEditW = MulDiv(75, lineH, 26);
-        CreateLabel(hw, L"Colorkey:", propCol2, y, ckLblW, lineH, hFont, false);
-        CreateEdit(hw, L"0x000000", IDC_MW_SPR_COLORKEY, propCol2 + ckLblW, y, ckEditW, lineH, hFont, 0, false);
+        CreateLabel(hw, L"Colorkey:", propCol2, y, ckLblW, lineH, hFont);
+        CreateEdit(hw, L"0x000000", IDC_MW_SPR_COLORKEY, propCol2 + ckLblW, y, ckEditW, lineH, hFont);
     }
     y += lineH + gap;
 
@@ -182,14 +182,14 @@ void SpritesWindow::DoBuildControls() {
     {
         int clrLblW = MulDiv(45, lineH, 26), clrEditW = MulDiv(40, lineH, 26), clrGap = 6;
         int colW = clrLblW + clrEditW + clrGap;
-        CreateLabel(hw, L"Red:", x, y, clrLblW, lineH, hFont, false);
-        CreateEdit(hw, L"1", IDC_MW_SPR_R, x + clrLblW, y, clrEditW, lineH, hFont, 0, false);
-        CreateLabel(hw, L"Green:", x + colW, y, clrLblW, lineH, hFont, false);
-        CreateEdit(hw, L"1", IDC_MW_SPR_G, x + colW + clrLblW, y, clrEditW, lineH, hFont, 0, false);
-        CreateLabel(hw, L"Blue:", x + 2 * colW, y, clrLblW, lineH, hFont, false);
-        CreateEdit(hw, L"1", IDC_MW_SPR_B, x + 2 * colW + clrLblW, y, clrEditW, lineH, hFont, 0, false);
-        CreateLabel(hw, L"Alpha:", x + 3 * colW, y, clrLblW, lineH, hFont, false);
-        CreateEdit(hw, L"1", IDC_MW_SPR_A, x + 3 * colW + clrLblW, y, clrEditW, lineH, hFont, 0, false);
+        CreateLabel(hw, L"Red:", x, y, clrLblW, lineH, hFont);
+        CreateEdit(hw, L"1", IDC_MW_SPR_R, x + clrLblW, y, clrEditW, lineH, hFont);
+        CreateLabel(hw, L"Green:", x + colW, y, clrLblW, lineH, hFont);
+        CreateEdit(hw, L"1", IDC_MW_SPR_G, x + colW + clrLblW, y, clrEditW, lineH, hFont);
+        CreateLabel(hw, L"Blue:", x + 2 * colW, y, clrLblW, lineH, hFont);
+        CreateEdit(hw, L"1", IDC_MW_SPR_B, x + 2 * colW + clrLblW, y, clrEditW, lineH, hFont);
+        CreateLabel(hw, L"Alpha:", x + 3 * colW, y, clrLblW, lineH, hFont);
+        CreateEdit(hw, L"1", IDC_MW_SPR_A, x + 3 * colW + clrLblW, y, clrEditW, lineH, hFont);
     }
     y += lineH + gap;
 
@@ -197,37 +197,37 @@ void SpritesWindow::DoBuildControls() {
     {
         int chkW = MulDiv(55, lineH, 26), chkGap = 4;
         int cx = x;
-        CreateCheck(hw, L"Flip X", IDC_MW_SPR_FLIPX, cx, y, chkW, lineH, hFont, false, false); cx += chkW + chkGap;
-        CreateCheck(hw, L"Flip Y", IDC_MW_SPR_FLIPY, cx, y, chkW, lineH, hFont, false, false); cx += chkW + chkGap;
-        CreateCheck(hw, L"Burn",   IDC_MW_SPR_BURN,  cx, y, chkW, lineH, hFont, false, false);
+        CreateCheck(hw, L"Flip X", IDC_MW_SPR_FLIPX, cx, y, chkW, lineH, hFont, false); cx += chkW + chkGap;
+        CreateCheck(hw, L"Flip Y", IDC_MW_SPR_FLIPY, cx, y, chkW, lineH, hFont, false); cx += chkW + chkGap;
+        CreateCheck(hw, L"Burn",   IDC_MW_SPR_BURN,  cx, y, chkW, lineH, hFont, false);
 
         int propCol2 = x + rw / 2;
         int repLblW = MulDiv(70, lineH, 26), repEditW = MulDiv(40, lineH, 26);
-        CreateLabel(hw, L"Repeat X:", propCol2, y, repLblW, lineH, hFont, false);
-        CreateEdit(hw, L"1", IDC_MW_SPR_REPEATX, propCol2 + repLblW, y, repEditW, lineH, hFont, 0, false);
+        CreateLabel(hw, L"Repeat X:", propCol2, y, repLblW, lineH, hFont);
+        CreateEdit(hw, L"1", IDC_MW_SPR_REPEATX, propCol2 + repLblW, y, repEditW, lineH, hFont);
         int repYx = propCol2 + repLblW + repEditW + 8;
-        CreateLabel(hw, L"Repeat Y:", repYx, y, repLblW, lineH, hFont, false);
-        CreateEdit(hw, L"1", IDC_MW_SPR_REPEATY, repYx + repLblW, y, repEditW, lineH, hFont, 0, false);
+        CreateLabel(hw, L"Repeat Y:", repYx, y, repLblW, lineH, hFont);
+        CreateEdit(hw, L"1", IDC_MW_SPR_REPEATY, repYx + repLblW, y, repEditW, lineH, hFont);
     }
     y += lineH + gap + 2;
 
     // Init Code
-    CreateLabel(hw, L"Init", x, y, 30, lineH, hFont, false);
+    CreateLabel(hw, L"Init", x, y, 30, lineH, hFont);
     y += lineH;
     {
         int codeH = 3 * lineH;
         CreateEdit(hw, L"", IDC_MW_SPR_INIT_CODE, x, y, rw, codeH, hFont,
-            ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL, false);
+            ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL);
         y += codeH + gap;
     }
 
     // Per-Frame Code
-    CreateLabel(hw, L"Per-Frame", x, y, 80, lineH, hFont, false);
+    CreateLabel(hw, L"Per-Frame", x, y, 80, lineH, hFont);
     y += lineH;
     {
         int codeH = 3 * lineH;
         CreateEdit(hw, L"", IDC_MW_SPR_FRAME_CODE, x, y, rw, codeH, hFont,
-            ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL, false);
+            ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL);
     }
 }
 

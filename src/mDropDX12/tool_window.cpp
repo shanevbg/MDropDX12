@@ -208,10 +208,13 @@ void ToolWindow::CreateOnThread() {
         continue;
       }
 
-      // Ctrl+Shift+F2 stays local (hotkey reset)
-      bool isCtrlShiftF2 = (vk == VK_F2 && bCtrl && bShift);
+      // Ctrl+F2 resets tool window position/size to defaults
+      if (vk == VK_F2 && bCtrl) {
+        ResetPosition();
+        continue;
+      }
 
-      if (!isCtrlShiftF2) {
+      {
         bool isFKey = (vk >= VK_F1 && vk <= VK_F24);
         // ForwardAllKeys(): forward everything (windows with no text edits)
         // Otherwise: only F-keys and Ctrl/Alt combos (bare alphanumerics go to edits)

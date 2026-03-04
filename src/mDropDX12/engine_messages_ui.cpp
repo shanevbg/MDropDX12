@@ -12,7 +12,7 @@ using namespace mdrop;
 // ─────────────────────────────────────────────────────
 
 MessagesWindow::MessagesWindow(Engine* pEngine)
-    : ToolWindow(pEngine, 500, 550) {}
+    : ToolWindow(pEngine, 540, 620) {}
 
 // ─────────────────────────────────────────────────────
 // Engine bridge: Open / Close
@@ -50,14 +50,14 @@ void MessagesWindow::DoBuildControls() {
     wchar_t buf[64];
 
     // Title
-    CreateLabel(hw, L"Custom Messages:", x, y, rw, lineH, hFontBold, false);
+    CreateLabel(hw, L"Custom Messages:", x, y, rw, lineH, hFontBold);
     y += lineH + 2;
 
     // Show Messages / Show Sprites toggles
     {
         int halfW = rw / 2 - 2;
-        CreateCheck(hw, L"Show Messages", IDC_MW_MSG_SHOW_MESSAGES, x, y, halfW, lineH, hFont, (p->m_nSpriteMessagesMode & 1) != 0, false);
-        CreateCheck(hw, L"Show Sprites", IDC_MW_MSG_SHOW_SPRITES, x + halfW + 4, y, halfW, lineH, hFont, (p->m_nSpriteMessagesMode & 2) != 0, false);
+        CreateCheck(hw, L"Show Messages", IDC_MW_MSG_SHOW_MESSAGES, x, y, halfW, lineH, hFont, (p->m_nSpriteMessagesMode & 1) != 0);
+        CreateCheck(hw, L"Show Sprites", IDC_MW_MSG_SHOW_SPRITES, x + halfW + 4, y, halfW, lineH, hFont, (p->m_nSpriteMessagesMode & 2) != 0);
     }
     y += lineH + gap;
 
@@ -65,7 +65,7 @@ void MessagesWindow::DoBuildControls() {
     {
         int listH = 10 * lineH;
         HWND hMsgList = CreateWindowExW(0, L"LISTBOX", L"",
-            WS_CHILD | WS_BORDER | WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_NOTIFY,
+            WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_NOTIFY,
             x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_MSG_LIST,
             GetModuleHandle(NULL), NULL);
         if (hMsgList && hFont) SendMessage(hMsgList, WM_SETFONT, (WPARAM)hFont, TRUE);
@@ -107,26 +107,26 @@ void MessagesWindow::DoBuildControls() {
     }
     y += lineH + gap + 4;
 
-    CreateLabel(hw, L"Font size: 50 = normal, <50 = smaller, >50 = larger (0.01\x2013" L"100)", x, y, rw, lineH, hFont, false);
+    CreateLabel(hw, L"Font size: 50 = normal, <50 = smaller, >50 = larger (0.01\x2013" L"100)", x, y, rw, lineH, hFont);
     y += lineH + gap;
 
     // Autoplay controls
-    CreateCheck(hw, L"Autoplay Messages", IDC_MW_MSG_AUTOPLAY, x, y, rw, lineH, hFont, p->m_bMsgAutoplay, false);
+    CreateCheck(hw, L"Autoplay Messages", IDC_MW_MSG_AUTOPLAY, x, y, rw, lineH, hFont, p->m_bMsgAutoplay);
     y += lineH + 2;
-    CreateCheck(hw, L"Sequential Order", IDC_MW_MSG_SEQUENTIAL, x, y, rw, lineH, hFont, p->m_bMsgSequential, false);
+    CreateCheck(hw, L"Sequential Order", IDC_MW_MSG_SEQUENTIAL, x, y, rw, lineH, hFont, p->m_bMsgSequential);
     y += lineH + 2;
-    CreateCheck(hw, L"Auto-size messages to fit screen width", IDC_MW_MSG_AUTOSIZE, x, y, rw, lineH, hFont, p->m_bMessageAutoSize, false);
+    CreateCheck(hw, L"Auto-size messages to fit screen width", IDC_MW_MSG_AUTOSIZE, x, y, rw, lineH, hFont, p->m_bMessageAutoSize);
     y += lineH + gap;
 
     // Interval + Jitter on same row
     {
-        HWND hLbl = CreateLabel(hw, L"Interval (s):", x, y, 90, lineH, hFont, false);
+        HWND hLbl = CreateLabel(hw, L"Interval (s):", x, y, 90, lineH, hFont);
         if (hLbl) SetWindowLongPtr(hLbl, GWL_ID, IDC_MW_MSG_INTERVAL_LBL);
     }
     swprintf(buf, 64, L"%.1f", p->m_fMsgAutoplayInterval);
     CreateEdit(hw, buf, IDC_MW_MSG_INTERVAL, x + 94, y, 60, lineH, hFont, 0);
     {
-        HWND hLbl = CreateLabel(hw, L"+/- (s):", x + 170, y, 60, lineH, hFont, false);
+        HWND hLbl = CreateLabel(hw, L"+/- (s):", x + 170, y, 60, lineH, hFont);
         if (hLbl) SetWindowLongPtr(hLbl, GWL_ID, IDC_MW_MSG_JITTER_LBL);
     }
     swprintf(buf, 64, L"%.1f", p->m_fMsgAutoplayJitter);
@@ -136,7 +136,7 @@ void MessagesWindow::DoBuildControls() {
     // Preview area
     {
         HWND hPrev = CreateWindowExW(0, L"STATIC", L"(select a message to preview)",
-            WS_CHILD | SS_LEFT, x, y, rw, lineH * 3, hw,
+            WS_CHILD | WS_VISIBLE | SS_LEFT, x, y, rw, lineH * 3, hw,
             (HMENU)(INT_PTR)IDC_MW_MSG_PREVIEW, GetModuleHandle(NULL), NULL);
         if (hPrev && hFont) SendMessage(hPrev, WM_SETFONT, (WPARAM)hFont, TRUE);
         TrackControl(hPrev);

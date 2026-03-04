@@ -349,8 +349,8 @@ protected:
   int GetPinControlID() const override       { return IDC_MW_SPRITES_WIN_PIN; }
   int GetFontPlusControlID() const override  { return IDC_MW_SPRITES_WIN_FONT_PLUS; }
   int GetFontMinusControlID() const override { return IDC_MW_SPRITES_WIN_FONT_MINUS; }
-  int GetMinWidth() const override  { return 480; }
-  int GetMinHeight() const override { return 500; }
+  int GetMinWidth() const override  { return 500; }
+  int GetMinHeight() const override { return 700; }
 
   void    OnResize() override;
   void    DoBuildControls() override;
