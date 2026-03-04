@@ -955,6 +955,32 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     m_mouseDown = 0;
     break;
 
+  case WM_LBUTTONDOWN:
+    // Shadertoy iMouse: compute pixel coords in render-target space (bottom-left origin)
+    {
+      POINT pt;
+      GetCursorPos(&pt);
+      ScreenToClient(GetPluginWindow(), &pt);
+      RECT rc; GetClientRect(GetPluginWindow(), &rc);
+      int cw = max((int)(rc.right - rc.left), 1);
+      int ch = max((int)(rc.bottom - rc.top), 1);
+      int tw = (m_lpDX && m_lpDX->m_backbuffer_width > 0) ? m_lpDX->m_backbuffer_width : cw;
+      int th = (m_lpDX && m_lpDX->m_backbuffer_height > 0) ? m_lpDX->m_backbuffer_height : ch;
+      float px = clamp((float)pt.x * tw / cw, 0.f, (float)(tw - 1));
+      float py = clamp((float)(th - 1) - (float)pt.y * th / ch, 0.f, (float)(th - 1));
+      m_stClickX = px;
+      m_stClickY = py;
+      m_stMouseX = px;
+      m_stMouseY = py;
+      m_stMouseDown = true;
+      m_stMouseJustClicked = true;
+    }
+    return DefWindowProc(hWnd, uMsg, wParam, lParam);
+
+  case WM_LBUTTONUP:
+    m_stMouseDown = false;
+    return DefWindowProc(hWnd, uMsg, wParam, lParam);
+
   case WM_KEYDOWN:    // virtual-key codes
 
     // Note that some keys will never reach this point, since they are

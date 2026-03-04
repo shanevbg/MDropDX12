@@ -6722,10 +6722,20 @@ void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT,
   if (h[13]) pCT->SetVector(lpDevice, h[13], &D3DXVECTOR4(blur_min[1], blur_max[1], blur_min[2], blur_max[2]));
   
   // BMV/MDropDX12
-  if (h[14]) pCT->SetVector(lpDevice, h[14], &D3DXVECTOR4(m_mouseX, 
-    m_mouseY != -1 ? -m_mouseY + 1 : -1, 
-    m_mouseDown ? 1.0f : 0.0f,
-    m_mouseClicked > 0 ? m_lastMouseY : -m_lastMouseY));
+  if (h[14]) {
+    if (m_bShadertoyMode) {
+      // Shadertoy iMouse: pixel coords, z/w encode click position with sign for button state
+      bool neverClicked = (m_stClickX == 0.f && m_stClickY == 0.f);
+      float z = neverClicked ? 0.f : (m_stMouseDown ?  m_stClickX : -m_stClickX);
+      float w = neverClicked ? 0.f : (m_stMouseJustClicked ? m_stClickY : -m_stClickY);
+      pCT->SetVector(lpDevice, h[14], &D3DXVECTOR4(m_stMouseX, m_stMouseY, z, w));
+    } else {
+      pCT->SetVector(lpDevice, h[14], &D3DXVECTOR4(m_mouseX,
+        m_mouseY != -1 ? -m_mouseY + 1 : -1,
+        m_mouseDown ? 1.0f : 0.0f,
+        m_mouseClicked > 0 ? m_lastMouseY : -m_lastMouseY));
+    }
+  }
   if (h[15]) pCT->SetVector(lpDevice, h[15], &D3DXVECTOR4(mysound.smooth[0], mysound.smooth[1], mysound.smooth[2], 0.3333f * (mysound.smooth[0], mysound.smooth[1], mysound.smooth[2])));
   if (h[16]) pCT->SetVector(lpDevice, h[16], &D3DXVECTOR4(m_VisIntensity, m_VisShift, m_VisVersion, 0));
   if (h[17]) pCT->SetVector(lpDevice, h[17], &D3DXVECTOR4(m_ColShiftHue, m_ColShiftSaturation, m_ColShiftBrightness, 0));

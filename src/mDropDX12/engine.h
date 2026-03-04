@@ -531,6 +531,14 @@ public:
   bool m_mouseDown;
   int m_mouseClicked;
 
+  // Shadertoy iMouse state (pixel coordinates, bottom-left origin)
+  float m_stMouseX = 0.f;      // drag position x (pixels), persists when released
+  float m_stMouseY = 0.f;      // drag position y (pixels), persists when released
+  float m_stClickX = 0.f;      // click-start position x (pixels)
+  float m_stClickY = 0.f;      // click-start position y (pixels)
+  bool  m_stMouseDown = false;  // left button currently held
+  bool  m_stMouseJustClicked = false; // true for one frame on click
+
   float fOpacity = 1.0f; // 0.0f = 100% transparent, 1.0f = 100% opaque
   bool m_RemotePresetLink = false;
   bool m_bAlwaysOnTop = false;

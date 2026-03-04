@@ -3568,7 +3568,16 @@ void Engine::MyRenderFn(int redraw) {
     // Convert to lower-left origin: (0,0)=lower-left, (1,1)=upper-right
     m_mouseX = fx;        // 0 = left, 1 = right
     m_mouseY = 1.0f - fy; // 0 = bottom, 1 = top
+
+    // Shadertoy iMouse: update drag position in pixels while left button held
+    if (m_stMouseDown) {
+      m_stMouseX = clamp(sx, 0.f, static_cast<float>(targetW - 1));
+      m_stMouseY = clamp(static_cast<float>(targetH - 1) - sy, 0.f, static_cast<float>(targetH - 1));
+    }
   }
+
+  // Shadertoy iMouse: clear just-clicked flag after one frame
+  if (m_stMouseJustClicked) m_stMouseJustClicked = false;
 
   //Duration of the click called from WM_LBUTTONDOWN
   if (m_mouseClicked > 0) {
