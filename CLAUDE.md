@@ -48,7 +48,7 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - DirectX 12 rendering backend (migrated from DX9Ex)
 - GDI overlay window for HUD text (preset name, FPS, debug info, notifications)
 - In-app Settings window (F8 / Ctrl+L) with tri-mode theme (Dark/Light/Follow System), 11-tab UI, preset browser, resource viewer, path display on About tab
-- ToolWindow system: Settings, Displays, Song Info, and Hotkeys windows run on their own threads with independent always-on-top, sticky positions, and tab memory
+- ToolWindow system: Settings, Displays, Song Info, Hotkeys, and Button Board windows run on their own threads with independent always-on-top, sticky positions, and tab memory
 - Configurable hotkeys (Ctrl+F7) with per-binding local/global scope, conflict detection, dynamic Script/Launch entries, and Reset to Defaults
 - Native MIDI input (50 mapping slots, Button/Knob actions, learn mode, JSON persistence)
 - Standalone Song Info window (Shift+Ctrl+F8) and Displays window (Ctrl+F8)

@@ -214,6 +214,72 @@ void ButtonBoardWindow::ExecuteSlot(int globalIndex) {
     }
 }
 
+// ─── "Assign Action..." cascading submenu ───────────────────────────────
+
+HMENU ButtonBoardWindow::BuildActionSubMenu() {
+    Engine* p = m_pEngine;
+    HMENU hTop = CreatePopupMenu();
+
+    for (int cat = HKCAT_NAVIGATION; cat <= HKCAT_MISC; cat++) {
+        HMENU hCatMenu = CreatePopupMenu();
+        int itemCount = 0;
+
+        if (cat == HKCAT_VISUAL) {
+            // Sub-group by first word of action name (Opacity, Wave, Zoom, ...)
+            struct PrefixGroup { std::wstring prefix; std::vector<int> indices; };
+            std::vector<PrefixGroup> groups;
+
+            for (int i = 0; i < NUM_HOTKEYS; i++) {
+                if ((int)p->m_hotkeys[i].category != cat) continue;
+                std::wstring action = p->m_hotkeys[i].szAction;
+                size_t sp = action.find(L' ');
+                std::wstring prefix = (sp != std::wstring::npos) ? action.substr(0, sp) : action;
+                bool found = false;
+                for (auto& g : groups) {
+                    if (g.prefix == prefix) { g.indices.push_back(i); found = true; break; }
+                }
+                if (!found) groups.push_back({ prefix, { i } });
+            }
+
+            for (auto& g : groups) {
+                if (g.indices.size() >= 2) {
+                    HMENU hSub = CreatePopupMenu();
+                    for (int idx : g.indices) {
+                        std::wstring text = p->m_hotkeys[idx].szAction;
+                        if (p->m_hotkeys[idx].vk != 0)
+                            text += L"\t" + p->FormatHotkeyDisplay(p->m_hotkeys[idx].modifiers, p->m_hotkeys[idx].vk);
+                        AppendMenuW(hSub, MF_STRING, 1000 + idx, text.c_str());
+                    }
+                    AppendMenuW(hCatMenu, MF_POPUP, (UINT_PTR)hSub, g.prefix.c_str());
+                } else {
+                    int idx = g.indices[0];
+                    std::wstring text = p->m_hotkeys[idx].szAction;
+                    if (p->m_hotkeys[idx].vk != 0)
+                        text += L"\t" + p->FormatHotkeyDisplay(p->m_hotkeys[idx].modifiers, p->m_hotkeys[idx].vk);
+                    AppendMenuW(hCatMenu, MF_STRING, 1000 + idx, text.c_str());
+                }
+                itemCount++;
+            }
+        } else {
+            for (int i = 0; i < NUM_HOTKEYS; i++) {
+                if ((int)p->m_hotkeys[i].category != cat) continue;
+                std::wstring text = p->m_hotkeys[i].szAction;
+                if (p->m_hotkeys[i].vk != 0)
+                    text += L"\t" + p->FormatHotkeyDisplay(p->m_hotkeys[i].modifiers, p->m_hotkeys[i].vk);
+                AppendMenuW(hCatMenu, MF_STRING, 1000 + i, text.c_str());
+                itemCount++;
+            }
+        }
+
+        if (itemCount > 0)
+            AppendMenuW(hTop, MF_POPUP, (UINT_PTR)hCatMenu, kCategoryNames[cat]);
+        else
+            DestroyMenu(hCatMenu);
+    }
+
+    return hTop;
+}
+
 // ─── Right-Click Context Menu ───────────────────────────────────────────
 
 void ButtonBoardWindow::ShowSlotContextMenu(int globalIndex, POINT screenPt) {
@@ -227,6 +293,8 @@ void ButtonBoardWindow::ShowSlotContextMenu(int globalIndex, POINT screenPt) {
     AppendMenuW(hMenu, MF_STRING, 2, L"Set Script Command...");
     AppendMenuW(hMenu, MF_STRING, 3, L"Set Sprite...");
     AppendMenuW(hMenu, MF_STRING, 4, L"Set Message...");
+    HMENU hActionMenu = BuildActionSubMenu();
+    AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hActionMenu, L"Assign Action...");
     AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenuW(hMenu, MF_STRING, 7, L"Set Image...");
     bool hasImage = !slot.imagePath.empty();
@@ -328,6 +396,16 @@ void ButtonBoardWindow::ShowSlotContextMenu(int globalIndex, POINT screenPt) {
         SetSlotImage(globalIndex, L"");
         SaveBoard();
         break;
+    }
+
+    // Handle "Assign Action..." menu items (ID = 1000 + hotkey index)
+    if (cmd >= 1000 && cmd < 1000 + NUM_HOTKEYS) {
+        int hkIdx = cmd - 1000;
+        s.action  = ButtonAction::ScriptCommand;
+        s.payload = std::wstring(L"ACTION=") + p->m_hotkeys[hkIdx].szIniKey;
+        s.label   = p->m_hotkeys[hkIdx].szAction;
+        m_pPanel->Invalidate();
+        SaveBoard();
     }
 }
 

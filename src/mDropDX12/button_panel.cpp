@@ -727,7 +727,7 @@ void ButtonPanel::PopulateDefaults() {
         { L"Clear Sprites",   L"ACTION=KillSprites" },
         { L"Clear Texts",     L"ACTION=KillSupertexts" },
         { L"Transparency",    L"ACTION=TransparencyMode" },
-        { L"Shader Help",     L"ACTION=ShowShaderHelp" },
+        { L"Play/Pause",      L"ACTION=MediaPlayPause" },
     };
 
     int count = sizeof(defaults) / sizeof(defaults[0]);

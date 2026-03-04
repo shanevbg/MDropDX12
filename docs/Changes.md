@@ -66,6 +66,21 @@
 
 ### Dynamic Script & Launch App Hotkeys
 
+### Button Board
+
+- Added per-slot image thumbnails (Set Image / Clear Image context menu, drag-drop image files onto slots)
+- Added per-slot hotkey bindings (modifiers, key, local/global scope) persisted in INI
+- Added RunScript and LaunchApp action types for button slots
+- Added JSON layout export/import (Save Layout / Load Layout in config menu)
+- Added Reset to Defaults with Milkwave Remote-style default layout (auto-populates on first run)
+- Added "Assign Action..." cascading submenu with all built-in actions organized by category (Navigation, Visual, Media, Window, Tools, Shader, Misc) with hotkey hints
+- Visual category sub-grouped by type (Opacity, Wave, Zoom, Warp, Echo, Gamma, Push, Rotate, Brightness, Hue)
+- Shared ActionEditDialog used by both Button Board and Hotkeys windows
+- Button Board forwards all keyboard input to render window so VJ hotkeys work while Board has focus
+- Added json_utils.cpp/h (lightweight JSON writer/reader)
+
+### Dynamic Script & Launch App Hotkeys
+
 - Replaced fixed Script (10) and Launch App (4) slots with unlimited dynamic entries
 - Click "+" button to add a Script Command or Launch App binding
 - Script commands support Browse button for script files (.txt, .bat, .cmd, .ps1)

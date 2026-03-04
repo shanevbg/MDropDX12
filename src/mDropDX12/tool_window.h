@@ -472,6 +472,7 @@ private:
   void SaveBoard();
   void LoadSlotImages();
   void SetSlotImage(int globalIndex, const std::wstring& path);
+  HMENU BuildActionSubMenu();
 };
 
 // Paint a ListView header in dark theme via NM_CUSTOMDRAW.
