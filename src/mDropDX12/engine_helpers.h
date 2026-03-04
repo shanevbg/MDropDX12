@@ -559,6 +559,8 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_DISP_OPACITY_SPIN 7013  // Up-down (spin) buddy for opacity
 #define IDC_MW_DISP_MIRROR_ALTS 7014   // Checkbox: use mirrors for ALT-S
 #define IDC_MW_DISP_MIRROR_NOPROMPT 7015 // Checkbox: don't ask when no mirrors enabled
+#define IDC_MW_DISP_SAVE_PROFILE   7016 // Button: save display profile
+#define IDC_MW_DISP_LOAD_PROFILE   7017 // Button: load display profile
 
 // About tab
 #define IDC_MW_FILE_ASSOC       2200   // Button: Register File Association (About tab)

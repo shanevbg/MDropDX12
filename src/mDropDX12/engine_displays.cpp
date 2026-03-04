@@ -6,6 +6,7 @@
 #include "engine.h"
 #include "tool_window.h"
 #include "engine_helpers.h"
+#include "json_utils.h"
 #include "utility.h"
 #include <algorithm>
 #include <dxgi1_4.h>
@@ -211,7 +212,7 @@ void Engine::LoadDisplayOutputSettings()
             GetPrivateProfileStringW(section, L"DeviceName", L"", devBuf, 32, pIni);
             wcsncpy_s(out.config.szDeviceName, devBuf, _TRUNCATE);
             out.config.bFullscreen = GetPrivateProfileBoolW(section, L"Fullscreen", true, pIni);
-            out.config.nOpacity = GetPrivateProfileIntW(section, L"Opacity", legacyOpacity, pIni);
+            out.config.nOpacity = GetPrivateProfileIntW(section, L"Opacity", 100, pIni);
             if (out.config.nOpacity < 1) out.config.nOpacity = 1;
             if (out.config.nOpacity > 100) out.config.nOpacity = 100;
             out.config.bClickThrough = GetPrivateProfileBoolW(section, L"ClickThrough", false, pIni);
@@ -418,7 +419,7 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
 
         // Create borderless popup window covering the target monitor
         // WS_EX_LAYERED enables SetLayeredWindowAttributes for opacity control.
-        // WS_EX_TRANSPARENT (click-through) is added dynamically via UpdateMirrorWindowStyles().
+        // WS_EX_TRANSPARENT (click-through) is added dynamically via ApplyMirrorWindowStyles().
         DWORD exStyle = WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_LAYERED;
         if (out.config.bClickThrough)
             exStyle |= WS_EX_TRANSPARENT;
@@ -577,6 +578,10 @@ void Engine::SendToDisplayOutputs()
 {
     if (!m_lpDX) return;
 
+    // Apply deferred mirror style changes (set by UI thread via m_bMirrorStylesDirty)
+    if (m_bMirrorStylesDirty.exchange(false))
+        ApplyMirrorWindowStyles();
+
     // Cleanup: destroy outputs that are disabled or (for monitors) globally deactivated
     for (auto& out : m_displayOutputs) {
         if (out.config.type == DisplayOutputType::Monitor) {
@@ -722,7 +727,7 @@ void Engine::SendToDisplayOutputs()
 
 // ─── Mirror Window Style Updates ─────────────────────────────────────────────
 
-void Engine::UpdateMirrorWindowStyles()
+void Engine::ApplyMirrorWindowStyles()
 {
     for (auto& out : m_displayOutputs) {
         if (out.config.type != DisplayOutputType::Monitor || !out.monitorState)
@@ -851,6 +856,126 @@ void Engine::UpdateDisplaysTabSelection(int sel)
     wchar_t buf[32];
     if (hW) { swprintf(buf, 32, L"%d", cfg.nWidth); SetWindowTextW(hW, isSpout ? buf : L""); EnableWindow(hW, isSpout); }
     if (hH) { swprintf(buf, 32, L"%d", cfg.nHeight); SetWindowTextW(hH, isSpout ? buf : L""); EnableWindow(hH, isSpout); }
+}
+
+// ─── Display Profile Save / Load ─────────────────────────────────────────────
+
+bool Engine::SaveDisplayProfile(const wchar_t* filePath)
+{
+    JsonWriter w;
+    w.BeginObject();
+    w.Int(L"version", 1);
+    w.Float(L"mainWindowOpacity", fOpacity);
+    w.Bool(L"mirrorsActive", m_bMirrorsActive);
+    w.Bool(L"mirrorModeForAltS", m_bMirrorModeForAltS);
+
+    w.BeginArray(L"displays");
+    for (auto& out : m_displayOutputs) {
+        auto& cfg = out.config;
+        w.BeginObject();
+        w.String(L"type", cfg.type == DisplayOutputType::Monitor ? L"Monitor" : L"Spout");
+        w.String(L"name", cfg.szName);
+        w.Bool(L"enabled", cfg.bEnabled);
+
+        if (cfg.type == DisplayOutputType::Monitor) {
+            w.String(L"deviceName", cfg.szDeviceName);
+            w.Bool(L"fullscreen", cfg.bFullscreen);
+            w.Int(L"opacity", cfg.nOpacity);
+            w.Bool(L"clickThrough", cfg.bClickThrough);
+        } else {
+            w.Bool(L"fixedSize", cfg.bFixedSize);
+            w.Int(L"width", cfg.nWidth);
+            w.Int(L"height", cfg.nHeight);
+        }
+        w.EndObject();
+    }
+    w.EndArray();
+    w.EndObject();
+
+    return w.SaveToFile(filePath);
+}
+
+bool Engine::LoadDisplayProfile(const wchar_t* filePath)
+{
+    JsonValue root = JsonLoadFile(filePath);
+    if (!root.isObject()) return false;
+
+    int version = root[L"version"].asInt(0);
+    if (version < 1) return false;
+
+    // Tear down existing mirror windows before applying new settings
+    for (auto& out : m_displayOutputs) {
+        if (out.monitorState)
+            DestroyDisplayOutput(out);
+    }
+
+    // Main window opacity
+    if (root.has(L"mainWindowOpacity")) {
+        fOpacity = root[L"mainWindowOpacity"].asFloat(1.0f);
+        if (fOpacity < 0.0f) fOpacity = 0.0f;
+        if (fOpacity > 1.0f) fOpacity = 1.0f;
+        // Apply via message to render window (owns the HWND)
+        HWND hw = GetPluginWindow();
+        if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
+    }
+
+    // Global flags
+    m_bMirrorsActive = root[L"mirrorsActive"].asBool(false);
+    m_bMirrorModeForAltS = root[L"mirrorModeForAltS"].asBool(false);
+
+    // Apply per-display settings
+    const auto& displays = root[L"displays"];
+    for (size_t i = 0; i < displays.size(); i++) {
+        const auto& d = displays.at(i);
+        std::wstring type = d[L"type"].asString(L"");
+
+        if (type == L"Monitor") {
+            std::wstring devName = d[L"deviceName"].asString(L"");
+            // Match to currently enumerated monitor
+            for (auto& out : m_displayOutputs) {
+                if (out.config.type != DisplayOutputType::Monitor) continue;
+                if (devName != out.config.szDeviceName) continue;
+                out.config.bEnabled     = d[L"enabled"].asBool(false);
+                out.config.bFullscreen  = d[L"fullscreen"].asBool(true);
+                out.config.nOpacity     = d[L"opacity"].asInt(100);
+                if (out.config.nOpacity < 1) out.config.nOpacity = 1;
+                if (out.config.nOpacity > 100) out.config.nOpacity = 100;
+                out.config.bClickThrough = d[L"clickThrough"].asBool(false);
+                break;
+            }
+        } else if (type == L"Spout") {
+            std::wstring name = d[L"name"].asString(L"");
+            // Try to match existing Spout output by name
+            bool matched = false;
+            for (auto& out : m_displayOutputs) {
+                if (out.config.type != DisplayOutputType::Spout) continue;
+                if (name != out.config.szName) continue;
+                out.config.bEnabled   = d[L"enabled"].asBool(false);
+                out.config.bFixedSize = d[L"fixedSize"].asBool(false);
+                out.config.nWidth     = d[L"width"].asInt(1920);
+                out.config.nHeight    = d[L"height"].asInt(1080);
+                matched = true;
+                break;
+            }
+            // If no existing Spout output matched, add a new one
+            if (!matched && !name.empty()) {
+                DisplayOutput newOut;
+                newOut.config.type      = DisplayOutputType::Spout;
+                newOut.config.bEnabled  = d[L"enabled"].asBool(false);
+                newOut.config.bFixedSize = d[L"fixedSize"].asBool(false);
+                newOut.config.nWidth    = d[L"width"].asInt(1920);
+                newOut.config.nHeight   = d[L"height"].asInt(1080);
+                wcsncpy_s(newOut.config.szName, name.c_str(), _TRUNCATE);
+                m_displayOutputs.insert(m_displayOutputs.begin(), std::move(newOut));
+            }
+        }
+    }
+
+    // Request render-thread mirror style refresh and save to INI
+    m_bMirrorStylesDirty.store(true);
+    SaveDisplayOutputSettings();
+    RefreshDisplaysTab();
+    return true;
 }
 
 } // namespace mdrop

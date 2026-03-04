@@ -160,6 +160,15 @@ void DisplaysWindow::BuildOutputsPage(int x, int y, int rw, int lineH, int gap) 
   y += lineH + gap;
   PAGE_TC(0, CreateCheck(hw, L"Don't ask when no mirrors are enabled (enable all automatically)",
     IDC_MW_DISP_MIRROR_NOPROMPT, x, y, rw, lineH, hFont, p->m_bMirrorPromptDisabled));
+  y += lineH + gap + 4;
+
+  // Save / Load Profile buttons
+  {
+    int btnW = MulDiv(120, lineH, 26);
+    int btnGap = 8;
+    PAGE_TC(0, CreateBtn(hw, L"Save Profile...", IDC_MW_DISP_SAVE_PROFILE, x, y, btnW, lineH, hFont));
+    PAGE_TC(0, CreateBtn(hw, L"Load Profile...", IDC_MW_DISP_LOAD_PROFILE, x + btnW + btnGap, y, btnW, lineH, hFont));
+  }
 
   #undef PAGE_TC
 }
@@ -373,7 +382,7 @@ LRESULT DisplaysWindow::DoNotify(HWND hWnd, NMHDR* pnm) {
     if (sel >= 0 && sel < (int)p->m_displayOutputs.size() &&
         p->m_displayOutputs[sel].config.type == DisplayOutputType::Monitor) {
       p->m_displayOutputs[sel].config.nOpacity = newVal;
-      p->UpdateMirrorWindowStyles();
+      p->m_bMirrorStylesDirty.store(true);
     }
     return 0;
   }
@@ -468,7 +477,7 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       if (sel >= 0 && sel < (int)p->m_displayOutputs.size() &&
           p->m_displayOutputs[sel].config.type == DisplayOutputType::Monitor) {
         p->m_displayOutputs[sel].config.bClickThrough = bChecked;
-        p->UpdateMirrorWindowStyles();
+        p->m_bMirrorStylesDirty.store(true);
         p->SaveDisplayOutputSettings();
       }
       return 0;
@@ -566,7 +575,7 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       if (sel >= 0 && sel < (int)p->m_displayOutputs.size() &&
           p->m_displayOutputs[sel].config.type == DisplayOutputType::Monitor) {
         p->m_displayOutputs[sel].config.nOpacity = val;
-        p->UpdateMirrorWindowStyles();
+        p->m_bMirrorStylesDirty.store(true);
         p->SaveDisplayOutputSettings();
       }
       return 0;
@@ -641,6 +650,39 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       return 0;
     }
     }
+  }
+
+  // ===== Save / Load Profile =====
+  if (code == BN_CLICKED && (id == IDC_MW_DISP_SAVE_PROFILE || id == IDC_MW_DISP_LOAD_PROFILE)) {
+    wchar_t filePath[MAX_PATH] = {};
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hWnd;
+    ofn.lpstrFilter = L"Display Profile (*.json)\0*.json\0All Files\0*.*\0";
+    ofn.lpstrFile = filePath;
+    ofn.nMaxFile = MAX_PATH;
+
+    if (id == IDC_MW_DISP_SAVE_PROFILE) {
+      ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+      ofn.lpstrDefExt = L"json";
+      if (GetSaveFileNameW(&ofn)) {
+        if (!p->SaveDisplayProfile(filePath))
+          MessageBoxW(hWnd, L"Failed to save display profile.", L"Error", MB_OK | MB_ICONERROR);
+      }
+    } else {
+      ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+      if (GetOpenFileNameW(&ofn)) {
+        if (p->LoadDisplayProfile(filePath)) {
+          // Refresh UI and restore selection
+          HWND hList = GetDlgItem(hWnd, IDC_MW_DISP_LIST);
+          if (hList) SendMessage(hList, LB_SETCURSEL, -1, 0);
+          p->UpdateDisplaysTabSelection(-1);
+        } else {
+          MessageBoxW(hWnd, L"Failed to load display profile.", L"Error", MB_OK | MB_ICONERROR);
+        }
+      }
+    }
+    return 0;
   }
 
   // ===== Video Input handlers =====

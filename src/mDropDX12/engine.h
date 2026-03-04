@@ -395,6 +395,7 @@ public:
   bool m_bMirrorsActive = false;       // Displays tab button; always starts off
   bool m_bMirrorModeForAltS = false;   // When true, ALT-S activates mirrors+fullscreen instead of stretch
   bool m_bMirrorPromptDisabled = false; // Skip "no mirrors enabled" prompt; auto-enable all
+  std::atomic<bool> m_bMirrorStylesDirty{false}; // UI thread sets; render thread applies
 
   enum MirrorActivateResult { MirrorActivated, MirrorFullscreenOnly, MirrorCancelled };
   MirrorActivateResult TryActivateMirrors(HWND hRenderWnd);
@@ -408,7 +409,9 @@ public:
   void ResizeMirrorSwapChain(MonitorMirrorState& ms, int newW, int newH);
   void SendToDisplayOutputs() override;
   void RefreshDisplaysTab();
-  void UpdateMirrorWindowStyles();  // apply click-through + opacity to all active mirrors
+  void ApplyMirrorWindowStyles();   // apply click-through + opacity to all active mirrors (render thread only)
+  bool SaveDisplayProfile(const wchar_t* filePath);
+  bool LoadDisplayProfile(const wchar_t* filePath);
   void UpdateDisplaysTabSelection(int sel);
   int  m_nDisplaysTabSel = -1;  // Selected index in Displays tab listbox
 
