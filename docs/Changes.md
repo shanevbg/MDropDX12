@@ -64,8 +64,6 @@
 - JSON persistence (midi.json) with Save/Load/Defaults buttons
 - INI persistence for device selection and enabled state
 
-### Dynamic Script & Launch App Hotkeys
-
 ### Button Board
 
 - Added per-slot image thumbnails (Set Image / Clear Image context menu, drag-drop image files onto slots)
