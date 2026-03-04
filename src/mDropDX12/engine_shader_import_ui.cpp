@@ -319,7 +319,7 @@ void ShaderImportWindow::ApplyShader() {
         // Buffer A — store locally and write into state
         m_bufferAHlsl = hlsl;
         strncpy_s(p->m_pState->m_szBufferAShadersText, MAX_BIGSTRING_LEN, hlsl.c_str(), _TRUNCATE);
-        p->m_pState->m_nBufferAPSVersion = MD2_PS_3_0;
+        p->m_pState->m_nBufferAPSVersion = MD2_PS_5_0;
         SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT,
             L"Buffer A stored. Switch to Image, convert & apply to see the full effect.");
         return;
@@ -327,12 +327,12 @@ void ShaderImportWindow::ApplyShader() {
 
     // Image (comp) — also inject stored Buffer A if present
     strncpy_s(p->m_pState->m_szCompShadersText, MAX_BIGSTRING_LEN, hlsl.c_str(), _TRUNCATE);
-    p->m_pState->m_nCompPSVersion = MD2_PS_3_0;
-    p->m_pState->m_nMaxPSVersion = max(p->m_pState->m_nWarpPSVersion, (int)MD2_PS_3_0);
+    p->m_pState->m_nCompPSVersion = MD2_PS_5_0;
+    p->m_pState->m_nMaxPSVersion = max(p->m_pState->m_nWarpPSVersion, (int)MD2_PS_5_0);
 
     if (!m_bufferAHlsl.empty()) {
         strncpy_s(p->m_pState->m_szBufferAShadersText, MAX_BIGSTRING_LEN, m_bufferAHlsl.c_str(), _TRUNCATE);
-        p->m_pState->m_nBufferAPSVersion = MD2_PS_3_0;
+        p->m_pState->m_nBufferAPSVersion = MD2_PS_5_0;
     }
 
     // Activate Shadertoy pipeline (skip warp/blur/shapes)
@@ -407,6 +407,7 @@ void ShaderImportWindow::SaveAsPreset() {
         JsonWriter w;
         w.BeginObject();
         w.Int(L"version", 1);
+        w.Bool(L"shadertoy", true);
 
         // Extract a name from the filename
         std::wstring fname = std::filesystem::path(filePath).stem().wstring();
@@ -444,9 +445,9 @@ void ShaderImportWindow::SaveAsPreset() {
         // Legacy .milk save path
         auto tempState = std::make_unique<CState>();
         tempState->Default(0xFFFFFFFF);
-        tempState->m_nCompPSVersion = MD2_PS_3_0;
+        tempState->m_nCompPSVersion = MD2_PS_5_0;
         tempState->m_nWarpPSVersion = 0;
-        tempState->m_nMaxPSVersion = MD2_PS_3_0;
+        tempState->m_nMaxPSVersion = MD2_PS_5_0;
         tempState->m_nMinPSVersion = 0;
 
         if (pass == 0) {
@@ -458,7 +459,7 @@ void ShaderImportWindow::SaveAsPreset() {
 
         if (!m_bufferAHlsl.empty()) {
             strncpy_s(tempState->m_szBufferAShadersText, MAX_BIGSTRING_LEN, m_bufferAHlsl.c_str(), _TRUNCATE);
-            tempState->m_nBufferAPSVersion = MD2_PS_3_0;
+            tempState->m_nBufferAPSVersion = MD2_PS_5_0;
         }
 
         if (tempState->Export(filePath)) {
@@ -687,27 +688,23 @@ std::string ShaderImportWindow::FixFloatNumberOfArguments(const std::string& inp
     return result;
 }
 
-// Fix two-argument atan(y,x) → atan2(y,x)
+// Fix two-argument atan(y,x) → atan2(y,x), checking each occurrence individually
 std::string ShaderImportWindow::FixAtan(const std::string& line) {
     std::string result = line;
-    size_t index = result.find("atan(");
-    if (index != std::string::npos) {
-        std::string rest = result.substr(index + 5);
+    size_t pos = 0;
+    while ((pos = result.find("atan(", pos)) != std::string::npos) {
+        std::string rest = result.substr(pos + 5);
         int closingIdx = FindClosingBracket(rest, '(', ')', 1);
         if (closingIdx > 0) {
             std::string args = rest.substr(0, closingIdx);
             if (args.find(',') != std::string::npos) {
                 // Two arguments → atan2
-                auto replaceAll = [](std::string& s, const std::string& from, const std::string& to) {
-                    size_t pos = 0;
-                    while ((pos = s.find(from, pos)) != std::string::npos) {
-                        s.replace(pos, from.size(), to);
-                        pos += to.size();
-                    }
-                };
-                replaceAll(result, "atan(", "atan2(");
+                result.replace(pos, 5, "atan2(");
+                pos += 6; // skip past "atan2("
+                continue;
             }
         }
+        pos += 5; // skip past "atan(" — single-arg, leave as is
     }
     return result;
 }
@@ -1235,7 +1232,6 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
         inp = inpHeader + inpMain;
 
         // Phase 3: Per-line processing
-        std::string breakReplacement;
         std::ostringstream sb;
         {
             std::istringstream lss(inp);
@@ -1243,32 +1239,6 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
             while (std::getline(lss, line)) {
                 if (!line.empty() && line.back() == '\r') line.pop_back();
                 std::string currentLine = line;
-
-                // Save for-loop condition for break replacement
-                if (line.find("for(") != std::string::npos || line.find("for (") != std::string::npos) {
-                    // Extract condition from second semicolon-delimited section
-                    size_t forIdx = line.find("for");
-                    size_t parenIdx = line.find('(', forIdx);
-                    if (parenIdx != std::string::npos) {
-                        std::string forBody = line.substr(parenIdx);
-                        size_t semi1 = forBody.find(';');
-                        if (semi1 != std::string::npos) {
-                            std::string cond = forBody.substr(semi1 + 1);
-                            size_t semi2 = cond.find(';');
-                            if (semi2 != std::string::npos)
-                                cond = cond.substr(0, semi2);
-                            // Replace comparison operators with =
-                            replaceAll(cond, "<=", "=");
-                            replaceAll(cond, ">=", "=");
-                            replaceAll(cond, "<", "=");
-                            replaceAll(cond, ">", "=");
-                            // Trim
-                            size_t s = cond.find_first_not_of(" \t");
-                            if (s != std::string::npos) cond = cond.substr(s);
-                            breakReplacement = cond;
-                        }
-                    }
-                }
 
                 if (line.find("float2 uv =") != std::string::npos) {
                     currentLine = "// " + line;
@@ -1281,13 +1251,6 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
                     sb << "// CONV: iTimeDelta unsupported\n";
                     replaceAll(currentLine, "xTimeDelta", "iTimeDelta");
                     currentLine = "// " + currentLine;
-                } else if (line.find("break") != std::string::npos) {
-                    if (breakReplacement.empty()) {
-                        sb << "// CONV: no saved break condition, see manual\n";
-                    } else {
-                        sb << "// CONV: replaced break with breaking condition\n";
-                        replaceAll(currentLine, "break", breakReplacement);
-                    }
                 }
 
                 currentLine = FixMatrixMultiplication(currentLine);

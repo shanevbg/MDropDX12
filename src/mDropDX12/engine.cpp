@@ -1460,7 +1460,7 @@ void Engine::MyReadConfig() {
   m_MinPSVersionConfig = GetPrivateProfileIntW(L"Settings", L"MinPSVersion", m_MinPSVersionConfig, pIni);
   if (m_MinPSVersionConfig < 0) m_MinPSVersionConfig = 2;
   m_MaxPSVersionConfig = GetPrivateProfileIntW(L"Settings", L"MaxPSVersion", m_MaxPSVersionConfig, pIni);
-  if (m_MaxPSVersionConfig < 0) m_MaxPSVersionConfig = 4;
+  if (m_MaxPSVersionConfig < 0) m_MaxPSVersionConfig = 6;
   m_nMixType = GetPrivateProfileIntW(L"Settings", L"Mixtype", m_nMixType, pIni);
 
   m_ShowUpArrowInDescriptionIfPSMinVersionForced = GetPrivateProfileBoolW(L"Milkwave", L"ShowUpArrowInDescriptionIfPSMinVersionForced", m_ShowUpArrowInDescriptionIfPSMinVersionForced, pIni);

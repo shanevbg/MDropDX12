@@ -637,6 +637,7 @@ bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int sh
   case MD2_PS_2_X: lstrcpy(ver, "ps_2_a"); break; // we'll try ps_2_a first, LoadShaderFromMemory will try ps_2_b if compilation fails
   case MD2_PS_3_0: lstrcpy(ver, "ps_3_0"); break;
   case MD2_PS_4_0: lstrcpy(ver, "ps_4_0"); break;
+  case MD2_PS_5_0: lstrcpy(ver, "ps_5_0"); break;
   default: assert(0); break;
   }
 

@@ -143,6 +143,7 @@ enum {
   MD2_PS_2_X = 3,
   MD2_PS_3_0 = 4,
   MD2_PS_4_0 = 5, // not supported by milkdrop
+  MD2_PS_5_0 = 6, // SM5.0 for Shadertoy (.milk3) presets
 };
 
 typedef struct {
@@ -554,7 +555,7 @@ public:
   bool m_HideNotificationsWhenRemoteActive = false;
 
   int m_MinPSVersionConfig = 2;
-  int m_MaxPSVersionConfig = 4;
+  int m_MaxPSVersionConfig = 6;
   bool m_ShowUpArrowInDescriptionIfPSMinVersionForced = true;
 
   // GPU Protection Settings

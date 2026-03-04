@@ -1606,22 +1606,22 @@ void Engine::LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime) 
   if (!imageW.empty()) {
     std::string imageA = wideToNarrow(imageW);
     strncpy_s(m_pState->m_szCompShadersText, MAX_BIGSTRING_LEN, imageA.c_str(), _TRUNCATE);
-    m_pState->m_nCompPSVersion = MD2_PS_3_0;
+    m_pState->m_nCompPSVersion = MD2_PS_5_0;
   }
 
   // Store Buffer A shader
   if (!bufferAW.empty()) {
     std::string bufferAA = wideToNarrow(bufferAW);
     strncpy_s(m_pState->m_szBufferAShadersText, MAX_BIGSTRING_LEN, bufferAA.c_str(), _TRUNCATE);
-    m_pState->m_nBufferAPSVersion = MD2_PS_3_0;
+    m_pState->m_nBufferAPSVersion = MD2_PS_5_0;
   }
 
   // No warp shader in Shadertoy mode
   m_pState->m_nWarpPSVersion = 0;
-  m_pState->m_nMaxPSVersion = MD2_PS_3_0;
+  m_pState->m_nMaxPSVersion = MD2_PS_5_0;
 
-  // Activate Shadertoy pipeline
-  m_bShadertoyMode = true;
+  // Activate Shadertoy pipeline (default true for backward compat with .milk3 files without the flag)
+  m_bShadertoyMode = root[L"shadertoy"].asBool(true);
   m_nShadertoyStartFrame = GetFrame();
 
   // Compile shaders
