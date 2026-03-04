@@ -216,6 +216,21 @@ void ToolWindow::CreateOnThread() {
         // ForwardAllKeys(): forward everything (windows with no text edits)
         // Otherwise: only F-keys and Ctrl/Alt combos (bare alphanumerics go to edits)
         bool shouldForward = ForwardAllKeys() || isFKey || bCtrl || bAlt;
+
+        // Don't forward standard edit shortcuts when an edit control has focus
+        // (Ctrl+A=SelectAll, Ctrl+C=Copy, Ctrl+X=Cut, Ctrl+V=Paste, Ctrl+Z=Undo)
+        if (shouldForward && bCtrl && !bAlt && !bShift) {
+          if (vk == 'A' || vk == 'C' || vk == 'X' || vk == 'V' || vk == 'Z') {
+            HWND hFocus = GetFocus();
+            if (hFocus) {
+              wchar_t cls[16];
+              GetClassNameW(hFocus, cls, 16);
+              if (_wcsicmp(cls, L"Edit") == 0 || _wcsicmp(cls, L"RichEdit20W") == 0)
+                shouldForward = false;
+            }
+          }
+        }
+
         if (shouldForward) {
           HWND hRender = m_pEngine->GetPluginWindow();
           if (hRender) {
