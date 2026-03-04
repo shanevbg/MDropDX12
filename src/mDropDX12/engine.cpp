@@ -3144,10 +3144,13 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
 
   m_shaders.comp.Clear();
   m_shaders.warp.Clear();
+  m_shaders.bufferA.Clear();
   m_OldShaders.comp.Clear();
   m_OldShaders.warp.Clear();
+  m_OldShaders.bufferA.Clear();
   m_NewShaders.comp.Clear();
   m_NewShaders.warp.Clear();
+  m_NewShaders.bufferA.Clear();
   m_fallbackShaders_vs.comp.Clear();
   m_fallbackShaders_ps.comp.Clear();
   m_fallbackShaders_vs.warp.Clear();
@@ -3158,6 +3161,7 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
   m_BlurShaders[1].ps.Clear();
   m_dx12BlurPSO[0].Reset();
   m_dx12BlurPSO[1].Reset();
+  m_dx12BufferAPSO.Reset();
   /*
   SafeRelease( m_shaders.comp.ptr );
   SafeRelease( m_shaders.warp.ptr );

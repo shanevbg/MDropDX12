@@ -1234,8 +1234,9 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         p++;
         // then insert first line(s)
         lstrcpy(temp, p);
-        if (m_bShadertoyMode) {
+        if (m_bShadertoyMode && !bHardErrors) {
           // Shadertoy: float4 ret to preserve alpha channel (temporal accumulation data)
+          // Guard: !bHardErrors excludes fallback shaders (compiled during resize)
           sprintf(p, "    float4 ret = 0;\n");
         } else {
           sprintf(p, "%s\n", szFirstLine);
@@ -1246,10 +1247,11 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         // find the ending curly brace
         p = strrchr(p, '}');
         if (p) {
-          if (m_bShadertoyMode) {
+          if (m_bShadertoyMode && !bHardErrors) {
             // Shadertoy: output all 4 channels directly (no shiftHSV, no alpha override)
             // Both Buffer A and Image passes output ret unchanged.
             // Buffer A writes to FLOAT32 feedback; Image writes to UNORM backbuffer.
+            // Guard: !bHardErrors excludes fallback shaders (compiled during resize)
             char szLastLine[] = "    _return_value = ret;";
             sprintf(p, " %s\n}\n", szLastLine);
           } else {
