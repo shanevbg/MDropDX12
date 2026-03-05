@@ -1430,11 +1430,10 @@ void Engine::MyRenderUI(
     }
     else if (m_UI_mode == UI_LOAD) {
       if (m_nPresets == 0) {
-        // note: this error message is repeated in milkdrop.cpp in LoadRandomPreset()
-        wchar_t buf[1024];
-        swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILE_FOUND_IN_X_MILK), m_szPresetDir);
-        AddError(buf, 6.0f, ERR_MISC, true);
+        // No presets — post dialog to UI thread instead of showing overlay text
         m_UI_mode = UI_REGULAR;
+        HWND hw = GetPluginWindow();
+        if (hw) PostMessage(hw, WM_MW_NO_PRESETS_PROMPT, 0, 0);
       }
       else {
         MyTextOut(wasabiApiLangString(IDS_LOAD_WHICH_PRESET_PLUS_COMMANDS), MTO_UPPER_LEFT, true);

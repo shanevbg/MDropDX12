@@ -573,6 +573,10 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     return 0;
   }
 
+  case WM_MW_NO_PRESETS_PROMPT:
+    OpenWelcomeWindow();
+    return 0;
+
   // Milkwave Remote messages (forwarded from IPC window)
   case WM_MW_NEXT_PRESET:
   {

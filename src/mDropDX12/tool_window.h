@@ -475,11 +475,58 @@ private:
   HMENU BuildActionSubMenu();
 };
 
-// ── Concrete subclass: Shader Import window ──
+// ── Shared data for shader import passes ──
+
+struct ShaderPass {
+  std::wstring name;       // "Image", "Buffer A"
+  std::string  glslSource; // Raw GLSL text (narrow)
+  std::string  hlslOutput; // Converted HLSL (narrow, with LINEFEED_CONTROL_CHAR)
+};
+
+// ── Concrete subclass: Shader Editor window (GLSL + HLSL code editor) ──
+
+class ShaderImportWindow;  // forward decl
+
+class ShaderEditorWindow : public ToolWindow {
+public:
+  ShaderEditorWindow(Engine* pEngine, ShaderImportWindow* pImport);
+
+  void SetGLSL(const std::string& glsl);
+  std::string GetGLSL();
+  void SetHLSL(const std::string& hlsl);
+  std::string GetHLSL();
+  void SetPassName(const std::wstring& name);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return m_title.c_str(); }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12ShaderEditorWnd"; }
+  const wchar_t* GetINISection() const override  { return L"ShaderEditor"; }
+  int GetPinControlID() const override       { return IDC_MW_SHEDITOR_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_SHEDITOR_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_SHEDITOR_FONT_MINUS; }
+  int GetMinWidth() const override  { return 500; }
+  int GetMinHeight() const override { return 400; }
+
+  void    OnResize() override;
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+
+private:
+  int m_nTopY = 0;
+  std::wstring m_passName = L"Image";
+  mutable std::wstring m_title = L"Shader Editor - Image";
+  ShaderImportWindow* m_pImportWindow = nullptr;
+};
+
+// ── Concrete subclass: Shader Import window (control panel) ──
 
 class ShaderImportWindow : public ToolWindow {
 public:
   ShaderImportWindow(Engine* pEngine);
+  ~ShaderImportWindow();
+
+  void SyncEditorToPass();    // Editor text → m_passes[m_nSelectedPass]
+  void ConvertGLSLtoHLSL();   // Convert current pass GLSL→HLSL
 
 protected:
   const wchar_t* GetWindowTitle() const override { return L"Shader Import"; }
@@ -488,8 +535,8 @@ protected:
   int GetPinControlID() const override       { return IDC_MW_SHIMPORT_PIN; }
   int GetFontPlusControlID() const override  { return IDC_MW_SHIMPORT_FONT_PLUS; }
   int GetFontMinusControlID() const override { return IDC_MW_SHIMPORT_FONT_MINUS; }
-  int GetMinWidth() const override  { return 600; }
-  int GetMinHeight() const override { return 700; }
+  int GetMinWidth() const override  { return 350; }
+  int GetMinHeight() const override { return 450; }
 
   void    OnResize() override;
   void    DoBuildControls() override;
@@ -498,12 +545,19 @@ protected:
 
 private:
   int m_nTopY = 0;
-  std::string m_bufferAHlsl;   // Stored Buffer A HLSL (narrow, with LINEFEED_CONTROL_CHAR)
+  std::vector<ShaderPass> m_passes;
+  int m_nSelectedPass = 0;
+  std::unique_ptr<ShaderEditorWindow> m_editorWindow;
+
   void LayoutControls();
-  void ConvertGLSLtoHLSL();
+  void SyncPassToEditor();    // m_passes[m_nSelectedPass] → editor text
+  void RebuildPassList();
+  void OpenEditor();
   void ApplyShader();
   void SaveAsPreset();
-  int  GetSelectedPass();      // 0=Image, 1=Buffer A
+  void SaveImportProject();
+  void LoadImportProject();
+  int  GetSelectedPass();     // 0=Image, 1=Buffer A
 
   // Conversion helpers (ported from Milkwave Remote ShaderHelper.cs)
   static std::string ReplaceVarName(const std::string& oldName, const std::string& newName, const std::string& input);
@@ -512,6 +566,26 @@ private:
   static std::string FixFloatNumberOfArguments(const std::string& line, const std::string& fullContext);
   static std::string FixAtan(const std::string& line);
   static std::string BasicFormatShaderCode(const std::string& code);
+};
+
+// ── Concrete subclass: Welcome window (no-presets prompt) ──
+
+class WelcomeWindow : public ToolWindow {
+public:
+  WelcomeWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Welcome"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12WelcomeWnd"; }
+  const wchar_t* GetINISection() const override  { return L"Welcome"; }
+  int GetPinControlID() const override       { return 0; }
+  int GetFontPlusControlID() const override  { return 0; }
+  int GetFontMinusControlID() const override { return 0; }
+  int GetMinWidth() const override  { return 300; }
+  int GetMinHeight() const override { return 220; }
+
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
 };
 
 // Paint a ListView header in dark theme via NM_CUSTOMDRAW.

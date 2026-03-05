@@ -1122,6 +1122,11 @@ public:
   void OpenShaderImportWindow();
   void CloseShaderImportWindow();
 
+  // Welcome window (no-presets prompt)
+  std::unique_ptr<WelcomeWindow> m_welcomeWindow;
+  void OpenWelcomeWindow();
+  void CloseWelcomeWindow();
+
   // Broadcast WM_MW_REBUILD_FONTS to all windows except the sender
   void BroadcastFontSync(HWND hSender);
 

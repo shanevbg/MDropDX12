@@ -18,6 +18,9 @@
 
 namespace mdrop {
 
+// Forward declarations
+static std::string WideHlslToNarrow(const std::wstring& hlslW, int len);
+
 // ─── Open / Close (Engine methods) ──────────────────────────────────────
 
 void Engine::OpenShaderImportWindow() {
@@ -31,11 +34,273 @@ void Engine::CloseShaderImportWindow() {
         m_shaderImportWindow->Close();
 }
 
-// ─── Constructor ────────────────────────────────────────────────────────
+// ─── Welcome Window (no-presets prompt) ──────────────────────────────────
+
+void Engine::OpenWelcomeWindow() {
+    if (!m_welcomeWindow)
+        m_welcomeWindow = std::make_unique<WelcomeWindow>(this);
+    m_welcomeWindow->Open();
+}
+
+void Engine::CloseWelcomeWindow() {
+    if (m_welcomeWindow)
+        m_welcomeWindow->Close();
+}
+
+WelcomeWindow::WelcomeWindow(Engine* pEngine) : ToolWindow(pEngine, 340, 260) {
+}
+
+void WelcomeWindow::DoBuildControls() {
+    HWND hw = m_hWnd;
+    auto L = BuildBaseControls();
+    HFONT hFont = GetFont();
+
+    RECT rc;
+    GetClientRect(hw, &rc);
+    int pad = 16;
+    int x = pad;
+    int w = rc.right - pad * 2;
+    int lineH = L.lineH;
+    int btnH = lineH + 10;
+    int gap = 8;
+    int y = L.y + gap;
+
+    // Message label
+    HWND hLabel = CreateWindowExW(0, L"STATIC",
+        L"No presets found in the current directory.\r\n\r\n"
+        L"Choose an option below to get started:",
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        x, y, w, lineH * 3, hw, NULL, NULL, NULL);
+    TrackControl(hLabel);
+    SendMessage(hLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+    y += lineH * 3 + gap;
+
+    // Open Settings button
+    TrackControl(CreateBtn(hw, L"Open Settings...",
+        IDC_MW_WELCOME_SETTINGS, x, y, w, btnH, hFont));
+    y += btnH + gap;
+
+    // Open Shader Import button
+    TrackControl(CreateBtn(hw, L"Open Shader Import...",
+        IDC_MW_WELCOME_SHADER_IMPORT, x, y, w, btnH, hFont));
+    y += btnH + gap;
+
+    // Open Preset Browser button
+    TrackControl(CreateBtn(hw, L"Open Preset Browser...",
+        IDC_MW_WELCOME_PRESETS, x, y, w, btnH, hFont));
+}
+
+LRESULT WelcomeWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
+    if (code != BN_CLICKED) return 0;
+    Engine* p = m_pEngine;
+    switch (id) {
+    case IDC_MW_WELCOME_SETTINGS:
+        p->OpenSettingsWindow();
+        Close();
+        return 0;
+    case IDC_MW_WELCOME_SHADER_IMPORT:
+        p->OpenShaderImportWindow();
+        Close();
+        return 0;
+    case IDC_MW_WELCOME_PRESETS:
+        p->OpenPresetsWindow();
+        Close();
+        return 0;
+    }
+    return 0;
+}
+
+// ─── ShaderEditorWindow ─────────────────────────────────────────────────
+
+ShaderEditorWindow::ShaderEditorWindow(Engine* pEngine, ShaderImportWindow* pImport)
+    : ToolWindow(pEngine, 700, 800), m_pImportWindow(pImport)
+{
+}
+
+void ShaderEditorWindow::SetPassName(const std::wstring& name) {
+    m_passName = name;
+    m_title = L"Shader Editor - " + m_passName;
+    if (m_hWnd)
+        SetWindowTextW(m_hWnd, m_title.c_str());
+}
+
+void ShaderEditorWindow::SetGLSL(const std::string& glsl) {
+    if (!m_hWnd) return;
+    std::wstring w(glsl.begin(), glsl.end());
+    SetDlgItemTextW(m_hWnd, IDC_MW_SHEDITOR_GLSL_EDIT, w.c_str());
+}
+
+std::string ShaderEditorWindow::GetGLSL() {
+    if (!m_hWnd) return "";
+    HWND hEdit = GetDlgItem(m_hWnd, IDC_MW_SHEDITOR_GLSL_EDIT);
+    int len = GetWindowTextLengthW(hEdit);
+    if (len <= 0) return "";
+    std::wstring w(len + 1, L'\0');
+    GetWindowTextW(hEdit, w.data(), len + 1);
+    std::string s;
+    s.reserve(len);
+    for (int i = 0; i < len; i++) {
+        wchar_t ch = w[i];
+        if (ch < 128) s += (char)ch; else s += '?';
+    }
+    return s;
+}
+
+void ShaderEditorWindow::SetHLSL(const std::string& hlsl) {
+    if (!m_hWnd) return;
+    std::wstring w(hlsl.begin(), hlsl.end());
+    SetDlgItemTextW(m_hWnd, IDC_MW_SHEDITOR_HLSL_EDIT, w.c_str());
+}
+
+std::string ShaderEditorWindow::GetHLSL() {
+    if (!m_hWnd) return "";
+    HWND hEdit = GetDlgItem(m_hWnd, IDC_MW_SHEDITOR_HLSL_EDIT);
+    int len = GetWindowTextLengthW(hEdit);
+    if (len <= 0) return "";
+    std::wstring w(len + 1, L'\0');
+    GetWindowTextW(hEdit, w.data(), len + 1);
+    // Convert to narrow with LINEFEED_CONTROL_CHAR
+    return WideHlslToNarrow(w, len);
+}
+
+void ShaderEditorWindow::DoBuildControls() {
+    HWND hw = m_hWnd;
+    auto L = BuildBaseControls();
+    HFONT hFont = GetFont();
+    m_nTopY = L.y;
+
+    RECT rc;
+    GetClientRect(hw, &rc);
+    int clientH = rc.bottom - rc.top;
+
+    int x = L.x, rw = L.rw, lineH = L.lineH, gap = L.gap;
+    int y = m_nTopY;
+    int btnW = MulDiv(80, lineH, 26);
+    int btnH = lineH + 4;
+
+    // Available height for both edits
+    int convertRowH = btnH + gap;  // Convert button row
+    int fixedH = (lineH + gap) * 2 + convertRowH + gap;  // 2 label rows + convert row
+    int editH = clientH - y - fixedH;
+    if (editH < 120) editH = 120;
+    int glslH = editH * 55 / 100;  // GLSL gets more space
+    int hlslH = editH - glslH;
+
+    // "GLSL:" label + Paste / Clear
+    TrackControl(CreateWindowExW(0, L"STATIC", L"GLSL:", WS_CHILD | WS_VISIBLE,
+        x, y, 60, lineH, hw, NULL, NULL, NULL));
+    TrackControl(CreateBtn(hw, L"Paste", IDC_MW_SHEDITOR_PASTE,
+        x + rw - btnW * 2 - 8, y - 2, btnW, btnH, hFont));
+    TrackControl(CreateBtn(hw, L"Clear", IDC_MW_SHEDITOR_CLEAR,
+        x + rw - btnW, y - 2, btnW, btnH, hFont));
+    y += lineH + gap;
+
+    // GLSL multiline edit
+    TrackControl(CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN |
+        WS_VSCROLL | WS_HSCROLL | ES_NOHIDESEL,
+        x, y, rw, glslH, hw, (HMENU)(INT_PTR)IDC_MW_SHEDITOR_GLSL_EDIT, NULL, NULL));
+    SendDlgItemMessageW(hw, IDC_MW_SHEDITOR_GLSL_EDIT, EM_SETLIMITTEXT, 0x100000, 0);
+    y += glslH + gap;
+
+    // [Convert GLSL → HLSL] button (centered, prominent)
+    {
+        int cvtW = MulDiv(180, lineH, 26);
+        int cvtX = x + (rw - cvtW) / 2;
+        TrackControl(CreateBtn(hw, L"Convert GLSL \x2192 HLSL", IDC_MW_SHEDITOR_CONVERT,
+            cvtX, y, cvtW, btnH, hFont));
+    }
+    y += btnH + gap;
+
+    // "HLSL:" label + Copy
+    TrackControl(CreateWindowExW(0, L"STATIC", L"HLSL:", WS_CHILD | WS_VISIBLE,
+        x, y, 60, lineH, hw, NULL, NULL, NULL));
+    TrackControl(CreateBtn(hw, L"Copy", IDC_MW_SHEDITOR_COPY,
+        x + rw - btnW, y - 2, btnW, btnH, hFont));
+    y += lineH + gap;
+
+    // HLSL multiline edit (editable — for direct HLSL authoring)
+    TrackControl(CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN |
+        WS_VSCROLL | WS_HSCROLL | ES_NOHIDESEL,
+        x, y, rw, hlslH, hw, (HMENU)(INT_PTR)IDC_MW_SHEDITOR_HLSL_EDIT, NULL, NULL));
+    SendDlgItemMessageW(hw, IDC_MW_SHEDITOR_HLSL_EDIT, EM_SETLIMITTEXT, 0x100000, 0);
+
+    // Monospace font on both edits
+    HFONT hMono = CreateFontW(-MulDiv(10, GetDpiForWindow(hw), 72), 0, 0, 0, FW_NORMAL,
+        FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
+    if (hMono) {
+        SendDlgItemMessageW(hw, IDC_MW_SHEDITOR_GLSL_EDIT, WM_SETFONT, (WPARAM)hMono, TRUE);
+        SendDlgItemMessageW(hw, IDC_MW_SHEDITOR_HLSL_EDIT, WM_SETFONT, (WPARAM)hMono, TRUE);
+    }
+}
+
+void ShaderEditorWindow::OnResize() {
+    RebuildFonts();
+}
+
+LRESULT ShaderEditorWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
+    if (code == BN_CLICKED) {
+        switch (id) {
+        case IDC_MW_SHEDITOR_PASTE:
+            if (OpenClipboard(hWnd)) {
+                HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+                if (hData) {
+                    wchar_t* pText = (wchar_t*)GlobalLock(hData);
+                    if (pText) {
+                        SetDlgItemTextW(hWnd, IDC_MW_SHEDITOR_GLSL_EDIT, pText);
+                        GlobalUnlock(hData);
+                    }
+                }
+                CloseClipboard();
+            }
+            return 0;
+        case IDC_MW_SHEDITOR_CLEAR:
+            SetDlgItemTextW(hWnd, IDC_MW_SHEDITOR_GLSL_EDIT, L"");
+            SetDlgItemTextW(hWnd, IDC_MW_SHEDITOR_HLSL_EDIT, L"");
+            return 0;
+        case IDC_MW_SHEDITOR_CONVERT:
+            // Trigger conversion via the import window
+            if (m_pImportWindow) {
+                m_pImportWindow->SyncEditorToPass();
+                m_pImportWindow->ConvertGLSLtoHLSL();
+            }
+            return 0;
+        case IDC_MW_SHEDITOR_COPY: {
+            HWND hEdit = GetDlgItem(hWnd, IDC_MW_SHEDITOR_HLSL_EDIT);
+            int len = GetWindowTextLengthW(hEdit);
+            if (len > 0) {
+                std::wstring text(len + 1, L'\0');
+                GetWindowTextW(hEdit, text.data(), len + 1);
+                if (OpenClipboard(hWnd)) {
+                    EmptyClipboard();
+                    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (len + 1) * sizeof(wchar_t));
+                    if (hMem) {
+                        memcpy(GlobalLock(hMem), text.c_str(), (len + 1) * sizeof(wchar_t));
+                        GlobalUnlock(hMem);
+                        SetClipboardData(CF_UNICODETEXT, hMem);
+                    }
+                    CloseClipboard();
+                }
+            }
+            return 0;
+        }
+        }
+    }
+    return -1;
+}
+
+// ─── ShaderImportWindow — Constructor / Destructor ──────────────────────
 
 ShaderImportWindow::ShaderImportWindow(Engine* pEngine)
-    : ToolWindow(pEngine, 700, 800)
+    : ToolWindow(pEngine, 400, 500)
 {
+    m_passes.push_back({L"Image", "", ""});
+}
+
+ShaderImportWindow::~ShaderImportWindow() {
+    m_editorWindow.reset();
 }
 
 // ─── Build Controls ─────────────────────────────────────────────────────
@@ -54,75 +319,49 @@ void ShaderImportWindow::DoBuildControls() {
     int y = m_nTopY;
     int btnW = MulDiv(80, lineH, 26);
     int btnH = lineH + 4;
-    int pad = 8;
+    int smBtnW = lineH + 4;  // square buttons for +/-
 
-    // Calculate proportional edit heights from available space
-    int fixedH = (lineH + gap) * 3  // 3 label rows
-               + (btnH + gap)       // Convert button row
-               + (btnH + gap)       // bottom buttons row
-               + pad;
-    int editH = clientH - y - fixedH;
-    if (editH < 120) editH = 120;
-    int glslH = editH * 38 / 100;
-    int hlslH = editH * 38 / 100;
-    int errH  = editH - glslH - hlslH;
+    // "Passes:" label + [+] [-] buttons
+    TrackControl(CreateWindowExW(0, L"STATIC", L"Passes:", WS_CHILD | WS_VISIBLE,
+        x, y, 80, lineH, hw, NULL, NULL, NULL));
+    TrackControl(CreateBtn(hw, L"+", IDC_MW_SHIMPORT_ADD_PASS,
+        x + rw - smBtnW * 2 - 4, y - 2, smBtnW, btnH, hFont));
+    TrackControl(CreateBtn(hw, L"-", IDC_MW_SHIMPORT_DEL_PASS,
+        x + rw - smBtnW, y - 2, smBtnW, btnH, hFont));
+    y += lineH + gap;
+
+    // Listbox — fills middle area
+    int fixedBelow = (btnH + gap)       // Convert/Apply/Save row
+                   + (lineH + gap)      // Errors label
+                   + (btnH + gap)       // Save/Load Import row
+                   + gap;
+    int listH = clientH - y - fixedBelow - 80;  // leave room for error edit
+    if (listH < 60) listH = 60;
+    int errH = clientH - y - listH - fixedBelow;
     if (errH < 40) errH = 40;
 
-    // "GLSL Input:" label + Paste / Clear buttons
-    TrackControl(CreateWindowExW(0, L"STATIC", L"GLSL Input:", WS_CHILD | WS_VISIBLE,
-        x, y, 100, lineH, hw, NULL, NULL, NULL));
-    TrackControl(CreateBtn(hw, L"Paste", IDC_MW_SHIMPORT_PASTE,
-        x + rw - btnW * 2 - 8, y - 2, btnW, btnH, hFont));
-    TrackControl(CreateBtn(hw, L"Clear", IDC_MW_SHIMPORT_CLEAR,
-        x + rw - btnW, y - 2, btnW, btnH, hFont));
-    y += lineH + gap;
+    HWND hList = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", NULL,
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
+        LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
+        x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_SHIMPORT_PASS_LIST,
+        GetModuleHandle(NULL), NULL);
+    if (hList && hFont) SendMessage(hList, WM_SETFONT, (WPARAM)hFont, TRUE);
+    TrackControl(hList);
+    y += listH + gap;
 
-    // GLSL multiline edit
-    TrackControl(CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-        WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN |
-        WS_VSCROLL | WS_HSCROLL | ES_NOHIDESEL,
-        x, y, rw, glslH, hw, (HMENU)(INT_PTR)IDC_MW_SHIMPORT_GLSL_EDIT, NULL, NULL));
-    // Raise text limit from default 30K to 1MB for large Shadertoy shaders
-    SendDlgItemMessageW(hw, IDC_MW_SHIMPORT_GLSL_EDIT, EM_SETLIMITTEXT, 0x100000, 0);
-    y += glslH + gap;
-
-    // Convert button + pass selector
-    TrackControl(CreateBtn(hw, L"Convert >>", IDC_MW_SHIMPORT_CONVERT,
-        x, y, btnW + 20, btnH, hFont));
-    {
-        int comboW = MulDiv(120, lineH, 26);
-        TrackControl(CreateWindowExW(0, L"STATIC", L"Target:", WS_CHILD | WS_VISIBLE,
-            x + btnW + 30, y + 2, MulDiv(50, lineH, 26), lineH, hw, NULL, NULL, NULL));
-        HWND hCombo = CreateWindowExW(0, L"COMBOBOX", L"",
-            WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-            x + btnW + 30 + MulDiv(52, lineH, 26), y, comboW, lineH * 4,
-            hw, (HMENU)(INT_PTR)IDC_MW_SHIMPORT_PASS_COMBO, NULL, NULL);
-        SendMessageW(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
-        SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Image (comp)");
-        SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Buffer A");
-        SendMessageW(hCombo, CB_SETCURSEL, 0, 0);
-        TrackControl(hCombo);
-    }
+    // [Convert] [Apply] [Save .milk3...] buttons
+    int saveW = MulDiv(120, lineH, 26);
+    TrackControl(CreateBtn(hw, L"Convert", IDC_MW_SHIMPORT_CONVERT,
+        x, y, btnW, btnH, hFont));
+    TrackControl(CreateBtn(hw, L"Apply", IDC_MW_SHIMPORT_APPLY,
+        x + btnW + 4, y, btnW, btnH, hFont));
+    TrackControl(CreateBtn(hw, L"Save .milk3...", IDC_MW_SHIMPORT_SAVE,
+        x + rw - saveW, y, saveW, btnH, hFont));
     y += btnH + gap;
 
-    // "HLSL Output:" label + Copy button
-    TrackControl(CreateWindowExW(0, L"STATIC", L"HLSL Output:", WS_CHILD | WS_VISIBLE,
-        x, y, 100, lineH, hw, NULL, NULL, NULL));
-    TrackControl(CreateBtn(hw, L"Copy", IDC_MW_SHIMPORT_COPY,
-        x + rw - btnW, y - 2, btnW, btnH, hFont));
-    y += lineH + gap;
-
-    // HLSL multiline edit
-    TrackControl(CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-        WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN |
-        WS_VSCROLL | WS_HSCROLL | ES_NOHIDESEL,
-        x, y, rw, hlslH, hw, (HMENU)(INT_PTR)IDC_MW_SHIMPORT_HLSL_EDIT, NULL, NULL));
-    SendDlgItemMessageW(hw, IDC_MW_SHIMPORT_HLSL_EDIT, EM_SETLIMITTEXT, 0x100000, 0);
-    y += hlslH + gap;
-
-    // "Errors:" label
-    TrackControl(CreateWindowExW(0, L"STATIC", L"Errors:", WS_CHILD | WS_VISIBLE,
-        x, y, 100, lineH, hw, NULL, NULL, NULL));
+    // "Errors / Status:" label
+    TrackControl(CreateWindowExW(0, L"STATIC", L"Errors / Status:", WS_CHILD | WS_VISIBLE,
+        x, y, 150, lineH, hw, NULL, NULL, NULL));
     y += lineH + gap;
 
     // Error multiline edit (read-only)
@@ -132,22 +371,22 @@ void ShaderImportWindow::DoBuildControls() {
         x, y, rw, errH, hw, (HMENU)(INT_PTR)IDC_MW_SHIMPORT_ERROR_EDIT, NULL, NULL));
     y += errH + gap;
 
-    // Bottom buttons: Apply, Save
-    TrackControl(CreateBtn(hw, L"Apply", IDC_MW_SHIMPORT_APPLY,
-        x, y, btnW, btnH, hFont));
-    int saveW = MulDiv(140, lineH, 26);
-    TrackControl(CreateBtn(hw, L"Save as .milk...", IDC_MW_SHIMPORT_SAVE,
-        x + rw - saveW, y, saveW, btnH, hFont));
+    // [Save Import...] [Load Import...] buttons
+    int impW = MulDiv(110, lineH, 26);
+    TrackControl(CreateBtn(hw, L"Save Import...", IDC_MW_SHIMPORT_SAVE_IMPORT,
+        x, y, impW, btnH, hFont));
+    TrackControl(CreateBtn(hw, L"Load Import...", IDC_MW_SHIMPORT_LOAD_IMPORT,
+        x + impW + 4, y, impW, btnH, hFont));
 
-    // Set monospace font on code edits
+    // Monospace font on error edit
     HFONT hMono = CreateFontW(-MulDiv(10, GetDpiForWindow(hw), 72), 0, 0, 0, FW_NORMAL,
         FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
         CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
-    if (hMono) {
-        SendDlgItemMessageW(hw, IDC_MW_SHIMPORT_GLSL_EDIT, WM_SETFONT, (WPARAM)hMono, TRUE);
-        SendDlgItemMessageW(hw, IDC_MW_SHIMPORT_HLSL_EDIT, WM_SETFONT, (WPARAM)hMono, TRUE);
+    if (hMono)
         SendDlgItemMessageW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, WM_SETFONT, (WPARAM)hMono, TRUE);
-    }
+
+    // Populate listbox
+    RebuildPassList();
 }
 
 // ─── Layout ─────────────────────────────────────────────────────────────
@@ -160,64 +399,110 @@ void ShaderImportWindow::LayoutControls() {
     // All layout is handled by DoBuildControls; OnResize calls RebuildFonts.
 }
 
+// ─── Pass Management Helpers ────────────────────────────────────────────
+
+void ShaderImportWindow::RebuildPassList() {
+    HWND hList = GetDlgItem(m_hWnd, IDC_MW_SHIMPORT_PASS_LIST);
+    if (!hList) return;
+    SendMessage(hList, LB_RESETCONTENT, 0, 0);
+    for (auto& p : m_passes)
+        SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p.name.c_str());
+    if (m_nSelectedPass >= (int)m_passes.size())
+        m_nSelectedPass = 0;
+    SendMessage(hList, LB_SETCURSEL, m_nSelectedPass, 0);
+}
+
+void ShaderImportWindow::SyncEditorToPass() {
+    if (!m_editorWindow || m_nSelectedPass < 0 || m_nSelectedPass >= (int)m_passes.size())
+        return;
+    m_passes[m_nSelectedPass].glslSource = m_editorWindow->GetGLSL();
+    m_passes[m_nSelectedPass].hlslOutput = m_editorWindow->GetHLSL();
+}
+
+void ShaderImportWindow::SyncPassToEditor() {
+    if (!m_editorWindow || m_nSelectedPass < 0 || m_nSelectedPass >= (int)m_passes.size())
+        return;
+    m_editorWindow->SetGLSL(m_passes[m_nSelectedPass].glslSource);
+    m_editorWindow->SetHLSL(m_passes[m_nSelectedPass].hlslOutput);
+    m_editorWindow->SetPassName(m_passes[m_nSelectedPass].name);
+}
+
+void ShaderImportWindow::OpenEditor() {
+    if (!m_editorWindow)
+        m_editorWindow = std::make_unique<ShaderEditorWindow>(m_pEngine, this);
+    m_editorWindow->Open();
+    SyncPassToEditor();
+}
+
 // ─── Command Handler ────────────────────────────────────────────────────
 
 LRESULT ShaderImportWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
-    Engine* p = m_pEngine;
+    // Listbox selection change
+    if (id == IDC_MW_SHIMPORT_PASS_LIST && code == LBN_SELCHANGE) {
+        HWND hList = GetDlgItem(hWnd, IDC_MW_SHIMPORT_PASS_LIST);
+        int newSel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
+        if (newSel >= 0 && newSel < (int)m_passes.size() && newSel != m_nSelectedPass) {
+            SyncEditorToPass();
+            m_nSelectedPass = newSel;
+            SyncPassToEditor();
+        }
+        return 0;
+    }
+
+    // Listbox double-click — open editor
+    if (id == IDC_MW_SHIMPORT_PASS_LIST && code == LBN_DBLCLK) {
+        OpenEditor();
+        return 0;
+    }
 
     if (code == BN_CLICKED) {
         switch (id) {
-        case IDC_MW_SHIMPORT_PASTE: {
-            // Paste from clipboard into GLSL edit, then auto-convert
-            if (OpenClipboard(hWnd)) {
-                HANDLE hData = GetClipboardData(CF_UNICODETEXT);
-                if (hData) {
-                    wchar_t* pText = (wchar_t*)GlobalLock(hData);
-                    if (pText) {
-                        SetDlgItemTextW(hWnd, IDC_MW_SHIMPORT_GLSL_EDIT, pText);
-                        GlobalUnlock(hData);
-                    }
-                }
-                CloseClipboard();
+        case IDC_MW_SHIMPORT_ADD_PASS: {
+            // Add Buffer A if not present
+            bool hasBufferA = false;
+            for (auto& p : m_passes)
+                if (p.name == L"Buffer A") { hasBufferA = true; break; }
+            if (!hasBufferA) {
+                m_passes.push_back({L"Buffer A", "", ""});
+                SyncEditorToPass();  // save current pass before switching
+                m_nSelectedPass = (int)m_passes.size() - 1;
+                RebuildPassList();
+                OpenEditor();
             }
-            ConvertGLSLtoHLSL();
             return 0;
         }
-        case IDC_MW_SHIMPORT_CLEAR:
-            SetDlgItemTextW(hWnd, IDC_MW_SHIMPORT_GLSL_EDIT, L"");
-            SetDlgItemTextW(hWnd, IDC_MW_SHIMPORT_HLSL_EDIT, L"");
-            SetDlgItemTextW(hWnd, IDC_MW_SHIMPORT_ERROR_EDIT, L"");
+        case IDC_MW_SHIMPORT_DEL_PASS:
+            if (m_nSelectedPass > 0 && m_nSelectedPass < (int)m_passes.size()) {
+                m_passes.erase(m_passes.begin() + m_nSelectedPass);
+                m_nSelectedPass = 0;
+                RebuildPassList();
+                SyncPassToEditor();
+            }
             return 0;
 
         case IDC_MW_SHIMPORT_CONVERT:
+            SyncEditorToPass();
             ConvertGLSLtoHLSL();
+            SyncPassToEditor();  // show converted HLSL in editor
             return 0;
 
-        case IDC_MW_SHIMPORT_COPY: {
-            // Copy HLSL to clipboard
-            int len = GetWindowTextLengthW(GetDlgItem(hWnd, IDC_MW_SHIMPORT_HLSL_EDIT));
-            if (len > 0) {
-                std::wstring text(len + 1, L'\0');
-                GetDlgItemTextW(hWnd, IDC_MW_SHIMPORT_HLSL_EDIT, text.data(), len + 1);
-                if (OpenClipboard(hWnd)) {
-                    EmptyClipboard();
-                    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (len + 1) * sizeof(wchar_t));
-                    if (hMem) {
-                        memcpy(GlobalLock(hMem), text.c_str(), (len + 1) * sizeof(wchar_t));
-                        GlobalUnlock(hMem);
-                        SetClipboardData(CF_UNICODETEXT, hMem);
-                    }
-                    CloseClipboard();
-                }
-            }
-            return 0;
-        }
         case IDC_MW_SHIMPORT_APPLY:
+            SyncEditorToPass();
             ApplyShader();
             return 0;
 
         case IDC_MW_SHIMPORT_SAVE:
+            SyncEditorToPass();
             SaveAsPreset();
+            return 0;
+
+        case IDC_MW_SHIMPORT_SAVE_IMPORT:
+            SyncEditorToPass();
+            SaveImportProject();
+            return 0;
+
+        case IDC_MW_SHIMPORT_LOAD_IMPORT:
+            LoadImportProject();
             return 0;
         }
     }
@@ -238,7 +523,8 @@ LRESULT ShaderImportWindow::DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
 
         std::wstring errText;
         bool compOK = (p->m_shaders.comp.bytecodeBlob != NULL);
-        bool bufAOK = !m_bufferAHlsl.empty() ? (p->m_shaders.bufferA.bytecodeBlob != NULL) : true;
+        bool hasBufA = (m_passes.size() > 1 && !m_passes[1].hlslOutput.empty());
+        bool bufAOK = hasBufA ? (p->m_shaders.bufferA.bytecodeBlob != NULL) : true;
 
         if (compOK && bufAOK) {
             errText = L"Shader compiled successfully.";
@@ -277,8 +563,7 @@ LRESULT ShaderImportWindow::DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
 // ─── Helpers ────────────────────────────────────────────────────────────
 
 int ShaderImportWindow::GetSelectedPass() {
-    HWND hCombo = GetDlgItem(m_hWnd, IDC_MW_SHIMPORT_PASS_COMBO);
-    return hCombo ? (int)SendMessageW(hCombo, CB_GETCURSEL, 0, 0) : 0;
+    return m_nSelectedPass;  // 0=Image, 1=Buffer A
 }
 
 // Convert wide HLSL text to narrow with LINEFEED_CONTROL_CHAR line endings
@@ -307,53 +592,41 @@ void ShaderImportWindow::ApplyShader() {
     HWND hw = m_hWnd;
     Engine* p = m_pEngine;
 
-    // Get HLSL text
-    int len = GetWindowTextLengthW(GetDlgItem(hw, IDC_MW_SHIMPORT_HLSL_EDIT));
-    if (len <= 0) {
-        SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"No HLSL text to apply.");
-        return;
-    }
-    std::wstring hlslW(len + 1, L'\0');
-    GetDlgItemTextW(hw, IDC_MW_SHIMPORT_HLSL_EDIT, hlslW.data(), len + 1);
-    std::string hlsl = WideHlslToNarrow(hlslW, len);
+    // Get Image HLSL from m_passes[0]
+    std::string imageHlsl = (m_passes.size() > 0) ? m_passes[0].hlslOutput : "";
+    std::string bufAHlsl  = (m_passes.size() > 1) ? m_passes[1].hlslOutput : "";
 
-    int pass = GetSelectedPass();
-    if (pass == 1) {
-        // Buffer A — store locally and write into state
-        m_bufferAHlsl = hlsl;
-        strncpy_s(p->m_pState->m_szBufferAShadersText, MAX_SHADER_TEXT_LEN, hlsl.c_str(), _TRUNCATE);
-        p->m_pState->m_nBufferAPSVersion = MD2_PS_5_0;
-        SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT,
-            L"Buffer A stored. Switch to Image, convert & apply to see the full effect.");
+    if (imageHlsl.empty()) {
+        SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"No Image HLSL to apply. Convert first.");
         return;
     }
 
-    // Image (comp) — also inject stored Buffer A if present
-    strncpy_s(p->m_pState->m_szCompShadersText, MAX_SHADER_TEXT_LEN, hlsl.c_str(), _TRUNCATE);
+    // Apply Image (comp) shader
+    strncpy_s(p->m_pState->m_szCompShadersText, MAX_SHADER_TEXT_LEN, imageHlsl.c_str(), _TRUNCATE);
     p->m_pState->m_nCompPSVersion = MD2_PS_5_0;
     p->m_pState->m_nMaxPSVersion = max(p->m_pState->m_nWarpPSVersion, (int)MD2_PS_5_0);
 
-    if (!m_bufferAHlsl.empty()) {
-        strncpy_s(p->m_pState->m_szBufferAShadersText, MAX_SHADER_TEXT_LEN, m_bufferAHlsl.c_str(), _TRUNCATE);
+    // Apply Buffer A if present
+    if (!bufAHlsl.empty()) {
+        strncpy_s(p->m_pState->m_szBufferAShadersText, MAX_SHADER_TEXT_LEN, bufAHlsl.c_str(), _TRUNCATE);
         p->m_pState->m_nBufferAPSVersion = MD2_PS_5_0;
     }
 
-    // Activate Shadertoy pipeline (skip warp/blur/shapes)
+    // Activate Shadertoy pipeline
     p->m_bShadertoyMode = true;
     p->m_nShadertoyStartFrame = p->GetFrame();
 
-    // Signal pending and enqueue recompile
-    p->m_nRecompileResult.store(1);  // 1=pending
+    p->m_nRecompileResult.store(1);
     p->EnqueueRenderCmd(RenderCmd::RecompileCompShader);
 
-    // Poll for result every 200ms (render thread signals completion)
+    // Status message
     {
         int storedLen = (int)strlen(p->m_pState->m_szCompShadersText);
-        int bufALen = m_bufferAHlsl.empty() ? 0 : (int)strlen(p->m_pState->m_szBufferAShadersText);
+        int bufALen = bufAHlsl.empty() ? 0 : (int)strlen(p->m_pState->m_szBufferAShadersText);
         wchar_t msg[256];
-        bool truncated = ((int)hlsl.size() > storedLen + 1);
+        bool truncated = ((int)imageHlsl.size() > storedLen + 1);
         if (truncated)
-            swprintf(msg, 256, L"Compiling... (TRUNCATED: %d of %d chars stored)", storedLen, (int)hlsl.size());
+            swprintf(msg, 256, L"Compiling... (TRUNCATED: %d of %d chars stored)", storedLen, (int)imageHlsl.size());
         else if (bufALen > 0)
             swprintf(msg, 256, L"Compiling... (Image: %d chars, Buffer A: %d chars)", storedLen, bufALen);
         else
@@ -369,14 +642,14 @@ void ShaderImportWindow::SaveAsPreset() {
     HWND hw = m_hWnd;
     Engine* p = m_pEngine;
 
-    // Get HLSL text
-    int len = GetWindowTextLengthW(GetDlgItem(hw, IDC_MW_SHIMPORT_HLSL_EDIT));
-    if (len <= 0) {
-        SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"No HLSL text to save.");
+    // Sync editor text into m_passes before saving
+    SyncEditorToPass();
+
+    // Must have Image HLSL
+    if (m_passes.empty() || m_passes[0].hlslOutput.empty()) {
+        SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"No Image HLSL to save. Convert first.");
         return;
     }
-    std::wstring hlslW(len + 1, L'\0');
-    GetDlgItemTextW(hw, IDC_MW_SHIMPORT_HLSL_EDIT, hlslW.data(), len + 1);
 
     // File save dialog — default to .milk3 for Shadertoy imports
     wchar_t filePath[MAX_PATH] = {};
@@ -393,32 +666,14 @@ void ShaderImportWindow::SaveAsPreset() {
     if (!GetSaveFileNameW(&ofn))
         return;
 
-    // Convert HLSL text to narrow
-    std::string hlsl = WideHlslToNarrow(hlslW, len);
-
-    // If currently on Buffer A, store it first before saving
-    int pass = GetSelectedPass();
-    if (pass == 1)
-        m_bufferAHlsl = hlsl;
-
     // Determine which extension the user chose
     std::wstring ext = filePath;
     bool isMilk3 = (ext.size() >= 6 && _wcsicmp(ext.c_str() + ext.size() - 6, L".milk3") == 0);
 
+    bool hasBufferA = (m_passes.size() > 1 && !m_passes[1].hlslOutput.empty());
+
     if (isMilk3) {
         // Save as .milk3 JSON
-        std::string imageHlsl, bufferAHlsl;
-        if (pass == 0) {
-            imageHlsl = hlsl;
-        } else {
-            // Buffer A pass — use current state's comp text for Image
-            if (p->m_pState->m_nCompPSVersion > 0)
-                imageHlsl = p->m_pState->m_szCompShadersText;
-        }
-        if (!m_bufferAHlsl.empty())
-            bufferAHlsl = m_bufferAHlsl;
-
-        // Build JSON
         JsonWriter w;
         w.BeginObject();
         w.Int(L"version", 1);
@@ -429,24 +684,24 @@ void ShaderImportWindow::SaveAsPreset() {
         w.String(L"name", fname.c_str());
 
         // Write shader text as wide strings (JsonWriter handles escaping)
-        if (!bufferAHlsl.empty()) {
-            std::wstring wBufA(bufferAHlsl.begin(), bufferAHlsl.end());
+        if (hasBufferA) {
+            std::wstring wBufA(m_passes[1].hlslOutput.begin(), m_passes[1].hlslOutput.end());
             w.String(L"bufferA", wBufA.c_str());
         }
         {
-            std::wstring wImage(imageHlsl.begin(), imageHlsl.end());
+            std::wstring wImage(m_passes[0].hlslOutput.begin(), m_passes[0].hlslOutput.end());
             w.String(L"image", wImage.c_str());
         }
 
         // Channel mappings
         w.BeginObject(L"channels");
-        if (!bufferAHlsl.empty()) {
+        if (hasBufferA) {
             w.BeginObject(L"bufferA");
             w.String(L"iChannel0", L"self");
             w.EndObject();
         }
         w.BeginObject(L"image");
-        w.String(L"iChannel0", bufferAHlsl.empty() ? L"self" : L"bufferA");
+        w.String(L"iChannel0", hasBufferA ? L"bufferA" : L"self");
         w.EndObject();
         w.EndObject(); // channels
         w.EndObject(); // root
@@ -465,15 +720,10 @@ void ShaderImportWindow::SaveAsPreset() {
         tempState->m_nMaxPSVersion = MD2_PS_5_0;
         tempState->m_nMinPSVersion = 0;
 
-        if (pass == 0) {
-            strncpy_s(tempState->m_szCompShadersText, MAX_SHADER_TEXT_LEN, hlsl.c_str(), _TRUNCATE);
-        } else {
-            if (p->m_pState->m_nCompPSVersion > 0)
-                strncpy_s(tempState->m_szCompShadersText, MAX_SHADER_TEXT_LEN, p->m_pState->m_szCompShadersText, _TRUNCATE);
-        }
+        strncpy_s(tempState->m_szCompShadersText, MAX_SHADER_TEXT_LEN, m_passes[0].hlslOutput.c_str(), _TRUNCATE);
 
-        if (!m_bufferAHlsl.empty()) {
-            strncpy_s(tempState->m_szBufferAShadersText, MAX_SHADER_TEXT_LEN, m_bufferAHlsl.c_str(), _TRUNCATE);
+        if (hasBufferA) {
+            strncpy_s(tempState->m_szBufferAShadersText, MAX_SHADER_TEXT_LEN, m_passes[1].hlslOutput.c_str(), _TRUNCATE);
             tempState->m_nBufferAPSVersion = MD2_PS_5_0;
         }
 
@@ -817,21 +1067,20 @@ std::string ShaderImportWindow::BasicFormatShaderCode(const std::string& code) {
 void ShaderImportWindow::ConvertGLSLtoHLSL() {
     HWND hw = m_hWnd;
 
-    // Get GLSL text
-    int len = GetWindowTextLengthW(GetDlgItem(hw, IDC_MW_SHIMPORT_GLSL_EDIT));
-    if (len <= 0) return;
+    // Sync current editor text into m_passes
+    SyncEditorToPass();
 
-    std::wstring glslW(len + 1, L'\0');
-    GetDlgItemTextW(hw, IDC_MW_SHIMPORT_GLSL_EDIT, glslW.data(), len + 1);
-
-    // Convert wide → narrow for processing
-    std::string inp;
-    inp.reserve(len);
-    for (int i = 0; i < len; i++) {
-        wchar_t ch = glslW[i];
-        if (ch < 128) inp += (char)ch;
-        else inp += '?';
+    // Get GLSL from current pass
+    int passIdx = m_nSelectedPass;
+    if (passIdx < 0 || passIdx >= (int)m_passes.size()) return;
+    const std::string& glslNarrow = m_passes[passIdx].glslSource;
+    if (glslNarrow.empty()) {
+        SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"No GLSL text to convert. Paste GLSL in the editor first.");
+        return;
     }
+
+    // Use narrow GLSL directly (already stored as narrow in m_passes)
+    std::string inp = glslNarrow;
 
     // Strip // comment lines (browser copy-paste can line-wrap comments,
     // splitting words across lines and creating invalid identifiers like 'his' from 'this').
@@ -1016,7 +1265,7 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
         // iChannel samplers — inline replacement (not #define) to avoid preprocessor issues
         // For Buffer A pass or Image pass WITH Buffer A: iChannel0 = feedback buffer
         // For Image-only shaders (no Buffer A): iChannel0 = noise texture
-        if (GetSelectedPass() == 1 || !m_bufferAHlsl.empty())
+        if (GetSelectedPass() == 1 || m_passes.size() > 1)
             replaceAll(inp, "iChannel0", "sampler_feedback");
         else
             replaceAll(inp, "iChannel0", "sampler_noise_lq");
@@ -1680,18 +1929,136 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
         }
     }
 
-    // Convert result to wide and set in HLSL edit
-    std::wstring resultW;
-    resultW.reserve(result.size());
-    for (char c : result) resultW += (wchar_t)(unsigned char)c;
+    // Store converted HLSL in the current pass
+    m_passes[passIdx].hlslOutput = result;
 
-    SetDlgItemTextW(hw, IDC_MW_SHIMPORT_HLSL_EDIT, resultW.c_str());
+    // Update editor window with the converted HLSL
+    if (m_editorWindow && m_editorWindow->IsOpen())
+        m_editorWindow->SetHLSL(result);
 
-    // Show errors
+    // Show errors/status
     std::wstring errW;
-    if (errors.empty()) errW = L"Conversion complete.";
-    else for (char c : errors) errW += (wchar_t)(unsigned char)c;
+    if (errors.empty()) {
+        errW = L"Conversion complete";
+        errW += L" (" + m_passes[passIdx].name + L").";
+    } else {
+        for (char c : errors) errW += (wchar_t)(unsigned char)c;
+    }
     SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, errW.c_str());
+}
+
+// ─── Save / Load Import Project (JSON) ──────────────────────────────────
+
+void ShaderImportWindow::SaveImportProject() {
+    HWND hw = m_hWnd;
+
+    // Sync editor text into m_passes before saving
+    SyncEditorToPass();
+
+    // Must have at least Image GLSL
+    if (m_passes.empty() || m_passes[0].glslSource.empty()) {
+        SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"No GLSL text to save.");
+        return;
+    }
+
+    wchar_t filePath[MAX_PATH] = {};
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hw;
+    ofn.lpstrFilter = L"Shader Import (*.json)\0*.json\0All Files\0*.*\0";
+    ofn.lpstrFile = filePath;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+    ofn.lpstrDefExt = L"json";
+
+    if (!GetSaveFileNameW(&ofn))
+        return;
+
+    JsonWriter w;
+    w.BeginObject();
+    w.String(L"type", L"shader_import");
+    w.Int(L"version", 1);
+
+    w.BeginArray(L"passes");
+    for (auto& pass : m_passes) {
+        w.BeginObject();
+        w.String(L"name", pass.name.c_str());
+        // Store GLSL as wide string (JsonWriter handles escaping)
+        std::wstring wGlsl(pass.glslSource.begin(), pass.glslSource.end());
+        w.String(L"glsl", wGlsl.c_str());
+        w.EndObject();
+    }
+    w.EndArray();
+    w.EndObject();
+
+    if (w.SaveToFile(filePath))
+        SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"Import project saved.");
+    else
+        SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"Failed to save import project.");
+}
+
+void ShaderImportWindow::LoadImportProject() {
+    HWND hw = m_hWnd;
+
+    wchar_t filePath[MAX_PATH] = {};
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hw;
+    ofn.lpstrFilter = L"Shader Import (*.json)\0*.json\0All Files\0*.*\0";
+    ofn.lpstrFile = filePath;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+
+    if (!GetOpenFileNameW(&ofn))
+        return;
+
+    JsonValue root = JsonLoadFile(filePath);
+    if (!root.isObject()) {
+        SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"Failed to load JSON file.");
+        return;
+    }
+
+    std::wstring type = root[L"type"].asString(L"");
+    if (type != L"shader_import") {
+        SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"Not a shader import project file.");
+        return;
+    }
+
+    int version = root[L"version"].asInt(0);
+    if (version < 1) {
+        SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"Unsupported import project version.");
+        return;
+    }
+
+    // Rebuild passes from JSON
+    m_passes.clear();
+    const auto& passes = root[L"passes"];
+    for (size_t i = 0; i < passes.size(); i++) {
+        const auto& p = passes.at(i);
+        ShaderPass sp;
+        sp.name = p[L"name"].asString(L"Image");
+        // Convert wide GLSL back to narrow
+        std::wstring wGlsl = p[L"glsl"].asString(L"");
+        sp.glslSource.reserve(wGlsl.size());
+        for (wchar_t ch : wGlsl) {
+            if (ch < 128) sp.glslSource += (char)ch;
+            else sp.glslSource += '?';
+        }
+        sp.hlslOutput.clear();
+        m_passes.push_back(std::move(sp));
+    }
+
+    // Ensure Image is always at index 0
+    if (m_passes.empty())
+        m_passes.push_back({L"Image", "", ""});
+    else if (m_passes[0].name != L"Image")
+        m_passes.insert(m_passes.begin(), {L"Image", "", ""});
+
+    m_nSelectedPass = 0;
+    RebuildPassList();
+    SyncPassToEditor();
+
+    SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"Import project loaded.");
 }
 
 } // namespace mdrop

@@ -591,20 +591,34 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_MESSAGES_WIN_FONT_PLUS   9061
 #define IDC_MW_MESSAGES_WIN_FONT_MINUS  9062
 
-// Shader Import window controls (9100-9119)
+// Shader Import control panel (9100-9119)
 #define IDC_MW_SHIMPORT_PIN          9100
 #define IDC_MW_SHIMPORT_FONT_PLUS    9101
 #define IDC_MW_SHIMPORT_FONT_MINUS   9102
-#define IDC_MW_SHIMPORT_GLSL_EDIT    9103  // Multiline EDIT: GLSL paste area
-#define IDC_MW_SHIMPORT_HLSL_EDIT    9104  // Multiline EDIT: converted HLSL
 #define IDC_MW_SHIMPORT_ERROR_EDIT   9105  // Multiline EDIT: errors (read-only)
 #define IDC_MW_SHIMPORT_CONVERT      9106  // Button: Convert GLSL→HLSL
 #define IDC_MW_SHIMPORT_APPLY        9107  // Button: Apply (live preview)
-#define IDC_MW_SHIMPORT_SAVE         9108  // Button: Save as .milk
-#define IDC_MW_SHIMPORT_CLEAR        9109  // Button: Clear all
-#define IDC_MW_SHIMPORT_PASTE        9110  // Button: Paste from clipboard
-#define IDC_MW_SHIMPORT_COPY         9111  // Button: Copy HLSL
-#define IDC_MW_SHIMPORT_PASS_COMBO   9112  // Combo: target pass (Image / Buffer A)
+#define IDC_MW_SHIMPORT_SAVE         9108  // Button: Save as .milk3
+#define IDC_MW_SHIMPORT_PASS_LIST    9113  // ListBox: pass selection
+#define IDC_MW_SHIMPORT_ADD_PASS     9114  // Button: +
+#define IDC_MW_SHIMPORT_DEL_PASS     9115  // Button: -
+#define IDC_MW_SHIMPORT_SAVE_IMPORT  9116  // Button: Save Import...
+#define IDC_MW_SHIMPORT_LOAD_IMPORT  9117  // Button: Load Import...
+// Shader Editor window (9120-9129)
+#define IDC_MW_SHEDITOR_PIN          9120
+#define IDC_MW_SHEDITOR_FONT_PLUS    9121
+#define IDC_MW_SHEDITOR_FONT_MINUS   9122
+#define IDC_MW_SHEDITOR_GLSL_EDIT    9123  // Multiline EDIT: GLSL source
+#define IDC_MW_SHEDITOR_PASTE        9124  // Button: Paste GLSL
+#define IDC_MW_SHEDITOR_CLEAR        9125  // Button: Clear
+#define IDC_MW_SHEDITOR_HLSL_EDIT    9126  // Multiline EDIT: HLSL (editable)
+#define IDC_MW_SHEDITOR_COPY         9127  // Button: Copy HLSL
+#define IDC_MW_SHEDITOR_CONVERT      9128  // Button: Convert GLSL→HLSL
+
+// Welcome window (no-presets prompt)
+#define IDC_MW_WELCOME_SETTINGS      9130  // Button: Open Settings
+#define IDC_MW_WELCOME_SHADER_IMPORT 9131  // Button: Open Shader Import
+#define IDC_MW_WELCOME_PRESETS       9132  // Button: Open Preset Browser
 
 // Launcher buttons on Settings General tab
 #define IDC_MW_OPEN_PRESETS       9080
@@ -650,6 +664,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_REBUILD_FONTS       (WM_APP + 21) // cross-window font size sync
 #define WM_MW_HOTKEY_ACTION       (WM_APP + 22) // wParam = HotkeyAction ID (dispatch to App.cpp)
 #define WM_MW_MIDI_DATA           (WM_APP + 23) // lParam = packed MIDI bytes from MidiInput callback
+#define WM_MW_NO_PRESETS_PROMPT   (WM_APP + 24) // show "no presets" dialog on UI thread
 
 // Milkwave Remote messages (sent via PostMessage from Milkwave Remote → IPC window → render window)
 #define WM_MW_NEXT_PRESET       (WM_APP + 100)
