@@ -475,12 +475,28 @@ private:
   HMENU BuildActionSubMenu();
 };
 
+// ── Channel input sources for Shadertoy passes ──
+
+enum ChannelSource {
+  CHAN_NOISE_LQ = 0,     // sampler_noise_lq (256x256)
+  CHAN_NOISE_MQ,         // sampler_noise_mq (256x256)
+  CHAN_NOISE_HQ,         // sampler_noise_hq (256x256)
+  CHAN_FEEDBACK,         // sampler_feedback (Buffer A output / self-feedback)
+  CHAN_NOISEVOL_LQ,      // sampler_noisevol_lq (3D 32x32x32)
+  CHAN_NOISEVOL_HQ,      // sampler_noisevol_hq (3D 32x32x32)
+  CHAN_IMAGE_PREV,       // sampler_image (Image previous frame output)
+  CHAN_AUDIO,            // sampler_audio (512x2 audio FFT + waveform)
+  CHAN_COUNT
+};
+
 // ── Shared data for shader import passes ──
 
 struct ShaderPass {
   std::wstring name;       // "Image", "Buffer A"
   std::string  glslSource; // Raw GLSL text (narrow)
   std::string  hlslOutput; // Converted HLSL (narrow, with LINEFEED_CONTROL_CHAR)
+  std::string  notes;      // User comments/notes (narrow)
+  int channels[4] = {CHAN_NOISE_LQ, CHAN_NOISE_LQ, CHAN_NOISE_MQ, CHAN_NOISE_HQ};
 };
 
 // ── Concrete subclass: Shader Editor window (GLSL + HLSL code editor) ──
@@ -495,7 +511,10 @@ public:
   std::string GetGLSL();
   void SetHLSL(const std::string& hlsl);
   std::string GetHLSL();
+  void SetNotes(const std::string& notes);
+  std::string GetNotes();
   void SetPassName(const std::wstring& name);
+  void SetPendingData(const ShaderPass& pass);  // Store data for DoBuildControls to load
 
 protected:
   const wchar_t* GetWindowTitle() const override { return m_title.c_str(); }
@@ -509,6 +528,7 @@ protected:
 
   void    OnResize() override;
   void    DoBuildControls() override;
+  void    DoDestroy() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
 
 private:
@@ -516,6 +536,9 @@ private:
   std::wstring m_passName = L"Image";
   mutable std::wstring m_title = L"Shader Editor - Image";
   ShaderImportWindow* m_pImportWindow = nullptr;
+  // Pending data — set before Open(), loaded by DoBuildControls when controls are ready
+  std::string m_pendingGlsl, m_pendingHlsl, m_pendingNotes;
+  std::wstring m_pendingPassName;
 };
 
 // ── Concrete subclass: Shader Import window (control panel) ──
@@ -525,8 +548,10 @@ public:
   ShaderImportWindow(Engine* pEngine);
   ~ShaderImportWindow();
 
-  void SyncEditorToPass();    // Editor text → m_passes[m_nSelectedPass]
-  void ConvertGLSLtoHLSL();   // Convert current pass GLSL→HLSL
+  void SyncEditorToPass();          // Editor text → m_passes[m_nSelectedPass]
+  void OnEditorClosing(const std::string& glsl, const std::string& hlsl, const std::string& notes);  // Called by editor before destroy
+  void ConvertGLSLtoHLSL(int passOverride = -1);  // Convert pass GLSL→HLSL
+  void ConvertAndApply();           // Convert all passes, then apply
 
 protected:
   const wchar_t* GetWindowTitle() const override { return L"Shader Import"; }
@@ -540,6 +565,7 @@ protected:
 
   void    OnResize() override;
   void    DoBuildControls() override;
+  void    DoDestroy() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
   LRESULT DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) override;
 
@@ -551,6 +577,7 @@ private:
 
   void LayoutControls();
   void SyncPassToEditor();    // m_passes[m_nSelectedPass] → editor text
+  void SyncChannelCombos();   // Update channel combos from m_passes[m_nSelectedPass]
   void RebuildPassList();
   void OpenEditor();
   void ApplyShader();

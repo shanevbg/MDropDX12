@@ -81,7 +81,16 @@ std::wstring JsonEscape(const std::wstring& s) {
         case L'\n': out += L"\\n";  break;
         case L'\r': break;
         case L'\t': out += L"\\t";  break;
-        default:    out += c;       break;
+        default:
+            if (c < 0x20) {
+                // Escape control characters as \uXXXX (JSON spec requires this)
+                wchar_t buf[8];
+                swprintf(buf, 8, L"\\u%04x", (unsigned)c);
+                out += buf;
+            } else {
+                out += c;
+            }
+            break;
         }
     }
     return out;
@@ -99,6 +108,15 @@ std::wstring JsonUnescape(const std::wstring& s) {
             case L'"':  out += L'"';  break;
             case L'\\': out += L'\\'; break;
             case L'/':  out += L'/';  break;
+            case L'u':  // \uXXXX
+                if (i + 4 < s.size()) {
+                    wchar_t hex[5] = { s[i+1], s[i+2], s[i+3], s[i+4], 0 };
+                    unsigned val = 0;
+                    if (swscanf(hex, L"%x", &val) == 1)
+                        out += (wchar_t)val;
+                    i += 4;
+                }
+                break;
             default:    out += L'\\'; out += s[i]; break;
             }
         } else {
@@ -142,6 +160,15 @@ struct Parser {
                 case L'"':  s += L'"';  break;
                 case L'\\': s += L'\\'; break;
                 case L'/':  s += L'/';  break;
+                case L'u':  // \uXXXX
+                    if (p + 4 < end) {
+                        wchar_t hex[5] = { p[1], p[2], p[3], p[4], 0 };
+                        unsigned val = 0;
+                        if (swscanf(hex, L"%x", &val) == 1)
+                            s += (wchar_t)val;
+                        p += 4;
+                    }
+                    break;
                 default:    s += *p;    break;
                 }
             } else {
@@ -252,18 +279,54 @@ JsonValue JsonParse(const std::wstring& text) {
 }
 
 JsonValue JsonLoadFile(const wchar_t* path) {
-    std::wifstream f(path);
+    // Read as UTF-8 binary and convert to wstring
+    std::ifstream f(path, std::ios::binary);
     if (!f.is_open()) return {};
-    std::wostringstream ss;
-    ss << f.rdbuf();
-    return JsonParse(ss.str());
+    std::string utf8((std::istreambuf_iterator<char>(f)),
+                      std::istreambuf_iterator<char>());
+    // Simple UTF-8 → wchar_t (BMP only, sufficient for JSON/HLSL/GLSL)
+    std::wstring wide;
+    wide.reserve(utf8.size());
+    for (size_t i = 0; i < utf8.size(); ) {
+        unsigned char c = utf8[i];
+        if (c < 0x80) {
+            wide += (wchar_t)c;
+            i++;
+        } else if (c < 0xE0 && i + 1 < utf8.size()) {
+            wide += (wchar_t)(((c & 0x1F) << 6) | (utf8[i+1] & 0x3F));
+            i += 2;
+        } else if (c < 0xF0 && i + 2 < utf8.size()) {
+            wide += (wchar_t)(((c & 0x0F) << 12) | ((utf8[i+1] & 0x3F) << 6) | (utf8[i+2] & 0x3F));
+            i += 3;
+        } else {
+            wide += L'?';
+            i++;
+        }
+    }
+    return JsonParse(wide);
 }
 
 bool JsonSaveFile(const wchar_t* path, const std::wstring& jsonText) {
-    std::wofstream f(path);
+    // Write as UTF-8 binary to avoid locale-dependent encoding issues
+    // (wofstream can choke on control characters in some locales).
+    std::string utf8;
+    utf8.reserve(jsonText.size());
+    for (wchar_t c : jsonText) {
+        if (c < 0x80) {
+            utf8 += (char)c;
+        } else if (c < 0x800) {
+            utf8 += (char)(0xC0 | (c >> 6));
+            utf8 += (char)(0x80 | (c & 0x3F));
+        } else {
+            utf8 += (char)(0xE0 | (c >> 12));
+            utf8 += (char)(0x80 | ((c >> 6) & 0x3F));
+            utf8 += (char)(0x80 | (c & 0x3F));
+        }
+    }
+    std::ofstream f(path, std::ios::binary);
     if (!f.is_open()) return false;
-    f << jsonText;
-    return true;
+    f.write(utf8.data(), utf8.size());
+    return f.good();
 }
 
 // ─── JsonWriter ─────────────────────────────────────────────────────────

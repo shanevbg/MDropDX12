@@ -217,6 +217,10 @@ float4 texsize_noisevol_hq;
 // Explicit register required — without it, the compiler merges sampler_feedback with sampler_main
 // (same sampler state) and the SRV never appears in reflection, so CacheParams can't detect it.
 sampler2D sampler_feedback : register(s14);
+// Image self-feedback (Image pass reads own previous frame output):
+sampler2D sampler_image : register(s15);
+// Audio texture (512x2: row 0 = FFT spectrum, row 1 = PCM waveform):
+sampler2D sampler_audio : register(s10);
 
 // procedural blur textures:
 sampler2D sampler_blur1 : register(s11);

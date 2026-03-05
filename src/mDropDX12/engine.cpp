@@ -2507,14 +2507,24 @@ int Engine::AllocateMyDX9Stuff() {
       UINT fbH = (UINT)max(1, m_nTexSizeY);
       m_dx12Feedback[0] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
       m_dx12Feedback[1] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
+      m_dx12ImageFeedback[0] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
+      m_dx12ImageFeedback[1] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
       // Binding blocks needed for the blit pass (feedback → backbuffer for display)
       if (m_dx12Feedback[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12Feedback[0]);
       if (m_dx12Feedback[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12Feedback[1]);
+      if (m_dx12ImageFeedback[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12ImageFeedback[0]);
+      if (m_dx12ImageFeedback[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12ImageFeedback[1]);
       m_nFeedbackIdx = 0;
       DebugLogA(m_dx12Feedback[0].IsValid() && m_dx12Feedback[1].IsValid()
                 ? "DX12: Feedback buffers: created (ping-pong pair)"
                 : "DX12: Feedback buffers: FAILED");
+      DebugLogA(m_dx12ImageFeedback[0].IsValid() && m_dx12ImageFeedback[1].IsValid()
+                ? "DX12: Image feedback buffers: created (ping-pong pair)"
+                : "DX12: Image feedback buffers: FAILED");
     }
+
+    // Audio FFT/waveform texture (512x2, R32_FLOAT) for Shadertoy sound shaders
+    CreateAudioTexture();
 
     // Inject effect pixel shader PSO
     // mode.x = F11 inject effect (0=off, 1=brighten, 2=darken, 3=solarize, 4=invert)
@@ -3017,18 +3027,24 @@ int Engine::AllocateMyDX9Stuff() {
     m_lpDX->m_uploadAllocator->Reset();
     m_lpDX->m_uploadCommandList->Reset(m_lpDX->m_uploadAllocator.Get(), nullptr);
     float black[] = { 0.f, 0.f, 0.f, 0.f };
-    for (int i = 0; i < 2; i++) {
+    // Clear both feedback buffer pairs (Buffer A + Image)
+    DX12Texture* clearList[] = {
+        &m_dx12Feedback[0], &m_dx12Feedback[1],
+        &m_dx12ImageFeedback[0], &m_dx12ImageFeedback[1]
+    };
+    for (auto* tex : clearList) {
+      if (!tex->IsValid()) continue;
       // Transition SRV → RT
       D3D12_RESOURCE_BARRIER barrier = {};
       barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-      barrier.Transition.pResource = m_dx12Feedback[i].resource.Get();
+      barrier.Transition.pResource = tex->resource.Get();
       barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
       barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
       barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
       m_lpDX->m_uploadCommandList->ResourceBarrier(1, &barrier);
       // Clear
       m_lpDX->m_uploadCommandList->ClearRenderTargetView(
-          m_lpDX->GetRtvCpuHandle(m_dx12Feedback[i]), black, 0, nullptr);
+          m_lpDX->GetRtvCpuHandle(*tex), black, 0, nullptr);
       // Transition RT → SRV
       barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
       barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
@@ -3228,6 +3244,10 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
     m_injectEffectTex.Reset();
     m_dx12Feedback[0].Reset();
     m_dx12Feedback[1].Reset();
+    m_dx12ImageFeedback[0].Reset();
+    m_dx12ImageFeedback[1].Reset();
+    m_dx12AudioTex.Reset();
+    m_audioUploadBuffer.Reset();
     m_dx12BufferAPSO.Reset();
     m_pInjectEffectPSO.Reset();
     m_pSpoutInputPSO.Reset();
@@ -3654,7 +3674,8 @@ void Engine::MyRenderFn(int redraw) {
   CopyBackbufferToFeedback();  // capture comp output for Shadertoy temporal feedback (no-op when unused)
 
   // Swap feedback ping-pong: current write becomes next frame's read
-  if (m_bCompUsesFeedback || m_bHasBufferA)
+  // (shared index for both Buffer A and Image feedback pairs)
+  if (m_bCompUsesFeedback || m_bCompUsesImageFeedback || m_bHasBufferA)
     m_nFeedbackIdx = 1 - m_nFeedbackIdx;
 
   RenderInjectEffect();  // F11 inject effect post-process pass (no-op when mode==0)
@@ -3967,5 +3988,151 @@ void DrawOwnerButton(DRAWITEMSTRUCT* pDIS, bool bDark,
   if (hOldFont) SelectObject(hdc, hOldFont);
 }
 
+// ---------------------------------------------------------------------------
+// Audio texture (512x2, R32_FLOAT) — Shadertoy-compatible FFT + waveform
+// Row 0: FFT spectrum (512 bins, bass→treble), Row 1: PCM waveform (512 samples)
+// ---------------------------------------------------------------------------
+void Engine::CreateAudioTexture()
+{
+    if (!m_lpDX || !m_lpDX->m_device) return;
+
+    const UINT W = 512, H = 2;
+    const DXGI_FORMAT fmt = DXGI_FORMAT_R32_FLOAT;
+    const UINT bytesPerPixel = 4; // R32_FLOAT = 4 bytes
+
+    // 1. Create GPU texture (DEFAULT heap, SRV-readable)
+    D3D12_RESOURCE_DESC texDesc = {};
+    texDesc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    texDesc.Width            = W;
+    texDesc.Height           = H;
+    texDesc.DepthOrArraySize = 1;
+    texDesc.MipLevels        = 1;
+    texDesc.Format           = fmt;
+    texDesc.SampleDesc.Count = 1;
+    texDesc.Flags            = D3D12_RESOURCE_FLAG_NONE;
+
+    D3D12_HEAP_PROPERTIES defaultHeap = {};
+    defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    HRESULT hr = m_lpDX->m_device->CreateCommittedResource(
+        &defaultHeap, D3D12_HEAP_FLAG_NONE, &texDesc,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr,
+        IID_PPV_ARGS(&m_dx12AudioTex.resource));
+    if (FAILED(hr)) {
+        DebugLogA("DX12: Audio texture creation FAILED", LOG_WARN);
+        return;
+    }
+
+    m_dx12AudioTex.width  = W;
+    m_dx12AudioTex.height = H;
+    m_dx12AudioTex.format = fmt;
+    m_dx12AudioTex.currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+
+    // Allocate SRV
+    D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_lpDX->AllocateSrvCpu();
+    m_dx12AudioTex.srvIndex = m_lpDX->m_nextFreeSrvSlot;
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format                  = fmt;
+    srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Texture2D.MipLevels     = 1;
+    m_lpDX->m_device->CreateShaderResourceView(m_dx12AudioTex.resource.Get(), &srvDesc, srvCpu);
+    m_lpDX->AllocateSrvGpu();
+
+    m_lpDX->CreateBindingBlockForTexture(m_dx12AudioTex);
+
+    // 2. Create persistent upload buffer (row pitch must be 256-byte aligned)
+    UINT alignedRowPitch = (W * bytesPerPixel + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1)
+                           & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
+    UINT64 uploadSize = (UINT64)alignedRowPitch * H;
+
+    D3D12_HEAP_PROPERTIES uploadHeap = {};
+    uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+    D3D12_RESOURCE_DESC bufDesc = {};
+    bufDesc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+    bufDesc.Width            = uploadSize;
+    bufDesc.Height           = 1;
+    bufDesc.DepthOrArraySize = 1;
+    bufDesc.MipLevels        = 1;
+    bufDesc.Format           = DXGI_FORMAT_UNKNOWN;
+    bufDesc.SampleDesc.Count = 1;
+    bufDesc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    hr = m_lpDX->m_device->CreateCommittedResource(
+        &uploadHeap, D3D12_HEAP_FLAG_NONE, &bufDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+        IID_PPV_ARGS(&m_audioUploadBuffer));
+    if (FAILED(hr)) {
+        DebugLogA("DX12: Audio upload buffer creation FAILED", LOG_WARN);
+        m_dx12AudioTex.Reset();
+        return;
+    }
+
+    DebugLogA("DX12: Audio texture created (512x2 R32_FLOAT)");
+}
+
+void Engine::UpdateAudioTexture()
+{
+    if (!m_dx12AudioTex.IsValid() || !m_audioUploadBuffer || !m_lpDX) return;
+
+    const UINT W = 512, H = 2;
+    const UINT bytesPerPixel = 4;
+    UINT alignedRowPitch = (W * bytesPerPixel + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1)
+                           & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
+
+    // Map upload buffer
+    UINT8* mapped = nullptr;
+    D3D12_RANGE readRange = { 0, 0 }; // not reading
+    HRESULT hr = m_audioUploadBuffer->Map(0, &readRange, (void**)&mapped);
+    if (FAILED(hr)) return;
+
+    // Row 0: FFT spectrum (512 bins) — normalize with sqrt + scale to match Shadertoy
+    {
+        float* row0 = (float*)mapped;
+        for (UINT i = 0; i < W; i++) {
+            // Average left + right channels, apply sqrt for perceptual scaling
+            float mag = (mysound.fSpecLeft[i] + mysound.fSpecRight[i]) * 0.5f;
+            // Shadertoy-style scaling: sqrt(magnitude) * scale, clamped 0-1
+            row0[i] = min(1.0f, sqrtf(mag) * 4.0f);
+        }
+    }
+
+    // Row 1: PCM waveform (512 samples from 576) — normalize -1..1 → 0..1
+    {
+        float* row1 = (float*)(mapped + alignedRowPitch);
+        for (UINT i = 0; i < W; i++) {
+            // Average left + right channels, normalize: waveform is -128..128 range
+            float sample = (mysound.fWave[0][i] + mysound.fWave[1][i]) * 0.5f;
+            row1[i] = sample / 256.0f + 0.5f; // map to 0..1
+        }
+    }
+
+    m_audioUploadBuffer->Unmap(0, nullptr);
+
+    // Copy upload buffer → GPU texture
+    auto* cmdList = m_lpDX->m_commandList.Get();
+
+    m_lpDX->TransitionResource(m_dx12AudioTex, D3D12_RESOURCE_STATE_COPY_DEST);
+
+    D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+    srcLoc.pResource = m_audioUploadBuffer.Get();
+    srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    srcLoc.PlacedFootprint.Footprint.Format   = DXGI_FORMAT_R32_FLOAT;
+    srcLoc.PlacedFootprint.Footprint.Width    = W;
+    srcLoc.PlacedFootprint.Footprint.Height   = H;
+    srcLoc.PlacedFootprint.Footprint.Depth    = 1;
+    srcLoc.PlacedFootprint.Footprint.RowPitch = alignedRowPitch;
+
+    D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+    dstLoc.pResource = m_dx12AudioTex.resource.Get();
+    dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dstLoc.SubresourceIndex = 0;
+
+    cmdList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+
+    m_lpDX->TransitionResource(m_dx12AudioTex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+}
 
 } // namespace mdrop

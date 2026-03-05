@@ -21,6 +21,24 @@ namespace mdrop {
 // Forward declarations
 static std::string WideHlslToNarrow(const std::wstring& hlslW, int len);
 
+// Channel source lookup tables
+static const char* kChannelSamplers[] = {
+    "sampler_noise_lq",    // CHAN_NOISE_LQ
+    "sampler_noise_mq",    // CHAN_NOISE_MQ
+    "sampler_noise_hq",    // CHAN_NOISE_HQ
+    "sampler_feedback",    // CHAN_FEEDBACK
+    "sampler_noisevol_lq", // CHAN_NOISEVOL_LQ
+    "sampler_noisevol_hq", // CHAN_NOISEVOL_HQ
+    "sampler_image",       // CHAN_IMAGE_PREV
+    "sampler_audio",       // CHAN_AUDIO
+};
+static const wchar_t* kChannelNames[] = {
+    L"Noise LQ",      L"Noise MQ",       L"Noise HQ",
+    L"Buffer A / Self", L"Noise Vol LQ",  L"Noise Vol HQ",
+    L"Image (prev frame)", L"Audio (FFT + Wave)",
+};
+static const int kChannelTexDim[] = { 256, 256, 256, 0, 32, 32, 0, 0 }; // 0 = use texsize
+
 // ─── Open / Close (Engine methods) ──────────────────────────────────────
 
 void Engine::OpenShaderImportWindow() {
@@ -124,9 +142,27 @@ void ShaderEditorWindow::SetPassName(const std::wstring& name) {
         SetWindowTextW(m_hWnd, m_title.c_str());
 }
 
+// Convert narrow text to wide with proper \r\n line breaks for edit controls
+static std::wstring NarrowToEditText(const std::string& s) {
+    std::wstring w;
+    w.reserve(s.size() + s.size() / 10);
+    for (size_t i = 0; i < s.size(); i++) {
+        char c = s[i];
+        if (c == LINEFEED_CONTROL_CHAR || c == '\n') {
+            w += L"\r\n";
+        } else if (c == '\r') {
+            w += L"\r\n";
+            if (i + 1 < s.size() && s[i + 1] == '\n') i++;  // skip \n after \r
+        } else {
+            w += (wchar_t)(unsigned char)c;
+        }
+    }
+    return w;
+}
+
 void ShaderEditorWindow::SetGLSL(const std::string& glsl) {
     if (!m_hWnd) return;
-    std::wstring w(glsl.begin(), glsl.end());
+    std::wstring w = NarrowToEditText(glsl);
     SetDlgItemTextW(m_hWnd, IDC_MW_SHEDITOR_GLSL_EDIT, w.c_str());
 }
 
@@ -148,7 +184,7 @@ std::string ShaderEditorWindow::GetGLSL() {
 
 void ShaderEditorWindow::SetHLSL(const std::string& hlsl) {
     if (!m_hWnd) return;
-    std::wstring w(hlsl.begin(), hlsl.end());
+    std::wstring w = NarrowToEditText(hlsl);
     SetDlgItemTextW(m_hWnd, IDC_MW_SHEDITOR_HLSL_EDIT, w.c_str());
 }
 
@@ -161,6 +197,29 @@ std::string ShaderEditorWindow::GetHLSL() {
     GetWindowTextW(hEdit, w.data(), len + 1);
     // Convert to narrow with LINEFEED_CONTROL_CHAR
     return WideHlslToNarrow(w, len);
+}
+
+void ShaderEditorWindow::SetNotes(const std::string& notes) {
+    if (!m_hWnd) return;
+    std::wstring w = NarrowToEditText(notes);
+    SetDlgItemTextW(m_hWnd, IDC_MW_SHEDITOR_NOTES_EDIT, w.c_str());
+}
+
+std::string ShaderEditorWindow::GetNotes() {
+    if (!m_hWnd) return "";
+    HWND hEdit = GetDlgItem(m_hWnd, IDC_MW_SHEDITOR_NOTES_EDIT);
+    int len = GetWindowTextLengthW(hEdit);
+    if (len <= 0) return "";
+    std::wstring w(len + 1, L'\0');
+    GetWindowTextW(hEdit, w.data(), len + 1);
+    std::string s;
+    s.reserve(len);
+    for (int i = 0; i < len; i++) {
+        wchar_t ch = w[i];
+        if (ch == '\r') continue;  // strip \r, keep \n
+        if (ch < 128) s += (char)ch; else s += '?';
+    }
+    return s;
 }
 
 void ShaderEditorWindow::DoBuildControls() {
@@ -178,7 +237,20 @@ void ShaderEditorWindow::DoBuildControls() {
     int btnW = MulDiv(80, lineH, 26);
     int btnH = lineH + 4;
 
-    // Available height for both edits
+    // "Notes:" label
+    TrackControl(CreateWindowExW(0, L"STATIC", L"Notes:", WS_CHILD | WS_VISIBLE,
+        x, y, 60, lineH, hw, NULL, NULL, NULL));
+    y += lineH + gap;
+
+    // Notes multiline edit (small, ~3 lines)
+    int notesH = lineH * 3 + 4;
+    TrackControl(CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL,
+        x, y, rw, notesH, hw, (HMENU)(INT_PTR)IDC_MW_SHEDITOR_NOTES_EDIT, NULL, NULL));
+    SendDlgItemMessageW(hw, IDC_MW_SHEDITOR_NOTES_EDIT, EM_SETLIMITTEXT, 4096, 0);
+    y += notesH + gap;
+
+    // Available height for GLSL + HLSL edits
     int convertRowH = btnH + gap;  // Convert button row
     int fixedH = (lineH + gap) * 2 + convertRowH + gap;  // 2 label rows + convert row
     int editH = clientH - y - fixedH;
@@ -203,11 +275,11 @@ void ShaderEditorWindow::DoBuildControls() {
     SendDlgItemMessageW(hw, IDC_MW_SHEDITOR_GLSL_EDIT, EM_SETLIMITTEXT, 0x100000, 0);
     y += glslH + gap;
 
-    // [Convert GLSL → HLSL] button (centered, prominent)
+    // [Convert & Apply] button (centered, prominent)
     {
-        int cvtW = MulDiv(180, lineH, 26);
+        int cvtW = MulDiv(160, lineH, 26);
         int cvtX = x + (rw - cvtW) / 2;
-        TrackControl(CreateBtn(hw, L"Convert GLSL \x2192 HLSL", IDC_MW_SHEDITOR_CONVERT,
+        TrackControl(CreateBtn(hw, L"Convert && Apply", IDC_MW_SHEDITOR_CONVERT,
             cvtX, y, cvtW, btnH, hFont));
     }
     y += btnH + gap;
@@ -226,7 +298,7 @@ void ShaderEditorWindow::DoBuildControls() {
         x, y, rw, hlslH, hw, (HMENU)(INT_PTR)IDC_MW_SHEDITOR_HLSL_EDIT, NULL, NULL));
     SendDlgItemMessageW(hw, IDC_MW_SHEDITOR_HLSL_EDIT, EM_SETLIMITTEXT, 0x100000, 0);
 
-    // Monospace font on both edits
+    // Monospace font on code edits (not notes)
     HFONT hMono = CreateFontW(-MulDiv(10, GetDpiForWindow(hw), 72), 0, 0, 0, FW_NORMAL,
         FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
         CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
@@ -234,10 +306,32 @@ void ShaderEditorWindow::DoBuildControls() {
         SendDlgItemMessageW(hw, IDC_MW_SHEDITOR_GLSL_EDIT, WM_SETFONT, (WPARAM)hMono, TRUE);
         SendDlgItemMessageW(hw, IDC_MW_SHEDITOR_HLSL_EDIT, WM_SETFONT, (WPARAM)hMono, TRUE);
     }
+
+    // Load pending data (set by OpenEditor before window creation)
+    SetGLSL(m_pendingGlsl);
+    SetHLSL(m_pendingHlsl);
+    SetNotes(m_pendingNotes);
+    SetPassName(m_pendingPassName);
+}
+
+void ShaderEditorWindow::SetPendingData(const ShaderPass& pass) {
+    m_pendingGlsl     = pass.glslSource;
+    m_pendingHlsl     = pass.hlslOutput;
+    m_pendingNotes    = pass.notes;
+    m_pendingPassName = pass.name;
 }
 
 void ShaderEditorWindow::OnResize() {
     RebuildFonts();
+}
+
+void ShaderEditorWindow::DoDestroy() {
+    // Sync editor content back to pass data before controls are destroyed.
+    // Read directly here since m_hWnd is still valid during WM_DESTROY
+    // but IsOpen() may return false.
+    if (m_pImportWindow && m_hWnd) {
+        m_pImportWindow->OnEditorClosing(GetGLSL(), GetHLSL(), GetNotes());
+    }
 }
 
 LRESULT ShaderEditorWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
@@ -261,11 +355,9 @@ LRESULT ShaderEditorWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam
             SetDlgItemTextW(hWnd, IDC_MW_SHEDITOR_HLSL_EDIT, L"");
             return 0;
         case IDC_MW_SHEDITOR_CONVERT:
-            // Trigger conversion via the import window
-            if (m_pImportWindow) {
-                m_pImportWindow->SyncEditorToPass();
-                m_pImportWindow->ConvertGLSLtoHLSL();
-            }
+            // Convert all passes and apply via the import window
+            if (m_pImportWindow)
+                m_pImportWindow->ConvertAndApply();
             return 0;
         case IDC_MW_SHEDITOR_COPY: {
             HWND hEdit = GetDlgItem(hWnd, IDC_MW_SHEDITOR_HLSL_EDIT);
@@ -331,9 +423,11 @@ void ShaderImportWindow::DoBuildControls() {
     y += lineH + gap;
 
     // Listbox — fills middle area
-    int fixedBelow = (btnH + gap)       // Convert/Apply/Save row
-                   + (lineH + gap)      // Errors label
-                   + (btnH + gap)       // Save/Load Import row
+    int chRowH = lineH + gap;  // one row of channel combos
+    int fixedBelow = chRowH * 2          // 2 rows of channel combos (2x2)
+                   + (btnH + gap)        // Convert&Apply/Apply/Save row
+                   + (lineH + gap)       // Errors label
+                   + (btnH + gap)        // Save/Load Import row
                    + gap;
     int listH = clientH - y - fixedBelow - 80;  // leave room for error edit
     if (listH < 60) listH = 60;
@@ -349,12 +443,38 @@ void ShaderImportWindow::DoBuildControls() {
     TrackControl(hList);
     y += listH + gap;
 
-    // [Convert] [Apply] [Save .milk3...] buttons
-    int saveW = MulDiv(120, lineH, 26);
-    TrackControl(CreateBtn(hw, L"Convert", IDC_MW_SHIMPORT_CONVERT,
-        x, y, btnW, btnH, hFont));
+    // Channel input combos (2x2 grid): ch0/ch1 on row 1, ch2/ch3 on row 2
+    {
+        int lblW = MulDiv(30, lineH, 26);
+        int comboW = (rw - lblW * 2 - 8) / 2;
+        for (int row = 0; row < 2; row++) {
+            for (int col = 0; col < 2; col++) {
+                int ch = row * 2 + col;
+                int cx = x + col * (lblW + comboW + 8);
+                wchar_t lbl[8];
+                swprintf(lbl, 8, L"ch%d:", ch);
+                TrackControl(CreateWindowExW(0, L"STATIC", lbl, WS_CHILD | WS_VISIBLE,
+                    cx, y + 2, lblW, lineH, hw, NULL, NULL, NULL));
+                HWND hCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
+                    WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+                    cx + lblW, y, comboW, lineH * 8, hw,
+                    (HMENU)(INT_PTR)(IDC_MW_SHIMPORT_CH0 + ch), NULL, NULL);
+                if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+                for (int s = 0; s < CHAN_COUNT; s++)
+                    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)kChannelNames[s]);
+                TrackControl(hCombo);
+            }
+            y += lineH + gap;
+        }
+    }
+
+    // [Convert & Apply] [Apply] [Save .milk3...] buttons
+    int caW = MulDiv(120, lineH, 26);
+    int saveW = MulDiv(110, lineH, 26);
+    TrackControl(CreateBtn(hw, L"Convert && Apply", IDC_MW_SHIMPORT_CONVERT,
+        x, y, caW, btnH, hFont));
     TrackControl(CreateBtn(hw, L"Apply", IDC_MW_SHIMPORT_APPLY,
-        x + btnW + 4, y, btnW, btnH, hFont));
+        x + caW + 4, y, btnW, btnH, hFont));
     TrackControl(CreateBtn(hw, L"Save .milk3...", IDC_MW_SHIMPORT_SAVE,
         x + rw - saveW, y, saveW, btnH, hFont));
     y += btnH + gap;
@@ -371,12 +491,17 @@ void ShaderImportWindow::DoBuildControls() {
         x, y, rw, errH, hw, (HMENU)(INT_PTR)IDC_MW_SHIMPORT_ERROR_EDIT, NULL, NULL));
     y += errH + gap;
 
-    // [Save Import...] [Load Import...] buttons
-    int impW = MulDiv(110, lineH, 26);
-    TrackControl(CreateBtn(hw, L"Save Import...", IDC_MW_SHIMPORT_SAVE_IMPORT,
-        x, y, impW, btnH, hFont));
-    TrackControl(CreateBtn(hw, L"Load Import...", IDC_MW_SHIMPORT_LOAD_IMPORT,
-        x + impW + 4, y, impW, btnH, hFont));
+    // [New] [Save Import...] [Load Import...] buttons
+    {
+        int newW = MulDiv(40, lineH, 26);
+        int impW = MulDiv(100, lineH, 26);
+        TrackControl(CreateBtn(hw, L"New", IDC_MW_SHIMPORT_NEW,
+            x, y, newW, btnH, hFont));
+        TrackControl(CreateBtn(hw, L"Save Import...", IDC_MW_SHIMPORT_SAVE_IMPORT,
+            x + newW + 4, y, impW, btnH, hFont));
+        TrackControl(CreateBtn(hw, L"Load Import...", IDC_MW_SHIMPORT_LOAD_IMPORT,
+            x + newW + 4 + impW + 4, y, impW, btnH, hFont));
+    }
 
     // Monospace font on error edit
     HFONT hMono = CreateFontW(-MulDiv(10, GetDpiForWindow(hw), 72), 0, 0, 0, FW_NORMAL,
@@ -385,8 +510,15 @@ void ShaderImportWindow::DoBuildControls() {
     if (hMono)
         SendDlgItemMessageW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, WM_SETFONT, (WPARAM)hMono, TRUE);
 
-    // Populate listbox
+    // Populate listbox and channel combos
     RebuildPassList();
+    SyncChannelCombos();
+}
+
+void ShaderImportWindow::DoDestroy() {
+    // Close editor window when import window closes
+    if (m_editorWindow)
+        m_editorWindow->Close();
 }
 
 // ─── Layout ─────────────────────────────────────────────────────────────
@@ -412,26 +544,53 @@ void ShaderImportWindow::RebuildPassList() {
     SendMessage(hList, LB_SETCURSEL, m_nSelectedPass, 0);
 }
 
+void ShaderImportWindow::SyncChannelCombos() {
+    if (m_nSelectedPass < 0 || m_nSelectedPass >= (int)m_passes.size()) return;
+    for (int ch = 0; ch < 4; ch++) {
+        HWND hCombo = GetDlgItem(m_hWnd, IDC_MW_SHIMPORT_CH0 + ch);
+        if (hCombo)
+            SendMessage(hCombo, CB_SETCURSEL, m_passes[m_nSelectedPass].channels[ch], 0);
+    }
+}
+
 void ShaderImportWindow::SyncEditorToPass() {
-    if (!m_editorWindow || m_nSelectedPass < 0 || m_nSelectedPass >= (int)m_passes.size())
+    if (!m_editorWindow || !m_editorWindow->IsOpen() ||
+        m_nSelectedPass < 0 || m_nSelectedPass >= (int)m_passes.size())
         return;
     m_passes[m_nSelectedPass].glslSource = m_editorWindow->GetGLSL();
     m_passes[m_nSelectedPass].hlslOutput = m_editorWindow->GetHLSL();
+    m_passes[m_nSelectedPass].notes = m_editorWindow->GetNotes();
+}
+
+void ShaderImportWindow::OnEditorClosing(const std::string& glsl, const std::string& hlsl, const std::string& notes) {
+    if (m_nSelectedPass >= 0 && m_nSelectedPass < (int)m_passes.size()) {
+        m_passes[m_nSelectedPass].glslSource = glsl;
+        m_passes[m_nSelectedPass].hlslOutput = hlsl;
+        m_passes[m_nSelectedPass].notes = notes;
+    }
 }
 
 void ShaderImportWindow::SyncPassToEditor() {
+    SyncChannelCombos();
     if (!m_editorWindow || m_nSelectedPass < 0 || m_nSelectedPass >= (int)m_passes.size())
         return;
     m_editorWindow->SetGLSL(m_passes[m_nSelectedPass].glslSource);
     m_editorWindow->SetHLSL(m_passes[m_nSelectedPass].hlslOutput);
+    m_editorWindow->SetNotes(m_passes[m_nSelectedPass].notes);
     m_editorWindow->SetPassName(m_passes[m_nSelectedPass].name);
 }
 
 void ShaderImportWindow::OpenEditor() {
     if (!m_editorWindow)
         m_editorWindow = std::make_unique<ShaderEditorWindow>(m_pEngine, this);
+    // Store data for the editor to load when its controls are ready
+    if (m_nSelectedPass >= 0 && m_nSelectedPass < (int)m_passes.size())
+        m_editorWindow->SetPendingData(m_passes[m_nSelectedPass]);
+    bool wasOpen = m_editorWindow->IsOpen();
     m_editorWindow->Open();
-    SyncPassToEditor();
+    // If editor was already open, sync directly (controls exist)
+    if (wasOpen)
+        SyncPassToEditor();
 }
 
 // ─── Command Handler ────────────────────────────────────────────────────
@@ -455,6 +614,17 @@ LRESULT ShaderImportWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam
         return 0;
     }
 
+    // Channel combo selection change
+    if (id >= IDC_MW_SHIMPORT_CH0 && id <= IDC_MW_SHIMPORT_CH3 && code == CBN_SELCHANGE) {
+        int ch = id - IDC_MW_SHIMPORT_CH0;
+        HWND hCombo = GetDlgItem(hWnd, id);
+        int sel = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
+        if (sel >= 0 && sel < CHAN_COUNT &&
+            m_nSelectedPass >= 0 && m_nSelectedPass < (int)m_passes.size())
+            m_passes[m_nSelectedPass].channels[ch] = sel;
+        return 0;
+    }
+
     if (code == BN_CLICKED) {
         switch (id) {
         case IDC_MW_SHIMPORT_ADD_PASS: {
@@ -463,10 +633,15 @@ LRESULT ShaderImportWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam
             for (auto& p : m_passes)
                 if (p.name == L"Buffer A") { hasBufferA = true; break; }
             if (!hasBufferA) {
-                m_passes.push_back({L"Buffer A", "", ""});
+                ShaderPass bufA;
+                bufA.name = L"Buffer A";
+                bufA.channels[0] = CHAN_FEEDBACK;  // Buffer A ch0 = self-feedback (previous frame)
+                m_passes.push_back(std::move(bufA));
+                m_passes[0].channels[0] = CHAN_FEEDBACK;  // Image ch0 = Buffer A output
                 SyncEditorToPass();  // save current pass before switching
                 m_nSelectedPass = (int)m_passes.size() - 1;
                 RebuildPassList();
+                SyncChannelCombos();
                 OpenEditor();
             }
             return 0;
@@ -475,15 +650,16 @@ LRESULT ShaderImportWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam
             if (m_nSelectedPass > 0 && m_nSelectedPass < (int)m_passes.size()) {
                 m_passes.erase(m_passes.begin() + m_nSelectedPass);
                 m_nSelectedPass = 0;
+                // If only Image remains, reset ch0 to noise
+                if (m_passes.size() == 1)
+                    m_passes[0].channels[0] = CHAN_NOISE_LQ;
                 RebuildPassList();
                 SyncPassToEditor();
             }
             return 0;
 
         case IDC_MW_SHIMPORT_CONVERT:
-            SyncEditorToPass();
-            ConvertGLSLtoHLSL();
-            SyncPassToEditor();  // show converted HLSL in editor
+            ConvertAndApply();
             return 0;
 
         case IDC_MW_SHIMPORT_APPLY:
@@ -503,6 +679,18 @@ LRESULT ShaderImportWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam
 
         case IDC_MW_SHIMPORT_LOAD_IMPORT:
             LoadImportProject();
+            return 0;
+
+        case IDC_MW_SHIMPORT_NEW:
+            // Reset to single empty Image pass
+            SyncEditorToPass();
+            m_passes.clear();
+            m_passes.push_back({L"Image", "", ""});
+            m_nSelectedPass = 0;
+            RebuildPassList();
+            SyncPassToEditor();
+            SyncChannelCombos();
+            SetDlgItemTextW(hWnd, IDC_MW_SHIMPORT_ERROR_EDIT, L"");
             return 0;
         }
     }
@@ -636,6 +824,27 @@ void ShaderImportWindow::ApplyShader() {
     SetTimer(hw, 1, 200, NULL);
 }
 
+// ─── Convert & Apply (all passes) ───────────────────────────────────────
+
+void ShaderImportWindow::ConvertAndApply() {
+    SyncEditorToPass();
+
+    // Convert each pass in order (Buffer A first if present, then Image)
+    for (int i = (int)m_passes.size() - 1; i >= 0; i--) {
+        if (m_passes[i].glslSource.empty()) continue;
+        m_passes[i].hlslOutput.clear();
+        ConvertGLSLtoHLSL(i);
+        if (m_passes[i].hlslOutput.empty())
+            return;  // Error already shown
+    }
+
+    // Update editor with current pass HLSL
+    if (m_editorWindow && m_editorWindow->IsOpen())
+        SyncPassToEditor();
+
+    ApplyShader();
+}
+
 // ─── Save as .milk3 (JSON Shadertoy format) ─────────────────────────────
 
 void ShaderImportWindow::SaveAsPreset() {
@@ -683,14 +892,47 @@ void ShaderImportWindow::SaveAsPreset() {
         std::wstring fname = std::filesystem::path(filePath).stem().wstring();
         w.String(L"name", fname.c_str());
 
+        // Write notes (if any pass has notes)
+        {
+            bool hasNotes = false;
+            for (auto& pass : m_passes)
+                if (!pass.notes.empty()) { hasNotes = true; break; }
+            if (hasNotes) {
+                w.BeginObject(L"notes");
+                if (!m_passes[0].notes.empty()) {
+                    std::wstring wn(m_passes[0].notes.begin(), m_passes[0].notes.end());
+                    w.String(L"image", wn.c_str());
+                }
+                if (hasBufferA && m_passes.size() > 1 && !m_passes[1].notes.empty()) {
+                    std::wstring wn(m_passes[1].notes.begin(), m_passes[1].notes.end());
+                    w.String(L"bufferA", wn.c_str());
+                }
+                w.EndObject();
+            }
+        }
+
+        // Convert HLSL narrow string to wide, replacing LINEFEED_CONTROL_CHAR (0x01)
+        // back to '\n' so that JSON stores standard newlines.
+        auto hlslToWide = [](const std::string& s) -> std::wstring {
+            std::wstring w;
+            w.reserve(s.size());
+            for (char c : s) {
+                if (c == LINEFEED_CONTROL_CHAR)
+                    w += L'\n';
+                else if ((unsigned char)c < 128)
+                    w += (wchar_t)c;
+                else
+                    w += L'?';
+            }
+            return w;
+        };
+
         // Write shader text as wide strings (JsonWriter handles escaping)
         if (hasBufferA) {
-            std::wstring wBufA(m_passes[1].hlslOutput.begin(), m_passes[1].hlslOutput.end());
-            w.String(L"bufferA", wBufA.c_str());
+            w.String(L"bufferA", hlslToWide(m_passes[1].hlslOutput).c_str());
         }
         {
-            std::wstring wImage(m_passes[0].hlslOutput.begin(), m_passes[0].hlslOutput.end());
-            w.String(L"image", wImage.c_str());
+            w.String(L"image", hlslToWide(m_passes[0].hlslOutput).c_str());
         }
 
         // Channel mappings
@@ -1064,14 +1306,15 @@ std::string ShaderImportWindow::BasicFormatShaderCode(const std::string& code) {
 
 // ─── Main Conversion ────────────────────────────────────────────────────
 
-void ShaderImportWindow::ConvertGLSLtoHLSL() {
+void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
     HWND hw = m_hWnd;
 
-    // Sync current editor text into m_passes
-    SyncEditorToPass();
+    // Only sync editor when converting the currently selected pass
+    if (passOverride < 0)
+        SyncEditorToPass();
 
-    // Get GLSL from current pass
-    int passIdx = m_nSelectedPass;
+    // Get GLSL from specified pass (or selected pass)
+    int passIdx = (passOverride >= 0) ? passOverride : m_nSelectedPass;
     if (passIdx < 0 || passIdx >= (int)m_passes.size()) return;
     const std::string& glslNarrow = m_passes[passIdx].glslSource;
     if (glslNarrow.empty()) {
@@ -1262,19 +1505,27 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
         replaceAll(inp, "iResolution", "float3(texsize.x, texsize.y, 1.0)");
         replaceAll(inp, "iFrame", "frame");
         replaceAll(inp, "iMouse", "mouse");
-        // iChannel samplers — inline replacement (not #define) to avoid preprocessor issues
-        // For Buffer A pass or Image pass WITH Buffer A: iChannel0 = feedback buffer
-        // For Image-only shaders (no Buffer A): iChannel0 = noise texture
-        if (GetSelectedPass() == 1 || m_passes.size() > 1)
-            replaceAll(inp, "iChannel0", "sampler_feedback");
-        else
-            replaceAll(inp, "iChannel0", "sampler_noise_lq");
-        replaceAll(inp, "iChannel1", "sampler_noise_lq");
-        replaceAll(inp, "iChannel2", "sampler_noise_mq");
-        replaceAll(inp, "iChannel3", "sampler_noise_hq");
+        // iChannel samplers — use per-pass channel configuration
+        {
+            const int* ch = m_passes[passIdx].channels;
+            for (int i = 0; i < 4; i++) {
+                char from[16], to[32];
+                sprintf_s(from, "iChannel%d", i);
+                int src = (ch[i] >= 0 && ch[i] < CHAN_COUNT) ? ch[i] : 0;
+                strcpy_s(to, kChannelSamplers[src]);
+                replaceAll(inp, from, to);
+            }
+        }
         replaceAll(inp, "texture(", "tex2D(");
         replaceAll(inp, "textureLod(", "tex2Dlod_conv(");
         replaceAll(inp, "texelFetch(", "texelFetch_conv(");
+        // Normalize whitespace after texelFetch_conv( so specialization matches
+        while (inp.find("texelFetch_conv( ") != std::string::npos)
+            replaceAll(inp, "texelFetch_conv( ", "texelFetch_conv(");
+        // Specialize texelFetch for noise textures (256x256) vs screen-sized feedback
+        replaceAll(inp, "texelFetch_conv(sampler_noise_lq,", "texelFetch_noise(sampler_noise_lq,");
+        replaceAll(inp, "texelFetch_conv(sampler_noise_mq,", "texelFetch_noise(sampler_noise_mq,");
+        replaceAll(inp, "texelFetch_conv(sampler_noise_hq,", "texelFetch_noise(sampler_noise_hq,");
         // GLSL bit-cast / math intrinsics → HLSL equivalents
         replaceAll(inp, "uintBitsToFloat(", "asfloat(");
         replaceAll(inp, "intBitsToFloat(", "asfloat(");
@@ -1360,6 +1611,16 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
                                     fp++;
                                 }
                                 afterStar = fp;
+                            }
+                            // Capture trailing swizzle (.xyz, .yzw, etc.) as part of operand
+                            if (afterStar < inp.size() && inp[afterStar] == '.') {
+                                size_t dotPos = afterStar;
+                                size_t swizEnd = dotPos + 1;
+                                while (swizEnd < inp.size() && swizEnd - dotPos - 1 < 4 &&
+                                       (inp[swizEnd] >= 'a' && inp[swizEnd] <= 'z'))
+                                    swizEnd++;
+                                if (swizEnd > dotPos + 1 && (swizEnd >= inp.size() || !isIdent(inp[swizEnd])))
+                                    afterStar = swizEnd;
                             }
                             std::string operand = inp.substr(opStart, afterStar - opStart);
                             std::string repl;
@@ -1546,10 +1807,18 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
             inpHeader = modHelpers + inpHeader;
         }
 
-        // Add texelFetch helper if needed (GLSL integer-coordinate texture fetch)
+        // Add texelFetch helpers if needed (GLSL integer-coordinate texture fetch)
+        if (inp.find("texelFetch_noise(") != std::string::npos) {
+            std::string helper =
+                "// CONV: texelFetch for noise textures (256x256)\n"
+                "float4 texelFetch_noise(sampler2D s, int2 c, int l) {\n"
+                "  return tex2Dlod(s, float4((float2(c) + 0.5) / 256.0, 0, l));\n"
+                "}\n\n";
+            inpHeader = helper + inpHeader;
+        }
         if (inp.find("texelFetch_conv(") != std::string::npos) {
             std::string helper =
-                "// CONV: texelFetch → tex2Dlod with integer-to-UV coordinate conversion\n"
+                "// CONV: texelFetch for screen-sized textures\n"
                 "float4 texelFetch_conv(sampler2D s, int2 c, int l) {\n"
                 "  return tex2Dlod(s, float4((float2(c) + 0.5) * texsize.zw, 0, l));\n"
                 "}\n\n";
@@ -1916,13 +2185,16 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
         errors += "Conversion error (exception)\r\n";
     }
 
-    // Dump converter output for diagnostics
+    // Dump converter output for diagnostics (per-pass)
     {
         wchar_t diagPath[MAX_PATH];
-        swprintf(diagPath, MAX_PATH, L"%lsdiag_converter_output.txt", m_pEngine->m_szBaseDir);
+        const wchar_t* passTag = (passIdx == 0) ? L"image" : L"bufferA";
+        swprintf(diagPath, MAX_PATH, L"%lsdiag_converter_%ls.txt", m_pEngine->m_szBaseDir, passTag);
         FILE* f = _wfopen(diagPath, L"w");
         if (f) {
-            fprintf(f, "// CONV OUTPUT: %d chars, %d lines\n", (int)result.size(),
+            fprintf(f, "// CONV OUTPUT [%s]: %d chars, %d lines\n",
+                    (passIdx == 0) ? "Image" : "Buffer A",
+                    (int)result.size(),
                     (int)std::count(result.begin(), result.end(), '\n'));
             fwrite(result.c_str(), 1, result.size(), f);
             fclose(f);
@@ -1932,8 +2204,8 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
     // Store converted HLSL in the current pass
     m_passes[passIdx].hlslOutput = result;
 
-    // Update editor window with the converted HLSL
-    if (m_editorWindow && m_editorWindow->IsOpen())
+    // Update editor window with the converted HLSL (only for selected pass)
+    if (passIdx == m_nSelectedPass && m_editorWindow && m_editorWindow->IsOpen())
         m_editorWindow->SetHLSL(result);
 
     // Show errors/status
@@ -1986,6 +2258,18 @@ void ShaderImportWindow::SaveImportProject() {
         // Store GLSL as wide string (JsonWriter handles escaping)
         std::wstring wGlsl(pass.glslSource.begin(), pass.glslSource.end());
         w.String(L"glsl", wGlsl.c_str());
+        // Store notes (if any)
+        if (!pass.notes.empty()) {
+            std::wstring wNotes(pass.notes.begin(), pass.notes.end());
+            w.String(L"notes", wNotes.c_str());
+        }
+        // Store channel inputs
+        w.BeginObject(L"channels");
+        w.Int(L"ch0", pass.channels[0]);
+        w.Int(L"ch1", pass.channels[1]);
+        w.Int(L"ch2", pass.channels[2]);
+        w.Int(L"ch3", pass.channels[3]);
+        w.EndObject();
         w.EndObject();
     }
     w.EndArray();
@@ -2045,6 +2329,23 @@ void ShaderImportWindow::LoadImportProject() {
             else sp.glslSource += '?';
         }
         sp.hlslOutput.clear();
+        // Load notes (if present)
+        if (p.has(L"notes")) {
+            std::wstring wNotes = p[L"notes"].asString(L"");
+            sp.notes.reserve(wNotes.size());
+            for (wchar_t ch : wNotes) {
+                if (ch < 128) sp.notes += (char)ch;
+                else sp.notes += '?';
+            }
+        }
+        // Load channel inputs (if present)
+        if (p.has(L"channels")) {
+            const auto& ch = p[L"channels"];
+            sp.channels[0] = ch[L"ch0"].asInt(CHAN_NOISE_LQ);
+            sp.channels[1] = ch[L"ch1"].asInt(CHAN_NOISE_LQ);
+            sp.channels[2] = ch[L"ch2"].asInt(CHAN_NOISE_MQ);
+            sp.channels[3] = ch[L"ch3"].asInt(CHAN_NOISE_HQ);
+        }
         m_passes.push_back(std::move(sp));
     }
 
@@ -2053,6 +2354,10 @@ void ShaderImportWindow::LoadImportProject() {
         m_passes.push_back({L"Image", "", ""});
     else if (m_passes[0].name != L"Image")
         m_passes.insert(m_passes.begin(), {L"Image", "", ""});
+
+    // If Buffer A exists, default Image ch0 to feedback
+    if (m_passes.size() > 1 && m_passes[0].channels[0] == CHAN_NOISE_LQ)
+        m_passes[0].channels[0] = CHAN_FEEDBACK;
 
     m_nSelectedPass = 0;
     RebuildPassList();

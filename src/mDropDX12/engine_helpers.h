@@ -604,6 +604,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SHIMPORT_DEL_PASS     9115  // Button: -
 #define IDC_MW_SHIMPORT_SAVE_IMPORT  9116  // Button: Save Import...
 #define IDC_MW_SHIMPORT_LOAD_IMPORT  9117  // Button: Load Import...
+#define IDC_MW_SHIMPORT_NEW          9118  // Button: New
 // Shader Editor window (9120-9129)
 #define IDC_MW_SHEDITOR_PIN          9120
 #define IDC_MW_SHEDITOR_FONT_PLUS    9121
@@ -613,7 +614,14 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SHEDITOR_CLEAR        9125  // Button: Clear
 #define IDC_MW_SHEDITOR_HLSL_EDIT    9126  // Multiline EDIT: HLSL (editable)
 #define IDC_MW_SHEDITOR_COPY         9127  // Button: Copy HLSL
-#define IDC_MW_SHEDITOR_CONVERT      9128  // Button: Convert GLSL→HLSL
+#define IDC_MW_SHEDITOR_CONVERT      9128  // Button: Convert & Apply
+#define IDC_MW_SHEDITOR_NOTES_EDIT   9129  // Multiline EDIT: notes/comments
+
+// Shader Import channel input combos (9140-9143)
+#define IDC_MW_SHIMPORT_CH0          9140  // Combo: iChannel0 source
+#define IDC_MW_SHIMPORT_CH1          9141  // Combo: iChannel1 source
+#define IDC_MW_SHIMPORT_CH2          9142  // Combo: iChannel2 source
+#define IDC_MW_SHIMPORT_CH3          9143  // Combo: iChannel3 source
 
 // Welcome window (no-presets prompt)
 #define IDC_MW_WELCOME_SETTINGS      9130  // Button: Open Settings

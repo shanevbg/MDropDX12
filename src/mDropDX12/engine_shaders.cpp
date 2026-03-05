@@ -171,6 +171,22 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
           m_texture_bindings[cd.RegisterIndex].bBilinear = true;
         }
       }
+      else if (!wcscmp(L"image", szRootName)) {
+        m_texture_bindings[cd.RegisterIndex].texptr = NULL;
+        m_texcode[cd.RegisterIndex] = TEX_IMAGE_FEEDBACK;
+        if (!bWrapFilterSpecified) {
+          m_texture_bindings[cd.RegisterIndex].bWrap = false;   // default CLAMP
+          m_texture_bindings[cd.RegisterIndex].bBilinear = true;
+        }
+      }
+      else if (!wcscmp(L"audio", szRootName)) {
+        m_texture_bindings[cd.RegisterIndex].texptr = NULL;
+        m_texcode[cd.RegisterIndex] = TEX_AUDIO;
+        if (!bWrapFilterSpecified) {
+          m_texture_bindings[cd.RegisterIndex].bWrap = false;   // default CLAMP
+          m_texture_bindings[cd.RegisterIndex].bBilinear = true;
+        }
+      }
 #if (NUM_BLUR_TEX >= 2)
       else if (!wcscmp(L"blur1", szRootName)) {
         m_texture_bindings[cd.RegisterIndex].texptr = g_engine.m_lpBlur[1];
@@ -735,13 +751,16 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
       memcpy(&sh->comp, &m_fallbackShaders_ps.comp, sizeof(PShaderInfo));
     }
 
-    // Check if comp shader uses sampler_feedback (Shadertoy temporal reprojection)
-    if (!m_bCompUsesFeedback) {
+    // Check if comp shader uses sampler_feedback or sampler_image
+    if (!m_bCompUsesFeedback || !m_bCompUsesImageFeedback) {
       for (int i = 0; i < 16; i++) {
-        if (sh->comp.params.m_texcode[i] == TEX_FEEDBACK) {
+        if (sh->comp.params.m_texcode[i] == TEX_FEEDBACK && !m_bCompUsesFeedback) {
           m_bCompUsesFeedback = true;
           DebugLogA("DX12: Comp shader uses sampler_feedback (temporal feedback enabled)");
-          break;
+        }
+        if (sh->comp.params.m_texcode[i] == TEX_IMAGE_FEEDBACK && !m_bCompUsesImageFeedback) {
+          m_bCompUsesImageFeedback = true;
+          DebugLogA("DX12: Comp shader uses sampler_image (Image self-feedback enabled)");
         }
       }
     }
