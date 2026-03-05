@@ -213,6 +213,12 @@ float4 texsize_noise_hq;
 float4 texsize_noisevol_lq;
 float4 texsize_noisevol_hq;
 
+// user/random disk textures (auto-assigned, used by Shadertoy channel mapping):
+sampler2D sampler_rand00;
+sampler2D sampler_rand01;
+sampler2D sampler_rand02;
+sampler2D sampler_rand03;
+
 // feedback buffer for Shadertoy temporal reprojection (comp shader reads own previous output):
 // Explicit register required — without it, the compiler merges sampler_feedback with sampler_main
 // (same sampler state) and the SRV never appears in reflection, so CacheParams can't detect it.

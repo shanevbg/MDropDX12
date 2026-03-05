@@ -1,241 +1,200 @@
-# GLSL to HLSL Conversion — Challenges and Solutions
+# Importing Shadertoy Shaders into MDropDX12
 
-This document covers the challenges of converting Shadertoy GLSL shaders to MDropDX12's HLSL/DX12 environment. The converter lives in `engine_shader_import_ui.cpp`, function `ConvertGLSLtoHLSL()`.
+So you found a sick shader on Shadertoy and want it running as a music visualizer? MDropDX12 can import Shadertoy GLSL and convert it to HLSL for DirectX 12. This guide covers how it works, what gets translated, and where things can go sideways.
 
-## Conversion Pipeline Overview
+## Where to Find Shaders
 
-The converter runs in four phases:
+These sites have GLSL shaders you can import into MDropDX12:
 
-1. **Phase 1** — Full-text global replacements (types, functions, uniforms, matrices)
-2. **Phase 1b** — Matrix variable detection and `mul()` insertion
-3. **Phase 2** — Extract `mainImage()`, build `shader_body` wrapper
-4. **Phase 3** — Per-line processing (matrix ops, float expansion, atan fix, break replacement)
+- **[Shadertoy](https://www.shadertoy.com)** — the big one. Thousands of community shaders. Look for shaders with "Image" only or "Image + Buffer A" — those are the ones MDropDX12 supports right now.
+- **[Shadertoy sorted by popularity](https://www.shadertoy.com/results?query=&sort=popular&from=0&num=25)** — start here for the greatest hits
+- **[GLSL Sandbox](https://glslsandbox.com)** — simpler shaders, mostly single-pass fullscreen effects. Good for getting started.
+- **[Interactiveshaderformat.com](https://www.interactiveshaderformat.com)** — ISF-format shaders, some convertible to Shadertoy style
+- **[Shader Park](https://shaderpark.com)** — JavaScript-based but the concepts transfer
 
-Post-processing: backslash continuation joining, return value insertion, code formatting.
+### What Works Best
+
+Not every Shadertoy shader will import cleanly. Here's what to look for:
+
+**Great candidates:**
+- Single-pass ("Image" tab only) shaders — simplest to import
+- "Image + Buffer A" shaders — fully supported (terrain, fluid sims, particle systems)
+- Shaders that use `iTime`, `iResolution`, `iMouse` — all mapped
+- Audio-reactive shaders using `iChannel0` as audio — `sampler_audio` is wired up
+
+**Won't work (yet):**
+- Shaders with Buffer B, C, or D — only Buffer A is supported
+- Cubemap inputs — not implemented
+- Shaders using `iDate`, `iTimeDelta`, or `iChannelResolution` — not mapped
+- Keyboard input (`iChannelN` as keyboard) — not supported
+- Video/webcam inputs as iChannel sources — not connected to Shadertoy pipeline
+
+### Tested Shaders
+
+These are confirmed working and make good test cases:
+
+| Shader | Link | Structure | What It Tests |
+|--------|------|-----------|---------------|
+| Elevated | [shadertoy.com/view/MdX3Rr](https://www.shadertoy.com/view/MdX3Rr) | Buffer A + Image | texelFetch with noise, terrain raymarching, mat2 rotation |
+| Seascape | [shadertoy.com/view/Ms2SD1](https://www.shadertoy.com/view/Ms2SD1) | Image only | Ocean raymarching, matrix transforms |
+| Clouds | [shadertoy.com/view/XslGRr](https://www.shadertoy.com/view/XslGRr) | Image only | Noise-based volumetric rendering |
+| Protean Clouds | [shadertoy.com/view/3l23Rh](https://www.shadertoy.com/view/3l23Rh) | Image only | Complex noise, lots of math |
 
 ---
 
-## 1. Matrix Storage: Column-Major vs Row-Major
+## How the Converter Works
 
-**The single hardest problem in the entire converter.**
-
-GLSL and HLSL store matrices differently:
-
-| | GLSL | HLSL |
-|---|---|---|
-| Storage | Column-major | Row-major |
-| `mat3(a,b,c)` | a,b,c are **columns** | — |
-| `float3x3(a,b,c)` | — | a,b,c are **rows** |
-| `M[i]` | Returns column i | Returns row i |
-| `M * v` | Column-major multiply | — |
-| `mul(M, v)` | — | Row-major multiply |
-
-A naive `mat3(` → `float3x3(` replacement produces a **transposed** matrix. Every multiplication gives wrong results and every `M[i]` access returns the wrong vector.
-
-### Solution: Dual Strategy
-
-The converter uses **different strategies for square vs non-square matrices** because they have different tradeoffs:
-
-#### Square matrices (mat2, mat3, mat4): Mul-Swap
-
-No `transpose()` on constructors. Instead, swap `mul()` argument order.
+The converter lives in `engine_shader_import_ui.cpp` and runs in multiple phases. Here's the high-level flow:
 
 ```
-GLSL: mat3 ca = mat3(cu, cv, cw);     → HLSL: float3x3 ca = float3x3(cu, cv, cw);
-GLSL: vec3 rd = ca * normalize(p);    → HLSL: float3 rd = mul(normalize(p), ca);  // SWAPPED
-GLSL: vec3 col = v * ca;              → HLSL: float3 col = mul(ca, v);            // SWAPPED
-```
-
-**Why this works**: `float3x3(a,b,c)` stores a,b,c as rows. GLSL's `mat3(a,b,c) * v` computes `result[i] = a[i]*v[0] + b[i]*v[1] + c[i]*v[2]`. HLSL's `mul(v, float3x3(a,b,c))` computes the same thing — each result component is the dot product of `v` with a column of M, which equals `(a[i], b[i], c[i])`.
-
-**Why not transpose**: `M[i]` indexing is common for square matrices (e.g., extracting camera basis vectors). With mul-swap, `ca[0]` = row 0 = `cu`, which matches GLSL's `ca[0]` = column 0 = `cu`. Wrapping with `transpose()` would break this — `ca[0]` would return `(cu[0], cv[0], cw[0])` instead.
-
-#### Non-square matrices (mat3x4, mat4x3, etc.): Transpose
-
-Wrap constructors with `transpose()`, use standard `mul()` order.
-
-```
-GLSL: mat3x4 M = mat3x4(a, b, c);    → HLSL: float4x3 M = transpose(float3x4(a, b, c));
-GLSL: vec4 r = M * v;                 → HLSL: float4 r = mul(M, v);              // STANDARD
-GLSL: vec3 r = v * M;                 → HLSL: float3 r = mul(v, M);              // STANDARD
-```
-
-**Why transpose is required**: A simple dimension-swap replacement (`mat3x4` → `float4x3`) produces a valid type but the **constructor fills elements completely wrong**. `float4x3` expects 4 rows of 3 elements; passing 3 `float4` vectors causes element interleaving:
-
-```
-GLSL mat3x4(a, b, c):
-  col0 = a, col1 = b, col2 = c       ← clean column fill
-
-HLSL float4x3(a, b, c) with 3 float4 args (12 scalars → 4×3):
-  row0 = (a[0], a[1], a[2])          ← WRONG: elements from 'a' only
-  row1 = (a[3], b[0], b[1])          ← WRONG: mixed elements
-  row2 = (b[2], b[3], c[0])          ← WRONG: mixed elements
-  row3 = (c[1], c[2], c[3])          ← WRONG: elements from 'c' only
-```
-
-With `transpose(float3x4(a, b, c))`: `float3x4` is 3 rows × 4 cols, so rows = a, b, c (clean). Transpose flips to 4 rows × 3 cols with columns = a, b, c — matching GLSL.
-
-**Why standard mul order**: The matrix value is now correct (transpose fixed the layout), so standard multiplication order works directly.
-
-#### Why the two strategies are incompatible
-
-Square mul-swap: `matVar * expr` → `mul(expr, matVar)` (swapped)
-Non-square standard: `matVar * expr` → `mul(matVar, expr)` (standard)
-
-Phase 1b tracks which variables are square vs non-square and applies the correct `mul()` order for each.
-
-### Multi-Line Constructors
-
-Constant matrices often span multiple lines:
-
-```glsl
-const mat3 m3 = mat3(0.00, 0.80, 0.60,
-                     -0.80, 0.36, -0.48,
-                     -0.60, -0.48, 0.64);
-```
-
-Phase 1 runs on the full text with `FindClosingBracket()` for bracket matching, so multi-line constructors are handled correctly. Phase 3's per-line `FixMatrixMultiplication` handles `*=mat2(...)` patterns which are typically single-line (inline rotation matrices).
-
-### Dimension Naming Convention
-
-GLSL and HLSL use opposite conventions for `matAxB` / `floatAxB`:
-
-| GLSL | Meaning | HLSL | Meaning |
-|------|---------|------|---------|
-| `mat3x4` | 3 cols × 4 rows | `float3x4` | 3 rows × 4 cols |
-
-So `mat3x4` (a 4×3 math matrix) corresponds to `float4x3` in HLSL. **Dimensions are swapped** for type declarations but **kept as GLSL** inside `transpose()` constructors:
-
-```
-Type declaration:  mat3x4 → float4x3   (swapped)
-Constructor:       mat3x4(args) → transpose(float3x4(args))  (GLSL dims, transpose produces float4x3)
+Your Shadertoy GLSL
+       ↓
+  Phase 1: Global text replacements (types, functions, uniforms)
+       ↓
+  Phase 1b: Matrix variable detection + mul() insertion
+       ↓
+  Phase 2: Extract mainImage(), wrap in shader_body
+       ↓
+  Phase 3: Per-line fixes (matrix ops, float expansion, atan)
+       ↓
+  Post-processing: backslash joins, vector l-value fix, constructor fix
+       ↓
+  MDropDX12-compatible HLSL
 ```
 
 ---
 
-## 2. Matrix Multiplication Operator
+## The Tricky Parts
 
-HLSL does not support `*` for matrix-vector multiplication. The compiler emits error X3020 (type mismatch). All matrix multiplications must use `mul()`.
+### 1. Matrices — The Hardest Problem
 
-### Named variables (Phase 1b)
+GLSL and HLSL store matrices in opposite order. GLSL is column-major, HLSL is row-major. A naive find-and-replace of `mat3(` → `float3x3(` gives you a **transposed** matrix — every multiplication comes out wrong.
 
-The converter scans for matrix type declarations, collects variable names, then replaces `matVar * expr` and `expr * matVar` with appropriate `mul()` calls.
+The converter uses two different strategies depending on the matrix shape:
 
-### Inline constructors (Phase 3)
-
-Patterns like `uv *= mat2(cos(a), -sin(a), sin(a), cos(a))` are handled per-line by `FixMatrixMultiplication()`:
+**Square matrices (mat2, mat3, mat4) — swap the mul() arguments:**
 
 ```
-v *= matN(args)  →  v = mul(floatNxN(args), v)      // swap: constructor on left
-x * matN(args)   →  mul(floatNxN(args), x)           // swap: constructor on left
+GLSL:  vec3 rd = ca * normalize(p);
+HLSL:  float3 rd = mul(normalize(p), ca);  // arguments swapped!
 ```
 
----
+This way `ca[0]` still returns the same vector in both languages. If we used `transpose()` instead, indexing with `M[i]` would break (and a lot of shaders use that for camera basis vectors).
 
-## 3. Type and Function Mappings
+**Non-square matrices (mat3x4, etc.) — wrap with transpose():**
 
-### Types
+```
+GLSL:  mat3x4 M = mat3x4(a, b, c);
+HLSL:  float4x3 M = transpose(float3x4(a, b, c));
+```
 
-| GLSL | HLSL |
-|------|------|
-| `vec2/3/4` | `float2/3/4` |
-| `ivec2/3/4` | `int2/3/4` |
-| `bvec2/3/4` | `bool2/3/4` |
-| `mat2/3/4` | `float2x2/3x3/4x4` |
+Non-square matrices need this because the element layout gets completely scrambled otherwise — you'd get mixed-up values from different vectors ending up in the wrong rows.
 
-Integer/boolean types must be replaced **before** `vec` → `float` to avoid `ivec2` → `ifloat2`.
+### 2. Type and Function Swaps
 
-### Functions
+Most of these are straightforward find-and-replace:
 
 | GLSL | HLSL | Notes |
 |------|------|-------|
+| `vec2/3/4` | `float2/3/4` | |
+| `ivec2/3/4` | `int2/3/4` | Replaced **before** `vec` → `float` so `ivec2` doesn't become `ifloat2` |
+| `mat2/3/4` | `float2x2/3x3/4x4` | See matrix section above |
 | `fract()` | `frac()` | |
 | `mix()` | `lerp()` | |
-| `mod()` | `mod_conv()` | Custom helper; HLSL `fmod` has different sign behavior |
-| `atan(y,x)` | `atan2(y,x)` | Only 2-arg form; 1-arg `atan()` unchanged |
+| `mod()` | `mod_conv()` | Custom helper — HLSL's `fmod` handles negative numbers differently |
+| `atan(y,x)` | `atan2(y,x)` | Only the 2-argument version; single-arg `atan()` stays as-is |
 | `texture()` | `tex2D()` | |
-| `textureLod()` | `tex2Dlod_conv()` | Custom wrapper adapting arg format |
-| `texelFetch()` | `texelFetch_conv()` | Integer coords → UV conversion with `texsize.zw` |
+| `textureLod()` | `tex2Dlod_conv()` | Custom wrapper that reformats the arguments |
+| `texelFetch()` | `texelFetch_conv()` or `texelFetch_noise()` | See texelFetch section below |
+| `highp`/`mediump`/`lowp` | *(removed)* | HLSL doesn't have precision qualifiers |
 
-### Precision qualifiers
+### 3. Shadertoy Uniforms
 
-`highp`, `mediump`, `lowp` are stripped (HLSL has no equivalents; all computation is full precision).
+| Shadertoy | What It Becomes | What It Is |
+|-----------|-----------------|------------|
+| `iResolution` | `float3(texsize.x, texsize.y, 1.0)` | Screen size (width, height, pixel aspect ratio) |
+| `iTime` | `time` | Seconds since start |
+| `iFrame` | `frame` | Frame counter |
+| `iMouse` | `mouse` | Mouse position (pixel coords, Shadertoy-compatible click behavior) |
+| `iChannel0-3` | Depends on channel config | See channel mapping below |
 
----
+### 4. Variable Name Collisions
 
-## 4. Shadertoy Uniform Mapping
+MDropDX12 uses `#define` macros for audio data like `bass`, `mid`, `treb`, and `vol`. If your shader has a variable called `mid` (super common — think "midpoint"), it gets macro-expanded into a constant buffer swizzle and everything breaks.
 
-| Shadertoy | MDropDX12 | Constant Buffer |
-|-----------|-----------|-----------------|
-| `iResolution` | `float3(texsize.x, texsize.y, 1.0)` | `_c7` |
-| `iTime` | `time` | `_c2.x` |
-| `iFrame` | `frame` | `_c2.z` |
-| `iMouse` | `mouse` | (zeroed) |
-| `iChannel0` | `sampler_feedback` | `register(s14)` |
-| `iChannel1` | `sampler_noise_lq` | `register(s8)` |
+The converter auto-renames these: `mid` → `_st_mid`, `bass` → `_st_bass`, etc. Same deal with `time` → `time_conv` since `time` is already a MDropDX12 uniform.
 
-`iResolution` is inline-expanded (not `#define`d) because `texsize` is a `float4` and `iResolution.z` (pixel aspect ratio, always 1.0) would conflict with `texsize.z` (1/width).
+### 5. Vector Component Writing (X3500 Error)
 
----
-
-## 5. Variable Name Collisions
-
-MDropDX12 presets use `#define` macros for audio data:
+HLSL can't write to vector components with a dynamic index:
 
 ```hlsl
-#define bass _c3.x
-#define mid  _c3.y
-#define treb _c3.z
-```
-
-Common GLSL variable names like `mid` (midpoint), `bass`, `treb`, `vol` get macro-expanded into constant buffer swizzles, breaking declarations like `float mid = 0.5;` → `float _c3.y = 0.5;`.
-
-**Fix**: Whole-word rename before macro expansion: `mid` → `_st_mid`, `bass` → `_st_bass`, etc.
-
-Similarly, `time` (a common GLSL variable) collides with the MDropDX12 `time` uniform, so it's renamed to `time_conv`.
-
----
-
-## 6. Float Constructor Expansion
-
-GLSL allows single-argument vector constructors: `float3(1.0)` expands to `float3(1.0, 1.0, 1.0)`. HLSL requires all arguments explicitly.
-
-The converter detects single-argument constructors (no commas at top level) and expands them when the argument is:
-- A numeric literal
-- A function call
-- A known `float` variable
-
-This runs per-line in Phase 3 via `FixFloatNumberOfArguments()`.
-
----
-
-## 7. Break Statement Replacement
-
-HLSL Shader Model 3.0 (used by MDropDX12 for compatibility) does not support `break` in loops. The converter replaces `break` with an assignment that makes the loop condition false:
-
-```glsl
-for (int i = 0; i < N; i++) {
-    if (hit) break;
+// This works in GLSL but HLSL says no:
+for (int ch = 0; ch < 3; ch++) {
+    result[ch] = someValue;  // X3500: array reference cannot be used as an l-value
 }
 ```
 
-becomes:
+The converter detects this pattern and rewrites it using helper functions:
 
 ```hlsl
-for (int i = 0; i < N; i++) {
-    if (hit) i = N;
+// Converted to:
+_setComp(result, ch, someValue);
+
+// Where _setComp uses static member access:
+void _setComp(inout float3 v, int i, float val) {
+    if (i == 0) v.x = val; else if (i == 1) v.y = val; else v.z = val;
 }
 ```
 
-The condition is extracted from the most recent `for` loop header and the comparison operator is replaced with `=`.
+### 6. Over-Specified Constructors
+
+GLSL lets you pass more components than needed — `vec3(vec3_a, vec3_b, vec3_c)` just takes the first 3 values total. HLSL rejects this. The converter detects when all arguments to a constructor are the same expression and simplifies it to a cast: `((float3)(expr))`.
 
 ---
 
-## 8. Shadertoy Render Pipeline
+## Channel Mapping
 
-Shadertoy shaders run in a completely separate render path from MilkDrop presets — no warp, blur, shapes, or waves.
+Each pass has 4 input channels (`iChannel0` through `iChannel3`). The converter maps these to MDropDX12 samplers based on the channel configuration:
 
-### Pipeline
+| Channel Source | Sampler | Texture |
+|---------------|---------|---------|
+| `CHAN_NOISE_LQ` | `sampler_noise_lq` | 256x256 grayscale noise |
+| `CHAN_NOISE_MQ` | `sampler_noise_mq` | 256x256 noise (medium quality) |
+| `CHAN_NOISE_HQ` | `sampler_noise_hq` | 256x256 noise (high quality) |
+| `CHAN_FEEDBACK` | `sampler_feedback` | Screen-sized Buffer A output |
+| `CHAN_NOISEVOL_LQ` | `sampler_noisevol_lq` | 3D 32x32x32 noise |
+| `CHAN_NOISEVOL_HQ` | `sampler_noisevol_hq` | 3D 32x32x32 noise |
+| `CHAN_IMAGE_PREV` | `sampler_image` | Previous frame |
+| `CHAN_AUDIO` | `sampler_audio` | 512x2 FFT + waveform |
+| `CHAN_RANDOM_TEX` | `sampler_rand00` | Random disk texture |
+
+**Default channels**: `{NOISE_LQ, NOISE_LQ, NOISE_MQ, NOISE_HQ}`
+
+When you add a Buffer A pass, the **Image pass** iChannel0 automatically switches to `CHAN_FEEDBACK` so it reads Buffer A's output. Buffer A itself keeps `CHAN_NOISE_LQ` on ch0 — most Shadertoy Buffer A shaders use noise for terrain generation, fluid simulation, etc.
+
+### texelFetch — Getting the Right UV Scale
+
+`texelFetch` in GLSL reads a specific pixel by integer coordinates. Since HLSL's `tex2Dlod` needs UV coordinates (0.0–1.0), the converter has to divide by the texture size. But which size?
+
+- **Noise textures** (256x256): divide by 256.0
+- **Screen-sized textures** (feedback buffer): divide by screen resolution via `texsize.zw`
+
+The converter picks the right one automatically based on which sampler is being used:
+
+```hlsl
+// For noise:
+texelFetch_noise(sampler_noise_lq, coords, 0)  // divides by 256.0
+
+// For feedback:
+texelFetch_conv(sampler_feedback, coords, 0)    // divides by texsize.zw
+```
+
+---
+
+## The Shadertoy Render Pipeline
+
+Shadertoy imports run on a completely separate render path from regular MilkDrop presets — no warp mesh, no blur, no custom shapes or waves. Just raw shader math.
 
 ```
 Frame N:
@@ -244,45 +203,45 @@ Frame N:
   Swap feedback indices
 ```
 
-### fragCoord Convention
+The feedback buffers are **FLOAT32** — full 32-bit floating point per channel. This matters for shaders that accumulate values over time (motion blur, fluid simulations, particle systems). Regular display is UNORM (8-bit per channel), but the feedback loop preserves all the precision.
 
-The converter uses DX convention (y=0 at top) for `fragCoord`:
-
-```hlsl
-float2 fragCoord = uv * texsize.xy;  // uv.y=0 at top
-```
-
-This differs from Shadertoy's OpenGL convention (y=0 at bottom), but the feedback loop is **self-consistent**: what Buffer A writes at `uv.y = F/H` is read back at the same `uv.y = F/H`. The Image pass flips quad UVs to display right-side-up.
-
-### Shader Output
-
-Both Buffer A and Image passes output `ret` unchanged — no gamma correction, no `shiftHSV()`. FLOAT32 feedback buffers preserve full precision for temporal accumulation.
+Both passes use Shader Model 5.0 (`ps_5_0`) — that's the full DirectX 11+ feature set, including native `break` in loops, integer operations, and bitwise math.
 
 ---
 
-## 9. Known Limitations
+## Known Limitations
 
 | Feature | Status |
 |---------|--------|
-| `iDate` | Not supported (commented out with warning) |
-| `iTimeDelta` | Not supported (commented out with warning) |
-| `iChannelResolution` | Not mapped |
-| `iChannel1-3` | Mapped to noise textures, not configurable per-shader |
-| Buffer B/C/D | Not implemented (only Buffer A + Image) |
+| Buffer B, C, D | Not implemented — only Buffer A + Image |
 | Cubemap inputs | Not supported |
-| `inversesqrt()` | Not converted (compiles if unused; `rsqrt()` is HLSL equivalent) |
-| Non-square matrix `M[i]` indexing | Returns wrong vector (transpose breaks indexing) |
-| `dFdx`/`dFdy` | Require `ddx`/`ddy` in HLSL (not currently converted) |
+| `iDate` | Not mapped |
+| `iTimeDelta` | Not mapped |
+| `iChannelResolution` | Not mapped |
+| Keyboard input | Not supported |
+| Video/webcam as iChannel | Not connected to Shadertoy pipeline |
+| `dFdx`/`dFdy` | Need `ddx`/`ddy` in HLSL — not currently converted |
+| `inversesqrt()` | Not converted (HLSL equivalent is `rsqrt()`) |
+| Non-square matrix `M[i]` indexing | Returns wrong vector due to transpose |
 
 ---
 
-## 10. Debugging Converted Shaders
+## Debugging When Things Go Wrong
 
-The engine dumps compiled shader text to diagnostic files in the working directory:
+If a shader doesn't compile or looks wrong, check these diagnostic files in the MDropDX12 working directory:
 
-- `diag_comp_shader.txt` — Buffer A shader (compiled as comp type)
-- `diag_comp_shader.txt` — Image/comp shader (overwrites Buffer A dump)
+| File | What's In It |
+|------|-------------|
+| `diag_converter_image.txt` | The converted HLSL for the Image pass |
+| `diag_converter_bufferA.txt` | The converted HLSL for Buffer A |
+| `diag_comp_shader_error.txt` | Compilation result for the Image pass |
+| `diag_bufferA_shader_error.txt` | Compilation result for Buffer A |
 
-These show the final HLSL after all conversion phases and the engine's wrapper code (`shader_body`, return value injection, constant buffer declarations).
+Common issues:
+- **"undeclared identifier"** — a variable rename was missed, or a sampler isn't declared
+- **"X3500: array reference cannot be used as an l-value"** — dynamic vector indexing that the `_setComp` fix didn't catch
+- **"X3020: type mismatch"** — matrix multiplication missing `mul()` wrapper
+- **Black screen** — check if the shader needs a specific iChannel input that isn't mapped
+- **System stutters / GPU hang** — usually a raymarcher with bad input data (wrong texture, wrong UV scale). Check the channel mapping.
 
-To inspect conversion results without running the visualizer, paste GLSL into the import dialog and click Convert — the HLSL output appears in the right panel.
+You can also paste GLSL into the Shader Editor window and click Convert to see the HLSL output without applying it. Edit the HLSL directly if the auto-conversion needs tweaking.

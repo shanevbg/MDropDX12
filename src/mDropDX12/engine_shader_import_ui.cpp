@@ -31,13 +31,15 @@ static const char* kChannelSamplers[] = {
     "sampler_noisevol_hq", // CHAN_NOISEVOL_HQ
     "sampler_image",       // CHAN_IMAGE_PREV
     "sampler_audio",       // CHAN_AUDIO
+    "sampler_rand00",      // CHAN_RANDOM_TEX
 };
 static const wchar_t* kChannelNames[] = {
     L"Noise LQ",      L"Noise MQ",       L"Noise HQ",
     L"Buffer A / Self", L"Noise Vol LQ",  L"Noise Vol HQ",
     L"Image (prev frame)", L"Audio (FFT + Wave)",
+    L"Random Texture",
 };
-static const int kChannelTexDim[] = { 256, 256, 256, 0, 32, 32, 0, 0 }; // 0 = use texsize
+static const int kChannelTexDim[] = { 256, 256, 256, 0, 32, 32, 0, 0, 0 }; // 0 = use texsize
 
 // ─── Open / Close (Engine methods) ──────────────────────────────────────
 
@@ -635,7 +637,9 @@ LRESULT ShaderImportWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam
             if (!hasBufferA) {
                 ShaderPass bufA;
                 bufA.name = L"Buffer A";
-                bufA.channels[0] = CHAN_FEEDBACK;  // Buffer A ch0 = self-feedback (previous frame)
+                // Buffer A ch0 defaults to CHAN_NOISE_LQ (256x256 noise texture).
+                // Most Shadertoy shaders use noise for ch0 in Buffer A (e.g. terrain generation).
+                // Users can change to CHAN_FEEDBACK if self-feedback is needed.
                 m_passes.push_back(std::move(bufA));
                 m_passes[0].channels[0] = CHAN_FEEDBACK;  // Image ch0 = Buffer A output
                 SyncEditorToPass();  // save current pass before switching
@@ -1021,6 +1025,8 @@ std::string ShaderImportWindow::ReplaceVarName(const std::string& oldName, const
     replaceAll(res, oldName + ".", newName + ".");
     replaceAll(res, "(" + oldName + "-", "(" + newName + "-");
     replaceAll(res, "(" + oldName + ",", "(" + newName + ",");
+    replaceAll(res, ", " + oldName + ",", ", " + newName + ",");
+    replaceAll(res, " " + oldName + ",", " " + newName + ",");
     replaceAll(res, "," + oldName + ")", "," + newName + ")");
     replaceAll(res, ", " + oldName + ")", ", " + newName + ")");
     replaceAll(res, "(" + oldName + ")", "(" + newName + ")");
@@ -1969,6 +1975,85 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
             result = clean.str();
         }
 
+        // Fix vector l-value indexing: vec[dynamic_idx] = expr → _setComp(vec, idx, expr)
+        // HLSL doesn't support writing to float2/3/4 components via dynamic index (X3500/X3550).
+        // Replace with helper function calls that use static .x/.y/.z/.w member access.
+        {
+            bool needsSetComp = false;
+            std::istringstream lvss(result);
+            std::string line;
+            std::ostringstream lvout;
+            while (std::getline(lvss, line)) {
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+
+                // Find leading whitespace
+                size_t ws = 0;
+                while (ws < line.size() && (line[ws] == ' ' || line[ws] == '\t')) ws++;
+
+                // Check for IDENTIFIER[
+                size_t idStart = ws;
+                size_t idEnd = idStart;
+                while (idEnd < line.size() && (isalnum((unsigned char)line[idEnd]) || line[idEnd] == '_')) idEnd++;
+
+                if (idEnd > idStart && idEnd < line.size() && line[idEnd] == '[') {
+                    std::string varName = line.substr(idStart, idEnd - idStart);
+
+                    // Check for IDENTIFIER index inside brackets
+                    size_t idxStart = idEnd + 1;
+                    size_t idxEnd = idxStart;
+                    while (idxEnd < line.size() && (isalnum((unsigned char)line[idxEnd]) || line[idxEnd] == '_')) idxEnd++;
+
+                    if (idxEnd > idxStart && idxEnd < line.size() && line[idxEnd] == ']') {
+                        std::string idxName = line.substr(idxStart, idxEnd - idxStart);
+
+                        // Skip if index is a numeric literal (HLSL handles constant indices fine)
+                        bool isNumeric = !idxName.empty();
+                        for (char c : idxName) {
+                            if (!isdigit((unsigned char)c)) { isNumeric = false; break; }
+                        }
+
+                        if (!isNumeric) {
+                            // Check for = (not ==, not compound +=/-=/*=//=)
+                            // Scan past ] for first non-space: if it's '=', it's simple assignment
+                            size_t eqPos = idxEnd + 1;
+                            while (eqPos < line.size() && (line[eqPos] == ' ' || line[eqPos] == '\t')) eqPos++;
+
+                            if (eqPos < line.size() && line[eqPos] == '=' &&
+                                (eqPos + 1 >= line.size() || line[eqPos + 1] != '=')) {
+                                // Find the expression until ;
+                                size_t exprStart = eqPos + 1;
+                                while (exprStart < line.size() && line[exprStart] == ' ') exprStart++;
+                                size_t semi = line.find(';', exprStart);
+
+                                if (semi != std::string::npos && semi > exprStart) {
+                                    std::string expr = line.substr(exprStart, semi - exprStart);
+                                    while (!expr.empty() && (expr.back() == ' ' || expr.back() == '\t')) expr.pop_back();
+
+                                    std::string indent = line.substr(0, idStart);
+                                    std::string rest = (semi + 1 < line.size()) ? line.substr(semi + 1) : "";
+                                    line = indent + "_setComp(" + varName + ", " + idxName + ", " + expr + ");" + rest;
+                                    needsSetComp = true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                lvout << line << "\n";
+            }
+            result = lvout.str();
+
+            if (needsSetComp) {
+                std::string helpers =
+                    "// CONV: vector component write helpers (HLSL X3500 fix)\n"
+                    "void _setComp(inout float2 v, int i, float val) { if (i == 0) v.x = val; else v.y = val; }\n"
+                    "void _setComp(inout float3 v, int i, float val) { if (i == 0) v.x = val; else if (i == 1) v.y = val; else v.z = val; }\n"
+                    "void _setComp(inout float4 v, int i, float val) { if (i == 0) v.x = val; else if (i == 1) v.y = val; else if (i == 2) v.z = val; else v.w = val; }\n\n";
+                result = helpers + result;
+                DebugLogA("CONV-FIX: Added _setComp helpers for vector l-value indexing\n");
+            }
+        }
+
         // Fix over-specified identical constructors: float3(expr, expr, expr) → ((float3)(expr))
         // This runs AFTER backslash continuation removal so multi-line constructs are joined.
         // GLSL allows vec3(vec3,vec3,vec3) (takes first N components); HLSL rejects excess.
@@ -2227,8 +2312,11 @@ void ShaderImportWindow::SaveImportProject() {
     // Sync editor text into m_passes before saving
     SyncEditorToPass();
 
-    // Must have at least Image GLSL
-    if (m_passes.empty() || m_passes[0].glslSource.empty()) {
+    // Must have at least one pass with GLSL
+    bool hasAnyGlsl = false;
+    for (auto& p : m_passes)
+        if (!p.glslSource.empty()) { hasAnyGlsl = true; break; }
+    if (m_passes.empty() || !hasAnyGlsl) {
         SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"No GLSL text to save.");
         return;
     }
