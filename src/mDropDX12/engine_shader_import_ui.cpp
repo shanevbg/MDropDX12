@@ -1057,6 +1057,8 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
                 {"float2x3", false}, {"float3x2", false}, {"float2x4", false},
                 {"float4x2", false}, {"float3x4", false}, {"float4x3", false},
             };
+            struct MatFunc { std::string name; bool isSquare; };
+            std::vector<MatFunc> matFuncs;
             for (auto& mt : matTypes) {
                 int mtLen = (int)strlen(mt.type);
                 size_t pos = 0;
@@ -1073,6 +1075,8 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
                         while (check < inp.size() && (inp[check] == ' ' || inp[check] == '\t')) check++;
                         if (check >= inp.size() || inp[check] != '(')
                             matVars.push_back({name, mt.isSquare});
+                        else
+                            matFuncs.push_back({name, mt.isSquare});
                     }
                     pos = after;
                 }
@@ -1144,6 +1148,70 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
                         }
                     }
                     pos++;
+                }
+            }
+
+            // Convert expr *= matFunc(args) and expr * matFunc(args) to mul() calls.
+            // HLSL * operator doesn't work between vectors and matrices — must use mul().
+            // For matrix-returning functions like "rot()", the Phase 3 FixMatrixMultiplication
+            // only handles inline "mat2()" constructors. This handles function calls.
+            for (const auto& mf : matFuncs) {
+                size_t pos = 0;
+                while ((pos = inp.find(mf.name, pos)) != std::string::npos) {
+                    if (pos > 0 && isIdent(inp[pos - 1])) { pos++; continue; }
+                    size_t afterName = pos + mf.name.size();
+                    if (afterName >= inp.size() || inp[afterName] != '(') { pos++; continue; }
+
+                    // Find closing paren of function call
+                    std::string rest = inp.substr(afterName + 1);
+                    int closingIdx = FindClosingBracket(rest, '(', ')', 1);
+                    if (closingIdx < 0) { pos++; continue; }
+                    size_t callEnd = afterName + 1 + closingIdx + 1; // past closing ')'
+                    std::string funcCall = inp.substr(pos, callEnd - pos);
+
+                    // Check for "expr *= matFunc(args)" pattern
+                    size_t bk = pos;
+                    while (bk > 0 && inp[bk - 1] == ' ') bk--;
+                    if (bk >= 2 && inp[bk - 1] == '=' && inp[bk - 2] == '*') {
+                        size_t eqPos = bk - 2; // position of '*'
+                        size_t lEnd = eqPos;
+                        while (lEnd > 0 && inp[lEnd - 1] == ' ') lEnd--;
+                        // Walk back to find lvalue (may include dots/swizzles like "p.xz")
+                        size_t lStart = lEnd;
+                        while (lStart > 0 && (isIdent(inp[lStart - 1]) || inp[lStart - 1] == '.')) lStart--;
+                        if (lEnd > lStart) {
+                            std::string lvalue = inp.substr(lStart, lEnd - lStart);
+                            std::string repl;
+                            if (mf.isSquare)
+                                repl = lvalue + " = mul(" + funcCall + ", " + lvalue + ")";  // SWAPPED
+                            else
+                                repl = lvalue + " = mul(" + lvalue + ", " + funcCall + ")";  // STANDARD
+                            inp = inp.substr(0, lStart) + repl + inp.substr(callEnd);
+                            pos = lStart + repl.size();
+                            continue;
+                        }
+                    }
+
+                    // Check for "expr * matFunc(args)" pattern (not *=)
+                    if (bk > 0 && inp[bk - 1] == '*' && (bk < 2 || inp[bk - 2] != '=')) {
+                        size_t starPos = bk - 1;
+                        size_t opEnd = starPos;
+                        while (opEnd > 0 && inp[opEnd - 1] == ' ') opEnd--;
+                        size_t opStart = opEnd;
+                        while (opStart > 0 && (isIdent(inp[opStart - 1]) || inp[opStart - 1] == '.')) opStart--;
+                        if (opEnd > opStart) {
+                            std::string operand = inp.substr(opStart, opEnd - opStart);
+                            std::string repl;
+                            if (mf.isSquare)
+                                repl = "mul(" + funcCall + ", " + operand + ")";  // SWAPPED
+                            else
+                                repl = "mul(" + operand + ", " + funcCall + ")";  // STANDARD
+                            inp = inp.substr(0, opStart) + repl + inp.substr(callEnd);
+                            pos = opStart + repl.size();
+                            continue;
+                        }
+                    }
+                    pos = callEnd;
                 }
             }
         }
@@ -1313,9 +1381,10 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
             }
         }
 
-        // No UV manipulation — Shadertoy shaders compute their own UVs
-        // from fragCoord / iResolution. The MilkDrop 'uv' parameter is only
-        // used to initialize fragCoord above.
+        // Shadertoy shaders compute their own UVs from fragCoord / iResolution.
+        // The MilkDrop 'uv' macro is only used to initialize fragCoord above.
+        // #undef it so the shader can declare its own 'float2 uv = ...' variable.
+        sbHeader << "#undef uv\n#undef uv_orig\n";
 
         // Find the opening brace of mainImage body and replace everything before it
         size_t braceIdx = inpMain.find('{');
@@ -1335,9 +1404,7 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
                 if (!line.empty() && line.back() == '\r') line.pop_back();
                 std::string currentLine = line;
 
-                if (line.find("float2 uv =") != std::string::npos) {
-                    currentLine = "// " + line;
-                } else if (line.find("iDate") != std::string::npos) {
+                if (line.find("iDate") != std::string::npos) {
                     errors += "iDate unsupported\r\n";
                     sb << "// CONV: iDate unsupported\n";
                     currentLine = "// " + line;
@@ -1437,6 +1504,141 @@ void ShaderImportWindow::ConvertGLSLtoHLSL() {
                     }
                 }
                 searchFrom = index + prefix.size() + closingIdx;
+            }
+        }
+
+        // Fix HLSL X3508: inout struct parameters must have all members written.
+        // GLSL allows partial writes to inout struct params; HLSL rejects it.
+        // fxc sees through self-assignments and struct copies — the only reliable
+        // fix is to remove 'inout' entirely: transform
+        //   void func(inout StructType param) { body }
+        // into
+        //   StructType func(StructType param) { body; return param; }
+        // and call sites from func(arg) → arg = func(arg).
+        {
+            // Collect struct names so we only transform struct-typed inout params
+            std::set<std::string> structNames;
+            {
+                size_t spos = 0;
+                while (spos < result.size()) {
+                    spos = result.find("struct ", spos);
+                    if (spos == std::string::npos) break;
+                    size_t lineStart = result.rfind('\n', spos);
+                    if (lineStart == std::string::npos) lineStart = 0;
+                    if (result.substr(lineStart, spos - lineStart).find("//") != std::string::npos) { spos += 7; continue; }
+                    size_t ns = spos + 7;
+                    while (ns < result.size() && result[ns] == ' ') ns++;
+                    size_t ne = ns;
+                    while (ne < result.size() && (isalnum((unsigned char)result[ne]) || result[ne] == '_')) ne++;
+                    if (ne > ns) structNames.insert(result.substr(ns, ne - ns));
+                    spos = ne;
+                }
+            }
+
+            // Find "void funcName(inout StructType paramName)" and transform
+            size_t searchFrom = 0;
+            while (searchFrom < result.size()) {
+                // Find "void " keyword
+                size_t voidPos = result.find("void ", searchFrom);
+                if (voidPos == std::string::npos) break;
+                // Extract function name
+                size_t fnStart = voidPos + 5;
+                while (fnStart < result.size() && result[fnStart] == ' ') fnStart++;
+                size_t fnEnd = fnStart;
+                while (fnEnd < result.size() && (isalnum((unsigned char)result[fnEnd]) || result[fnEnd] == '_')) fnEnd++;
+                if (fnEnd == fnStart) { searchFrom = fnEnd; continue; }
+                std::string funcName = result.substr(fnStart, fnEnd - fnStart);
+                // Find opening paren
+                size_t parenOpen = fnEnd;
+                while (parenOpen < result.size() && result[parenOpen] == ' ') parenOpen++;
+                if (parenOpen >= result.size() || result[parenOpen] != '(') { searchFrom = fnEnd; continue; }
+                // Check for "inout " after paren
+                size_t afterParen = parenOpen + 1;
+                while (afterParen < result.size() && (result[afterParen] == ' ' || result[afterParen] == '\n' || result[afterParen] == '\r')) afterParen++;
+                if (result.substr(afterParen, 6) != "inout ") { searchFrom = fnEnd; continue; }
+                // Extract type name
+                size_t typeStart = afterParen + 6;
+                while (typeStart < result.size() && result[typeStart] == ' ') typeStart++;
+                size_t typeEnd = typeStart;
+                while (typeEnd < result.size() && (isalnum((unsigned char)result[typeEnd]) || result[typeEnd] == '_')) typeEnd++;
+                std::string typeName = result.substr(typeStart, typeEnd - typeStart);
+                if (structNames.find(typeName) == structNames.end()) { searchFrom = fnEnd; continue; }
+                // Extract param name
+                size_t pnStart = typeEnd;
+                while (pnStart < result.size() && result[pnStart] == ' ') pnStart++;
+                size_t pnEnd = pnStart;
+                while (pnEnd < result.size() && (isalnum((unsigned char)result[pnEnd]) || result[pnEnd] == '_')) pnEnd++;
+                std::string paramName = result.substr(pnStart, pnEnd - pnStart);
+                // Verify single parameter: closing paren after param name
+                size_t afterParam = pnEnd;
+                while (afterParam < result.size() && result[afterParam] == ' ') afterParam++;
+                if (afterParam >= result.size() || result[afterParam] != ')') { searchFrom = fnEnd; continue; }
+                // Find opening brace and verify it's a definition
+                size_t braceOpen = result.find('{', afterParam);
+                if (braceOpen == std::string::npos) { searchFrom = fnEnd; continue; }
+                bool isFuncDef = true;
+                for (size_t k = afterParam; k < braceOpen; k++) {
+                    if (result[k] == ';') { isFuncDef = false; break; }
+                }
+                if (!isFuncDef) { searchFrom = fnEnd; continue; }
+                // Find closing brace of function body
+                std::string afterBrace = result.substr(braceOpen);
+                int closeIdx = FindClosingBracket(afterBrace, '{', '}', 0);
+                if (closeIdx <= 0) { searchFrom = fnEnd; continue; }
+                size_t braceClose = braceOpen + closeIdx;
+
+                // === Transform the function ===
+                // 1. Replace "void" with typeName
+                result.replace(voidPos, 4, typeName);
+                int lenDiff = (int)typeName.size() - 4;
+                fnStart += lenDiff; fnEnd += lenDiff; parenOpen += lenDiff;
+                afterParen += lenDiff; braceOpen += lenDiff; braceClose += lenDiff;
+                // 2. Remove "inout " from parameter
+                size_t inoutPos = result.find("inout ", parenOpen);
+                if (inoutPos != std::string::npos && inoutPos < braceOpen) {
+                    result.erase(inoutPos, 6);
+                    braceOpen -= 6; braceClose -= 6;
+                }
+                // 3. Insert "return paramName;" before closing brace
+                std::string retStmt = "    return " + paramName + ";\n  ";
+                result.insert(braceClose, retStmt);
+                size_t funcDefEnd = braceClose + retStmt.size() + 1;
+
+                // 4. Transform call sites: funcName(arg) → arg = funcName(arg)
+                size_t callSearch = 0;
+                while (callSearch < result.size()) {
+                    size_t callPos = result.find(funcName + "(", callSearch);
+                    if (callPos == std::string::npos) break;
+                    // Skip if part of the function definition
+                    if (callPos >= voidPos && callPos < funcDefEnd) {
+                        callSearch = callPos + funcName.size() + 1;
+                        continue;
+                    }
+                    // Skip if preceded by alphanumeric (part of longer identifier)
+                    if (callPos > 0 && (isalnum((unsigned char)result[callPos - 1]) || result[callPos - 1] == '_')) {
+                        callSearch = callPos + funcName.size();
+                        continue;
+                    }
+                    // Extract argument between parens
+                    size_t argStart = callPos + funcName.size() + 1;
+                    std::string argRest = result.substr(argStart);
+                    int argCloseIdx = FindClosingBracket("(" + argRest, '(', ')', 1);
+                    if (argCloseIdx <= 0) { callSearch = argStart; continue; }
+                    std::string arg = result.substr(argStart, argCloseIdx - 1);
+                    // Trim whitespace from argument
+                    size_t as = arg.find_first_not_of(" \t\n\r");
+                    size_t ae = arg.find_last_not_of(" \t\n\r");
+                    if (as != std::string::npos) arg = arg.substr(as, ae - as + 1);
+                    // Replace: funcName(arg) → arg = funcName(arg)
+                    size_t origCallLen = funcName.size() + 1 + argCloseIdx;
+                    std::string replacement = arg + " = " + funcName + "(" + arg + ")";
+                    result.replace(callPos, origCallLen, replacement);
+                    int callDiff = (int)replacement.size() - (int)origCallLen;
+                    funcDefEnd += callDiff;
+                    callSearch = callPos + replacement.size();
+                }
+
+                searchFrom = funcDefEnd;
             }
         }
 
