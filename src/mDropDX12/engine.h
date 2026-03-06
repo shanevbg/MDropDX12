@@ -613,9 +613,9 @@ public:
 #define SHADER_OTHER 3
   bool LoadShaderFromMemory(const char* szShaderText, char* szFn, char* szProfile,
     LPD3DXCONSTANTTABLE* ppConstTable, void** ppShader, int shaderType, bool bHardErrors, bool compileOnly,
-    LPD3DXBUFFER* ppBytecodeOut = nullptr);
+    LPD3DXBUFFER* ppBytecodeOut = nullptr, const char* szDiagName = nullptr);
   bool RecompileVShader(const char* szShadersText, VShaderInfo* si, int shaderType, bool bHardErrors, bool bCompileOnly);
-  bool RecompilePShader(const char* szShadersText, PShaderInfo* si, int shaderType, bool bHardErrors, int PSVersion, bool bCompileOnly);
+  bool RecompilePShader(const char* szShadersText, PShaderInfo* si, int shaderType, bool bHardErrors, int PSVersion, bool bCompileOnly, const char* szDiagName = nullptr);
   bool EvictSomeTexture();
   typedef std::vector<TexInfo> TexInfoList;
   TexInfoList     m_textures;

@@ -639,7 +639,7 @@ bool Engine::RecompileVShader(const char* szShadersText, VShaderInfo* si, int sh
   return true;
 }
 
-bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int shaderType, bool bHardErrors, int PSVersion, bool bCompileOnly) {
+bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int shaderType, bool bHardErrors, int PSVersion, bool bCompileOnly, const char* szDiagName) {
   assert(m_nMaxPSVersion > 0);
 
   si->Clear();
@@ -665,7 +665,7 @@ bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int sh
   default: assert(0); break;
   }
 
-  if (!LoadShaderFromMemory(szShadersText, "PS", ver, &si->CT, (void**)&si->ptr, shaderType, bHardErrors, bCompileOnly, &si->bytecodeBlob)) {
+  if (!LoadShaderFromMemory(szShadersText, "PS", ver, &si->CT, (void**)&si->ptr, shaderType, bHardErrors, bCompileOnly, &si->bytecodeBlob, szDiagName)) {
     DebugLogA("DX12: RecompilePShader: LoadShaderFromMemory FAILED", LOG_ERROR);
     return false;
   }
@@ -715,38 +715,18 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
       return true;
   }
 
-  // Buffer A shader (Shadertoy two-pass) — compile BEFORE comp so diag files don't collide
+  // Buffer A shader (Shadertoy two-pass) — each pass writes its own diag files directly
   // NOTE: Do NOT set m_bHasBufferA/B or m_bCompUsesFeedback here — this may run on a
   // background thread. Those flags are derived in LoadPresetTick after the shader swap.
   if (!sh->bufferA.ptr && !sh->bufferA.CT && pState->m_nBufferAPSVersion > 0) {
-    bool bOK = RecompilePShader(pState->m_szBufferAShadersText, &sh->bufferA, SHADER_COMP, false, pState->m_nBufferAPSVersion, bCompileOnly);
+    bool bOK = RecompilePShader(pState->m_szBufferAShadersText, &sh->bufferA, SHADER_COMP, false, pState->m_nBufferAPSVersion, bCompileOnly, "bufferA");
     DebugLogA(bOK ? "DX12: LoadShaders bufferA: compiled OK" : "DX12: LoadShaders bufferA: FAILED", bOK ? LOG_VERBOSE : LOG_ERROR);
-    // Copy diag files to bufferA-specific names (RecompilePShader writes to diag_comp_*)
-    {
-      char srcPath[MAX_PATH], dstPath[MAX_PATH];
-      sprintf(srcPath, "%lsdiag_comp_shader_error.txt", m_szBaseDir);
-      sprintf(dstPath, "%lsdiag_bufferA_shader_error.txt", m_szBaseDir);
-      CopyFileA(srcPath, dstPath, FALSE);
-      sprintf(srcPath, "%lsdiag_comp_shader.txt", m_szBaseDir);
-      sprintf(dstPath, "%lsdiag_bufferA_shader.txt", m_szBaseDir);
-      CopyFileA(srcPath, dstPath, FALSE);
-    }
   }
 
-  // Buffer B shader (Shadertoy three-pass) — compile after Buffer A
+  // Buffer B shader (Shadertoy three-pass)
   if (!sh->bufferB.ptr && !sh->bufferB.CT && pState->m_nBufferBPSVersion > 0) {
-    bool bOK = RecompilePShader(pState->m_szBufferBShadersText, &sh->bufferB, SHADER_COMP, false, pState->m_nBufferBPSVersion, bCompileOnly);
+    bool bOK = RecompilePShader(pState->m_szBufferBShadersText, &sh->bufferB, SHADER_COMP, false, pState->m_nBufferBPSVersion, bCompileOnly, "bufferB");
     DebugLogA(bOK ? "DX12: LoadShaders bufferB: compiled OK" : "DX12: LoadShaders bufferB: FAILED", bOK ? LOG_VERBOSE : LOG_ERROR);
-    // Copy diag files to bufferB-specific names
-    {
-      char srcPath[MAX_PATH], dstPath[MAX_PATH];
-      sprintf(srcPath, "%lsdiag_comp_shader_error.txt", m_szBaseDir);
-      sprintf(dstPath, "%lsdiag_bufferB_shader_error.txt", m_szBaseDir);
-      CopyFileA(srcPath, dstPath, FALSE);
-      sprintf(srcPath, "%lsdiag_comp_shader.txt", m_szBaseDir);
-      sprintf(dstPath, "%lsdiag_bufferB_shader.txt", m_szBaseDir);
-      CopyFileA(srcPath, dstPath, FALSE);
-    }
   }
 
   // Comp (Image) shader — compiled after bufferA/bufferB so diag_comp_shader.txt reflects comp
@@ -1115,7 +1095,7 @@ static void FixShadowedBuiltins(char* szShaderText) {
 
 bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char* szProfile,
   LPD3DXCONSTANTTABLE* ppConstTable, void** ppShader, int shaderType, bool bHardErrors, bool compileOnly,
-  LPD3DXBUFFER* ppBytecodeOut) {
+  LPD3DXBUFFER* ppBytecodeOut, const char* szDiagName) {
 
   const char szWarpDefines[] = "#define rad _rad_ang.x\n"
     "#define ang _rad_ang.y\n"
@@ -1285,10 +1265,13 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         p = strrchr(p, '}');
         if (p) {
           if (m_bLoadingShadertoyMode && !bHardErrors) {
-            // Shadertoy: output all 4 channels directly (no shiftHSV, no alpha override)
-            // Both Buffer A and Image passes output ret unchanged.
-            // Buffer A writes to FLOAT32 feedback; Image writes to UNORM backbuffer.
-            char szLastLine[] = "    _return_value = ret;";
+            // Shadertoy output: Buffer A/B preserve full float4 (alpha stores data);
+            // Image/comp forces alpha=1 (shaders that write .rgb leave alpha=0 which
+            // would be transparent — the old non-Shadertoy wrapper used _vDiffuse.w=1).
+            bool bIsBuffer = szDiagName && (strcmp(szDiagName, "bufferA") == 0 || strcmp(szDiagName, "bufferB") == 0);
+            const char* szLastLine = bIsBuffer
+              ? "    _return_value = ret;"
+              : "    _return_value = float4(ret.xyz, 1.0);";
             sprintf(p, " %s\n}\n", szLastLine);
           } else {
             // MilkDrop3 does NOT apply gamma_adj or B/D/S/I for custom comp shader presets.
@@ -1318,7 +1301,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
 
   // Dump assembled shader text to file for diagnostics (written to m_szBaseDir)
   if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
-    const char* typeName = shaderType == SHADER_COMP ? "comp" : "warp";
+    const char* typeName = szDiagName ? szDiagName : (shaderType == SHADER_COMP ? "comp" : "warp");
     char dumpPath[MAX_PATH];
     sprintf(dumpPath, "%lsdiag_%s_shader.txt", m_szBaseDir, typeName);
     FILE* f = fopen(dumpPath, "w");
@@ -1423,7 +1406,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
 
         // Write D3DCompile error to diagnostic file for Shader Import window
         if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
-          const char* typeName = shaderType == SHADER_COMP ? "comp" : "warp";
+          const char* typeName = szDiagName ? szDiagName : (shaderType == SHADER_COMP ? "comp" : "warp");
           char errPath[MAX_PATH];
           sprintf(errPath, "%lsdiag_%s_shader_error.txt", m_szBaseDir, typeName);
           FILE* ef = fopen(errPath, "w");
@@ -1450,7 +1433,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
 
     // Clear stale error file on successful compilation
     if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
-      const char* typeName = shaderType == SHADER_COMP ? "comp" : "warp";
+      const char* typeName = szDiagName ? szDiagName : (shaderType == SHADER_COMP ? "comp" : "warp");
       char errPath[MAX_PATH];
       sprintf(errPath, "%lsdiag_%s_shader_error.txt", m_szBaseDir, typeName);
       FILE* ef = fopen(errPath, "w");

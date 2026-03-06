@@ -165,4 +165,4 @@ Per-pass diagnostic dumps written to `m_szBaseDir` (same dir as exe / debug.log)
 | `src/mDropDX12/tool_window.h` | ShaderPass struct, ShaderEditorWindow, ShaderImportWindow classes |
 | `src/mDropDX12/engine_helpers.h` | Control IDs for shader import/editor UI |
 | `src/mDropDX12/embedded_shaders.h` | Sampler declarations with register assignments |
-| `docs/GLSL_to_HLSL.md` | General GLSL→HLSL conversion reference |
+| `docs/GLSL_importing.md` | General GLSL→HLSL conversion reference |

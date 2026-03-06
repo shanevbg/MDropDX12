@@ -1888,6 +1888,27 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
         replaceAll(inp, "texelFetch_conv(sampler_noise_lq,", "texelFetch_noise(sampler_noise_lq,");
         replaceAll(inp, "texelFetch_conv(sampler_noise_mq,", "texelFetch_noise(sampler_noise_mq,");
         replaceAll(inp, "texelFetch_conv(sampler_noise_hq,", "texelFetch_noise(sampler_noise_hq,");
+        // Image pass: flip V on external texture reads to compensate for the
+        // flipped quad UVs (Shadertoy fragCoord convention). Buffer/feedback reads
+        // are self-consistent (written and read with same convention) so they stay.
+        if (m_passes[passIdx].name == L"Image") {
+            // External samplers that need V-flip (non-feedback, non-buffer)
+            const char* extSamplers[] = {
+                "sampler_noise_lq", "sampler_noise_mq", "sampler_noise_hq",
+                "sampler_noisevol_lq", "sampler_noisevol_hq",
+                "sampler_image", "sampler_audio", "sampler_rand00"
+            };
+            for (auto* s : extSamplers) {
+                char from[64], to[64];
+                sprintf_s(from, "tex2D(%s,", s);
+                sprintf_s(to, "tex2D_flipV(%s,", s);
+                replaceAll(inp, from, to);
+                sprintf_s(from, "tex2Dlod_conv(%s,", s);
+                sprintf_s(to, "tex2Dlod_flipV(%s,", s);
+                replaceAll(inp, from, to);
+            }
+        }
+
         // textureSize(sampler, mip) → int2(texsize.xy)
         // Shadertoy uses this for "is texture loaded" checks; in MDropDX12 textures are always bound.
         replaceAll(inp, "textureSize(", "_texSize(");
@@ -2196,6 +2217,20 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                 "// CONV: texelFetch for screen-sized textures\n"
                 "float4 texelFetch_conv(sampler2D s, int2 c, int l) {\n"
                 "  return tex2Dlod(s, float4((float2(c) + 0.5) * texsize.zw, 0, l));\n"
+                "}\n\n";
+            inpHeader = helper + inpHeader;
+        }
+
+        // Add V-flip texture helpers for Image pass external texture reads
+        if (inp.find("tex2D_flipV(") != std::string::npos || inp.find("tex2Dlod_flipV(") != std::string::npos) {
+            std::string helper =
+                "// CONV: V-flip wrappers for external textures in Image pass\n"
+                "// Compensates for flipped quad UVs (Shadertoy fragCoord convention)\n"
+                "float4 tex2D_flipV(sampler2D _s, float2 _tc) {\n"
+                "  return tex2D(_s, float2(_tc.x, 1.0 - _tc.y));\n"
+                "}\n"
+                "float4 tex2Dlod_flipV(sampler2D _s, float2 _tc, float _lod) {\n"
+                "  return tex2Dlod(_s, float4(_tc.x, 1.0 - _tc.y, 0, _lod));\n"
                 "}\n\n";
             inpHeader = helper + inpHeader;
         }

@@ -70,7 +70,7 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - Drag-and-drop presets, folders, and textures
 - Command-line preset loading (double-click .milk/.milk2 in Explorer; forwards to running instance via IPC)
 - File association registration for .milk/.milk2 (Settings → About, HKCU, no admin)
-- Shadertoy import: GLSL→HLSL converter with .milk3 JSON format (SM5.0 / `ps_5_0`), separate render path (`RenderFrameShadertoy`), FLOAT32 ping-pong feedback buffers (see `docs/GLSL_to_HLSL.md`)
+- Shadertoy import: GLSL→HLSL converter with .milk3 JSON format (SM5.0 / `ps_5_0`), separate render path (`RenderFrameShadertoy`), FLOAT32 ping-pong feedback buffers (see `docs/GLSL_importing.md`)
 - Preset filter by type (All / .milk / .milk2) in preset browser; random/sequential selection respects filter
 - Custom preset variables: `bass_smooth`, `mid_smooth`, `treb_smooth`, `vol_smooth`, `vis_intensity`, `vis_shift`, `vis_version`, `colshift_hue`
 

@@ -2224,24 +2224,47 @@ void Engine::ExecuteRenderCommand(const RenderCommand& cmd) {
       ClearErrors(ERR_PRESET);
       bool allOK = true;
       if (m_nMaxPSVersion > 0) {
-        m_shaders.comp.Clear();
-        if (!RecompilePShader(m_pState->m_szCompShadersText, &m_shaders.comp,
-                              SHADER_COMP, false, m_pState->m_nCompPSVersion, false)) {
-          m_shaders.comp = m_fallbackShaders_ps.comp;
-          allOK = false;
-        }
         // Recompile Buffer A if present
         m_bHasBufferA = false;
         m_shaders.bufferA.Clear();
         if (m_pState->m_nBufferAPSVersion > 0 && m_pState->m_szBufferAShadersText[0]) {
           if (RecompilePShader(m_pState->m_szBufferAShadersText, &m_shaders.bufferA,
-                               SHADER_COMP, false, m_pState->m_nBufferAPSVersion, false)) {
+                               SHADER_COMP, false, m_pState->m_nBufferAPSVersion, false, "bufferA")) {
             m_bHasBufferA = true;
             m_bCompUsesFeedback = true;
           } else {
             allOK = false;
           }
         }
+        // Recompile Buffer B if present
+        m_bHasBufferB = false;
+        m_shaders.bufferB.Clear();
+        if (m_pState->m_nBufferBPSVersion > 0 && m_pState->m_szBufferBShadersText[0]) {
+          if (RecompilePShader(m_pState->m_szBufferBShadersText, &m_shaders.bufferB,
+                               SHADER_COMP, false, m_pState->m_nBufferBPSVersion, false, "bufferB")) {
+            m_bHasBufferB = true;
+          } else {
+            allOK = false;
+          }
+        }
+        // Recompile Image/comp shader last (so diag_comp_* reflects Image pass)
+        m_shaders.comp.Clear();
+        if (!RecompilePShader(m_pState->m_szCompShadersText, &m_shaders.comp,
+                              SHADER_COMP, false, m_pState->m_nCompPSVersion, false)) {
+          m_shaders.comp = m_fallbackShaders_ps.comp;
+          allOK = false;
+        }
+        // Derive feedback flags from compiled shaders (same as LoadPresetTick)
+        m_bCompUsesFeedback = m_bHasBufferA;
+        m_bCompUsesImageFeedback = false;
+        for (int i = 0; i < 16; i++) {
+          if (m_shaders.comp.params.m_texcode[i] == TEX_FEEDBACK)
+            m_bCompUsesFeedback = true;
+          if (m_shaders.comp.params.m_texcode[i] == TEX_IMAGE_FEEDBACK)
+            m_bCompUsesImageFeedback = true;
+        }
+        // Reset Shadertoy start frame so feedback buffers get cleared
+        m_nShadertoyStartFrame = GetFrame();
         CreateDX12PresetPSOs();
       }
       m_nRecompileResult.store(allOK ? 2 : 3);  // 2=ok, 3=fail
