@@ -791,10 +791,8 @@ void EngineShell::OnUserResizeWindow() {
         // Check if device is still alive before attempting resize
         HRESULT devReason = m_lpDX->m_device->GetDeviceRemovedReason();
         if (devReason != S_OK) {
-          char dbg[256];
-          sprintf(dbg, "DX12: Device already removed (reason=0x%08X) before ResizeSwapChain — triggering recovery",
+          DLOG_ERROR("DX12: Device already removed (reason=0x%08X) before ResizeSwapChain — triggering recovery",
                   (unsigned)devReason);
-          DebugLogA(dbg, LOG_ERROR);
           m_lpDX->m_lastErr = devReason;
           return;
         }
@@ -1357,10 +1355,8 @@ int EngineShell::PluginRender(unsigned char* pWaveL, unsigned char* pWaveR)//, u
   // DXGI Present returns DXGI_ERROR_DEVICE_REMOVED/RESET in catastrophic cases,
   // which are handled inside DXContext::EndFrame() and surfaced via m_lastErr.
   if (m_lpDX->m_lastErr != S_OK) {
-    char dbg[512];
-    sprintf(dbg, "TDR Recovery: Device lost detected (hr=0x%08X) — signaling recovery",
+    DLOG_ERROR("TDR Recovery: Device lost detected (hr=0x%08X) — signaling recovery",
             (unsigned)m_lpDX->m_lastErr);
-    DebugLogA(dbg, LOG_ERROR);
     m_bDeviceRecoveryPending = true;
     return false;  // signal caller to attempt recovery
   }
@@ -1520,13 +1516,9 @@ void EngineShell::DrawAndDisplay(int redraw) {
       m_bScreenshotRequested = false;
       m_lpDX->WaitForGpu();
 
-      {
-        wchar_t dbg[512];
-        swprintf_s(dbg, L"[CaptureScreenshot] Saving to: %s (%ux%u, pitch=%u)",
+      DLOGW_INFO(L"[CaptureScreenshot] Saving to: %s (%ux%u, pitch=%u)",
                    m_screenshotPath, screenshotWidth, screenshotHeight,
                    screenshotLayout.Footprint.RowPitch);
-        DebugLogW(dbg);
-      }
 
       void* pData = nullptr;
       HRESULT hr = screenshotReadback->Map(0, nullptr, &pData);

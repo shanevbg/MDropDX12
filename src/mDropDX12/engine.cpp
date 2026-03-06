@@ -1286,9 +1286,8 @@ void Engine::MyReadConfig() {
     if (m_fAudioSensitivity < 0.5f) m_fAudioSensitivity = 0.5f;
     mdropdx12_audio_sensitivity = m_fAudioSensitivity;
   }
-  { char dbg[128]; sprintf(dbg, "AudioSensitivity: %.2f, adaptive=%d, gain=%.2f",
+  DLOG_INFO("AudioSensitivity: %.2f, adaptive=%d, gain=%.2f",
     m_fAudioSensitivity, (int)mdropdx12_audio_adaptive, mdropdx12_audio_sensitivity);
-    DebugLogA(dbg); }
   m_bEnablePresetStartupSavingOnClose = GetPrivateProfileBoolW(L"Settings", L"bEnablePresetStartupSavingOnClose", m_bEnablePresetStartupSavingOnClose, pIni);
 
   m_bAutoLockPresetWhenNoMusic = GetPrivateProfileBoolW(L"Settings", L"bAutoLockPresetWhenNoMusic", m_bAutoLockPresetWhenNoMusic, pIni);
@@ -1447,6 +1446,8 @@ void Engine::MyReadConfig() {
   if (m_bSelfBootstrapped && m_LogLevel < 4)
     m_LogLevel = 4; // verbose logging for first-run diagnostics
   DebugLogSetLevel(m_LogLevel); // apply log level to DebugLog system
+  m_LogOutput = GetPrivateProfileIntW(L"Milkwave", L"LogOutput", m_LogOutput, pIni);
+  DebugLogSetOutput(m_LogOutput);
   GetPrivateProfileStringW(L"Milkwave", L"WindowTitle", L"", m_szWindowTitle, 256, pIni);
   GetPrivateProfileStringW(L"Milkwave", L"RemoteWindowTitle", L"", m_szRemoteWindowTitle, 256, pIni);
 
@@ -2291,9 +2292,7 @@ int Engine::AllocateMyDX9Stuff() {
             m_BlurShaders[bi].ps.bytecodeBlob->GetBufferPointer(),
             (UINT)m_BlurShaders[bi].ps.bytecodeBlob->GetBufferSize(),
             g_MyVertexLayout, _countof(g_MyVertexLayout), false);
-          char dbg[128];
-          sprintf(dbg, "DX12: Blur PSO[%d] %s", bi, m_dx12BlurPSO[bi] ? "created" : "FAILED");
-          DebugLogA(dbg);
+          DLOG_INFO("DX12: Blur PSO[%d] %s", bi, m_dx12BlurPSO[bi] ? "created" : "FAILED");
         }
       }
     }

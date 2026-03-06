@@ -1399,7 +1399,6 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
     //m_szWarpShadersText[0] = 0;
     ReadCode(f, m_szWarpShadersText, "warp_");
     {
-      char dbg[512];
       int textLen = (int)strlen(m_szWarpShadersText);
       char preview[201] = {0};
       if (textLen > 0) {
@@ -1408,9 +1407,8 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
         for (int i = 0; i < 200 && preview[i]; i++)
           if (preview[i] < 32 && preview[i] != 0) preview[i] = '|';
       }
-      sprintf(dbg, "DIAG Import warp: ReadCode len=%d nWarpPSVersionInFile=%d text='%.200s'",
+      DLOG_VERBOSE("DIAG Import warp: ReadCode len=%d nWarpPSVersionInFile=%d text='%.200s'",
               textLen, nWarpPSVersionInFile, preview);
-      DebugLogA(dbg, LOG_VERBOSE);
     }
     if (!m_szWarpShadersText[0]) {
       DebugLogA("DIAG Import warp: EMPTY - falling back to GenWarpPShaderText", LOG_VERBOSE);
@@ -1424,7 +1422,6 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
     //m_szCompShadersText[0] = 0;
     ReadCode(f, m_szCompShadersText, "comp_", MAX_SHADER_TEXT_LEN);
     {
-      char dbg[512];
       int textLen = (int)strlen(m_szCompShadersText);
       char preview[201] = {0};
       if (textLen > 0) {
@@ -1432,9 +1429,8 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
         for (int i = 0; i < 200 && preview[i]; i++)
           if (preview[i] < 32 && preview[i] != 0) preview[i] = '|';
       }
-      sprintf(dbg, "DIAG Import comp: ReadCode len=%d nCompPSVersionInFile=%d text='%.200s'",
+      DLOG_VERBOSE("DIAG Import comp: ReadCode len=%d nCompPSVersionInFile=%d text='%.200s'",
               textLen, nCompPSVersionInFile, preview);
-      DebugLogA(dbg, LOG_VERBOSE);
     }
     if (!m_szCompShadersText[0]) {
       DebugLogA("DIAG Import comp: EMPTY - falling back to GenCompPShaderText", LOG_VERBOSE);
@@ -1569,9 +1565,7 @@ void CState::StripLinefeedCharsAndComments(char* src, char* dest) {
 
 void CState::RecompileExpressions(int flags, int bReInit) {
   if ((flags & RECOMPILE_PRESET_CODE) && m_szDesc[0]) {
-    char dbg[512];
-    sprintf(dbg, "EEL: Compiling preset: %ls", m_szDesc);
-    DebugLogA(dbg, LOG_VERBOSE);
+    DLOG_VERBOSE("EEL: Compiling preset: %ls", m_szDesc);
   }
   // before we get started, if we redo the init code for the preset, we have to redo
   // other things too, because q1-q8 could change.
@@ -1705,9 +1699,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
 
         if (!(pf_codehandle_init = NSEEL_code_compile(m_pf_eel, buf, 0))) {
           const char* err = NSEEL_code_getcodeerror(m_pf_eel);
-          char dbg[512];
-          sprintf(dbg, "EEL: preset init compile FAILED: %s", err ? err : "(unknown)");
-          DebugLogA(dbg, LOG_WARN);
+          DLOG_WARN("EEL: preset init compile FAILED: %s", err ? err : "(unknown)");
           wchar_t buf[1024];
           swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_PRESET_INIT_CODE), m_szDesc);
           g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
@@ -1737,9 +1729,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
       if (buf[0]) {
         if (!(m_pf_codehandle = NSEEL_code_compile(m_pf_eel, buf, 0))) {
           const char* err = NSEEL_code_getcodeerror(m_pf_eel);
-          char dbg[512];
-          sprintf(dbg, "EEL: per-frame compile FAILED: %s", err ? err : "(unknown)");
-          DebugLogA(dbg, LOG_WARN);
+          DLOG_WARN("EEL: per-frame compile FAILED: %s", err ? err : "(unknown)");
           wchar_t buf[1024];
           swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_PER_FRAME_CODE), m_szDesc);
           g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
@@ -1751,9 +1741,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
       if (buf[0]) {
         if (!(m_pp_codehandle = NSEEL_code_compile(m_pv_eel, buf, 0))) {
           const char* err = NSEEL_code_getcodeerror(m_pv_eel);
-          char dbg[512];
-          sprintf(dbg, "EEL: per-pixel compile FAILED: %s", err ? err : "(unknown)");
-          DebugLogA(dbg, LOG_WARN);
+          DLOG_WARN("EEL: per-pixel compile FAILED: %s", err ? err : "(unknown)");
           wchar_t buf[1024];
           swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_PER_VERTEX_CODE), m_szDesc);
           g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
@@ -1807,9 +1795,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
 #ifndef _NO_EXPR_
           if (!(m_wave[i].m_pf_codehandle = NSEEL_code_compile(m_wave[i].m_pf_eel, buf, 0))) {
             const char* err = NSEEL_code_getcodeerror(m_wave[i].m_pf_eel);
-            char dbg[512];
-            sprintf(dbg, "EEL: wave %d per-frame compile FAILED: %s", i, err ? err : "(unknown)");
-            DebugLogA(dbg, LOG_WARN);
+            DLOG_WARN("EEL: wave %d per-frame compile FAILED: %s", i, err ? err : "(unknown)");
             wchar_t buf[1024];
             swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_WAVE_X_PER_FRAME_CODE), m_szDesc, i);
             g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
@@ -1822,9 +1808,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
         if (buf[0]) {
           if (!(m_wave[i].m_pp_codehandle = NSEEL_code_compile(m_wave[i].m_pp_eel, buf, 0))) {
             const char* err = NSEEL_code_getcodeerror(m_wave[i].m_pp_eel);
-            char dbg[512];
-            sprintf(dbg, "EEL: wave %d per-point compile FAILED: %s", i, err ? err : "(unknown)");
-            DebugLogA(dbg, LOG_WARN);
+            DLOG_WARN("EEL: wave %d per-point compile FAILED: %s", i, err ? err : "(unknown)");
             wchar_t buf[1024];
             swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_WAVE_X_PER_POINT_CODE), m_szDesc, i);
             g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
@@ -1843,9 +1827,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
             NSEEL_CODEHANDLE	codehandle_temp;
             if (!(codehandle_temp = NSEEL_code_compile(m_shape[i].m_pf_eel, buf, 0))) {
               const char* err = NSEEL_code_getcodeerror(m_shape[i].m_pf_eel);
-              char dbg[512];
-              sprintf(dbg, "EEL: shape %d init compile FAILED: %s", i, err ? err : "(unknown)");
-              DebugLogA(dbg, LOG_WARN);
+              DLOG_WARN("EEL: shape %d init compile FAILED: %s", i, err ? err : "(unknown)");
               wchar_t buf[1024];
               swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_SHAPE_X_INIT_CODE), m_szDesc, i);
               g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
@@ -1881,9 +1863,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
 #ifndef _NO_EXPR_
           if (!(m_shape[i].m_pf_codehandle = NSEEL_code_compile(m_shape[i].m_pf_eel, buf, 0))) {
             const char* err = NSEEL_code_getcodeerror(m_shape[i].m_pf_eel);
-            char dbg[512];
-            sprintf(dbg, "EEL: shape %d per-frame compile FAILED: %s", i, err ? err : "(unknown)");
-            DebugLogA(dbg, LOG_WARN);
+            DLOG_WARN("EEL: shape %d per-frame compile FAILED: %s", i, err ? err : "(unknown)");
             wchar_t buf[1024];
             swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_SHAPE_X_PER_FRAME_CODE), m_szDesc, i);
             g_engine.AddError(buf, 6.0f, ERR_PRESET, true);

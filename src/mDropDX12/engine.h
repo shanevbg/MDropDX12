@@ -637,6 +637,7 @@ public:
   bool    m_ShaderPrecompileOnStartup = true;
   bool    m_CheckDirectXOnStartup = true;
   int     m_LogLevel = 1; // 0=Off, 1=Error, 2=Warn, 3=Info, 4=Verbose
+  int     m_LogOutput = 3; // LOG_OUTPUT_BOTH (FILE|ODS), see utility.h
   bool    m_ShowLockSymbol = true;
   float   m_fAnimTime;
   float   m_fStartTime;

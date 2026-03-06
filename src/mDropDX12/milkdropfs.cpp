@@ -1687,12 +1687,10 @@ void mdrop::Engine::DX12_BlurPasses()
   // Diagnostic: log blur pass info once per preset load
   bool bLogDiag = !m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f;
   if (bLogDiag) {
-    char dbg[256];
-    sprintf(dbg, "DX12 BlurPasses: highest=%d, passes=%d, PSO[0]=%s, PSO[1]=%s, blur[1].srv=%u, blur[3].srv=%u",
+    DLOG_VERBOSE("DX12 BlurPasses: highest=%d, passes=%d, PSO[0]=%s, PSO[1]=%s, blur[1].srv=%u, blur[3].srv=%u",
             m_nHighestBlurTexUsedThisFrame, passes,
             m_dx12BlurPSO[0] ? "OK" : "NULL", m_dx12BlurPSO[1] ? "OK" : "NULL",
             m_dx12Blur[1].srvIndex, m_dx12Blur[3].srvIndex);
-    DebugLogA(dbg, LOG_VERBOSE);
   }
 
   if (passes == 0)
@@ -1774,8 +1772,7 @@ void mdrop::Engine::DX12_BlurPasses()
     float fbias_now = fbias[i / 2];
 
     if (bLogDiag) {
-      char dbg[512];
-      sprintf(dbg, "DIAG BlurPass[%d]: src=%ux%u(srv=%u) dst=%ux%u(srv=%u,rtv=%u) "
+      DLOG_VERBOSE("DIAG BlurPass[%d]: src=%ux%u(srv=%u) dst=%ux%u(srv=%u,rtv=%u) "
               "CT=%p h[0]=%p h[1]=%p h[2]=%p h[3]=%p h[5]=%p h[6]=%p "
               "srcTexSize=(%.1f,%.1f,%.6f,%.6f) fscale=%.3f fbias=%.3f shadowSz=%u",
               i, srcTex.width, srcTex.height, srcTex.srvIndex,
@@ -1784,7 +1781,6 @@ void mdrop::Engine::DX12_BlurPasses()
               srctexsize.x, srctexsize.y, srctexsize.z, srctexsize.w,
               fscale_now, fbias_now,
               pCT ? static_cast<DX12ConstantTable*>(pCT)->GetShadowSize() : 0);
-      DebugLogA(dbg, LOG_VERBOSE);
     }
 
     if (i % 2 == 0) {
@@ -1863,8 +1859,8 @@ void mdrop::Engine::RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList)
   // Update audio texture (FFT + waveform) for this frame
   UpdateAudioTexture();
 
-  // Truncate binding diagnostics file on first Shadertoy frame
-  if (stFrame == 0) {
+  // Truncate binding diagnostics file on first Shadertoy frame (Verbose only)
+  if (DLOG_DIAG_ENABLED() && stFrame == 0) {
     wchar_t diagPath[MAX_PATH];
     swprintf(diagPath, MAX_PATH, L"%sdiag_bindings.txt", m_szBaseDir);
     FILE* fp = nullptr;
@@ -1874,20 +1870,16 @@ void mdrop::Engine::RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList)
 
   // One-time diagnostics on first Shadertoy frame
   if (stFrame == 0) {
-    char dbg[256];
-    sprintf(dbg, "Shadertoy: fb[0]=%s (%ux%u fmt=%u) fb[1]=%s (%ux%u fmt=%u)",
+    DLOG_INFO("Shadertoy: fb[0]=%s (%ux%u fmt=%u) fb[1]=%s (%ux%u fmt=%u)",
       m_dx12Feedback[0].IsValid() ? "OK" : "INVALID",
       m_dx12Feedback[0].width, m_dx12Feedback[0].height, (UINT)m_dx12Feedback[0].format,
       m_dx12Feedback[1].IsValid() ? "OK" : "INVALID",
       m_dx12Feedback[1].width, m_dx12Feedback[1].height, (UINT)m_dx12Feedback[1].format);
-    DebugLogA(dbg, LOG_INFO);
-    sprintf(dbg, "Shadertoy: bufferA_PSO=%s comp_PSO=%s hasBufferA=%d compUsesFeedback=%d compUsesImageFeedback=%d",
+    DLOG_INFO("Shadertoy: bufferA_PSO=%s comp_PSO=%s hasBufferA=%d compUsesFeedback=%d compUsesImageFeedback=%d",
       m_dx12BufferAPSO ? "OK" : "NULL", m_dx12CompPSO ? "OK" : "NULL",
       (int)m_bHasBufferA, (int)m_bCompUsesFeedback, (int)m_bCompUsesImageFeedback);
-    DebugLogA(dbg, LOG_INFO);
-    sprintf(dbg, "Shadertoy: texSize=%dx%d fbRead=%d fbWrite=%d",
+    DLOG_INFO("Shadertoy: texSize=%dx%d fbRead=%d fbWrite=%d",
       m_nTexSizeX, m_nTexSizeY, fbRead, fbWrite);
-    DebugLogA(dbg, LOG_INFO);
 
     // HUD notification
     wchar_t note[256];
@@ -2285,40 +2277,33 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     if (!m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f) {
       // Log comp shader's m_texcode and resulting binding slots
       {
-        char dbg[512];
         CShaderParams* cp = &m_shaders.comp.params;
-        sprintf(dbg, "DIAG CompBindings texcode: [%d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d]",
+        DLOG_VERBOSE("DIAG CompBindings texcode: [%d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d]",
                 cp->m_texcode[0], cp->m_texcode[1], cp->m_texcode[2], cp->m_texcode[3],
                 cp->m_texcode[4], cp->m_texcode[5], cp->m_texcode[6], cp->m_texcode[7],
                 cp->m_texcode[8], cp->m_texcode[9], cp->m_texcode[10], cp->m_texcode[11],
                 cp->m_texcode[12], cp->m_texcode[13], cp->m_texcode[14], cp->m_texcode[15]);
-        DebugLogA(dbg, LOG_VERBOSE);
-        sprintf(dbg, "DIAG CompBindings slots:   [%u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u]",
+        DLOG_VERBOSE("DIAG CompBindings slots:   [%u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u]",
                 compSlots[0], compSlots[1], compSlots[2], compSlots[3],
                 compSlots[4], compSlots[5], compSlots[6], compSlots[7],
                 compSlots[8], compSlots[9], compSlots[10], compSlots[11],
                 compSlots[12], compSlots[13], compSlots[14], compSlots[15]);
-        DebugLogA(dbg, LOG_VERBOSE);
-        sprintf(dbg, "DIAG CompBindings blur SRVs: blur[1].srv=%u blur[3].srv=%u blur[5].srv=%u VS[1].srv=%u",
+        DLOG_VERBOSE("DIAG CompBindings blur SRVs: blur[1].srv=%u blur[3].srv=%u blur[5].srv=%u VS[1].srv=%u",
                 m_dx12Blur[1].srvIndex, m_dx12Blur[3].srvIndex, m_dx12Blur[5].srvIndex, m_dx12VS[1].srvIndex);
-        DebugLogA(dbg, LOG_VERBOSE);
       }
       // Log warp shader's m_texcode
       {
-        char dbg[512];
         CShaderParams* wp = &m_shaders.warp.params;
-        sprintf(dbg, "DIAG WarpBindings texcode: [%d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d]",
+        DLOG_VERBOSE("DIAG WarpBindings texcode: [%d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d]",
                 wp->m_texcode[0], wp->m_texcode[1], wp->m_texcode[2], wp->m_texcode[3],
                 wp->m_texcode[4], wp->m_texcode[5], wp->m_texcode[6], wp->m_texcode[7],
                 wp->m_texcode[8], wp->m_texcode[9], wp->m_texcode[10], wp->m_texcode[11],
                 wp->m_texcode[12], wp->m_texcode[13], wp->m_texcode[14], wp->m_texcode[15]);
-        DebugLogA(dbg, LOG_VERBOSE);
-        sprintf(dbg, "DIAG WarpBindings slots:   [%u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u]",
+        DLOG_VERBOSE("DIAG WarpBindings slots:   [%u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u, %u,%u,%u,%u]",
                 warpSlots[0], warpSlots[1], warpSlots[2], warpSlots[3],
                 warpSlots[4], warpSlots[5], warpSlots[6], warpSlots[7],
                 warpSlots[8], warpSlots[9], warpSlots[10], warpSlots[11],
                 warpSlots[12], warpSlots[13], warpSlots[14], warpSlots[15]);
-        DebugLogA(dbg, LOG_VERBOSE);
       }
     }
 
@@ -2333,12 +2318,10 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
 
     // Diagnostic: log warp pass state once per preset load
     if (!m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f) {
-      char dbg[256];
-      sprintf(dbg, "DX12 Warp Draw: PSO=%s, warpCT=%s, decay=%.4f",
+      DLOG_VERBOSE("DX12 Warp Draw: PSO=%s, warpCT=%s, decay=%.4f",
               m_dx12WarpPSO ? "PRESET" : "FALLBACK",
               (m_shaders.warp.CT != nullptr) ? "yes" : "no",
               (float)(*m_pState->var_pf_decay));
-      DebugLogA(dbg, LOG_VERBOSE);
     }
 
     // Bind warp shader constant buffer
@@ -3589,11 +3572,9 @@ void mdrop::Engine::DX12_DrawCustomShapes() {
         totalInstances += m_pOldState->m_shape[i].instances;
     }
     if (totalInstances > m_nHeavyPresetMaxInstances) {
-      char dbg[512];
-      sprintf(dbg, "GPU Protection: Skipping shapes — total instances %d exceeds threshold %d (preset: %ls)",
+      DLOG_INFO("GPU Protection: Skipping shapes — total instances %d exceeds threshold %d (preset: %ls)",
               totalInstances, m_nHeavyPresetMaxInstances,
               wcsrchr(m_szCurrentPresetFile, L'\\') ? wcsrchr(m_szCurrentPresetFile, L'\\') + 1 : m_szCurrentPresetFile);
-      DebugLogA(dbg);
       return;
     }
   }
@@ -3634,11 +3615,9 @@ void mdrop::Engine::DX12_DrawCustomShapes() {
         if (effectiveMaxInstances > 0 && instances > effectiveMaxInstances) {
           // Log once per preset (within first half-second)
           if (GetTime() - m_fPresetStartTime < 0.5f) {
-            char dbg[512];
-            sprintf(dbg, "GPU Protection: Capping shape[%d] instances from %d to %d (res=%dx%d, preset: %ls)",
+            DLOG_INFO("GPU Protection: Capping shape[%d] instances from %d to %d (res=%dx%d, preset: %ls)",
                     i, instances, effectiveMaxInstances, m_nTexSizeX, m_nTexSizeY,
                     wcsrchr(m_szCurrentPresetFile, L'\\') ? wcsrchr(m_szCurrentPresetFile, L'\\') + 1 : m_szCurrentPresetFile);
-            DebugLogA(dbg);
           }
           instances = effectiveMaxInstances;
         }
@@ -3781,10 +3760,8 @@ void mdrop::Engine::DX12_DrawCustomShapes() {
 
   // Diagnostic: log shape draw stats once per preset load
   if (!m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f) {
-    char dbg[512];
-    sprintf(dbg, "DX12 Shapes: drawn=%d visible=%d firstAlpha=%.3f firstColor=0x%08X",
+    DLOG_VERBOSE("DX12 Shapes: drawn=%d visible=%d firstAlpha=%.3f firstColor=0x%08X",
             diag_shapesDrawn, diag_shapesVisible, diag_firstVisibleAlpha, diag_firstVisibleColor);
-    DebugLogA(dbg, LOG_VERBOSE);
   }
 }
 
@@ -6781,8 +6758,8 @@ void mdrop::Engine::BuildBindingSlots(CShaderParams* params, const DX12Texture& 
       break;
     }
   }
-  // Diagnostic dump for Shadertoy binding verification — write directly to file
-  if (m_bShadertoyMode && !m_bPresetDiagLogged) {
+  // Diagnostic dump for Shadertoy binding verification (Verbose only)
+  if (DLOG_DIAG_ENABLED() && m_bShadertoyMode && !m_bPresetDiagLogged) {
     wchar_t diagPath[MAX_PATH];
     swprintf(diagPath, MAX_PATH, L"%sdiag_bindings.txt", m_szBaseDir);
     FILE* fp = nullptr;

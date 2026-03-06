@@ -4,6 +4,7 @@
 #include <initguid.h>      // MUST be first — instantiates WASAPI GUIDs (replaces guid.cpp)
 #include "audio_capture.h"
 #include "d3dx9compat.h"    // DebugLogA, DebugLogW, LOG_VERBOSE, LOG_ERROR, LOG_INFO
+#include "utility.h"        // DLOG_* macros
 #include "mdropdx12.h"      // MDropDX12 class for logging from capture thread
 
 #include <stdexcept>
@@ -94,10 +95,8 @@ int8_t FltToInt(float flt) {
   }
   flt *= gain;
   if (++s_diagCount >= 48000) {
-    char dbg[128];
-    sprintf(dbg, "[AudioDiag] adaptive=%d gain=%.3f peak=%.5f flt_out=%.4f\n",
+    DLOG_VERBOSE("[AudioDiag] adaptive=%d gain=%.3f peak=%.5f flt_out=%.4f",
       (int)mdropdx12_audio_adaptive, gain, s_adaptivePeak, flt);
-    DebugLogA(dbg, LOG_VERBOSE);
     s_diagCount = 0;
   }
   if (flt >= 1.0f)  return +127;

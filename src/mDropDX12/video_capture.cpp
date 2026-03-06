@@ -208,11 +208,7 @@ bool VideoCaptureSource::OpenWebcam(const wchar_t* szDeviceName)
         return false;
     }
 
-    {
-        char dbg[256];
-        sprintf_s(dbg, "VideoCapture: Webcam opened %ux%u", m_nWidth, m_nHeight);
-        DebugLogA(dbg);
-    }
+    DLOG_INFO("VideoCapture: Webcam opened %ux%u", m_nWidth, m_nHeight);
     return true;
 }
 
@@ -246,9 +242,7 @@ bool VideoCaptureSource::OpenVideoFile(const wchar_t* szFilePath)
     if (pReaderAttrs) pReaderAttrs->Release();
 
     if (FAILED(hr)) {
-        char dbg[512];
-        sprintf_s(dbg, "VideoCapture: Failed to open video file (hr=0x%08X)", hr);
-        DebugLogA(dbg, LOG_ERROR);
+        DLOG_ERROR("VideoCapture: Failed to open video file (hr=0x%08X)", hr);
         return false;
     }
 
@@ -265,9 +259,7 @@ bool VideoCaptureSource::OpenVideoFile(const wchar_t* szFilePath)
         (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, pType.Get());
 
     if (FAILED(hr)) {
-        char dbg[512];
-        sprintf_s(dbg, "VideoCapture: Failed to set video output to RGB32 (hr=0x%08X)", hr);
-        DebugLogA(dbg, LOG_ERROR);
+        DLOG_ERROR("VideoCapture: Failed to set video output to RGB32 (hr=0x%08X)", hr);
         m_pReader.Reset();
         return false;
     }
@@ -302,11 +294,7 @@ bool VideoCaptureSource::OpenVideoFile(const wchar_t* szFilePath)
         return false;
     }
 
-    {
-        char dbg[256];
-        sprintf_s(dbg, "VideoCapture: Video file opened %ux%u", m_nWidth, m_nHeight);
-        DebugLogA(dbg);
-    }
+    DLOG_INFO("VideoCapture: Video file opened %ux%u", m_nWidth, m_nHeight);
     return true;
 }
 
@@ -659,11 +647,7 @@ bool VideoCaptureSource::EnsureGpuTexture(DXContext* dx, UINT w, UINT h)
     m_nGpuTexWidth = w;
     m_nGpuTexHeight = h;
 
-    {
-        char dbg[128];
-        sprintf_s(dbg, "VideoCapture: GPU texture created %ux%u", w, h);
-        DebugLogA(dbg);
-    }
+    DLOG_INFO("VideoCapture: GPU texture created %ux%u", w, h);
     return true;
 }
 

@@ -178,11 +178,7 @@ void Engine::LoadRandomPreset(float fBlendTime) {
   lstrcpyW(szFile, m_szPresetDir);	// note: m_szPresetDir always ends with '\'
   lstrcatW(szFile, m_presets[m_nCurrentPreset].szFilename.c_str());
 
-  {
-    char dbg[512];
-    sprintf(dbg, "LoadRandomPreset: idx=%d/%d file=%ls", m_nCurrentPreset, m_nPresets, m_presets[m_nCurrentPreset].szFilename.c_str());
-    DebugLogA(dbg);
-  }
+  DLOG_INFO("LoadRandomPreset: idx=%d/%d file=%ls", m_nCurrentPreset, m_nPresets, m_presets[m_nCurrentPreset].szFilename.c_str());
 
   if (!bHistoryEmpty)
     m_presetHistoryPos = (m_presetHistoryPos + 1) % PRESET_HIST_LEN;
@@ -1486,9 +1482,7 @@ void Engine::LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime) 
     const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
     if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
     name = name ? name + 1 : m_szCurrentPresetFile;
-    char dbg[512];
-    sprintf(dbg, "Render: Active preset: %ls", name);
-    DebugLogA(dbg);
+    DLOG_INFO("Render: Active preset: %ls", name);
   }
 
   // Import preset 1 into m_pOldState (the "from" state)
@@ -1641,9 +1635,7 @@ void Engine::LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime) 
     const wchar_t* name = wcsrchr(szPresetFilename, L'\\');
     if (!name) name = wcsrchr(szPresetFilename, L'/');
     name = name ? name + 1 : szPresetFilename;
-    char dbg[512];
-    sprintf(dbg, "LoadMilk3Preset: async compile started for %ls", name);
-    DebugLogA(dbg);
+    DLOG_INFO("LoadMilk3Preset: async compile started for %ls", name);
   }
 }
 
@@ -1728,12 +1720,8 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
   bool bIsMilk3 = lastDot && _wcsicmp(lastDot, L".milk3") == 0;
   bool bIsMilk2 = lastDot && _wcsicmp(lastDot, L".milk2") == 0;
 
-  {
-    char dbg[512];
-    sprintf(dbg, "LoadPreset: fnLen=%d lastDot=%ls milk3=%d milk2=%d path=%ls",
+  DLOG_INFO("LoadPreset: fnLen=%d lastDot=%ls milk3=%d milk2=%d path=%ls",
             fnLen, lastDot ? lastDot : L"(null)", bIsMilk3, bIsMilk2, szPresetFilename);
-    DebugLogA(dbg);
-  }
 
   if (bIsMilk3) {
     // .milk3 Shadertoy preset: parse JSON on main thread (fast), compile async
@@ -1795,10 +1783,8 @@ void Engine::OnFinishedLoadingPreset() {
       const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
       if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
       name = name ? name + 1 : m_szCurrentPresetFile;
-      char dbg[512];
-      sprintf(dbg, "GPU Warning: Preset has %d total shape instances (preset: %ls, res: %dx%d)",
+      DLOG_INFO("GPU Warning: Preset has %d total shape instances (preset: %ls, res: %dx%d)",
               totalInstances, name, m_nTexSizeX, m_nTexSizeY);
-      DebugLogA(dbg);
     }
   }
 
@@ -1963,9 +1949,7 @@ void Engine::LoadPresetTick() {
       if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
       name = name ? name + 1 : m_szCurrentPresetFile;
       float elapsed = GetTime() - m_fLoadStartTime;
-      char dbg[512];
-      sprintf(dbg, "Render: Active preset: %ls (compiled in %.1f ms)", name, elapsed * 1000.0f);
-      DebugLogA(dbg);
+      DLOG_INFO("Render: Active preset: %ls (compiled in %.1f ms)", name, elapsed * 1000.0f);
     }
 
     CState* temp = m_pState;
@@ -2064,9 +2048,7 @@ void Engine::LoadPresetTick() {
 
   // Check for timeout
   if (elapsed > m_fShaderCompileTimeout) {
-    char dbg[256];
-    sprintf(dbg, "Preset load: compilation timeout (%.1f sec), skipping preset", elapsed);
-    DebugLogA(dbg);
+    DLOG_INFO("Preset load: compilation timeout (%.1f sec), skipping preset", elapsed);
 
     // Abandon the stuck thread
     if (m_presetLoadThread.joinable())

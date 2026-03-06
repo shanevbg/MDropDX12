@@ -565,6 +565,8 @@ extern bool g_bSettingsWndClassRegistered;
 // About tab
 #define IDC_MW_FILE_ASSOC       2200   // Button: Register File Association (About tab)
 #define IDC_MW_PRESET_FILTER    2201   // Button: Preset extension filter (General tab)
+#define IDC_MW_LOGOUTPUT_FILE   2202   // Checkbox: Log Output to File (About tab)
+#define IDC_MW_LOGOUTPUT_ODS    2203   // Checkbox: Log Output to Debug Messages (About tab)
 
 // Button Board window controls (9000-9019)
 #define IDC_MW_BOARD_PIN          9000

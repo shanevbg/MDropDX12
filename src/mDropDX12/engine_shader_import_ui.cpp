@@ -3363,8 +3363,8 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
         errors += "Conversion error (exception)\r\n";
     }
 
-    // Dump converter output for diagnostics (per-pass)
-    {
+    // Dump converter output for diagnostics (Verbose only)
+    if (DLOG_DIAG_ENABLED()) {
         wchar_t diagPath[MAX_PATH];
         const wchar_t* passTag = (passIdx == 0) ? L"image" : L"bufferA";
         swprintf(diagPath, MAX_PATH, L"%lsdiag_converter_%ls.txt", m_pEngine->m_szBaseDir, passTag);

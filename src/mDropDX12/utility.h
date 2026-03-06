@@ -97,13 +97,34 @@ intptr_t myOpenURL(HWND hwnd, wchar_t* loc);
 #define LOG_INFO    3
 #define LOG_VERBOSE 4
 
+// Log output destinations (bitmask)
+#define LOG_OUTPUT_FILE  1
+#define LOG_OUTPUT_ODS   2  // OutputDebugString
+#define LOG_OUTPUT_BOTH  3  // default
+
+extern int g_debugLogLevel;
+extern int g_debugLogOutput;
+
 void DebugLogInit(const wchar_t* baseDir);
 void DebugLogSetLevel(int level);
+void DebugLogSetOutput(int output);
 void DebugLogW(const wchar_t* msg, int level = LOG_INFO);
 void DebugLogA(const char* msg, int level); // default (= LOG_INFO) is in d3dx9compat.h (included above)
 void DebugLogWFmt(const wchar_t* fmt, ...);
 void DebugLogWFmt(int level, const wchar_t* fmt, ...);
 void DebugLogAFmt(const char* fmt, ...);
 void DebugLogAFmt(int level, const char* fmt, ...);
+
+// Level-gated logging macros — skip ALL formatting when level is suppressed
+#define DLOG_ERROR(fmt, ...)   do { if (g_debugLogLevel >= LOG_ERROR)   DebugLogAFmt(LOG_ERROR, fmt, __VA_ARGS__); } while(0)
+#define DLOG_WARN(fmt, ...)    do { if (g_debugLogLevel >= LOG_WARN)    DebugLogAFmt(LOG_WARN, fmt, __VA_ARGS__); } while(0)
+#define DLOG_INFO(fmt, ...)    do { if (g_debugLogLevel >= LOG_INFO)    DebugLogAFmt(LOG_INFO, fmt, __VA_ARGS__); } while(0)
+#define DLOG_VERBOSE(fmt, ...) do { if (g_debugLogLevel >= LOG_VERBOSE) DebugLogAFmt(LOG_VERBOSE, fmt, __VA_ARGS__); } while(0)
+
+#define DLOGW_INFO(fmt, ...)    do { if (g_debugLogLevel >= LOG_INFO)    DebugLogWFmt(LOG_INFO, fmt, __VA_ARGS__); } while(0)
+#define DLOGW_VERBOSE(fmt, ...) do { if (g_debugLogLevel >= LOG_VERBOSE) DebugLogWFmt(LOG_VERBOSE, fmt, __VA_ARGS__); } while(0)
+
+// True when diagnostic files (diag_*.txt) should be written
+#define DLOG_DIAG_ENABLED() (g_debugLogLevel >= LOG_VERBOSE)
 
 #endif

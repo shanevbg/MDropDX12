@@ -1474,6 +1474,17 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
             case IDC_MW_LOGLEVEL_INFO:    newLevel = 3; break;
             case IDC_MW_LOGLEVEL_VERBOSE: newLevel = 4; break;
           }
+          // When enabling logging from Off, auto-enable both output destinations
+          if (p->m_LogLevel == 0 && newLevel > 0) {
+            p->m_LogOutput = LOG_OUTPUT_BOTH;
+            DebugLogSetOutput(p->m_LogOutput);
+            WritePrivateProfileIntW(p->m_LogOutput, L"LogOutput", p->GetConfigIniFile(), L"Milkwave");
+            // Update checkbox visuals
+            HWND hwFile = GetDlgItem(GetParent(hCtrl), IDC_MW_LOGOUTPUT_FILE);
+            HWND hwODS  = GetDlgItem(GetParent(hCtrl), IDC_MW_LOGOUTPUT_ODS);
+            if (hwFile) { SetPropW(hwFile, L"Checked", (HANDLE)(intptr_t)1); InvalidateRect(hwFile, NULL, TRUE); }
+            if (hwODS)  { SetPropW(hwODS,  L"Checked", (HANDLE)(intptr_t)1); InvalidateRect(hwODS,  NULL, TRUE); }
+          }
           p->m_LogLevel = newLevel;
           DebugLogSetLevel(newLevel);
           WritePrivateProfileIntW(newLevel, L"LogLevel", p->GetConfigIniFile(), L"Milkwave");
@@ -1491,6 +1502,18 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       }
       HWND hw = p->GetPluginWindow();
       switch (id) {
+      case IDC_MW_LOGOUTPUT_FILE:
+      case IDC_MW_LOGOUTPUT_ODS:
+      {
+        int bit = (id == IDC_MW_LOGOUTPUT_FILE) ? LOG_OUTPUT_FILE : LOG_OUTPUT_ODS;
+        if (bChecked)
+          p->m_LogOutput |= bit;
+        else
+          p->m_LogOutput &= ~bit;
+        DebugLogSetOutput(p->m_LogOutput);
+        WritePrivateProfileIntW(p->m_LogOutput, L"LogOutput", p->GetConfigIniFile(), L"Milkwave");
+        return 0;
+      }
       case IDC_MW_HARD_CUTS:
         p->m_bHardCutsDisabled = bChecked;
         p->SaveSettingToINI(SET_HARD_CUTS);
@@ -2170,6 +2193,7 @@ void SettingsWindow::DoBuildControls() {
   #define m_szRemoteWindowTitle _e->m_szRemoteWindowTitle
   #define m_szBaseDir _e->m_szBaseDir
   #define m_LogLevel _e->m_LogLevel
+  #define m_LogOutput _e->m_LogOutput
   #define m_szContentBasePath _e->m_szContentBasePath
   #define m_fallbackPaths _e->m_fallbackPaths
   #define m_szRandomTexDir _e->m_szRandomTexDir
@@ -2849,6 +2873,17 @@ void SettingsWindow::DoBuildControls() {
     rx += rbw;
     PAGE_CTRL(SP_ABOUT, CreateRadio(hw, L"Verbose", IDC_MW_LOGLEVEL_VERBOSE, rx,            y, rbw, lineH, hFont, m_LogLevel == 4, false, false));
   }
+  y += lineH + 4;
+
+  // Log Output destination checkboxes
+  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"Log Output:", x, y, lw, lineH, hFont, false));
+  {
+    int cx = x + lw + 4;
+    int cbw = 120;
+    PAGE_CTRL(SP_ABOUT, CreateCheck(hw, L"File",            IDC_MW_LOGOUTPUT_FILE, cx, y, cbw, lineH, hFont, (m_LogOutput & LOG_OUTPUT_FILE) != 0));
+    cx += cbw;
+    PAGE_CTRL(SP_ABOUT, CreateCheck(hw, L"Debug Messages",  IDC_MW_LOGOUTPUT_ODS,  cx, y, cbw + 40, lineH, hFont, (m_LogOutput & LOG_OUTPUT_ODS) != 0));
+  }
   y += lineH + 8;
 
   // File Association button
@@ -2993,6 +3028,7 @@ void SettingsWindow::DoBuildControls() {
   #undef m_szRemoteWindowTitle
   #undef m_szBaseDir
   #undef m_LogLevel
+  #undef m_LogOutput
   #undef m_szContentBasePath
   #undef m_fallbackPaths
   #undef m_szRandomTexDir

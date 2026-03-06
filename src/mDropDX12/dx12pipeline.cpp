@@ -250,7 +250,6 @@ ComPtr<ID3D12PipelineState> DX12CreatePresetPSO(
 
                 // Log all bound resources for diagnostics
                 {
-                    char dbg[256];
                     const char* typeStr = "?";
                     switch (rbd.Type) {
                     case D3D_SIT_CBUFFER: typeStr = "CBuf"; break;
@@ -258,9 +257,8 @@ ComPtr<ID3D12PipelineState> DX12CreatePresetPSO(
                     case D3D_SIT_SAMPLER: typeStr = "Samp"; break;
                     default: typeStr = "Other"; break;
                     }
-                    sprintf(dbg, "DIAG PSO Reflect[%u]: Name='%s' Type=%s BindPoint=%u BindCount=%u",
+                    DLOG_VERBOSE("DIAG PSO Reflect[%u]: Name='%s' Type=%s BindPoint=%u BindCount=%u",
                             i, rbd.Name ? rbd.Name : "(null)", typeStr, rbd.BindPoint, rbd.BindCount);
-                    DebugLogA(dbg, LOG_VERBOSE);
                 }
 
                 if (*pMainTexSlotOut == UINT_MAX && rbd.Type == D3D_SIT_TEXTURE) {

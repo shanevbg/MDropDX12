@@ -91,20 +91,16 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
 #define MAX_RAND_TEX 16
   std::wstring RandTexName[MAX_RAND_TEX];
 
-  // Diagnostic file for Shadertoy sampler debugging
+  // Diagnostic file for Shadertoy sampler debugging (Verbose only)
   FILE* fpDiag = nullptr;
-  if (g_engine.m_bLoadingShadertoyMode || g_engine.m_bShadertoyMode) {
+  if (DLOG_DIAG_ENABLED() && (g_engine.m_bLoadingShadertoyMode || g_engine.m_bShadertoyMode)) {
     wchar_t diagPath[MAX_PATH];
     swprintf(diagPath, MAX_PATH, L"%sdiag_cacheparams.txt", g_engine.m_szBaseDir);
     _wfopen_s(&fpDiag, diagPath, L"a");
     if (fpDiag) fprintf(fpDiag, "=== CacheParams: %u constants ===\n", d.Constants);
   }
 
-  {
-    char dbg[256];
-    sprintf(dbg, "DX12: CacheParams: %u constants", d.Constants);
-    DebugLogA(dbg, LOG_VERBOSE);
-  }
+  DLOG_VERBOSE("DX12: CacheParams: %u constants", d.Constants);
 
   // pass 1: find all the samplers (and texture bindings).
   for (UINT i = 0; i < d.Constants; i++) {
@@ -113,11 +109,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
     pCT->GetConstantDesc(h, &cd, &count);
 
     if (fpDiag) fprintf(fpDiag, "  [%u] Name=%s RegSet=%d RegIdx=%d Type=%d\n", i, cd.Name ? cd.Name : "(null)", cd.RegisterSet, cd.RegisterIndex, cd.Type);
-    {
-      char dbg[256];
-      sprintf(dbg, "DX12: CacheParams pass1: [%u] Name=%s RegSet=%d RegIdx=%d", i, cd.Name ? cd.Name : "(null)", cd.RegisterSet, cd.RegisterIndex);
-      DebugLogA(dbg, LOG_VERBOSE);
-    }
+    DLOG_VERBOSE("DX12: CacheParams pass1: [%u] Name=%s RegSet=%d RegIdx=%d", i, cd.Name ? cd.Name : "(null)", cd.RegisterSet, cd.RegisterIndex);
 
     // cd.Name          = VS_Sampler
     // cd.RegisterSet   = D3DXRS_SAMPLER
@@ -346,11 +338,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
             // DX12 path: load via WIC
             wchar_t szFilename[MAX_PATH];
             bool found = false;
-            {
-              char dbg[512];
-              sprintf(dbg, "CacheParams: searching for texture '%ls'", szRootName);
-              DebugLogA(dbg, LOG_VERBOSE);
-            }
+            DLOG_VERBOSE("CacheParams: searching for texture '%ls'", szRootName);
             for (int z = 0; z < texture_exts_count; z++) {
               swprintf(szFilename, L"%stextures\\%s.%s", g_engine.m_szMilkdrop2Path, szRootName, texture_exts[z].c_str());
               if (GetFileAttributesW(szFilename) == 0xFFFFFFFF) {
@@ -397,9 +385,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
                 x.nAge = g_engine.m_nPresetsLoadedTotal;
                 x.nSizeInBytes = x.w * x.h * 4 + 16384;
                 found = true;
-                char dbg[512];
-                sprintf(dbg, "CacheParams: loaded texture '%ls' from '%ls'", szRootName, szFilename);
-                DebugLogA(dbg, LOG_VERBOSE);
+                DLOG_VERBOSE("CacheParams: loaded texture '%ls' from '%ls'", szRootName, szFilename);
                 break;
               }
               // WIC couldn't decode this format (e.g. .dds) — try next extension
@@ -409,13 +395,9 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
               wchar_t buf[2048], title[64];
               swprintf(buf, wasabiApiLangString(IDS_COULD_NOT_LOAD_TEXTURE_X), szRootName, szExtsWithSlashes);
               g_engine.dumpmsg(buf, LOG_WARN);
-              {
-                char dbg[512];
-                sprintf(dbg, "CacheParams: texture NOT found: '%ls' (base='%ls', preset='%ls', %d fallback paths)",
+              DLOG_VERBOSE("CacheParams: texture NOT found: '%ls' (base='%ls', preset='%ls', %d fallback paths)",
                         szRootName, g_engine.m_szMilkdrop2Path, g_engine.m_szPresetDir,
                         (int)g_engine.m_fallbackPaths.size());
-                DebugLogA(dbg, LOG_VERBOSE);
-              }
               if (bHardErrors)
                 MessageBoxW(g_engine.GetPluginWindow(), buf, wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64), MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
               else
@@ -523,11 +505,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
     unsigned int count = 1;
     pCT->GetConstantDesc(h, &cd, &count);
 
-    {
-      char dbg[256];
-      sprintf(dbg, "DX12: CacheParams pass2: [%u] Name=%s RegSet=%d Class=%d", i, cd.Name ? cd.Name : "(null)", cd.RegisterSet, cd.Class);
-      DebugLogA(dbg, LOG_VERBOSE);
-    }
+    DLOG_VERBOSE("DX12: CacheParams pass2: [%u] Name=%s RegSet=%d Class=%d", i, cd.Name ? cd.Name : "(null)", cd.RegisterSet, cd.Class);
 
     if (cd.RegisterSet == D3DXRS_FLOAT4) {
       if (cd.Class == D3DXPC_MATRIX_COLUMNS) {
@@ -704,8 +682,8 @@ bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int sh
 }
 
 bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompileOnly) {
-  // Truncate diagnostic file at start of each shader load
-  if (m_bLoadingShadertoyMode && !bCompileOnly) {
+  // Truncate diagnostic file at start of each shader load (Verbose only)
+  if (DLOG_DIAG_ENABLED() && m_bLoadingShadertoyMode && !bCompileOnly) {
     wchar_t diagPath[MAX_PATH];
     swprintf(diagPath, MAX_PATH, L"%sdiag_cacheparams.txt", m_szBaseDir);
     FILE* fp = nullptr;
@@ -718,20 +696,12 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
   }
 
   // load one of the pixel shaders
-  {
-    char dbg[256];
-    sprintf(dbg, "DX12: LoadShaders: warp.ptr=%p warp.CT=%p nWarpPSVersion=%d nMaxPS=%d",
+  DLOG_VERBOSE("DX12: LoadShaders: warp.ptr=%p warp.CT=%p nWarpPSVersion=%d nMaxPS=%d",
             (void*)sh->warp.ptr, (void*)sh->warp.CT, pState->m_nWarpPSVersion, m_nMaxPSVersion);
-    DebugLogA(dbg, LOG_VERBOSE);
-  }
   if (!sh->warp.ptr && !sh->warp.CT && pState->m_nWarpPSVersion > 0) {
     bool bOK = RecompilePShader(pState->m_szWarpShadersText, &sh->warp, SHADER_WARP, false, pState->m_nWarpPSVersion, bCompileOnly);
-    {
-      char dbg[256];
-      sprintf(dbg, "DX12: LoadShaders warp: bOK=%d bytecodeBlob=%p CT=%p ptr=%p",
+    DLOG_VERBOSE("DX12: LoadShaders warp: bOK=%d bytecodeBlob=%p CT=%p ptr=%p",
               bOK, (void*)sh->warp.bytecodeBlob, (void*)sh->warp.CT, (void*)sh->warp.ptr);
-      DebugLogA(dbg, LOG_VERBOSE);
-    }
     if (!bOK) {
       // switch to fallback shader
       if (m_fallbackShaders_ps.warp.ptr) m_fallbackShaders_ps.warp.ptr->AddRef();
@@ -761,12 +731,8 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
   // Comp (Image) shader — compiled after bufferA/bufferB so diag_comp_shader.txt reflects comp
   if (!sh->comp.ptr && !sh->comp.CT && pState->m_nCompPSVersion > 0) {
     bool bOK = RecompilePShader(pState->m_szCompShadersText, &sh->comp, SHADER_COMP, false, pState->m_nCompPSVersion, bCompileOnly);
-    {
-      char dbg[256];
-      sprintf(dbg, "DX12: LoadShaders comp: bOK=%d bytecodeBlob=%p CT=%p ptr=%p",
+    DLOG_VERBOSE("DX12: LoadShaders comp: bOK=%d bytecodeBlob=%p CT=%p ptr=%p",
               bOK, (void*)sh->comp.bytecodeBlob, (void*)sh->comp.CT, (void*)sh->comp.ptr);
-      DebugLogA(dbg, LOG_VERBOSE);
-    }
     if (!bOK) {
       // switch to fallback shader
       if (m_fallbackShaders_ps.comp.ptr) m_fallbackShaders_ps.comp.ptr->AddRef();
@@ -856,17 +822,12 @@ void Engine::CreateDX12PresetPSOs() {
       false, &dummy);
   }
 
-  {
-    char dbg[256];
-    sprintf(dbg, "DX12: Preset warp PSO: %s (mainTexSlot=%u)", m_dx12WarpPSO ? "OK" : "FALLBACK", m_warpMainTexSlot);
-    DebugLogA(dbg, LOG_VERBOSE);
-    sprintf(dbg, "DX12: Preset comp PSO: %s (mainTexSlot=%u)", m_dx12CompPSO ? "OK" : "FALLBACK", m_compMainTexSlot);
-    DebugLogA(dbg, LOG_VERBOSE);
-    if (m_dx12BufferAPSO)
-      DebugLogA("DX12: Preset bufferA PSO: OK");
-    if (m_dx12BufferBPSO)
-      DebugLogA("DX12: Preset bufferB PSO: OK");
-  }
+  DLOG_VERBOSE("DX12: Preset warp PSO: %s (mainTexSlot=%u)", m_dx12WarpPSO ? "OK" : "FALLBACK", m_warpMainTexSlot);
+  DLOG_VERBOSE("DX12: Preset comp PSO: %s (mainTexSlot=%u)", m_dx12CompPSO ? "OK" : "FALLBACK", m_compMainTexSlot);
+  if (m_dx12BufferAPSO)
+    DebugLogA("DX12: Preset bufferA PSO: OK");
+  if (m_dx12BufferBPSO)
+    DebugLogA("DX12: Preset bufferB PSO: OK");
 }
 
 // Preprocessor: fix matrix * vector multiplication.
@@ -1156,7 +1117,6 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
 
   // DIAG: log original shader text (before include.fx prepend)
   {
-    char dbg[512];
     int origLen = szOrigShaderText ? (int)strlen(szOrigShaderText) : 0;
     char preview[301] = {0};
     if (origLen > 0) {
@@ -1164,9 +1124,8 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
       for (int i = 0; i < 300 && preview[i]; i++)
         if (preview[i] < 32 && preview[i] != 0) preview[i] = '|';
     }
-    sprintf(dbg, "DIAG LoadShader: type=%d(%s) origLen=%d text='%.300s'",
+    DLOG_VERBOSE("DIAG LoadShader: type=%d(%s) origLen=%d text='%.300s'",
             shaderType, szWhichShader, origLen, preview);
-    DebugLogA(dbg, LOG_VERBOSE);
   }
 
   char szShaderText[128000];
@@ -1249,12 +1208,8 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
       p++;
 
     // DIAG: log whether shader_body was found
-    {
-      char dbg[256];
-      sprintf(dbg, "DIAG shader_body search: type=%d found=%d offsetFromStart=%d",
+    DLOG_VERBOSE("DIAG shader_body search: type=%d found=%d offsetFromStart=%d",
               shaderType, (*p != 0) ? 1 : 0, (int)(p - &szShaderText[shaderStartPos]));
-      DebugLogA(dbg, LOG_VERBOSE);
-    }
 
     if (*p) {
       for (int i = 0; i < 11; i++)
@@ -1328,8 +1283,8 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // Fix matrix * vector multiplication (HLSL requires mul())
   FixMatrixVarMultiply(szShaderText);
 
-  // Dump assembled shader text to file for diagnostics (written to m_szBaseDir)
-  if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
+  // Dump assembled shader text to file for diagnostics (Verbose only)
+  if (DLOG_DIAG_ENABLED() && (shaderType == SHADER_COMP || shaderType == SHADER_WARP)) {
     const char* typeName = szDiagName ? szDiagName : (shaderType == SHADER_COMP ? "comp" : "warp");
     char dumpPath[MAX_PATH];
     sprintf(dumpPath, "%lsdiag_%s_shader.txt", m_szBaseDir, typeName);
@@ -1350,19 +1305,11 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
 
   uint32_t checksum = crc32(szShaderText, len);
 
-  {
-    char dbg[256];
-    sprintf(dbg, "DX12: LoadShaderFromMemory: checksum=0x%08X caching=%d", checksum, m_ShaderCaching);
-    DebugLogA(dbg, LOG_VERBOSE);
-  }
+  DLOG_VERBOSE("DX12: LoadShaderFromMemory: checksum=0x%08X caching=%d", checksum, m_ShaderCaching);
 
   if (m_ShaderCaching) {
     pShaderByteCode = LoadShaderBytecodeFromFile(checksum, &szProfile[0]);
-    {
-      char dbg[256];
-      sprintf(dbg, "DX12: LoadShaderFromMemory: cache %s (bytecode=%p)", pShaderByteCode ? "HIT" : "MISS", (void*)pShaderByteCode);
-      DebugLogA(dbg, LOG_VERBOSE);
-    }
+    DLOG_VERBOSE("DX12: LoadShaderFromMemory: cache %s (bytecode=%p)", pShaderByteCode ? "HIT" : "MISS", (void*)pShaderByteCode);
   }
 
   if (pShaderByteCode != NULL && !compileOnly) {
@@ -1402,14 +1349,9 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
     QueryPerformanceCounter(&compileEnd);
     double compileMs = (double)(compileEnd.QuadPart - compileStart.QuadPart) * 1000.0 / (double)compileFreq;
 
-    {
-      char dbg[256];
-      sprintf(dbg, "DX12: D3DCompile: hr=0x%08X  %.1f ms  profile=%s  textLen=%d", (unsigned)hresult, compileMs, szProfile, len);
-      DebugLogA(dbg, LOG_VERBOSE);
-      if (compileMs > 500.0) {
-        sprintf(dbg, "DX12: D3DCompile: SLOW shader compilation (%.1f ms)", compileMs);
-        DebugLogA(dbg, LOG_VERBOSE);
-      }
+    DLOG_VERBOSE("DX12: D3DCompile: hr=0x%08X  %.1f ms  profile=%s  textLen=%d", (unsigned)hresult, compileMs, szProfile, len);
+    if (compileMs > 500.0) {
+      DLOG_VERBOSE("DX12: D3DCompile: SLOW shader compilation (%.1f ms)", compileMs);
     }
 
     if (D3D_OK != hresult) {

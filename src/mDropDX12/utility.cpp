@@ -798,7 +798,8 @@ void* GetTextResource(UINT id, int no_fallback) {
 static FILE* g_debugLogFile = nullptr;
 static CRITICAL_SECTION g_debugLogCS;
 static bool g_debugLogReady = false;
-static int g_debugLogLevel = LOG_INFO; // default: show errors + warnings + info
+int g_debugLogLevel = LOG_INFO; // default: show errors + warnings + info
+int g_debugLogOutput = LOG_OUTPUT_BOTH; // default: file + OutputDebugString
 
 void DebugLogInit(const wchar_t* baseDir) {
   InitializeCriticalSection(&g_debugLogCS);
@@ -829,17 +830,20 @@ void DebugLogSetLevel(int level) {
   g_debugLogLevel = level;
 }
 
+void DebugLogSetOutput(int output) {
+  g_debugLogOutput = output;
+}
+
 void DebugLogW(const wchar_t* msg, int level) {
   if (!msg || !msg[0])
     return;
   if (level > g_debugLogLevel)
     return;
 
-  // Always send to debugger (DebugView / VS Output)
-  OutputDebugStringW(msg);
+  if (g_debugLogOutput & LOG_OUTPUT_ODS)
+    OutputDebugStringW(msg);
 
-  // Also write to log file if ready
-  if (!g_debugLogReady || !g_debugLogFile)
+  if (!(g_debugLogOutput & LOG_OUTPUT_FILE) || !g_debugLogReady || !g_debugLogFile)
     return;
 
   SYSTEMTIME st;
@@ -867,6 +871,7 @@ void DebugLogA(const char* msg, int level) {
 }
 
 void DebugLogWFmt(const wchar_t* fmt, ...) {
+  if (LOG_INFO > g_debugLogLevel) return;
   wchar_t buf[2048];
   va_list args;
   va_start(args, fmt);
@@ -876,6 +881,7 @@ void DebugLogWFmt(const wchar_t* fmt, ...) {
 }
 
 void DebugLogWFmt(int level, const wchar_t* fmt, ...) {
+  if (level > g_debugLogLevel) return;
   wchar_t buf[2048];
   va_list args;
   va_start(args, fmt);
@@ -885,6 +891,7 @@ void DebugLogWFmt(int level, const wchar_t* fmt, ...) {
 }
 
 void DebugLogAFmt(const char* fmt, ...) {
+  if (LOG_INFO > g_debugLogLevel) return;
   char buf[2048];
   va_list args;
   va_start(args, fmt);
@@ -894,6 +901,7 @@ void DebugLogAFmt(const char* fmt, ...) {
 }
 
 void DebugLogAFmt(int level, const char* fmt, ...) {
+  if (level > g_debugLogLevel) return;
   char buf[2048];
   va_list args;
   va_start(args, fmt);
