@@ -154,6 +154,9 @@ Most of these are straightforward find-and-replace:
 | `textureLod()` | `tex2Dlod_conv()` | Custom wrapper that reformats the arguments |
 | `texelFetch()` | `texelFetch_conv()` or `texelFetch_noise()` | See texelFetch section below |
 | `highp`/`mediump`/`lowp` | *(removed)* | HLSL doesn't have precision qualifiers |
+| `precision ... float;` | *(removed)* | Full precision declarations stripped (e.g. `precision highp float;`) |
+| `dFdx()`/`dFdy()` | `ddx()`/`ddy()` | Screen-space partial derivatives |
+| `inversesqrt()` | `rsqrt()` | |
 
 ### 3. Shadertoy Uniforms
 
@@ -216,6 +219,9 @@ Each pass has 4 input channels (`iChannel0` through `iChannel3`). The converter 
 | `CHAN_AUDIO` | 7 | `sampler_audio` | 512×2 FFT + waveform |
 | `CHAN_RANDOM_TEX` | 8 | `sampler_rand00` | Random disk texture |
 | `CHAN_BUFFER_B` | 9 | `sampler_bufferB` | Screen-sized Buffer B output |
+| `CHAN_TEXTURE_FILE` | 10 | `sampler_chtex0`–`3` | User-selected image file (per-channel) |
+
+**Texture File channels:** Select "Texture File..." in a channel combo to browse for an image file (PNG, JPG, BMP, etc.). The texture is loaded at shader compile time and bound as `sampler_chtex0` through `sampler_chtex3`. Texture paths are saved in import project JSON (`ch0_path` through `ch3_path`). Useful for shaders that reference Shadertoy's built-in photo textures (rock, pebbles, organic, etc.) — supply your own files.
 
 **Shadertoy-compatible noise (`_st` suffix):** Shadertoy noise textures use uniform white noise (full [0,255] range, no cubic interpolation, deterministic seed). MDropDX12's regular noise textures (`sampler_noise_lq` etc.) use cubically interpolated, centered-range noise that MilkDrop presets expect. Shadertoy imports automatically use the `_st` variants to match Shadertoy's noise characteristics.
 
@@ -258,7 +264,7 @@ All buffer passes read from the **previous frame** (`fbRead`). The Image pass re
 
 The feedback buffers are **FLOAT32** (`R32G32B32A32_FLOAT`) at VS resolution (`m_nTexSizeX × m_nTexSizeY`). This matters for shaders that accumulate values over time (motion blur, fluid simulations, temporal anti-aliasing). Regular display is UNORM (8-bit per channel), but the feedback loop preserves all the precision.
 
-**sRGB gamma correction** is applied via `RenderInjectEffect()` post-process (`mode.z=1`) when in Shadertoy mode. Shadertoy.com uses an sRGB framebuffer; MDropDX12 uses `R8G8B8A8_UNORM`, so `pow(x, 1/2.2)` is applied in the inject effect shader to match Shadertoy's brightness.
+**sRGB gamma correction** is **disabled**. Shadertoy.com uses `RGBA8` (not an sRGB framebuffer), so shaders that need gamma encode it themselves (e.g. `pow(col, vec3(0.4545))`). MDropDX12 previously applied `pow(x, 1/2.2)` as a post-process, but this double-gamma'd shaders that already encode gamma manually.
 
 All passes use Shader Model 5.0 (`ps_5_0`) — the full DirectX 11+ feature set, including native `break` in loops, integer operations, and bitwise math.
 
@@ -279,8 +285,7 @@ The Common tab contains shared GLSL code (helper functions, constants, struct de
 | `iChannelResolution` | Partial — `textureSize()` → `_texSize()` returns render target size (2D) or hardcoded 32 (3D) |
 | Keyboard input | Not supported |
 | Video/webcam as iChannel | Not connected to Shadertoy pipeline |
-| `dFdx`/`dFdy` | Need `ddx`/`ddy` in HLSL — not currently converted |
-| `inversesqrt()` | Not converted (HLSL equivalent is `rsqrt()`) |
+| `precision` declarations | Stripped automatically (`precision highp float;` etc.) |
 | Non-square matrix `M[i]` indexing | Returns wrong vector due to transpose |
 
 ---
@@ -310,5 +315,7 @@ Common issues:
 - **Progressive blur / image degrades over time** — wrong channel mapping for temporal accumulation. Buffer A self-feedback (for reprojection, TAA) must use `CHAN_FEEDBACK` not `CHAN_BUFFER_B`. Check the channel diagnostics shown when loading a .milk3 JSON.
 - **`return;` in mainImage doesn't output anything** — bare `return;` in GLSL leaves `_return_value` uninitialized. The converter auto-fixes this by inserting `ret = fragColor; _return_value = ret; return;`
 - **System stutters / GPU hang** — usually a raymarcher with bad input data (wrong texture, wrong UV scale). Check the channel mapping.
+
+The **Copy** button next to "Errors/Status:" copies the error/status text to the clipboard for easy sharing or pasting into bug reports.
 
 You can also paste GLSL into the Shader Editor window and click Convert to see the HLSL output without applying it. Edit the HLSL directly if the auto-conversion needs tweaking.

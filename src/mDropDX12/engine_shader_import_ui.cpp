@@ -2397,6 +2397,8 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
         replaceAll(inp, "highp ", "");
         replaceAll(inp, "lowp ", "");
         replaceAll(inp, "mediump ", "");
+        replaceAll(inp, "precision float;\n", ""); // leftover after qualifier stripping
+        replaceAll(inp, "precision int;\n", "");   // leftover after qualifier stripping
         replaceAll(inp, "void mainImage(", "mainImage(");
         replaceAll(inp, "atan (", "atan(");
 

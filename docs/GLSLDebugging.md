@@ -90,7 +90,27 @@ sampler2D sampler_audio : register(s10);
 
 Post-conversion validation counts braces, parentheses, and `#if`/`#endif` blocks. Warns in the error panel if any are unmatched, helping catch truncated or malformed shader output.
 
-### 10. String channel names in JSON import (ADDED)
+### 10. GLSL `precision` declarations not stripped (FIXED)
+
+**Symptom**: Shader fails to compile with `error X3000: unrecognized identifier 'precision'`. Renders as visible triangles (triangle strip seam of fallback textured quad PSO).
+
+**Root cause**: Phase 1 stripped qualifier words (`highp`, `mediump`, `lowp`) but not the `precision` keyword itself. `precision highp float;` → (strip `highp`) → `precision float;` which is invalid HLSL.
+
+**Fix**: After stripping qualifier words, also strip the remaining `precision float;\n` and `precision int;\n` lines.
+
+### 11. sRGB gamma double-application (FIXED)
+
+**Symptom**: Shadertoy presets that encode gamma manually (e.g. `pow(col, vec3(0.4545))`) appeared washed out / too bright.
+
+**Root cause**: MDropDX12 applied `pow(x, 1/2.2)` post-process for all Shadertoy presets, but Shadertoy.com uses `RGBA8` (not sRGB framebuffer). Shaders that need gamma encode it themselves.
+
+**Fix**: Disabled sRGB gamma post-process (`srgbGamma = 0u` in `RenderInjectEffect` for Shadertoy mode).
+
+### 12. Texture file channel support (ADDED)
+
+Added `CHAN_TEXTURE_FILE` channel type allowing users to select image files for iChannel slots. Textures are loaded at compile time and bound as `sampler_chtex0`–`sampler_chtex3`. File paths saved in import project JSON (`ch0_path`–`ch3_path`). Enables shaders that reference Shadertoy's built-in photo textures (rock, pebbles, organic, etc.).
+
+### 13. String channel names in JSON import (ADDED)
 
 JSON channel values now accept strings in addition to integers: `"self"`, `"bufferA"`, `"bufferB"`, `"noiseLQ"`, `"noiseMQ"`, `"noiseHQ"`, `"noiseVolLQ"`, `"noiseVolHQ"`, `"image"`, `"audio"`, `"random"`. Matches the export format and makes JSON files more readable.
 
@@ -110,6 +130,7 @@ enum ChannelSource {
     CHAN_AUDIO,          // sampler_audio (512x2 FFT+wave)
     CHAN_RANDOM_TEX,     // sampler_rand00 (random disk texture)
     CHAN_BUFFER_B,       // sampler_bufferB (screen-sized, Buffer B output)
+    CHAN_TEXTURE_FILE,   // sampler_chtex0-3 (user-selected image file)
 };
 ```
 
@@ -220,7 +241,7 @@ Frame N:
 - All buffer passes read from the **previous frame** (`fbRead`)
 - Image reads from the **current frame** (`fbWrite`)
 - Feedback buffers are `R32G32B32A32_FLOAT` at VS resolution (`m_nTexSizeX × m_nTexSizeY`)
-- sRGB gamma correction applied via `RenderInjectEffect()` post-process (`mode.z=1`)
+- sRGB gamma correction **disabled** (Shadertoy.com uses RGBA8, not sRGB; shaders encode gamma manually)
 - `PASSES_PER_FRAME = 4` (warp + bufferA + bufferB + comp) for descriptor heap layout
 
 ## Shadertoy-Compatible Noise Textures
