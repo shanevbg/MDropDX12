@@ -499,6 +499,7 @@ struct ShaderPass {
   std::string  hlslOutput; // Converted HLSL (narrow, with LINEFEED_CONTROL_CHAR)
   std::string  notes;      // User comments/notes (narrow)
   int channels[4] = {CHAN_NOISE_LQ, CHAN_NOISE_LQ, CHAN_NOISE_MQ, CHAN_NOISE_HQ};
+  bool channelsFromJSON = false;  // true = channels loaded from .milk3 JSON, skip auto-detect
 };
 
 // ── Concrete subclass: Shader Editor window (GLSL + HLSL code editor) ──
@@ -589,7 +590,7 @@ private:
   void LoadImportProject();
   int  GetSelectedPass();     // 0=Image, 1=Buffer A
 
-  void AnalyzeChannels(ShaderPass& pass);  // Infer channel types from GLSL source
+  void AnalyzeChannels(ShaderPass& pass, bool jsonLoaded = false);  // Infer channel types from GLSL source
 
   // Conversion helpers (ported from Milkwave Remote ShaderHelper.cs)
   static std::string ReplaceVarName(const std::string& oldName, const std::string& newName, const std::string& input);

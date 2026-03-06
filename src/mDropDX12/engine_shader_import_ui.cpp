@@ -22,7 +22,7 @@ namespace mdrop {
 // Forward declarations
 static std::string WideHlslToNarrow(const std::wstring& hlslW, int len);
 
-// Channel source lookup tables
+// Channel source lookup tables — MilkDrop noise (cubically interpolated)
 static const char* kChannelSamplers[] = {
     "sampler_noise_lq",    // CHAN_NOISE_LQ
     "sampler_noise_mq",    // CHAN_NOISE_MQ
@@ -34,6 +34,19 @@ static const char* kChannelSamplers[] = {
     "sampler_audio",       // CHAN_AUDIO
     "sampler_rand00",      // CHAN_RANDOM_TEX
     "sampler_bufferB",     // CHAN_BUFFER_B
+};
+// Shadertoy-compatible noise (uniform white noise, no interpolation, fixed seed)
+static const char* kChannelSamplers_ST[] = {
+    "sampler_noise_lq_st",    // CHAN_NOISE_LQ
+    "sampler_noise_mq_st",    // CHAN_NOISE_MQ
+    "sampler_noise_hq_st",    // CHAN_NOISE_HQ
+    "sampler_feedback",       // CHAN_FEEDBACK (unchanged)
+    "sampler_noisevol_lq_st", // CHAN_NOISEVOL_LQ
+    "sampler_noisevol_hq_st", // CHAN_NOISEVOL_HQ
+    "sampler_image",          // CHAN_IMAGE_PREV (unchanged)
+    "sampler_audio",          // CHAN_AUDIO (unchanged)
+    "sampler_rand00",         // CHAN_RANDOM_TEX (unchanged)
+    "sampler_bufferB",        // CHAN_BUFFER_B (unchanged)
 };
 static const wchar_t* kChannelNames[] = {
     L"Noise LQ",      L"Noise MQ",       L"Noise HQ",
@@ -886,9 +899,37 @@ void ShaderImportWindow::ApplyShader() {
 
 // ─── Channel Auto-Detection ────────────────────────────────────────────
 
-void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass) {
-    const std::string& src = pass.glslSource;
-    if (src.empty()) return;
+void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass, bool jsonLoaded) {
+    if (pass.glslSource.empty()) return;
+
+    // Make local copies for pattern analysis — we normalize whitespace in these
+    std::string src = pass.glslSource;
+
+    // Combine pass source with Common source for analysis (functions may be in Common)
+    std::string commonSrc;
+    for (auto& p : m_passes) {
+        if (p.name == L"Common") { commonSrc = p.glslSource; break; }
+    }
+    std::string combinedSrc = commonSrc + "\n" + src;
+
+    // Normalize whitespace after function calls used in pattern matching
+    // (GLSL allows "texelFetch( iChannel0" with space; our patterns expect no space)
+    auto collapseSpaceAfterParen = [](std::string& s, const char* funcName) {
+        size_t flen = strlen(funcName);
+        std::string pat = std::string(funcName) + "(";
+        size_t pos = 0;
+        while ((pos = s.find(pat, pos)) != std::string::npos) {
+            size_t start = pos + flen + 1; // position after '('
+            size_t end = start;
+            while (end < s.size() && s[end] == ' ') end++;
+            if (end > start) s.erase(start, end - start);
+            pos = start;
+        }
+    };
+    collapseSpaceAfterParen(src, "texelFetch");
+    collapseSpaceAfterParen(src, "texture");
+    collapseSpaceAfterParen(combinedSrc, "texelFetch");
+    collapseSpaceAfterParen(combinedSrc, "texture");
 
     bool isBufferA = (pass.name == L"Buffer A");
     bool isBufferB = (pass.name == L"Buffer B");
@@ -901,23 +942,49 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass) {
         if (src.find(chName) == std::string::npos)
             continue;  // This channel not used in source
 
-        // Only overwrite default values (noise types)
-        if (pass.channels[ch] != CHAN_NOISE_LQ &&
-            pass.channels[ch] != CHAN_NOISE_MQ &&
-            pass.channels[ch] != CHAN_NOISE_HQ)
-            continue;  // User already set this channel
+        // High-confidence patterns (1, 2, 2b) can override any default including
+        // CHAN_FEEDBACK — they detect specific texture types from source analysis.
+        // Low-confidence patterns (3) only override noise defaults.
 
-        // --- Pattern 1: Audio texture (texelFetch with ivec2) ---
+        // --- Pattern 1: Audio texture (texelFetch with ivec2(expr, 0) or ivec2(expr, 1)) ---
+        // Audio textures are 512x2: row 0=FFT, row 1=waveform.
+        // Distinguish from buffer reads which use ivec2(fragCoord) or ivec2(x, y).
         {
             char pat[64];
             sprintf_s(pat, "texelFetch(iChannel%d", ch);
-            size_t pos = src.find(pat);
-            if (pos != std::string::npos) {
-                std::string region = src.substr(pos, 120);
-                if (region.find("ivec2") != std::string::npos) {
-                    pass.channels[ch] = CHAN_AUDIO;
-                    continue;
+            bool isAudio = false;
+            size_t pos = 0;
+            while ((pos = src.find(pat, pos)) != std::string::npos) {
+                std::string region = src.substr(pos, 150);
+                size_t iv = region.find("ivec2(");
+                if (iv != std::string::npos) {
+                    // Extract content inside ivec2(...) specifically
+                    size_t ivStart = iv + 6; // past "ivec2("
+                    size_t ivClose = region.find(')', ivStart);
+                    if (ivClose != std::string::npos) {
+                        std::string ivecArgs = region.substr(ivStart, ivClose - ivStart);
+                        // Audio pattern: second arg is literal 0 or 1
+                        // e.g. ivec2(x, 0) or ivec2(expr,1)
+                        size_t lastComma = ivecArgs.rfind(',');
+                        if (lastComma != std::string::npos) {
+                            std::string secondArg = ivecArgs.substr(lastComma + 1);
+                            // Trim whitespace
+                            size_t a = secondArg.find_first_not_of(" \t");
+                            if (a != std::string::npos) secondArg = secondArg.substr(a);
+                            size_t b = secondArg.find_last_not_of(" \t");
+                            if (b != std::string::npos) secondArg = secondArg.substr(0, b + 1);
+                            if (secondArg == "0" || secondArg == "1") {
+                                isAudio = true;
+                                break;
+                            }
+                        }
+                    }
                 }
+                pos += strlen(pat);
+            }
+            if (isAudio) {
+                pass.channels[ch] = CHAN_AUDIO;
+                continue;
             }
         }
 
@@ -947,7 +1014,99 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass) {
             }
         }
 
+        // --- Pattern 2b: iChannelN passed to a function declared with sampler3D ---
+        // Common code often has helper functions like fbm1(sampler3D tex, vec3 x)
+        // that are called with iChannelN. Detect via combinedSrc.
+        {
+            char pat[64];
+            sprintf_s(pat, "iChannel%d", ch);
+            bool found3D = false;
+            // Collect function names that take sampler3D as first param
+            std::vector<std::string> sampler3DFuncs;
+            {
+                size_t pos = 0;
+                while ((pos = combinedSrc.find("sampler3D", pos)) != std::string::npos) {
+                    // Walk backwards to find function name: "type funcName( sampler3D ..."
+                    // Find the opening paren before sampler3D
+                    size_t pp = pos;
+                    while (pp > 0 && combinedSrc[pp - 1] == ' ') pp--;
+                    if (pp > 0 && combinedSrc[pp - 1] == '(') {
+                        size_t parenPos = pp - 1;
+                        size_t ne = parenPos;
+                        while (ne > 0 && combinedSrc[ne - 1] == ' ') ne--;
+                        size_t ns = ne;
+                        while (ns > 0 && (isalnum((unsigned char)combinedSrc[ns - 1]) || combinedSrc[ns - 1] == '_')) ns--;
+                        if (ne > ns) {
+                            sampler3DFuncs.push_back(combinedSrc.substr(ns, ne - ns));
+                        }
+                    }
+                    pos += 9;
+                }
+            }
+            // Check if iChannelN is passed to any sampler3D function
+            for (const auto& fn : sampler3DFuncs) {
+                std::string callPat = fn + "(";
+                size_t pos = 0;
+                while ((pos = src.find(callPat, pos)) != std::string::npos) {
+                    size_t argStart = pos + callPat.size();
+                    size_t end = src.find(')', argStart);
+                    if (end != std::string::npos) {
+                        std::string args = src.substr(argStart, end - argStart);
+                        if (args.find(pat) != std::string::npos) {
+                            found3D = true;
+                            break;
+                        }
+                    }
+                    pos += callPat.size();
+                }
+                if (found3D) break;
+            }
+            if (found3D) {
+                pass.channels[ch] = CHAN_NOISEVOL_LQ;
+                continue;
+            }
+        }
+
+        // --- Pattern 2c: Buffer B ch0 cross-buffer read (high confidence) ---
+        // If Buffer B ch0 uses texelFetch and Buffer A exists, it reads Buffer A output.
+        if (isBufferB && ch == 0) {
+            bool hasBufA = false;
+            for (auto& p : m_passes)
+                if (p.name == L"Buffer A") { hasBufA = true; break; }
+            char fetchPat[64];
+            sprintf_s(fetchPat, "texelFetch(iChannel%d", ch);
+            if (hasBufA && src.find(fetchPat) != std::string::npos) {
+                pass.channels[ch] = CHAN_FEEDBACK;  // Read from Buffer A
+                continue;
+            }
+        }
+
+        // --- Pattern 2d: JSON CHAN_FEEDBACK self-feedback validation ---
+        // Only applies to Buffer A reading itself (CHAN_FEEDBACK on isBufferA).
+        // Self-feedback on Shadertoy always uses texelFetch. If the channel uses
+        // texture()/textureLod() instead, the JSON value is wrong — it's noise.
+        // Cross-buffer reads (CHAN_FEEDBACK on Image/BufferB, CHAN_BUFFER_B on any)
+        // can use any sampling method, so we trust the JSON for those.
+        if (jsonLoaded && pass.channels[ch] == CHAN_FEEDBACK && isBufferA) {
+            char fetchPat[64];
+            sprintf_s(fetchPat, "texelFetch(iChannel%d", ch);
+            if (src.find(fetchPat) == std::string::npos) {
+                // No texelFetch evidence — downgrade to noise default
+                const int noiseDefaults[] = {CHAN_NOISE_LQ, CHAN_NOISE_LQ, CHAN_NOISE_MQ, CHAN_NOISE_HQ};
+                pass.channels[ch] = noiseDefaults[ch];
+            }
+            continue;
+        }
+
         // --- Pattern 3: Self-feedback / buffer reads ---
+        // Low confidence — skip entirely for JSON-loaded passes (JSON is more reliable).
+        // For non-JSON passes, only override noise defaults.
+        if (jsonLoaded) continue;
+        if (pass.channels[ch] != CHAN_NOISE_LQ &&
+            pass.channels[ch] != CHAN_NOISE_MQ &&
+            pass.channels[ch] != CHAN_NOISE_HQ)
+            continue;
+
         // Only ch0 is typically self-feedback; other channels may be noise, audio, etc.
         if (isBufferA) {
             if (ch == 0)
@@ -956,27 +1115,30 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass) {
         }
         if (isBufferB) {
             if (ch == 0)
-                pass.channels[ch] = CHAN_BUFFER_B;
+                pass.channels[ch] = CHAN_BUFFER_B;  // Self-feedback (no texelFetch evidence)
             continue;  // leave other channels at defaults
         }
         if (isImage) {
-            bool hasBufA = false, hasBufB = false;
-            for (auto& p : m_passes) {
-                if (p.name == L"Buffer A") hasBufA = true;
-                if (p.name == L"Buffer B") hasBufB = true;
-            }
-            if (hasBufA && pass.channels[ch] != CHAN_FEEDBACK &&
-                pass.channels[ch] != CHAN_BUFFER_B) {
-                bool feedbackUsed = false;
-                for (int k = 0; k < ch; k++)
+            // Only assign buffer channels when there's texelFetch evidence
+            // (buffer reads use texelFetch for screen-sized pixel-exact reads).
+            // Don't blindly assign buffers just because they exist.
+            char fetchPat[64];
+            sprintf_s(fetchPat, "texelFetch(iChannel%d", ch);
+            if (src.find(fetchPat) != std::string::npos) {
+                bool hasBufA = false, hasBufB = false;
+                for (auto& p : m_passes) {
+                    if (p.name == L"Buffer A") hasBufA = true;
+                    if (p.name == L"Buffer B") hasBufB = true;
+                }
+                bool feedbackUsed = false, bufBUsed = false;
+                for (int k = 0; k < ch; k++) {
                     if (pass.channels[k] == CHAN_FEEDBACK) feedbackUsed = true;
+                    if (pass.channels[k] == CHAN_BUFFER_B) bufBUsed = true;
+                }
                 if (!feedbackUsed && hasBufA) {
                     pass.channels[ch] = CHAN_FEEDBACK;
                     continue;
                 }
-                bool bufBUsed = false;
-                for (int k = 0; k < ch; k++)
-                    if (pass.channels[k] == CHAN_BUFFER_B) bufBUsed = true;
                 if (!bufBUsed && hasBufB) {
                     pass.channels[ch] = CHAN_BUFFER_B;
                     continue;
@@ -1875,13 +2037,61 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                 char from[16], to[32];
                 sprintf_s(from, "iChannel%d", i);
                 int src = (ch[i] >= 0 && ch[i] < CHAN_COUNT) ? ch[i] : 0;
-                strcpy_s(to, kChannelSamplers[src]);
+                strcpy_s(to, kChannelSamplers_ST[src]);
                 replaceAll(inp, from, to);
             }
         }
         replaceAll(inp, "texture(", "tex2D(");
+        // Volume textures need tex3D, not tex2D (sampler3D + float3 coords)
+        replaceAll(inp, "tex2D(sampler_noisevol_lq,", "tex3D(sampler_noisevol_lq,");
+        replaceAll(inp, "tex2D(sampler_noisevol_hq,", "tex3D(sampler_noisevol_hq,");
+        replaceAll(inp, "tex2D(sampler_noisevol_lq_st,", "tex3D(sampler_noisevol_lq_st,");
+        replaceAll(inp, "tex2D(sampler_noisevol_hq_st,", "tex3D(sampler_noisevol_hq_st,");
         replaceAll(inp, "textureLod(", "tex2Dlod_conv(");
         replaceAll(inp, "texelFetch(", "texelFetch_conv(");
+
+        // Fix tex2D/tex2Dlod_conv inside functions that take sampler3D parameters.
+        // e.g. noise1(sampler3D tex, vec3 x) { return tex2Dlod_conv(tex,...) }
+        //    → needs tex3Dlod(tex,...) instead.
+        {
+            size_t pos = 0;
+            while ((pos = inp.find("sampler3D", pos)) != std::string::npos) {
+                // Find parameter name after "sampler3D "
+                size_t nameStart = pos + 9;
+                while (nameStart < inp.size() && inp[nameStart] == ' ') nameStart++;
+                size_t nameEnd = nameStart;
+                while (nameEnd < inp.size() && (isalnum((unsigned char)inp[nameEnd]) || inp[nameEnd] == '_')) nameEnd++;
+                if (nameEnd <= nameStart) { pos = nameEnd; continue; }
+                std::string paramName = inp.substr(nameStart, nameEnd - nameStart);
+
+                // Find the function body: scan forward to find { ... }
+                size_t braceOpen = inp.find('{', nameEnd);
+                if (braceOpen == std::string::npos) { pos = nameEnd; continue; }
+                // Make sure we're in a function context (not a struct)
+                // Find matching closing brace
+                int depth = 1;
+                size_t braceClose = braceOpen + 1;
+                while (braceClose < inp.size() && depth > 0) {
+                    if (inp[braceClose] == '{') depth++;
+                    else if (inp[braceClose] == '}') depth--;
+                    braceClose++;
+                }
+                if (depth != 0) { pos = nameEnd; continue; }
+
+                // Within this function body, replace tex2D(paramName, → tex3D(paramName,
+                // tex2Dlod_conv already has a sampler3D overload, so leave those alone.
+                std::string body = inp.substr(braceOpen, braceClose - braceOpen);
+                std::string from2D = "tex2D(" + paramName + ",";
+                std::string to3D = "tex3D(" + paramName + ",";
+                size_t rpos = 0;
+                while ((rpos = body.find(from2D, rpos)) != std::string::npos) {
+                    body.replace(rpos, from2D.size(), to3D);
+                    rpos += to3D.size();
+                }
+                inp = inp.substr(0, braceOpen) + body + inp.substr(braceClose);
+                pos = braceOpen + body.size();
+            }
+        }
         // Normalize whitespace after texelFetch_conv( so specialization matches
         while (inp.find("texelFetch_conv( ") != std::string::npos)
             replaceAll(inp, "texelFetch_conv( ", "texelFetch_conv(");
@@ -1894,9 +2104,10 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
         // are self-consistent (written and read with same convention) so they stay.
         if (m_passes[passIdx].name == L"Image") {
             // External samplers that need V-flip (non-feedback, non-buffer)
+            // Only 2D samplers — volume textures (sampler3D) can't use tex2D_flipV
             const char* extSamplers[] = {
                 "sampler_noise_lq", "sampler_noise_mq", "sampler_noise_hq",
-                "sampler_noisevol_lq", "sampler_noisevol_hq",
+                "sampler_noise_lq_st", "sampler_noise_mq_st", "sampler_noise_hq_st",
                 "sampler_image", "sampler_audio", "sampler_rand00"
             };
             for (auto* s : extSamplers) {
@@ -3196,6 +3407,7 @@ void ShaderImportWindow::LoadImportProject() {
             sp.channels[1] = ch[L"ch1"].asInt(CHAN_NOISE_LQ);
             sp.channels[2] = ch[L"ch2"].asInt(CHAN_NOISE_MQ);
             sp.channels[3] = ch[L"ch3"].asInt(CHAN_NOISE_HQ);
+            sp.channelsFromJSON = true;
         }
         m_passes.push_back(std::move(sp));
     }
@@ -3210,31 +3422,35 @@ void ShaderImportWindow::LoadImportProject() {
     if (m_passes.size() > 1 && m_passes[0].channels[0] == CHAN_NOISE_LQ)
         m_passes[0].channels[0] = CHAN_FEEDBACK;
 
-    // Sanitize clearly-wrong channel duplicates from old saves, then auto-detect
+    // Auto-detect channels for all non-Common passes.
+    // For JSON-loaded passes, only high-confidence patterns run (3D texture, audio)
+    // because JSON values can be wrong about texture types but right about buffer wiring.
     for (auto& p : m_passes) {
-        if (p.name == L"Buffer A") {
-            // Only ch0 should be self-feedback; reset duplicates to defaults
-            for (int i = 1; i < 4; i++)
-                if (p.channels[i] == CHAN_FEEDBACK) {
-                    const int defaults[] = {0, CHAN_NOISE_LQ, CHAN_NOISE_MQ, CHAN_NOISE_HQ};
-                    p.channels[i] = defaults[i];
-                }
-        } else if (p.name == L"Buffer B") {
-            for (int i = 1; i < 4; i++)
-                if (p.channels[i] == CHAN_BUFFER_B) {
-                    const int defaults[] = {0, CHAN_NOISE_LQ, CHAN_NOISE_MQ, CHAN_NOISE_HQ};
-                    p.channels[i] = defaults[i];
-                }
-        }
-        if (p.name != L"Common")
-            AnalyzeChannels(p);
+        if (p.name == L"Common") continue;
+        AnalyzeChannels(p, p.channelsFromJSON);
     }
 
     m_nSelectedPass = 0;
     RebuildPassList();
     SyncPassToEditor();
 
-    SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"Import project loaded.");
+    // Diagnostic: show detected channels after JSON load + AnalyzeChannels
+    {
+        std::wstring msg = L"Import project loaded. Channels:\r\n";
+        const wchar_t* chanNames[] = {L"NoiseLQ",L"NoiseMQ",L"NoiseHQ",L"BufA/Self",L"NoiseVolLQ",L"NoiseVolHQ",L"ImgPrev",L"Audio",L"RandTex",L"BufB"};
+        for (auto& p : m_passes) {
+            if (p.name == L"Common") continue;
+            msg += p.name + L": ";
+            for (int i = 0; i < 4; i++) {
+                int c = p.channels[i];
+                msg += L"ch" + std::to_wstring(i) + L"=";
+                msg += (c >= 0 && c <= 9) ? chanNames[c] : std::to_wstring(c);
+                if (i < 3) msg += L" ";
+            }
+            msg += L"\r\n";
+        }
+        SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, msg.c_str());
+    }
 }
 
 } // namespace mdrop

@@ -321,7 +321,9 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
           {
             static const wchar_t* kBuiltinNoise[] = {
                 L"noise_lq", L"noise_lq_lite", L"noise_mq", L"noise_hq",
-                L"noisevol_lq", L"noisevol_hq", nullptr
+                L"noisevol_lq", L"noisevol_hq",
+                L"noise_lq_st", L"noise_mq_st", L"noise_hq_st",
+                L"noisevol_lq_st", L"noisevol_hq_st", nullptr
             };
             bool bBuiltin = false;
             for (int k = 0; kBuiltinNoise[k]; k++)

@@ -70,25 +70,41 @@ Per-pass channel configuration stored in `ShaderPass::channels[4]`:
 
 ```cpp
 enum ChannelSource {
-    CHAN_NOISE_LQ = 0,   // sampler_noise_lq (256x256)
-    CHAN_NOISE_MQ,       // sampler_noise_mq (256x256)
-    CHAN_NOISE_HQ,       // sampler_noise_hq (256x256)
+    CHAN_NOISE_LQ = 0,   // sampler_noise_lq_st (256x256, Shadertoy-compatible)
+    CHAN_NOISE_MQ,       // sampler_noise_mq_st (256x256)
+    CHAN_NOISE_HQ,       // sampler_noise_hq_st (256x256)
     CHAN_FEEDBACK,       // sampler_feedback (screen-sized, Buffer A output)
-    CHAN_NOISEVOL_LQ,    // sampler_noisevol_lq (3D 32x32x32)
-    CHAN_NOISEVOL_HQ,    // sampler_noisevol_hq (3D 32x32x32)
+    CHAN_NOISEVOL_LQ,    // sampler_noisevol_lq_st (3D 32x32x32)
+    CHAN_NOISEVOL_HQ,    // sampler_noisevol_hq_st (3D 32x32x32)
     CHAN_IMAGE_PREV,     // sampler_image (previous frame)
     CHAN_AUDIO,          // sampler_audio (512x2 FFT+wave)
     CHAN_RANDOM_TEX,     // sampler_rand00 (random disk texture)
+    CHAN_BUFFER_B,       // sampler_bufferB (screen-sized, Buffer B output)
 };
 ```
+
+Two sampler name tables exist:
+- `kChannelSamplers[]` — MilkDrop noise names (cubically interpolated, centered-range)
+- `kChannelSamplers_ST[]` — Shadertoy-compatible noise names (`_st` suffix: uniform white noise, full [0,255], deterministic seed)
+
+Shadertoy imports use `kChannelSamplers_ST[]` for iChannel→sampler mapping.
 
 **Defaults**: ShaderPass initializes to `{NOISE_LQ, NOISE_LQ, NOISE_MQ, NOISE_HQ}`.
 When adding Buffer A, only **Image ch0** is set to CHAN_FEEDBACK (reads Buffer A output).
 Buffer A ch0 stays at CHAN_NOISE_LQ (most Shadertoy shaders use noise, not self-feedback).
 
-For the Elevated shader:
-- **Buffer A**: iChannel0 → `sampler_noise_lq` (256x256 noise for terrain generation)
+**`channelsFromJSON` flag**: When a .milk3 JSON has a `channels` block, `ShaderPass::channelsFromJSON` is set to `true`. This tells `AnalyzeChannels()` to trust the JSON values and skip low-confidence guessing (Pattern 3), while still allowing high-confidence overrides (audio, 3D texture detection).
+
+**Elevated shader example:**
+
+- **Buffer A**: iChannel0 → `sampler_noise_lq_st` (256x256 noise for terrain generation)
 - **Image**: iChannel0 → `sampler_feedback` (reads Buffer A output for motion blur)
+
+**Selfie shader example (multi-pass):**
+
+- **Buffer A**: iChannel0 → `sampler_noisevol_lq_st` (3D noise), iChannel1 → `sampler_bufferB` (temporal feedback from Buffer B)
+- **Buffer B**: iChannel0 → `sampler_feedback` (reads Buffer A output for DoF blur)
+- **Image**: iChannel0 → `sampler_feedback` (reads Buffer A), iChannel1 → `sampler_bufferB` (reads Buffer B)
 
 ## texelFetch Helpers
 
@@ -106,18 +122,21 @@ float4 texelFetch_conv(sampler2D s, int2 c, int l) {
 }
 ```
 
-Specialization runs AFTER iChannel→sampler replacement and whitespace normalization:
+Specialization runs AFTER iChannel→sampler replacement and whitespace normalization.
+Both regular and `_st` noise sampler names are specialized:
+
 ```cpp
 replaceAll(inp, "texelFetch_conv(sampler_noise_lq,", "texelFetch_noise(sampler_noise_lq,");
-replaceAll(inp, "texelFetch_conv(sampler_noise_mq,", "texelFetch_noise(sampler_noise_mq,");
-replaceAll(inp, "texelFetch_conv(sampler_noise_hq,", "texelFetch_noise(sampler_noise_hq,");
+replaceAll(inp, "texelFetch_conv(sampler_noise_lq_st,", "texelFetch_noise(sampler_noise_lq_st,");
+// ... same for noise_mq, noise_hq and their _st variants
 ```
 
 ## Register Slot Layout
 
 ```
 s0-s4   : main samplers (main/FW/FC/PW/PC from preset)
-s5-s9   : auto-assigned (noise_lq/mq/hq, noisevol_lq/hq)
+s5-s8   : auto-assigned (noise_lq/mq/hq, noisevol_lq/hq, _st variants)
+s9      : sampler_bufferB
 s10     : sampler_audio
 s11-s13 : sampler_blur1/2/3
 s14     : sampler_feedback
@@ -144,25 +163,64 @@ s15     : sampler_image
 ## Diagnostic Files
 
 Per-pass diagnostic dumps written to `m_szBaseDir` (same dir as exe / debug.log):
+
 - `diag_converter_image.txt` — Image pass converted HLSL
 - `diag_converter_bufferA.txt` — Buffer A pass converted HLSL
+- `diag_converter_bufferB.txt` — Buffer B pass converted HLSL
+- `diag_converter_common.txt` — Common tab GLSL (prepended to all passes)
+- `diag_comp_shader.txt` — Full compiled Image shader (with headers)
 - `diag_comp_shader_error.txt` — Image shader compilation result
+- `diag_bufferA_shader.txt` — Full compiled Buffer A shader (with headers)
 - `diag_bufferA_shader_error.txt` — Buffer A shader compilation result
+- `diag_bufferB_shader.txt` — Full compiled Buffer B shader (with headers)
+- `diag_bufferB_shader_error.txt` — Buffer B shader compilation result
+
+## Shadertoy Render Pipeline
+
+```text
+Frame N:
+  Buffer A: reads FeedbackA[read] + FeedbackB[read] → writes FeedbackA[write]   (FLOAT32)
+  Buffer B: reads FeedbackA[read] + FeedbackB[read] → writes FeedbackB[write]   (FLOAT32)
+  Image:    reads FeedbackA[write] + FeedbackB[write] → writes backbuffer        (UNORM)
+  Swap feedback indices (m_nFeedbackIdx ^= 1)
+```
+
+- All buffer passes read from the **previous frame** (`fbRead`)
+- Image reads from the **current frame** (`fbWrite`)
+- Feedback buffers are `R32G32B32A32_FLOAT` at VS resolution (`m_nTexSizeX × m_nTexSizeY`)
+- sRGB gamma correction applied via `RenderInjectEffect()` post-process (`mode.z=1`)
+- `PASSES_PER_FRAME = 4` (warp + bufferA + bufferB + comp) for descriptor heap layout
+
+## Shadertoy-Compatible Noise Textures
+
+MilkDrop noise textures (`sampler_noise_lq` etc.) use cubically interpolated, centered-range noise — not what Shadertoy shaders expect. Shadertoy noise is uniform white noise, full [0,255] range, no interpolation, deterministic seed.
+
+The `_st` suffix textures match Shadertoy's noise characteristics:
+
+- `noise_lq_st`, `noise_mq_st`, `noise_hq_st` — 2D 256×256 (`AddNoiseTex_ST`)
+- `noisevol_lq_st`, `noisevol_hq_st` — 3D 32×32×32 (`AddNoiseVol_ST`)
+
+Generated in `engine_textures.cpp`, registered as built-in in `kBuiltinNoise[]` (engine_shaders.cpp) to prevent disk-load attempts. Declared in `embedded_shaders.h`.
 
 ## Test Shaders
 
 | Shader | URL | Structure | Tests |
-|--------|-----|-----------|-------|
+| --- | --- | --- | --- |
 | Elevated | shadertoy.com/view/MdX3Rr | Buffer A + Image | texelFetch noise, terrain raymarching, mat2 mul |
 | CRT simulation | (local crt.json) | Image only | Vector l-value indexing, `_setComp` fix |
 | Urchin Sound | (local urchinsound.json) | Image only | Audio texture, sampler_audio binding |
+| Butterfly Flock | (local butterflyflock.json) | Image only | Array of structs, nested loops, camera rotation |
+| Selfie Girl | (local selfie.json) | Common + Buffer A + Buffer B + Image | Temporal accumulation, 3D noise, camera reprojection |
 
 ## Key Files
 
 | File | Role |
-|------|------|
+| --- | --- |
 | `src/mDropDX12/engine_shader_import_ui.cpp` | GLSL→HLSL converter, UI, save/load |
-| `src/mDropDX12/tool_window.h` | ShaderPass struct, ShaderEditorWindow, ShaderImportWindow classes |
+| `src/mDropDX12/tool_window.h` | ShaderPass struct, ShaderEditorWindow, ShaderImportWindow |
 | `src/mDropDX12/engine_helpers.h` | Control IDs for shader import/editor UI |
 | `src/mDropDX12/embedded_shaders.h` | Sampler declarations with register assignments |
+| `src/mDropDX12/engine_textures.cpp` | Noise texture generation (including `_st` variants) |
+| `src/mDropDX12/engine_shaders.cpp` | Shader compilation, texture binding, `kBuiltinNoise[]` |
+| `src/mDropDX12/milkdropfs.cpp` | Shadertoy render pipeline (`RenderFrameShadertoy`) |
 | `docs/GLSL_importing.md` | General GLSL→HLSL conversion reference |

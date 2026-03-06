@@ -2981,6 +2981,13 @@ int Engine::AllocateMyDX9Stuff() {
 
     if (!AddNoiseVol(L"noisevol_lq", 32, 1)) return false;
     if (!AddNoiseVol(L"noisevol_hq", 32, 4)) return false;
+
+    // Shadertoy-compatible noise (uniform white noise, no interpolation, fixed seed)
+    if (!AddNoiseTex_ST(L"noise_lq_st", 256)) return false;
+    if (!AddNoiseTex_ST(L"noise_mq_st", 256)) return false;
+    if (!AddNoiseTex_ST(L"noise_hq_st", 256)) return false;
+    if (!AddNoiseVol_ST(L"noisevol_lq_st", 32)) return false;
+    if (!AddNoiseVol_ST(L"noisevol_hq_st", 32)) return false;
   }
 
   if (!m_bInitialPresetSelected) {

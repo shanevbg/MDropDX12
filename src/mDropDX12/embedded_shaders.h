@@ -213,6 +213,13 @@ float4 texsize_noise_hq;
 float4 texsize_noisevol_lq;
 float4 texsize_noisevol_hq;
 
+// Shadertoy-compatible noise textures (uniform white noise, no interpolation, fixed seed):
+sampler2D sampler_noise_lq_st;
+sampler2D sampler_noise_mq_st;
+sampler2D sampler_noise_hq_st;
+sampler3D sampler_noisevol_lq_st;
+sampler3D sampler_noisevol_hq_st;
+
 // user/random disk textures (auto-assigned, used by Shadertoy channel mapping):
 sampler2D sampler_rand00;
 sampler2D sampler_rand01;

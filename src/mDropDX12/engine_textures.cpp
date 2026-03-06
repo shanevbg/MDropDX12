@@ -467,6 +467,80 @@ bool Engine::AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor) {
 }
 
 
+// ── Shadertoy-compatible noise textures ──────────────────────────────────
+// Shadertoy noise textures are: uniform white noise, full [0,255] range,
+// NO cubic interpolation, fixed seed (deterministic). This ensures shaders
+// that depend on specific noise characteristics (like iq's "Selfie Girl")
+// get functionally equivalent noise instead of MilkDrop's smoothed variants.
+
+bool Engine::AddNoiseTex_ST(const wchar_t* szTexName, int size) {
+  if (GetDevice()) return true;  // DX12 only
+
+  // Use a deterministic seed based on the texture name for reproducibility
+  unsigned int seed = 0;
+  for (const wchar_t* p = szTexName; *p; p++)
+    seed = seed * 31 + *p;
+  srand(seed);
+
+  std::vector<DWORD> pixels(size * size);
+  for (int i = 0; i < size * size; i++) {
+    BYTE r = (BYTE)(rand() & 0xFF);
+    BYTE g = (BYTE)(rand() & 0xFF);
+    BYTE b = (BYTE)(rand() & 0xFF);
+    BYTE a = (BYTE)(rand() & 0xFF);
+    pixels[i] = ((DWORD)a << 24) | ((DWORD)r << 16) | ((DWORD)g << 8) | b;
+  }
+
+  TexInfo x;
+  lstrcpyW(x.texname, szTexName);
+  x.texptr = NULL;
+  x.w = size;
+  x.h = size;
+  x.d = 1;
+  x.bEvictable = false;
+  x.nAge = m_nPresetsLoadedTotal;
+  x.nSizeInBytes = size * size * 4;
+  x.dx12Tex = m_lpDX->CreateTextureFromPixels(pixels.data(), size, size,
+                                               size * sizeof(DWORD),
+                                               DXGI_FORMAT_B8G8R8A8_UNORM);
+  m_textures.push_back(x);
+  return true;
+}
+
+bool Engine::AddNoiseVol_ST(const wchar_t* szTexName, int size) {
+  if (GetDevice()) return true;  // DX12 only
+
+  unsigned int seed = 0;
+  for (const wchar_t* p = szTexName; *p; p++)
+    seed = seed * 31 + *p;
+  srand(seed);
+
+  std::vector<DWORD> pixels(size * size * size);
+  for (int i = 0; i < size * size * size; i++) {
+    BYTE r = (BYTE)(rand() & 0xFF);
+    BYTE g = (BYTE)(rand() & 0xFF);
+    BYTE b = (BYTE)(rand() & 0xFF);
+    BYTE a = (BYTE)(rand() & 0xFF);
+    pixels[i] = ((DWORD)a << 24) | ((DWORD)r << 16) | ((DWORD)g << 8) | b;
+  }
+
+  TexInfo ti;
+  lstrcpyW(ti.texname, szTexName);
+  ti.texptr = NULL;
+  ti.w = size;
+  ti.h = size;
+  ti.d = size;
+  ti.bEvictable = false;
+  ti.nAge = m_nPresetsLoadedTotal;
+  ti.nSizeInBytes = size * size * size * 4;
+  ti.dx12Tex = m_lpDX->CreateVolumeTextureFromPixels(
+      pixels.data(), size, size, size,
+      size * sizeof(DWORD),
+      DXGI_FORMAT_B8G8R8A8_UNORM);
+  m_textures.push_back(ti);
+  return true;
+}
+
 bool Engine::EvictSomeTexture() {
   // note: this won't evict a texture whose age is zero,
   //       or whose reported size is zero!

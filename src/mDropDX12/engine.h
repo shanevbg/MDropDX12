@@ -1278,6 +1278,8 @@ public:
   void        BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16], const DX12Texture* feedbackTex = nullptr, const DX12Texture* imageFeedbackTex = nullptr, const DX12Texture* bufferBTex = nullptr);
   bool        AddNoiseTex(const wchar_t* szTexName, int size, int zoom_factor);
   bool        AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor);
+  bool        AddNoiseTex_ST(const wchar_t* szTexName, int size);
+  bool        AddNoiseVol_ST(const wchar_t* szTexName, int size);
 
 
   //====[ 3. virtual functions: ]===========================================================================
