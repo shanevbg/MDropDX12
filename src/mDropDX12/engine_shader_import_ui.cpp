@@ -13,6 +13,7 @@
 #include <commdlg.h>
 #include <sstream>
 #include <algorithm>
+#include <set>
 #include <cstdio>
 #include <filesystem>
 
@@ -1845,7 +1846,7 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
         // Inline-expand so iResolution.z → float3(...).z → 1.0
         replaceAll(inp, "iResolution", "float3(texsize.x, texsize.y, 1.0)");
         replaceAll(inp, "iFrame", "frame");
-        replaceAll(inp, "iMouse", "mouse");
+        replaceAll(inp, "iMouse", "_c14");  // Direct ref to avoid local 'mouse' shadowing #define
         // ZERO/ZEROU: Shadertoy anti-optimization trick (#define ZERO min(iFrame,0)).
         // Always 0 at runtime but prevents GLSL compiler constant-folding.
         // HLSL fxc needs literal 0 to unroll loops, so remove the #defines and replace usage.
@@ -1940,6 +1941,9 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
             std::vector<MatVar> matVars;
             struct MatTypeInfo { const char* type; bool isSquare; };
             MatTypeInfo matTypes[] = {
+                // Pre-replacement GLSL forms (mat3 not yet replaced by Phase 3)
+                {"mat2", true}, {"mat3", true}, {"mat4", true},
+                // Post-replacement HLSL forms
                 {"float2x2", true}, {"float3x3", true}, {"float4x4", true},
                 {"float2x3", false}, {"float3x2", false}, {"float2x4", false},
                 {"float4x2", false}, {"float3x4", false}, {"float4x3", false},
@@ -2106,6 +2110,41 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                             inp = inp.substr(0, opStart) + repl + inp.substr(callEnd);
                             pos = opStart + repl.size();
                             continue;
+                        }
+                    }
+                    // Check for "matFunc(args) * expr" pattern (matrix on LEFT of multiply)
+                    // GLSL (column-major): M * v → HLSL (row-major): mul(v, M) for square
+                    {
+                        size_t afterCall = callEnd;
+                        while (afterCall < inp.size() && inp[afterCall] == ' ') afterCall++;
+                        if (afterCall < inp.size() && inp[afterCall] == '*' &&
+                            (afterCall + 1 >= inp.size() || inp[afterCall + 1] != '=')) {
+                            size_t rhsStart = afterCall + 1;
+                            while (rhsStart < inp.size() && inp[rhsStart] == ' ') rhsStart++;
+                            // Find end of RHS operand
+                            size_t rhsEnd = rhsStart;
+                            int depth = 0;
+                            while (rhsEnd < inp.size()) {
+                                char c = inp[rhsEnd];
+                                if (c == '(' || c == '[') depth++;
+                                else if (c == ')' || c == ']') { if (depth == 0) break; depth--; }
+                                else if ((c == ';' || c == ',' || c == '+' || c == '-') && depth == 0) break;
+                                rhsEnd++;
+                            }
+                            if (rhsEnd > rhsStart) {
+                                std::string rhs = inp.substr(rhsStart, rhsEnd - rhsStart);
+                                while (!rhs.empty() && rhs.back() == ' ') rhs.pop_back();
+                                std::string prefix = inp.substr(0, pos);
+                                std::string suffix = inp.substr(rhsEnd);
+                                std::string repl;
+                                if (mf.isSquare)
+                                    repl = "mul(" + rhs + ", " + funcCall + ")";  // SWAPPED
+                                else
+                                    repl = "mul(" + funcCall + ", " + rhs + ")";  // STANDARD
+                                inp = prefix + repl + suffix;
+                                pos = prefix.size() + repl.size();
+                                continue;
+                            }
                         }
                     }
                     pos = callEnd;
@@ -2324,6 +2363,10 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
         // The MilkDrop 'uv' macro is only used to initialize fragCoord above.
         // #undef it so the shader can declare its own 'float2 uv = ...' variable.
         sbHeader << "#undef uv\n#undef uv_orig\n";
+        // Shadertoy shaders often declare local 'mouse' variables from iMouse.
+        // #undef the MilkDrop mouse macros so they don't shadow _c14.
+        sbHeader << "#undef mouse\n#undef mouse_x\n#undef mouse_y\n"
+                    "#undef mouse_pos\n#undef mouse_clicked\n";
 
         // Find the opening brace of mainImage body and replace everything before it
         size_t braceIdx = inpMain.find('{');
@@ -2390,10 +2433,152 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
             result = clean.str();
         }
 
+        // Fix GLSL vector comparisons in if/while conditions:
+        // GLSL: if(v.xy == vec2(-0.5)) returns scalar bool
+        // HLSL: v.xy == float2(-0.5) returns bool2, not scalar — must wrap with all()
+        {
+            size_t searchPos = 0;
+            while (searchPos < result.size()) {
+                // Find "if(" or "while("
+                size_t ifPos = result.find("if(", searchPos);
+                size_t if2Pos = result.find("if (", searchPos);
+                size_t whilePos = result.find("while(", searchPos);
+                size_t while2Pos = result.find("while (", searchPos);
+                // Find earliest
+                size_t pos = std::string::npos;
+                for (size_t p : {ifPos, if2Pos, whilePos, while2Pos})
+                    if (p != std::string::npos && (pos == std::string::npos || p < pos)) pos = p;
+                if (pos == std::string::npos) break;
+                // Find the opening paren
+                size_t parenOpen = result.find('(', pos);
+                if (parenOpen == std::string::npos) { searchPos = pos + 1; continue; }
+                // Find matching closing paren
+                std::string afterParen = result.substr(parenOpen + 1);
+                int closeIdx = FindClosingBracket(afterParen, '(', ')', 1);
+                if (closeIdx < 0) { searchPos = parenOpen + 1; continue; }
+                std::string cond = afterParen.substr(0, closeIdx);
+                size_t condStart = parenOpen + 1;
+                size_t condEnd = condStart + closeIdx;
+                // Check if condition contains == or != with vector types
+                bool hasVecCompare = false;
+                for (const char* op : {"==", "!="}) {
+                    size_t opPos = cond.find(op);
+                    if (opPos != std::string::npos) {
+                        // Check if either side looks like a vector (swizzle or constructor)
+                        std::string before = cond.substr(0, opPos);
+                        std::string after = cond.substr(opPos + 2);
+                        bool looksVector = false;
+                        // Swizzle patterns
+                        for (const char* sw : {".xy", ".xyz", ".xyzw", ".xz", ".yz", ".rg", ".rgb", ".rgba"})
+                            if (before.find(sw) != std::string::npos || after.find(sw) != std::string::npos)
+                                looksVector = true;
+                        // Vector constructor patterns
+                        for (const char* vc : {"float2(", "float3(", "float4(", "int2(", "int3(", "int4("})
+                            if (before.find(vc) != std::string::npos || after.find(vc) != std::string::npos)
+                                looksVector = true;
+                        if (looksVector) { hasVecCompare = true; break; }
+                    }
+                }
+                if (hasVecCompare && cond.find("all(") == std::string::npos) {
+                    // Wrap condition with all()
+                    result = result.substr(0, condStart) + "all(" + cond + ")" + result.substr(condEnd);
+                    searchPos = condStart + cond.size() + 6; // past "all(...)"
+                } else {
+                    searchPos = condEnd + 1;
+                }
+            }
+        }
+
+        // Fix GLSL array parameter syntax: type[N] name → type name[N]
+        // GLSL allows "in type[SIZE] paramName" but HLSL requires "in type paramName[SIZE]"
+        {
+            // Match patterns like "TypeName[EXPR] identifier" in function parameter contexts
+            // We scan for IDENT[...] followed by space+IDENT, where the second IDENT is the param name
+            size_t searchPos = 0;
+            while (searchPos < result.size()) {
+                size_t bracket = result.find('[', searchPos);
+                if (bracket == std::string::npos) break;
+                // Check what's before [ — should be an identifier (type name)
+                size_t typeEnd = bracket;
+                size_t typeStart = typeEnd;
+                while (typeStart > 0 && (isalnum((unsigned char)result[typeStart-1]) || result[typeStart-1] == '_')) typeStart--;
+                if (typeStart >= typeEnd) { searchPos = bracket + 1; continue; }
+                std::string typeName = result.substr(typeStart, typeEnd - typeStart);
+                // Find closing ]
+                size_t closeBracket = result.find(']', bracket);
+                if (closeBracket == std::string::npos) { searchPos = bracket + 1; continue; }
+                std::string sizeExpr = result.substr(bracket, closeBracket - bracket + 1); // "[N]"
+                // After ] should be whitespace then an identifier (parameter name)
+                size_t afterBracket = closeBracket + 1;
+                size_t nameStart = afterBracket;
+                while (nameStart < result.size() && (result[nameStart] == ' ' || result[nameStart] == '\t')) nameStart++;
+                size_t nameEnd = nameStart;
+                while (nameEnd < result.size() && (isalnum((unsigned char)result[nameEnd]) || result[nameEnd] == '_')) nameEnd++;
+                if (nameEnd <= nameStart) { searchPos = bracket + 1; continue; }
+                // After paramName should be , or ) — confirms this is a function parameter
+                size_t afterName = nameEnd;
+                while (afterName < result.size() && result[afterName] == ' ') afterName++;
+                if (afterName < result.size() && (result[afterName] == ',' || result[afterName] == ')')) {
+                    // Check that typeName is not a vector type (those don't use array syntax in params)
+                    // Rewrite: type[N] name → type name[N]
+                    std::string paramName = result.substr(nameStart, nameEnd - nameStart);
+                    std::string replacement = typeName + " " + paramName + sizeExpr;
+                    result = result.substr(0, typeStart) + replacement + result.substr(nameEnd);
+                    searchPos = typeStart + replacement.size();
+                } else {
+                    searchPos = bracket + 1;
+                }
+            }
+        }
+
         // Fix vector l-value indexing: vec[dynamic_idx] = expr → _setComp(vec, idx, expr)
         // HLSL doesn't support writing to float2/3/4 components via dynamic index (X3500/X3550).
         // Replace with helper function calls that use static .x/.y/.z/.w member access.
+        // Skip struct/array variables — only vector types need this workaround.
         {
+            // Collect array variable names (declared as "type name[size]") to exclude from _setComp
+            std::set<std::string> arrayVars;
+            {
+                size_t scanPos = 0;
+                while (scanPos < result.size()) {
+                    size_t br = result.find('[', scanPos);
+                    if (br == std::string::npos) break;
+                    // Walk back past spaces to find variable name
+                    size_t ne = br;
+                    while (ne > 0 && result[ne-1] == ' ') ne--;
+                    size_t ns = ne;
+                    while (ns > 0 && (isalnum((unsigned char)result[ns-1]) || result[ns-1] == '_')) ns--;
+                    if (ne > ns) {
+                        // Check if preceded by a type name (another identifier before this one)
+                        size_t te = ns;
+                        while (te > 0 && result[te-1] == ' ') te--;
+                        size_t ts = te;
+                        while (ts > 0 && (isalnum((unsigned char)result[ts-1]) || result[ts-1] == '_')) ts--;
+                        if (te > ts) {
+                            // Check that what's inside [] is a size (number or #define constant)
+                            size_t cb = result.find(']', br);
+                            if (cb != std::string::npos) {
+                                std::string inside = result.substr(br + 1, cb - br - 1);
+                                // Trim
+                                size_t a = inside.find_first_not_of(" \t");
+                                if (a != std::string::npos) inside = inside.substr(a);
+                                size_t b = inside.find_last_not_of(" \t");
+                                if (b != std::string::npos) inside = inside.substr(0, b + 1);
+                                // If inside is a valid identifier or number, it's likely an array size
+                                bool validSize = !inside.empty();
+                                for (char c : inside) {
+                                    if (!isalnum((unsigned char)c) && c != '_') { validSize = false; break; }
+                                }
+                                if (validSize) {
+                                    arrayVars.insert(result.substr(ns, ne - ns));
+                                }
+                            }
+                        }
+                    }
+                    scanPos = br + 1;
+                }
+            }
+
             bool needsSetComp = false;
             std::istringstream lvss(result);
             std::string line;
@@ -2427,7 +2612,7 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                             if (!isdigit((unsigned char)c)) { isNumeric = false; break; }
                         }
 
-                        if (!isNumeric) {
+                        if (!isNumeric && arrayVars.find(varName) == arrayVars.end()) {
                             // Check for = (not ==, not compound +=/-=/*=//=)
                             // Scan past ] for first non-space: if it's '=', it's simple assignment
                             size_t eqPos = idxEnd + 1;
@@ -2604,6 +2789,115 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                     while (ne < result.size() && (isalnum((unsigned char)result[ne]) || result[ne] == '_')) ne++;
                     if (ne > ns) structNames.insert(result.substr(ns, ne - ns));
                     spos = ne;
+                }
+            }
+
+            // Fix GLSL struct constructors: StructName(a, b, c) → _init_StructName(a, b, c)
+            // HLSL doesn't support struct constructors (X3037). Generate helper functions.
+            {
+                struct StructField { std::string type; std::string name; };
+                struct StructDef { std::string name; std::vector<StructField> fields; };
+                std::vector<StructDef> structDefs;
+
+                // Parse struct definitions to get field types and names
+                for (const auto& sname : structNames) {
+                    std::string pat = "struct " + sname;
+                    size_t spos = result.find(pat);
+                    if (spos == std::string::npos) continue;
+                    size_t braceOpen = result.find('{', spos);
+                    if (braceOpen == std::string::npos) continue;
+                    size_t braceClose = result.find('}', braceOpen);
+                    if (braceClose == std::string::npos) continue;
+                    std::string body = result.substr(braceOpen + 1, braceClose - braceOpen - 1);
+
+                    StructDef sd;
+                    sd.name = sname;
+                    // Parse fields: "type name;" lines
+                    std::istringstream fss(body);
+                    std::string fline;
+                    while (std::getline(fss, fline)) {
+                        // Trim
+                        size_t a = fline.find_first_not_of(" \t\r\n");
+                        if (a == std::string::npos) continue;
+                        fline = fline.substr(a);
+                        size_t semi = fline.find(';');
+                        if (semi == std::string::npos) continue;
+                        fline = fline.substr(0, semi);
+                        // Trim trailing
+                        size_t b = fline.find_last_not_of(" \t");
+                        if (b != std::string::npos) fline = fline.substr(0, b + 1);
+                        // Split into type and name (last word is name)
+                        size_t lastSpace = fline.rfind(' ');
+                        if (lastSpace == std::string::npos) continue;
+                        StructField sf;
+                        sf.type = fline.substr(0, lastSpace);
+                        // Trim type trailing space
+                        size_t c = sf.type.find_last_not_of(" \t");
+                        if (c != std::string::npos) sf.type = sf.type.substr(0, c + 1);
+                        sf.name = fline.substr(lastSpace + 1);
+                        if (!sf.type.empty() && !sf.name.empty())
+                            sd.fields.push_back(sf);
+                    }
+                    if (!sd.fields.empty())
+                        structDefs.push_back(sd);
+                }
+
+                // For each struct, check if constructor syntax is used and replace
+                for (const auto& sd : structDefs) {
+                    std::string ctorPat = sd.name + "(";
+                    std::string initName = "_init_" + sd.name;
+                    bool needsHelper = false;
+
+                    // Replace StructName( with _init_StructName( but NOT "struct StructName" declarations
+                    size_t pos = 0;
+                    while ((pos = result.find(ctorPat, pos)) != std::string::npos) {
+                        // Check it's not a declaration: "struct StructName" or type declaration
+                        bool isDecl = false;
+                        if (pos >= 7) {
+                            std::string before = result.substr(pos - 7, 7);
+                            if (before.find("struct") != std::string::npos) isDecl = true;
+                        }
+                        // Check it's not a function definition: "StructName funcname("
+                        // A constructor call has StructName( immediately, possibly preceded by = or , or ( or space
+                        if (!isDecl && pos > 0) {
+                            char prev = result[pos - 1];
+                            if (isalnum((unsigned char)prev) || prev == '_') {
+                                // Part of another identifier
+                                pos += ctorPat.size();
+                                continue;
+                            }
+                        }
+                        if (!isDecl) {
+                            result.replace(pos, sd.name.size(), initName);
+                            needsHelper = true;
+                            pos += initName.size();
+                        } else {
+                            pos += ctorPat.size();
+                        }
+                    }
+
+                    // Generate helper function
+                    if (needsHelper) {
+                        std::string helper = sd.name + " " + initName + "(";
+                        for (size_t i = 0; i < sd.fields.size(); i++) {
+                            if (i > 0) helper += ", ";
+                            helper += sd.fields[i].type + " _f" + std::to_string(i);
+                        }
+                        helper += ") {\n  " + sd.name + " _s;\n";
+                        for (size_t i = 0; i < sd.fields.size(); i++) {
+                            helper += "  _s." + sd.fields[i].name + " = _f" + std::to_string(i) + ";\n";
+                        }
+                        helper += "  return _s;\n}\n\n";
+                        // Insert before first use of struct (after struct definition)
+                        size_t structEnd = result.find("};", result.find("struct " + sd.name));
+                        if (structEnd != std::string::npos) {
+                            structEnd += 2;
+                            // Skip to next line
+                            size_t nl = result.find('\n', structEnd);
+                            if (nl != std::string::npos) structEnd = nl + 1;
+                            result.insert(structEnd, helper);
+                        }
+                    }
                 }
             }
 
