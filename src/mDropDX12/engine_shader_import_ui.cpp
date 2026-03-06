@@ -2304,24 +2304,54 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                     if (pos > 0) {
                         size_t bk = pos;
                         while (bk > 0 && inp[bk - 1] == ' ') bk--;
-                        if (bk > 0 && inp[bk - 1] == '*') {
+                        // Check for *= operator: backward from matVar we hit '=' then '*'
+                        if (bk >= 2 && inp[bk - 1] == '=' && inp[bk - 2] == '*') {
+                            // "lvalue *= matVar" pattern
+                            size_t starIdx = bk - 2;  // position of '*'
+                            size_t lEnd = starIdx;
+                            while (lEnd > 0 && inp[lEnd - 1] == ' ') lEnd--;
+                            size_t lStart = lEnd;
+                            while (lStart > 0 && (isIdent(inp[lStart - 1]) || inp[lStart - 1] == '.')) lStart--;
+                            if (lEnd > lStart) {
+                                std::string lvalue = inp.substr(lStart, lEnd - lStart);
+                                std::string repl;
+                                if (mv.isSquare)
+                                    repl = lvalue + " = mul(" + mv.name + ", " + lvalue + ")";  // SWAPPED
+                                else
+                                    repl = lvalue + " = mul(" + lvalue + ", " + mv.name + ")";  // STANDARD
+                                inp = inp.substr(0, lStart) + repl + inp.substr(afterMv);
+                                pos = lStart + repl.size();
+                                continue;
+                            }
+                        } else if (bk > 0 && inp[bk - 1] == '*') {
+                            // "expr * matVar" pattern (not *=)
                             size_t starIdx = bk - 1;
-                            if (starIdx == 0 || inp[starIdx - 1] != '=') {
-                                size_t opEnd = starIdx;
-                                while (opEnd > 0 && inp[opEnd - 1] == ' ') opEnd--;
-                                size_t opStart = opEnd;
-                                while (opStart > 0 && isIdent(inp[opStart - 1])) opStart--;
-                                if (opEnd > opStart) {
-                                    std::string operand = inp.substr(opStart, opEnd - opStart);
-                                    std::string repl;
-                                    if (mv.isSquare)
-                                        repl = "mul(" + mv.name + ", " + operand + ")";  // SWAPPED
-                                    else
-                                        repl = "mul(" + operand + ", " + mv.name + ")";  // STANDARD
-                                    inp = inp.substr(0, opStart) + repl + inp.substr(afterMv);
-                                    pos = opStart + repl.size();
-                                    continue;
+                            size_t opEnd = starIdx;
+                            while (opEnd > 0 && inp[opEnd - 1] == ' ') opEnd--;
+                            size_t opStart = opEnd;
+                            // Walk backward through parens to capture func(args) as LHS
+                            if (opStart > 0 && inp[opStart - 1] == ')') {
+                                opStart--;
+                                int pd = 1;
+                                while (opStart > 0 && pd > 0) {
+                                    opStart--;
+                                    if (inp[opStart] == ')') pd++;
+                                    else if (inp[opStart] == '(') pd--;
                                 }
+                                while (opStart > 0 && (isIdent(inp[opStart - 1]) || inp[opStart - 1] == '.')) opStart--;
+                            } else {
+                                while (opStart > 0 && isIdent(inp[opStart - 1])) opStart--;
+                            }
+                            if (opEnd > opStart) {
+                                std::string operand = inp.substr(opStart, opEnd - opStart);
+                                std::string repl;
+                                if (mv.isSquare)
+                                    repl = "mul(" + mv.name + ", " + operand + ")";  // SWAPPED
+                                else
+                                    repl = "mul(" + operand + ", " + mv.name + ")";  // STANDARD
+                                inp = inp.substr(0, opStart) + repl + inp.substr(afterMv);
+                                pos = opStart + repl.size();
+                                continue;
                             }
                         }
                     }
@@ -2376,7 +2406,20 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                         size_t opEnd = starPos;
                         while (opEnd > 0 && inp[opEnd - 1] == ' ') opEnd--;
                         size_t opStart = opEnd;
-                        while (opStart > 0 && (isIdent(inp[opStart - 1]) || inp[opStart - 1] == '.')) opStart--;
+                        // Walk backward through parens to capture func(args) as LHS operand
+                        if (opStart > 0 && inp[opStart - 1] == ')') {
+                            opStart--;
+                            int pd = 1;
+                            while (opStart > 0 && pd > 0) {
+                                opStart--;
+                                if (inp[opStart] == ')') pd++;
+                                else if (inp[opStart] == '(') pd--;
+                            }
+                            // Continue back through identifier before '('
+                            while (opStart > 0 && (isIdent(inp[opStart - 1]) || inp[opStart - 1] == '.')) opStart--;
+                        } else {
+                            while (opStart > 0 && (isIdent(inp[opStart - 1]) || inp[opStart - 1] == '.')) opStart--;
+                        }
                         if (opEnd > opStart) {
                             std::string operand = inp.substr(opStart, opEnd - opStart);
                             std::string repl;
