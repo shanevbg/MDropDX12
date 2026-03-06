@@ -187,6 +187,14 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
           m_texture_bindings[cd.RegisterIndex].bBilinear = true;
         }
       }
+      else if (!wcscmp(L"bufferB", szRootName)) {
+        m_texture_bindings[cd.RegisterIndex].texptr = NULL;
+        m_texcode[cd.RegisterIndex] = TEX_BUFFER_B;
+        if (!bWrapFilterSpecified) {
+          m_texture_bindings[cd.RegisterIndex].bWrap = false;   // default CLAMP for feedback
+          m_texture_bindings[cd.RegisterIndex].bBilinear = true;
+        }
+      }
 #if (NUM_BLUR_TEX >= 2)
       else if (!wcscmp(L"blur1", szRootName)) {
         m_texture_bindings[cd.RegisterIndex].texptr = g_engine.m_lpBlur[1];
@@ -708,7 +716,8 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
   }
 
   // Buffer A shader (Shadertoy two-pass) — compile BEFORE comp so diag files don't collide
-  m_bHasBufferA = false;
+  // NOTE: Do NOT set m_bHasBufferA/B or m_bCompUsesFeedback here — this may run on a
+  // background thread. Those flags are derived in LoadPresetTick after the shader swap.
   if (!sh->bufferA.ptr && !sh->bufferA.CT && pState->m_nBufferAPSVersion > 0) {
     bool bOK = RecompilePShader(pState->m_szBufferAShadersText, &sh->bufferA, SHADER_COMP, false, pState->m_nBufferAPSVersion, bCompileOnly);
     DebugLogA(bOK ? "DX12: LoadShaders bufferA: compiled OK" : "DX12: LoadShaders bufferA: FAILED", bOK ? LOG_VERBOSE : LOG_ERROR);
@@ -722,19 +731,25 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
       sprintf(dstPath, "%lsdiag_bufferA_shader.txt", m_szBaseDir);
       CopyFileA(srcPath, dstPath, FALSE);
     }
-    if (bOK) {
-      m_bHasBufferA = true;
-      m_bCompUsesFeedback = true;  // Buffer A always implies feedback
-      for (int i = 0; i < 16; i++) {
-        if (sh->bufferA.params.m_texcode[i] == TEX_FEEDBACK) {
-          DebugLogA("DX12: Buffer A shader uses sampler_feedback (self-referencing)");
-          break;
-        }
-      }
+  }
+
+  // Buffer B shader (Shadertoy three-pass) — compile after Buffer A
+  if (!sh->bufferB.ptr && !sh->bufferB.CT && pState->m_nBufferBPSVersion > 0) {
+    bool bOK = RecompilePShader(pState->m_szBufferBShadersText, &sh->bufferB, SHADER_COMP, false, pState->m_nBufferBPSVersion, bCompileOnly);
+    DebugLogA(bOK ? "DX12: LoadShaders bufferB: compiled OK" : "DX12: LoadShaders bufferB: FAILED", bOK ? LOG_VERBOSE : LOG_ERROR);
+    // Copy diag files to bufferB-specific names
+    {
+      char srcPath[MAX_PATH], dstPath[MAX_PATH];
+      sprintf(srcPath, "%lsdiag_comp_shader_error.txt", m_szBaseDir);
+      sprintf(dstPath, "%lsdiag_bufferB_shader_error.txt", m_szBaseDir);
+      CopyFileA(srcPath, dstPath, FALSE);
+      sprintf(srcPath, "%lsdiag_comp_shader.txt", m_szBaseDir);
+      sprintf(dstPath, "%lsdiag_bufferB_shader.txt", m_szBaseDir);
+      CopyFileA(srcPath, dstPath, FALSE);
     }
   }
 
-  // Comp (Image) shader — compiled after bufferA so diag_comp_shader.txt reflects comp
+  // Comp (Image) shader — compiled after bufferA/bufferB so diag_comp_shader.txt reflects comp
   if (!sh->comp.ptr && !sh->comp.CT && pState->m_nCompPSVersion > 0) {
     bool bOK = RecompilePShader(pState->m_szCompShadersText, &sh->comp, SHADER_COMP, false, pState->m_nCompPSVersion, bCompileOnly);
     {
@@ -750,20 +765,6 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
       if (m_fallbackShaders_ps.comp.bytecodeBlob) m_fallbackShaders_ps.comp.bytecodeBlob->AddRef();
       memcpy(&sh->comp, &m_fallbackShaders_ps.comp, sizeof(PShaderInfo));
     }
-
-    // Check if comp shader uses sampler_feedback or sampler_image
-    if (!m_bCompUsesFeedback || !m_bCompUsesImageFeedback) {
-      for (int i = 0; i < 16; i++) {
-        if (sh->comp.params.m_texcode[i] == TEX_FEEDBACK && !m_bCompUsesFeedback) {
-          m_bCompUsesFeedback = true;
-          DebugLogA("DX12: Comp shader uses sampler_feedback (temporal feedback enabled)");
-        }
-        if (sh->comp.params.m_texcode[i] == TEX_IMAGE_FEEDBACK && !m_bCompUsesImageFeedback) {
-          m_bCompUsesImageFeedback = true;
-          DebugLogA("DX12: Comp shader uses sampler_image (Image self-feedback enabled)");
-        }
-      }
-    }
   }
 
   return true;
@@ -772,6 +773,11 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
 void Engine::CreateDX12PresetPSOs() {
   if (!m_lpDX || !m_lpDX->m_device.Get() || !m_lpDX->m_rootSignature.Get())
     return;
+
+  // Wait for GPU to finish all in-flight command lists before releasing old PSOs.
+  // Without this, the GPU may still be executing a previous frame's command list
+  // that references the old PSOs — releasing them causes use-after-free / TDR.
+  m_lpDX->WaitForGpu();
 
   ID3D12Device* device = m_lpDX->m_device.Get();
   ID3D12RootSignature* rootSig = m_lpDX->m_rootSignature.Get();
@@ -828,6 +834,19 @@ void Engine::CreateDX12PresetPSOs() {
       false, &dummy);
   }
 
+  // Create Buffer B PSO — same FLOAT32 feedback format as Buffer A
+  m_dx12BufferBPSO.Reset();
+  if (m_shaders.bufferB.bytecodeBlob && g_pCompVSBlob) {
+    UINT dummy = 0;
+    m_dx12BufferBPSO = DX12CreatePresetPSO(
+      device, rootSig, feedbackRtvFormat,
+      g_pCompVSBlob,
+      m_shaders.bufferB.bytecodeBlob->GetBufferPointer(),
+      (UINT)m_shaders.bufferB.bytecodeBlob->GetBufferSize(),
+      g_MyVertexLayout, _countof(g_MyVertexLayout),
+      false, &dummy);
+  }
+
   {
     char dbg[256];
     sprintf(dbg, "DX12: Preset warp PSO: %s (mainTexSlot=%u)", m_dx12WarpPSO ? "OK" : "FALLBACK", m_warpMainTexSlot);
@@ -836,6 +855,8 @@ void Engine::CreateDX12PresetPSOs() {
     DebugLogA(dbg, LOG_VERBOSE);
     if (m_dx12BufferAPSO)
       DebugLogA("DX12: Preset bufferA PSO: OK");
+    if (m_dx12BufferBPSO)
+      DebugLogA("DX12: Preset bufferB PSO: OK");
   }
 }
 
@@ -1249,9 +1270,10 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         p++;
         // then insert first line(s)
         lstrcpy(temp, p);
-        if (m_bShadertoyMode && !bHardErrors) {
+        if (m_bLoadingShadertoyMode && !bHardErrors) {
           // Shadertoy: float4 ret to preserve alpha channel (temporal accumulation data)
-          // Guard: !bHardErrors excludes fallback shaders (compiled during resize)
+          // Use m_bLoadingShadertoyMode (set before async thread) not m_bShadertoyMode
+          // (set after compilation in LoadPresetTick — too late for shader text generation)
           sprintf(p, "    float4 ret = 0;\n");
         } else {
           sprintf(p, "%s\n", szFirstLine);
@@ -1262,11 +1284,10 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         // find the ending curly brace
         p = strrchr(p, '}');
         if (p) {
-          if (m_bShadertoyMode && !bHardErrors) {
+          if (m_bLoadingShadertoyMode && !bHardErrors) {
             // Shadertoy: output all 4 channels directly (no shiftHSV, no alpha override)
             // Both Buffer A and Image passes output ret unchanged.
             // Buffer A writes to FLOAT32 feedback; Image writes to UNORM backbuffer.
-            // Guard: !bHardErrors excludes fallback shaders (compiled during resize)
             char szLastLine[] = "    _return_value = ret;";
             sprintf(p, " %s\n}\n", szLastLine);
           } else {

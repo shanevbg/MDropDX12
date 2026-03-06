@@ -88,7 +88,7 @@ struct WindowTitleProfile {
     int nPollIntervalSec = 2;          // Poll interval in seconds (1-10)
 };
 
-typedef enum { TEX_DISK, TEX_VS, TEX_FEEDBACK, TEX_IMAGE_FEEDBACK, TEX_AUDIO, TEX_BLUR0, TEX_BLUR1, TEX_BLUR2, TEX_BLUR3, TEX_BLUR4, TEX_BLUR5, TEX_BLUR6, TEX_BLUR_LAST } tex_code;
+typedef enum { TEX_DISK, TEX_VS, TEX_FEEDBACK, TEX_IMAGE_FEEDBACK, TEX_AUDIO, TEX_BUFFER_B, TEX_BLUR0, TEX_BLUR1, TEX_BLUR2, TEX_BLUR3, TEX_BLUR4, TEX_BLUR5, TEX_BLUR6, TEX_BLUR_LAST } tex_code;
 typedef enum { UI_REGULAR, UI_MENU, UI_LOAD, UI_LOAD_DEL, UI_LOAD_RENAME, UI_SAVEAS, UI_SAVE_OVERWRITE, UI_EDIT_MENU_STRING, UI_CHANGEDIR, UI_IMPORT_WAVE, UI_EXPORT_WAVE, UI_IMPORT_SHAPE, UI_EXPORT_SHAPE, UI_UPGRADE_PIXEL_SHADER, UI_MASHUP, UI_SETTINGS } ui_mode;
 typedef struct { float rad; float ang; float a; float c; } td_vertinfo; // blending: mix = max(0,min(1,a*t + c));
 typedef char* CHARPTR;
@@ -322,6 +322,7 @@ typedef struct {
   PShaderInfo warp;
   PShaderInfo comp;
   PShaderInfo bufferA;  // Shadertoy Buffer A (pre-comp pass)
+  PShaderInfo bufferB;  // Shadertoy Buffer B (second compute buffer)
 } PShaderSet;
 
 typedef struct {
@@ -654,6 +655,7 @@ public:
   std::atomic<uint64_t> m_nLoadGeneration{0}; // incremented each load; bg thread checks before signaling
   float   m_fLoadStartTime = 0;              // GetTime() when async load began (for timeout)
   float   m_fShaderCompileTimeout = 8.0f;    // seconds before auto-skipping a stuck compilation
+  bool    m_bLoadingShadertoyMode = false;    // true when async load is for a .milk3 Shadertoy preset
   int     m_nPresetsLoadedTotal; //important for texture eviction age-tracking...
   CState	m_state_DO_NOT_USE[3];	// do not use; use pState and pOldState instead.
   ui_mode	m_UI_mode;				// can be UI_REGULAR, UI_LOAD, UI_SAVEHOW, or UI_SAVEAS
@@ -850,9 +852,12 @@ public:
   void CreateAudioTexture();
   void UpdateAudioTexture();   // per-frame: upload latest FFT/waveform to GPU
   bool m_bHasBufferA = false;                        // true when preset has a Buffer A shader
+  bool m_bHasBufferB = false;                        // true when preset has a Buffer B shader
   bool m_bShadertoyMode = false;                     // true when a .milk3 Shadertoy preset is active
   int  m_nShadertoyStartFrame = 0;                   // frame at which Shadertoy mode was activated (for iFrame=0)
   ComPtr<ID3D12PipelineState> m_dx12BufferAPSO;      // Buffer A pixel shader PSO
+  ComPtr<ID3D12PipelineState> m_dx12BufferBPSO;      // Buffer B pixel shader PSO
+  DX12Texture m_dx12FeedbackB[2];                    // ping-pong feedback buffers for Buffer B (FLOAT32)
   std::atomic<int> m_nRecompileResult{0};            // 0=idle, 1=pending, 2=done-ok, 3=done-fail
   void CopyBackbufferToFeedback();                   // capture comp output for next frame's feedback (single-pass)
   void RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList);  // Shadertoy pipeline (skip warp/blur/shapes)
@@ -1270,7 +1275,7 @@ public:
   void        UvToMathSpace(float u, float v, float* rad, float* ang);
   void        ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CState* pState);
   void        RestoreShaderParams();
-  void        BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16], const DX12Texture* feedbackTex = nullptr, const DX12Texture* imageFeedbackTex = nullptr);
+  void        BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16], const DX12Texture* feedbackTex = nullptr, const DX12Texture* imageFeedbackTex = nullptr, const DX12Texture* bufferBTex = nullptr);
   bool        AddNoiseTex(const wchar_t* szTexName, int size, int zoom_factor);
   bool        AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor);
 

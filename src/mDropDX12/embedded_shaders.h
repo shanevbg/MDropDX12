@@ -225,6 +225,8 @@ sampler2D sampler_rand03;
 sampler2D sampler_feedback : register(s14);
 // Image self-feedback (Image pass reads own previous frame output):
 sampler2D sampler_image : register(s15);
+// Buffer B output (second Shadertoy compute buffer):
+sampler2D sampler_bufferB : register(s9);
 // Audio texture (512x2: row 0 = FFT spectrum, row 1 = PCM waveform):
 sampler2D sampler_audio : register(s10);
 

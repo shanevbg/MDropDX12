@@ -32,14 +32,16 @@ static const char* kChannelSamplers[] = {
     "sampler_image",       // CHAN_IMAGE_PREV
     "sampler_audio",       // CHAN_AUDIO
     "sampler_rand00",      // CHAN_RANDOM_TEX
+    "sampler_bufferB",     // CHAN_BUFFER_B
 };
 static const wchar_t* kChannelNames[] = {
     L"Noise LQ",      L"Noise MQ",       L"Noise HQ",
     L"Buffer A / Self", L"Noise Vol LQ",  L"Noise Vol HQ",
     L"Image (prev frame)", L"Audio (FFT + Wave)",
     L"Random Texture",
+    L"Buffer B",
 };
-static const int kChannelTexDim[] = { 256, 256, 256, 0, 32, 32, 0, 0, 0 }; // 0 = use texsize
+static const int kChannelTexDim[] = { 256, 256, 256, 0, 32, 32, 0, 0, 0, 0 }; // 0 = use texsize
 
 // ─── Open / Close (Engine methods) ──────────────────────────────────────
 
@@ -630,24 +632,35 @@ LRESULT ShaderImportWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam
     if (code == BN_CLICKED) {
         switch (id) {
         case IDC_MW_SHIMPORT_ADD_PASS: {
-            // Add Buffer A if not present
-            bool hasBufferA = false;
-            for (auto& p : m_passes)
-                if (p.name == L"Buffer A") { hasBufferA = true; break; }
-            if (!hasBufferA) {
+            // Add passes in priority order: Common → Buffer A → Buffer B
+            bool hasCommon = false, hasBufferA = false, hasBufferB = false;
+            for (auto& p : m_passes) {
+                if (p.name == L"Common") hasCommon = true;
+                if (p.name == L"Buffer A") hasBufferA = true;
+                if (p.name == L"Buffer B") hasBufferB = true;
+            }
+
+            if (!hasCommon) {
+                ShaderPass common;
+                common.name = L"Common";
+                m_passes.push_back(std::move(common));
+            } else if (!hasBufferA) {
                 ShaderPass bufA;
                 bufA.name = L"Buffer A";
-                // Buffer A ch0 defaults to CHAN_NOISE_LQ (256x256 noise texture).
-                // Most Shadertoy shaders use noise for ch0 in Buffer A (e.g. terrain generation).
-                // Users can change to CHAN_FEEDBACK if self-feedback is needed.
                 m_passes.push_back(std::move(bufA));
                 m_passes[0].channels[0] = CHAN_FEEDBACK;  // Image ch0 = Buffer A output
-                SyncEditorToPass();  // save current pass before switching
-                m_nSelectedPass = (int)m_passes.size() - 1;
-                RebuildPassList();
-                SyncChannelCombos();
-                OpenEditor();
+            } else if (!hasBufferB) {
+                ShaderPass bufB;
+                bufB.name = L"Buffer B";
+                m_passes.push_back(std::move(bufB));
+            } else {
+                return 0;  // all passes added
             }
+            SyncEditorToPass();
+            m_nSelectedPass = (int)m_passes.size() - 1;
+            RebuildPassList();
+            SyncChannelCombos();
+            OpenEditor();
             return 0;
         }
         case IDC_MW_SHIMPORT_DEL_PASS:
@@ -715,17 +728,20 @@ LRESULT ShaderImportWindow::DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
 
         std::wstring errText;
         bool compOK = (p->m_shaders.comp.bytecodeBlob != NULL);
-        bool hasBufA = (m_passes.size() > 1 && !m_passes[1].hlslOutput.empty());
-        bool bufAOK = hasBufA ? (p->m_shaders.bufferA.bytecodeBlob != NULL) : true;
+        bool bufAOK = !p->m_bHasBufferA || (p->m_shaders.bufferA.bytecodeBlob != NULL);
+        bool bufBOK = !p->m_bHasBufferB || (p->m_shaders.bufferB.bytecodeBlob != NULL);
 
-        if (compOK && bufAOK) {
+        if (compOK && bufAOK && bufBOK) {
             errText = L"Shader compiled successfully.";
-            if (p->m_bHasBufferA)
+            if (p->m_bHasBufferA && p->m_bHasBufferB)
+                errText += L" (Buffer A + Buffer B + Image)";
+            else if (p->m_bHasBufferA)
                 errText += L" (Buffer A + Image)";
         } else {
             errText = L"Compilation failed.\r\n";
             if (!compOK) errText += L"[Image/comp] ";
             if (!bufAOK) errText += L"[Buffer A] ";
+            if (!bufBOK) errText += L"[Buffer B] ";
             errText += L"\r\n";
             // Read error file (last compilation's errors)
             wchar_t errPath[MAX_PATH];
@@ -784,9 +800,13 @@ void ShaderImportWindow::ApplyShader() {
     HWND hw = m_hWnd;
     Engine* p = m_pEngine;
 
-    // Get Image HLSL from m_passes[0]
-    std::string imageHlsl = (m_passes.size() > 0) ? m_passes[0].hlslOutput : "";
-    std::string bufAHlsl  = (m_passes.size() > 1) ? m_passes[1].hlslOutput : "";
+    // Find passes by name
+    std::string imageHlsl, bufAHlsl, bufBHlsl;
+    for (auto& pass : m_passes) {
+        if (pass.name == L"Image") imageHlsl = pass.hlslOutput;
+        else if (pass.name == L"Buffer A") bufAHlsl = pass.hlslOutput;
+        else if (pass.name == L"Buffer B") bufBHlsl = pass.hlslOutput;
+    }
 
     if (imageHlsl.empty()) {
         SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, L"No Image HLSL to apply. Convert first.");
@@ -804,6 +824,12 @@ void ShaderImportWindow::ApplyShader() {
         p->m_pState->m_nBufferAPSVersion = MD2_PS_5_0;
     }
 
+    // Apply Buffer B if present
+    if (!bufBHlsl.empty()) {
+        strncpy_s(p->m_pState->m_szBufferBShadersText, MAX_SHADER_TEXT_LEN, bufBHlsl.c_str(), _TRUNCATE);
+        p->m_pState->m_nBufferBPSVersion = MD2_PS_5_0;
+    }
+
     // Activate Shadertoy pipeline
     p->m_bShadertoyMode = true;
     p->m_nShadertoyStartFrame = p->GetFrame();
@@ -815,12 +841,13 @@ void ShaderImportWindow::ApplyShader() {
     {
         int storedLen = (int)strlen(p->m_pState->m_szCompShadersText);
         int bufALen = bufAHlsl.empty() ? 0 : (int)strlen(p->m_pState->m_szBufferAShadersText);
+        int bufBLen = bufBHlsl.empty() ? 0 : (int)strlen(p->m_pState->m_szBufferBShadersText);
         wchar_t msg[256];
         bool truncated = ((int)imageHlsl.size() > storedLen + 1);
         if (truncated)
             swprintf(msg, 256, L"Compiling... (TRUNCATED: %d of %d chars stored)", storedLen, (int)imageHlsl.size());
-        else if (bufALen > 0)
-            swprintf(msg, 256, L"Compiling... (Image: %d chars, Buffer A: %d chars)", storedLen, bufALen);
+        else if (bufALen > 0 || bufBLen > 0)
+            swprintf(msg, 256, L"Compiling... (Image: %d, BufA: %d, BufB: %d chars)", storedLen, bufALen, bufBLen);
         else
             swprintf(msg, 256, L"Compiling... (%d chars)", storedLen);
         SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, msg);
@@ -833,11 +860,31 @@ void ShaderImportWindow::ApplyShader() {
 void ShaderImportWindow::ConvertAndApply() {
     SyncEditorToPass();
 
-    // Convert each pass in order (Buffer A first if present, then Image)
+    // Find Common pass GLSL (if any) — prepended to all other passes before conversion
+    std::string commonGlsl;
+    for (auto& p : m_passes) {
+        if (p.name == L"Common") {
+            commonGlsl = p.glslSource;
+            p.hlslOutput.clear();  // Common has no mainImage, no HLSL output
+            break;
+        }
+    }
+
+    // Convert each pass in order (Buffer B/A first if present, then Image)
     for (int i = (int)m_passes.size() - 1; i >= 0; i--) {
+        if (m_passes[i].name == L"Common") continue;  // skip Common (no mainImage)
         if (m_passes[i].glslSource.empty()) continue;
-        m_passes[i].hlslOutput.clear();
-        ConvertGLSLtoHLSL(i);
+        // Prepend Common GLSL to each pass before conversion
+        if (!commonGlsl.empty()) {
+            std::string saved = m_passes[i].glslSource;
+            m_passes[i].glslSource = commonGlsl + "\n" + saved;
+            m_passes[i].hlslOutput.clear();
+            ConvertGLSLtoHLSL(i);
+            m_passes[i].glslSource = saved;  // restore original (don't persist Common prefix)
+        } else {
+            m_passes[i].hlslOutput.clear();
+            ConvertGLSLtoHLSL(i);
+        }
         if (m_passes[i].hlslOutput.empty())
             return;  // Error already shown
     }
@@ -883,7 +930,17 @@ void ShaderImportWindow::SaveAsPreset() {
     std::wstring ext = filePath;
     bool isMilk3 = (ext.size() >= 6 && _wcsicmp(ext.c_str() + ext.size() - 6, L".milk3") == 0);
 
-    bool hasBufferA = (m_passes.size() > 1 && !m_passes[1].hlslOutput.empty());
+    // Find passes by name
+    bool hasBufferA = false, hasBufferB = false, hasCommon = false;
+    std::string commonGlsl;
+    for (auto& pass : m_passes) {
+        if (pass.name == L"Buffer A" && !pass.hlslOutput.empty()) hasBufferA = true;
+        if (pass.name == L"Buffer B" && !pass.hlslOutput.empty()) hasBufferB = true;
+        if (pass.name == L"Common" && !pass.glslSource.empty()) {
+            hasCommon = true;
+            commonGlsl = pass.glslSource;
+        }
+    }
 
     if (isMilk3) {
         // Save as .milk3 JSON
@@ -903,13 +960,12 @@ void ShaderImportWindow::SaveAsPreset() {
                 if (!pass.notes.empty()) { hasNotes = true; break; }
             if (hasNotes) {
                 w.BeginObject(L"notes");
-                if (!m_passes[0].notes.empty()) {
-                    std::wstring wn(m_passes[0].notes.begin(), m_passes[0].notes.end());
-                    w.String(L"image", wn.c_str());
-                }
-                if (hasBufferA && m_passes.size() > 1 && !m_passes[1].notes.empty()) {
-                    std::wstring wn(m_passes[1].notes.begin(), m_passes[1].notes.end());
-                    w.String(L"bufferA", wn.c_str());
+                for (auto& pass : m_passes) {
+                    if (pass.notes.empty()) continue;
+                    std::wstring wn(pass.notes.begin(), pass.notes.end());
+                    if (pass.name == L"Image") w.String(L"image", wn.c_str());
+                    else if (pass.name == L"Buffer A") w.String(L"bufferA", wn.c_str());
+                    else if (pass.name == L"Buffer B") w.String(L"bufferB", wn.c_str());
                 }
                 w.EndObject();
             }
@@ -932,17 +988,29 @@ void ShaderImportWindow::SaveAsPreset() {
         };
 
         // Write shader text as wide strings (JsonWriter handles escaping)
-        if (hasBufferA) {
-            w.String(L"bufferA", hlslToWide(m_passes[1].hlslOutput).c_str());
+        // Write Common GLSL (stored as raw GLSL, not HLSL — for round-tripping)
+        if (hasCommon) {
+            std::wstring wCommon(commonGlsl.begin(), commonGlsl.end());
+            w.String(L"common", wCommon.c_str());
         }
-        {
-            w.String(L"image", hlslToWide(m_passes[0].hlslOutput).c_str());
+        for (auto& pass : m_passes) {
+            if (pass.name == L"Buffer A" && !pass.hlslOutput.empty())
+                w.String(L"bufferA", hlslToWide(pass.hlslOutput).c_str());
+            else if (pass.name == L"Buffer B" && !pass.hlslOutput.empty())
+                w.String(L"bufferB", hlslToWide(pass.hlslOutput).c_str());
+            else if (pass.name == L"Image" && !pass.hlslOutput.empty())
+                w.String(L"image", hlslToWide(pass.hlslOutput).c_str());
         }
 
         // Channel mappings
         w.BeginObject(L"channels");
         if (hasBufferA) {
             w.BeginObject(L"bufferA");
+            w.String(L"iChannel0", L"self");
+            w.EndObject();
+        }
+        if (hasBufferB) {
+            w.BeginObject(L"bufferB");
             w.String(L"iChannel0", L"self");
             w.EndObject();
         }

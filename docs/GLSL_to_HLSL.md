@@ -6,7 +6,7 @@ So you found a sick shader on Shadertoy and want it running as a music visualize
 
 These sites have GLSL shaders you can import into MDropDX12:
 
-- **[Shadertoy](https://www.shadertoy.com)** — the big one. Thousands of community shaders. Look for shaders with "Image" only or "Image + Buffer A" — those are the ones MDropDX12 supports right now.
+- **[Shadertoy](https://www.shadertoy.com)** — the big one. Thousands of community shaders. MDropDX12 supports Image only, Image + Buffer A, and Common + Buffer A + Buffer B + Image.
 - **[Shadertoy sorted by popularity](https://www.shadertoy.com/results?query=&sort=popular&from=0&num=25)** — start here for the greatest hits
 - **[GLSL Sandbox](https://glslsandbox.com)** — simpler shaders, mostly single-pass fullscreen effects. Good for getting started.
 - **[Interactiveshaderformat.com](https://www.interactiveshaderformat.com)** — ISF-format shaders, some convertible to Shadertoy style
@@ -19,11 +19,12 @@ Not every Shadertoy shader will import cleanly. Here's what to look for:
 **Great candidates:**
 - Single-pass ("Image" tab only) shaders — simplest to import
 - "Image + Buffer A" shaders — fully supported (terrain, fluid sims, particle systems)
+- "Common + Buffer A + Buffer B + Image" shaders — classic multi-pass (fluid dynamics, particle systems from ~2013-2016 era)
 - Shaders that use `iTime`, `iResolution`, `iMouse` — all mapped
 - Audio-reactive shaders using `iChannel0` as audio — `sampler_audio` is wired up
 
 **Won't work (yet):**
-- Shaders with Buffer B, C, or D — only Buffer A is supported
+- Shaders with Buffer C or D — only up to Buffer B is supported
 - Cubemap inputs — not implemented
 - Shaders using `iDate`, `iTimeDelta`, or `iChannelResolution` — not mapped
 - Keyboard input (`iChannelN` as keyboard) — not supported
@@ -213,7 +214,7 @@ Both passes use Shader Model 5.0 (`ps_5_0`) — that's the full DirectX 11+ feat
 
 | Feature | Status |
 |---------|--------|
-| Buffer B, C, D | Not implemented — only Buffer A + Image |
+| Buffer C, D | Not implemented — only up to Buffer A + Buffer B + Image |
 | Cubemap inputs | Not supported |
 | `iDate` | Not mapped |
 | `iTimeDelta` | Not mapped |

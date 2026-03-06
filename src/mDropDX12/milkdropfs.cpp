@@ -1898,6 +1898,11 @@ void mdrop::Engine::RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList)
         cmdList->ClearRenderTargetView(m_lpDX->GetRtvCpuHandle(m_dx12Feedback[i]), black, 0, nullptr);
         m_lpDX->TransitionResource(m_dx12Feedback[i], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
       }
+      if (m_dx12FeedbackB[i].IsValid()) {
+        m_lpDX->TransitionResource(m_dx12FeedbackB[i], D3D12_RESOURCE_STATE_RENDER_TARGET);
+        cmdList->ClearRenderTargetView(m_lpDX->GetRtvCpuHandle(m_dx12FeedbackB[i]), black, 0, nullptr);
+        m_lpDX->TransitionResource(m_dx12FeedbackB[i], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+      }
       if (m_dx12ImageFeedback[i].IsValid()) {
         m_lpDX->TransitionResource(m_dx12ImageFeedback[i], D3D12_RESOURCE_STATE_RENDER_TARGET);
         cmdList->ClearRenderTargetView(m_lpDX->GetRtvCpuHandle(m_dx12ImageFeedback[i]), black, 0, nullptr);
@@ -1911,25 +1916,39 @@ void mdrop::Engine::RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList)
   cmdList->SetDescriptorHeaps(1, heaps);
   cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
 
-  // Build binding slots for Buffer A and comp/Image passes
-  UINT warpSlots[16], bufferASlots[16], compSlots[16];
+  // Build binding slots for Buffer A, Buffer B, and comp/Image passes
+  UINT warpSlots[16], bufferASlots[16], bufferBSlots[16], compSlots[16];
   memset(warpSlots, 0xFF, sizeof(warpSlots));  // warp unused in Shadertoy mode
+  memset(bufferBSlots, 0xFF, sizeof(bufferBSlots));
 
   {
     // Image feedback read texture (previous Image output, if Image self-feedback is used)
     const DX12Texture* imgFbRead = m_bCompUsesImageFeedback ? &m_dx12ImageFeedback[fbRead] : nullptr;
 
     if (m_bHasBufferA) {
-      // Buffer A reads feedback[read] (own previous output)
-      BuildBindingSlots(&m_shaders.bufferA.params, m_dx12VS[1], bufferASlots, &m_dx12Feedback[fbRead], imgFbRead);
-      // Image/comp reads feedback[write] (Buffer A's current output)
-      BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots, &m_dx12Feedback[fbWrite], imgFbRead);
+      // Buffer A reads FeedbackA[fbRead] (own previous output) + FeedbackB[fbRead]
+      BuildBindingSlots(&m_shaders.bufferA.params, m_dx12VS[1], bufferASlots,
+                        &m_dx12Feedback[fbRead], imgFbRead, &m_dx12FeedbackB[fbRead]);
     } else {
       memset(bufferASlots, 0xFF, sizeof(bufferASlots));
-      BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots, &m_dx12Feedback[fbRead], imgFbRead);
+    }
+
+    if (m_bHasBufferB) {
+      // Buffer B reads FeedbackA[fbRead] + FeedbackB[fbRead] (both from previous frame)
+      BuildBindingSlots(&m_shaders.bufferB.params, m_dx12VS[1], bufferBSlots,
+                        &m_dx12Feedback[fbRead], imgFbRead, &m_dx12FeedbackB[fbRead]);
+    }
+
+    if (m_bHasBufferA || m_bHasBufferB) {
+      // Image/comp reads FeedbackA[fbWrite] + FeedbackB[fbWrite] (current frame outputs)
+      BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots,
+                        &m_dx12Feedback[fbWrite], imgFbRead, &m_dx12FeedbackB[fbWrite]);
+    } else {
+      BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots,
+                        &m_dx12Feedback[fbRead], imgFbRead, &m_dx12FeedbackB[fbRead]);
     }
   }
-  m_lpDX->UpdatePerFrameBindings(warpSlots, bufferASlots, compSlots);
+  m_lpDX->UpdatePerFrameBindings(warpSlots, bufferASlots, bufferBSlots, compSlots);
 
   // ── Buffer A pass: render to feedback[fbWrite] ──
   if (m_bHasBufferA && m_dx12BufferAPSO && m_dx12Feedback[fbWrite].IsValid()) {
@@ -1973,6 +1992,50 @@ void mdrop::Engine::RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList)
 
     // Transition feedback[write] to SRV so Image pass can read it
     m_lpDX->TransitionResource(fbWriteTex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  }
+
+  // ── Buffer B pass: render to feedbackB[fbWrite] ──
+  if (m_bHasBufferB && m_dx12BufferBPSO && m_dx12FeedbackB[fbWrite].IsValid()) {
+    DX12Texture& fbBWriteTex = m_dx12FeedbackB[fbWrite];
+
+    m_lpDX->TransitionResource(fbBWriteTex, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    D3D12_CPU_DESCRIPTOR_HANDLE fbBRtv = m_lpDX->GetRtvCpuHandle(fbBWriteTex);
+    cmdList->OMSetRenderTargets(1, &fbBRtv, FALSE, nullptr);
+
+    SetViewportAndScissor(cmdList, fbBWriteTex.width, fbBWriteTex.height);
+    cmdList->SetPipelineState(m_dx12BufferBPSO.Get());
+
+    // Apply Buffer B shader params and upload constant buffer
+    PShaderInfo* bufBSI = &m_shaders.bufferB;
+    if (bufBSI->CT) {
+      ApplyShaderParams(&bufBSI->params, bufBSI->CT, m_pState);
+      DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(bufBSI->CT);
+      if (ct->GetShadowSize() > 0) {
+        D3D12_GPU_VIRTUAL_ADDRESS cbAddr =
+            m_lpDX->UploadConstantBuffer(ct->GetShadowData(), ct->GetShadowSize());
+        if (cbAddr)
+          cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+      }
+    }
+
+    // Bind Buffer B descriptor table
+    cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetBufferBBindingGpuHandle());
+
+    // Fullscreen quad (same UVs as Buffer A — DX convention, no Y-flip)
+    MYVERTEX bufBQuad[4];
+    ZeroMemory(bufBQuad, sizeof(bufBQuad));
+    bufBQuad[0].x = -1.f; bufBQuad[0].y =  1.f; bufBQuad[0].z = 0.f; bufBQuad[0].Diffuse = 0xFFFFFFFF;
+    bufBQuad[0].tu = 0.f; bufBQuad[0].tv = 0.f; bufBQuad[0].tu_orig = 0.f; bufBQuad[0].tv_orig = 0.f; bufBQuad[0].rad = 1.f; bufBQuad[0].ang = 3.14159f;
+    bufBQuad[1].x =  1.f; bufBQuad[1].y =  1.f; bufBQuad[1].z = 0.f; bufBQuad[1].Diffuse = 0xFFFFFFFF;
+    bufBQuad[1].tu = 1.f; bufBQuad[1].tv = 0.f; bufBQuad[1].tu_orig = 1.f; bufBQuad[1].tv_orig = 0.f; bufBQuad[1].rad = 1.f; bufBQuad[1].ang = 0.f;
+    bufBQuad[2].x = -1.f; bufBQuad[2].y = -1.f; bufBQuad[2].z = 0.f; bufBQuad[2].Diffuse = 0xFFFFFFFF;
+    bufBQuad[2].tu = 0.f; bufBQuad[2].tv = 1.f; bufBQuad[2].tu_orig = 0.f; bufBQuad[2].tv_orig = 1.f; bufBQuad[2].rad = 1.f; bufBQuad[2].ang = 3.14159f;
+    bufBQuad[3].x =  1.f; bufBQuad[3].y = -1.f; bufBQuad[3].z = 0.f; bufBQuad[3].Diffuse = 0xFFFFFFFF;
+    bufBQuad[3].tu = 1.f; bufBQuad[3].tv = 1.f; bufBQuad[3].tu_orig = 1.f; bufBQuad[3].tv_orig = 1.f; bufBQuad[3].rad = 1.f; bufBQuad[3].ang = 0.f;
+    m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, bufBQuad, 4, sizeof(MYVERTEX));
+
+    // Transition feedbackB[write] to SRV so Image pass can read it
+    m_lpDX->TransitionResource(fbBWriteTex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   }
 
   // ── Image/Comp pass ──
@@ -2193,7 +2256,8 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     // In DX12, VS[0] is ALSO the warp input. The comp shader needs the
     // warp+shapes output = VS[1].
 
-    UINT warpSlots[16], bufferASlots[16], compSlots[16];
+    UINT warpSlots[16], bufferASlots[16], bufferBSlots[16], compSlots[16];
+    memset(bufferBSlots, 0xFF, sizeof(bufferBSlots));  // Buffer B unused in non-Shadertoy mode
     BuildBindingSlots(&m_shaders.warp.params, m_dx12VS[0], warpSlots);
 
     // Buffer A reads feedback[read] (own previous output), comp reads feedback[write] (Buffer A's current output)
@@ -2204,7 +2268,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       memset(bufferASlots, 0xFF, sizeof(bufferASlots));  // all UINT_MAX (unused)
       BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots, &m_dx12Feedback[fbRead]);
     }
-    m_lpDX->UpdatePerFrameBindings(warpSlots, bufferASlots, compSlots);
+    m_lpDX->UpdatePerFrameBindings(warpSlots, bufferASlots, bufferBSlots, compSlots);
 
     // Diagnostic: log binding slots once per preset load
     if (!m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f) {
@@ -6646,7 +6710,7 @@ void mdrop::Engine::RestoreShaderParams() {
 
 }
 
-void mdrop::Engine::BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16], const DX12Texture* feedbackTex, const DX12Texture* imageFeedbackTex) {
+void mdrop::Engine::BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[16], const DX12Texture* feedbackTex, const DX12Texture* imageFeedbackTex, const DX12Texture* bufferBTex) {
   for (int i = 0; i < 16; i++) {
     outSlots[i] = UINT_MAX;
     switch (params->m_texcode[i]) {
@@ -6668,6 +6732,12 @@ void mdrop::Engine::BuildBindingSlots(CShaderParams* params, const DX12Texture& 
         outSlots[i] = m_dx12ImageFeedback[0].srvIndex;
       else
         outSlots[i] = vsTex.srvIndex;  // fallback
+      break;
+    case TEX_BUFFER_B:
+      if (bufferBTex && bufferBTex->IsValid())
+        outSlots[i] = bufferBTex->srvIndex;
+      else if (m_dx12FeedbackB[0].IsValid())
+        outSlots[i] = m_dx12FeedbackB[0].srvIndex;
       break;
     case TEX_AUDIO:
       if (m_dx12AudioTex.IsValid())

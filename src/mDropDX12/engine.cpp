@@ -2514,6 +2514,11 @@ int Engine::AllocateMyDX9Stuff() {
       if (m_dx12Feedback[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12Feedback[1]);
       if (m_dx12ImageFeedback[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12ImageFeedback[0]);
       if (m_dx12ImageFeedback[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12ImageFeedback[1]);
+      // Buffer B feedback pair (same FLOAT32 format as Buffer A)
+      m_dx12FeedbackB[0] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
+      m_dx12FeedbackB[1] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
+      if (m_dx12FeedbackB[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackB[0]);
+      if (m_dx12FeedbackB[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackB[1]);
       m_nFeedbackIdx = 0;
       DebugLogA(m_dx12Feedback[0].IsValid() && m_dx12Feedback[1].IsValid()
                 ? "DX12: Feedback buffers: created (ping-pong pair)"
@@ -2521,6 +2526,9 @@ int Engine::AllocateMyDX9Stuff() {
       DebugLogA(m_dx12ImageFeedback[0].IsValid() && m_dx12ImageFeedback[1].IsValid()
                 ? "DX12: Image feedback buffers: created (ping-pong pair)"
                 : "DX12: Image feedback buffers: FAILED");
+      DebugLogA(m_dx12FeedbackB[0].IsValid() && m_dx12FeedbackB[1].IsValid()
+                ? "DX12: FeedbackB buffers: created (ping-pong pair)"
+                : "DX12: FeedbackB buffers: FAILED");
     }
 
     // Audio FFT/waveform texture (512x2, R32_FLOAT) for Shadertoy sound shaders
@@ -3027,9 +3035,10 @@ int Engine::AllocateMyDX9Stuff() {
     m_lpDX->m_uploadAllocator->Reset();
     m_lpDX->m_uploadCommandList->Reset(m_lpDX->m_uploadAllocator.Get(), nullptr);
     float black[] = { 0.f, 0.f, 0.f, 0.f };
-    // Clear both feedback buffer pairs (Buffer A + Image)
+    // Clear all feedback buffer pairs (Buffer A + Buffer B + Image)
     DX12Texture* clearList[] = {
         &m_dx12Feedback[0], &m_dx12Feedback[1],
+        &m_dx12FeedbackB[0], &m_dx12FeedbackB[1],
         &m_dx12ImageFeedback[0], &m_dx12ImageFeedback[1]
     };
     for (auto* tex : clearList) {
@@ -3246,9 +3255,12 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
     m_dx12Feedback[1].Reset();
     m_dx12ImageFeedback[0].Reset();
     m_dx12ImageFeedback[1].Reset();
+    m_dx12FeedbackB[0].Reset();
+    m_dx12FeedbackB[1].Reset();
     m_dx12AudioTex.Reset();
     m_audioUploadBuffer.Reset();
     m_dx12BufferAPSO.Reset();
+    m_dx12BufferBPSO.Reset();
     m_pInjectEffectPSO.Reset();
     m_pSpoutInputPSO.Reset();
     DestroySpoutInput();
@@ -3674,8 +3686,8 @@ void Engine::MyRenderFn(int redraw) {
   CopyBackbufferToFeedback();  // capture comp output for Shadertoy temporal feedback (no-op when unused)
 
   // Swap feedback ping-pong: current write becomes next frame's read
-  // (shared index for both Buffer A and Image feedback pairs)
-  if (m_bCompUsesFeedback || m_bCompUsesImageFeedback || m_bHasBufferA)
+  // (shared index for Buffer A, Buffer B, and Image feedback pairs)
+  if (m_bCompUsesFeedback || m_bCompUsesImageFeedback || m_bHasBufferA || m_bHasBufferB)
     m_nFeedbackIdx = 1 - m_nFeedbackIdx;
 
   RenderInjectEffect();  // F11 inject effect post-process pass (no-op when mode==0)

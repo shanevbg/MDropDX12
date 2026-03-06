@@ -178,6 +178,12 @@ void Engine::LoadRandomPreset(float fBlendTime) {
   lstrcpyW(szFile, m_szPresetDir);	// note: m_szPresetDir always ends with '\'
   lstrcatW(szFile, m_presets[m_nCurrentPreset].szFilename.c_str());
 
+  {
+    char dbg[512];
+    sprintf(dbg, "LoadRandomPreset: idx=%d/%d file=%ls", m_nCurrentPreset, m_nPresets, m_presets[m_nCurrentPreset].szFilename.c_str());
+    DebugLogA(dbg);
+  }
+
   if (!bHistoryEmpty)
     m_presetHistoryPos = (m_presetHistoryPos + 1) % PRESET_HIST_LEN;
 
@@ -1531,10 +1537,11 @@ void Engine::LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime) 
   LoadShaders(&m_shaders, m_pState, false, false);
   CreateDX12PresetPSOs();
 
+  m_bShadertoyMode = false;  // .milk2 presets are never Shadertoy mode
   m_fPresetStartTime = GetTime();
   m_bPresetDiagLogged = false;
   m_fNextPresetTime  = -1.0f;
-  NumTotalPresetsLoaded++;
+  m_nLoadingPreset = 0;  // synchronous load complete — clear async flag
   OnFinishedLoadingPreset();
 
   // Clean up temp files
@@ -1543,49 +1550,25 @@ void Engine::LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime) 
 }
 
 // Loads a .milk3 Shadertoy preset from JSON: { bufferA: "hlsl...", image: "hlsl..." }
+// Async: parses JSON on the calling thread (fast), then launches a background thread
+// for shader compilation.  LoadPresetTick() picks up the result on the render thread.
+// Thread cancellation for stale async loads is handled by LoadPreset before calling this.
 void Engine::LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime) {
   JsonValue root = JsonLoadFile(szPresetFilename);
   if (!root.isObject()) {
     wchar_t buf[MAX_PATH + 64];
     swprintf_s(buf, L"LoadMilk3Preset: failed to parse %s", szPresetFilename);
-    DebugLogW(buf, LOG_VERBOSE);
+    DebugLogW(buf, LOG_WARN);
+    m_nLoadingPreset = 0;
     return;
   }
 
   int version = root[L"version"].asInt(0);
   if (version < 1) {
     DebugLogA("LoadMilk3Preset: unsupported version", LOG_WARN);
+    m_nLoadingPreset = 0;
     return;
   }
-
-  // Update current preset path
-  lstrcpyW(m_szCurrentPresetFile, szPresetFilename);
-
-  // Log which preset is now actively rendering
-  {
-    const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
-    if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
-    name = name ? name + 1 : m_szCurrentPresetFile;
-    char dbg[512];
-    sprintf(dbg, "Render: Active preset (milk3): %ls", name);
-    DebugLogA(dbg);
-  }
-
-  // Reset state to defaults
-  m_pState->Default(0xFFFFFFFF);
-
-  // Set preset description from filename
-  {
-    const wchar_t* p = wcsrchr(szPresetFilename, L'\\');
-    if (!p) p = szPresetFilename; else p++;
-    wcsncpy_s(m_pState->m_szDesc, p, MAX_PATH - 1);
-    wchar_t* dot = wcsrchr(m_pState->m_szDesc, L'.');
-    if (dot) *dot = L'\0';
-  }
-
-  // Extract shader text from JSON
-  std::wstring bufferAW = root[L"bufferA"].asString(L"");
-  std::wstring imageW   = root[L"image"].asString(L"");
 
   // Convert wide strings to narrow for shader text storage
   auto wideToNarrow = [](const std::wstring& ws) -> std::string {
@@ -1602,40 +1585,66 @@ void Engine::LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime) 
     return s;
   };
 
+  // Fill m_pNewState (NOT m_pState — that's live on the render thread).
+  // LoadPresetTick will swap pointers on the render thread when compilation finishes.
+  m_pNewState->Default(0xFFFFFFFF);
+
+  // Set preset description from filename
+  {
+    const wchar_t* p = wcsrchr(szPresetFilename, L'\\');
+    if (!p) p = szPresetFilename; else p++;
+    wcsncpy_s(m_pNewState->m_szDesc, p, MAX_PATH - 1);
+    wchar_t* dot = wcsrchr(m_pNewState->m_szDesc, L'.');
+    if (dot) *dot = L'\0';
+  }
+
+  // Extract shader text from JSON
+  std::wstring imageW   = root[L"image"].asString(L"");
+  std::wstring bufferAW = root[L"bufferA"].asString(L"");
+  std::wstring bufferBW = root[L"bufferB"].asString(L"");
+
   // Store Image/comp shader
   if (!imageW.empty()) {
     std::string imageA = wideToNarrow(imageW);
-    strncpy_s(m_pState->m_szCompShadersText, MAX_SHADER_TEXT_LEN, imageA.c_str(), _TRUNCATE);
-    m_pState->m_nCompPSVersion = MD2_PS_5_0;
+    strncpy_s(m_pNewState->m_szCompShadersText, MAX_SHADER_TEXT_LEN, imageA.c_str(), _TRUNCATE);
+    m_pNewState->m_nCompPSVersion = MD2_PS_5_0;
   }
 
   // Store Buffer A shader
   if (!bufferAW.empty()) {
     std::string bufferAA = wideToNarrow(bufferAW);
-    strncpy_s(m_pState->m_szBufferAShadersText, MAX_SHADER_TEXT_LEN, bufferAA.c_str(), _TRUNCATE);
-    m_pState->m_nBufferAPSVersion = MD2_PS_5_0;
+    strncpy_s(m_pNewState->m_szBufferAShadersText, MAX_SHADER_TEXT_LEN, bufferAA.c_str(), _TRUNCATE);
+    m_pNewState->m_nBufferAPSVersion = MD2_PS_5_0;
+  }
+
+  // Store Buffer B shader
+  if (!bufferBW.empty()) {
+    std::string bufferBA = wideToNarrow(bufferBW);
+    strncpy_s(m_pNewState->m_szBufferBShadersText, MAX_SHADER_TEXT_LEN, bufferBA.c_str(), _TRUNCATE);
+    m_pNewState->m_nBufferBPSVersion = MD2_PS_5_0;
   }
 
   // No warp shader in Shadertoy mode
-  m_pState->m_nWarpPSVersion = 0;
-  m_pState->m_nMaxPSVersion = MD2_PS_5_0;
+  m_pNewState->m_nWarpPSVersion = 0;
+  m_pNewState->m_nMaxPSVersion = MD2_PS_5_0;
 
-  // Activate Shadertoy pipeline (default true for backward compat with .milk3 files without the flag)
-  m_bShadertoyMode = root[L"shadertoy"].asBool(true);
-  m_nShadertoyStartFrame = GetFrame();
+  // Launch background thread for shader compilation (D3DCompile is the expensive part).
+  // LoadPresetTick on the render thread will swap state + shaders when done.
+  uint64_t myGeneration = ++m_nLoadGeneration;
+  m_presetLoadThread = std::thread([this, myGeneration]() {
+    LoadShaders(&m_NewShaders, m_pNewState, false, false);
+    if (m_nLoadGeneration.load() == myGeneration)
+      m_bPresetLoadReady.store(true);
+  });
 
-  // Compile shaders
-  m_shaders.warp.Clear();
-  m_shaders.comp.Clear();
-  m_shaders.bufferA.Clear();
-  LoadShaders(&m_shaders, m_pState, false, false);
-  CreateDX12PresetPSOs();
-
-  m_fPresetStartTime = GetTime();
-  m_bPresetDiagLogged = false;
-  m_fNextPresetTime = -1.0f;
-  NumTotalPresetsLoaded++;
-  OnFinishedLoadingPreset();
+  {
+    const wchar_t* name = wcsrchr(szPresetFilename, L'\\');
+    if (!name) name = wcsrchr(szPresetFilename, L'/');
+    name = name ? name + 1 : szPresetFilename;
+    char dbg[512];
+    sprintf(dbg, "LoadMilk3Preset: async compile started for %ls", name);
+    DebugLogA(dbg);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1677,67 +1686,76 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
     }
   }
 
-  // .milk3 Shadertoy preset: route to dedicated loader
-  {
-    int fnLen = lstrlenW(szPresetFilename);
-    if (fnLen >= 6 && _wcsicmp(szPresetFilename + fnLen - 6, L".milk3") == 0) {
-      LoadMilk3Preset(szPresetFilename, fBlendTime);
-      return;
-    }
-  }
-
-  // .milk2 double-preset: route to dedicated loader
-  {
-    int fnLen = lstrlenW(szPresetFilename);
-    if (fnLen >= 6 && wcsicmp(szPresetFilename + fnLen - 6, L".milk2") == 0) {
-      LoadMilk2Preset(szPresetFilename, fBlendTime);
-      return;
-    }
-  }
-
-  // Loading a non-.milk3 preset: disable Shadertoy mode
-  m_bShadertoyMode = false;
-
-  // if no preset was valid before, make sure there is no blend, because there is nothing valid to blend from.
-  if (!wcscmp(m_pState->m_szDesc, INVALID_PRESET_DESC))
-    fBlendTime = 0;
-
-  // All loads go through the async background thread path.
-  // Import + shader compilation run off the render thread so the current
-  // preset keeps rendering without stutter. When the thread finishes,
-  // LoadPresetTick() detects it and does an instant hard-cut or blended swap.
-
-  // If a previous load is still running, try to finish it quickly.
-  // If it's stuck in D3DCompile, detach it and start fresh.
+  // Cancel any pending async load before starting a new one.
+  // This prevents a stale background thread from overwriting a freshly loaded preset.
   if (m_presetLoadThread.joinable()) {
     HANDLE h = (HANDLE)m_presetLoadThread.native_handle();
     DWORD wait = WaitForSingleObject(h, 100); // ~6 frames at 60fps
     if (wait == WAIT_TIMEOUT) {
-      // Thread is stuck in D3DCompile — detach it. The generation check
-      // in the lambda will prevent it from signaling ready.
       m_presetLoadThread.detach();
-      // Null out COM pointers the old thread may have partially written.
-      // This leaks a small amount of bytecode — acceptable for rare slow-shader cases.
       m_NewShaders.warp.ptr = NULL; m_NewShaders.warp.CT = NULL; m_NewShaders.warp.bytecodeBlob = NULL;
       m_NewShaders.comp.ptr = NULL; m_NewShaders.comp.CT = NULL; m_NewShaders.comp.bytecodeBlob = NULL;
+      m_NewShaders.bufferA.ptr = NULL; m_NewShaders.bufferA.CT = NULL; m_NewShaders.bufferA.bytecodeBlob = NULL;
+      m_NewShaders.bufferB.ptr = NULL; m_NewShaders.bufferB.CT = NULL; m_NewShaders.bufferB.bytecodeBlob = NULL;
       DebugLogA("Preset load: detaching stale compilation thread (D3DCompile stall)", LOG_WARN);
     } else {
       m_presetLoadThread.join();
     }
     m_bPresetLoadReady = false;
+    m_nLoadingPreset = 0;
   }
+
+  // All preset types use the async background thread path.
+  // Import + shader compilation run off the render thread so the current
+  // preset keeps rendering without stutter. When the thread finishes,
+  // LoadPresetTick() detects it and does an instant hard-cut or blended swap.
 
   m_NewShaders.warp.Clear();
   m_NewShaders.comp.Clear();
+  m_NewShaders.bufferA.Clear();
+  m_NewShaders.bufferB.Clear();
 
-  m_nLoadingPreset = 1;  // signals "load in progress" to the rest of the code
+  m_nLoadingPreset = 1;
   m_bPresetLoadReady = false;
   m_fLoadingPresetBlendTime = fBlendTime;
   lstrcpyW(m_szLoadingPreset, szPresetFilename);
   m_fLoadStartTime = GetTime();
   NumTotalPresetsLoaded++;
 
-  // Capture values the thread needs (avoid reading member vars from bg thread)
+  // Detect preset type for routing — match .milk* by finding last '.' and checking prefix
+  int fnLen = lstrlenW(szPresetFilename);
+  const wchar_t* lastDot = wcsrchr(szPresetFilename, L'.');
+  bool bIsMilk3 = lastDot && _wcsicmp(lastDot, L".milk3") == 0;
+  bool bIsMilk2 = lastDot && _wcsicmp(lastDot, L".milk2") == 0;
+
+  {
+    char dbg[512];
+    sprintf(dbg, "LoadPreset: fnLen=%d lastDot=%ls milk3=%d milk2=%d path=%ls",
+            fnLen, lastDot ? lastDot : L"(null)", bIsMilk3, bIsMilk2, szPresetFilename);
+    DebugLogA(dbg);
+  }
+
+  if (bIsMilk3) {
+    // .milk3 Shadertoy preset: parse JSON on main thread (fast), compile async
+    m_bLoadingShadertoyMode = true;
+    LoadMilk3Preset(szPresetFilename, fBlendTime);
+    return;
+  }
+
+  if (bIsMilk2) {
+    // .milk2 double-preset: parse + compile async
+    m_bLoadingShadertoyMode = false;
+    LoadMilk2Preset(szPresetFilename, fBlendTime);
+    return;
+  }
+
+  // .milk preset: async Import + compile
+  m_bLoadingShadertoyMode = false;
+
+  // if no preset was valid before, make sure there is no blend, because there is nothing valid to blend from.
+  if (!wcscmp(m_pState->m_szDesc, INVALID_PRESET_DESC))
+    m_fLoadingPresetBlendTime = 0;
+
   float loadTime = GetTime();
   DWORD ApplyFlags = STATE_ALL;
   ApplyFlags ^= (m_bWarpShaderLock ? STATE_WARP : 0);
@@ -1973,9 +1991,19 @@ void Engine::LoadPresetTick() {
     m_bPresetDiagLogged = false;
     m_fNextPresetTime = -1.0f;		// flags UpdateTime() to recompute this
 
+    // Activate or deactivate Shadertoy mode based on what was loaded
+    if (m_bLoadingShadertoyMode) {
+      m_bShadertoyMode = true;
+      m_nShadertoyStartFrame = GetFrame();
+    } else {
+      m_bShadertoyMode = false;
+    }
+
     // release stuff from m_OldShaders, then move m_shaders to m_OldShaders, then load the new shaders.
     m_OldShaders.warp.Clear();
     m_OldShaders.comp.Clear();
+    m_OldShaders.bufferA.Clear();
+    m_OldShaders.bufferB.Clear();
     m_OldShaders = m_shaders;
     m_shaders = m_NewShaders;
     // Null out m_NewShaders' COM pointers WITHOUT releasing — ownership transferred to m_shaders.
@@ -1988,6 +2016,28 @@ void Engine::LoadPresetTick() {
     m_NewShaders.comp.CT = NULL;
     m_NewShaders.comp.bytecodeBlob = NULL;
     m_NewShaders.comp.params.Clear();
+    m_NewShaders.bufferA.ptr = NULL;
+    m_NewShaders.bufferA.CT = NULL;
+    m_NewShaders.bufferA.bytecodeBlob = NULL;
+    m_NewShaders.bufferA.params.Clear();
+    m_NewShaders.bufferB.ptr = NULL;
+    m_NewShaders.bufferB.CT = NULL;
+    m_NewShaders.bufferB.bytecodeBlob = NULL;
+    m_NewShaders.bufferB.params.Clear();
+
+    // Derive buffer/feedback flags from the newly swapped shaders.
+    // These flags must ONLY change on the render thread (here) — never on the
+    // background compilation thread, which would race with mid-frame rendering.
+    m_bHasBufferA = (m_shaders.bufferA.bytecodeBlob != NULL);
+    m_bHasBufferB = (m_shaders.bufferB.bytecodeBlob != NULL);
+    m_bCompUsesFeedback = m_bHasBufferA;  // Buffer A always implies feedback
+    m_bCompUsesImageFeedback = false;
+    for (int i = 0; i < 16; i++) {
+      if (m_shaders.comp.params.m_texcode[i] == TEX_FEEDBACK)
+        m_bCompUsesFeedback = true;
+      if (m_shaders.comp.params.m_texcode[i] == TEX_IMAGE_FEEDBACK)
+        m_bCompUsesImageFeedback = true;
+    }
 
     // end loading mode
     m_nLoadingPreset = 0;
@@ -2226,7 +2276,7 @@ retry:
 
       // .milk3 files are always runnable (JSON + HLSL, no PS version check needed)
       if (!bSkip && bIsMilk3) {
-        // no further filtering needed for .milk3
+        fRating = 3.0f;  // default rating so CDF-weighted random selection can pick them
       }
       // if it is .milk/.milk2, make sure we know how to run its pixel shaders -
       // otherwise we don't want to show it in the preset list!

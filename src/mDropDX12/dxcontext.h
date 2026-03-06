@@ -49,7 +49,7 @@ using Microsoft::WRL::ComPtr;
 
 // Descriptor heap sizes
 #define DXC_MAX_RTV  32   // 2 back buffers + 2 VS + 6 blur + 10 title + spare
-#define DXC_MAX_SRV  1024 // texture SRVs + 16-slot binding blocks (each texture uses 17 slots)
+#define DXC_MAX_SRV  1280 // texture SRVs + 16-slot binding blocks (each texture uses 17 slots)
 #define DXC_MAX_SAMPLERS 16
 
 #define SNAP_WINDOWED_MODE_BLOCKSIZE  32
@@ -246,13 +246,15 @@ public:
   D3D12_GPU_DESCRIPTOR_HANDLE GetBindingBlockGpuHandleByIndex(UINT blockStart);
 
   // Per-frame binding blocks: avoids GPU race by using separate descriptor ranges per frame.
-  // 2 frames × 3 passes (warp + bufferA + comp) × 16 SRV descriptors = 96 total.
-  static const UINT PASSES_PER_FRAME = 3; // warp, bufferA, comp
+  // 2 frames × 4 passes (warp + bufferA + bufferB + comp) × 16 SRV descriptors = 128 total.
+  static const UINT PASSES_PER_FRAME = 4; // warp, bufferA, bufferB, comp
   UINT m_perFrameBindingBase = UINT_MAX;
   bool AllocatePerFrameBindings(); // call once at init, after CreateNullTexture
-  void UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT bufferASrvSlots[16], const UINT compSrvSlots[16]);
+  void UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT bufferASrvSlots[16],
+                              const UINT bufferBSrvSlots[16], const UINT compSrvSlots[16]);
   D3D12_GPU_DESCRIPTOR_HANDLE GetWarpBindingGpuHandle();
   D3D12_GPU_DESCRIPTOR_HANDLE GetBufferABindingGpuHandle();
+  D3D12_GPU_DESCRIPTOR_HANDLE GetBufferBBindingGpuHandle();
   D3D12_GPU_DESCRIPTOR_HANDLE GetCompBindingGpuHandle();
 
   // Per-frame blur binding blocks: 2 frames × 6 blur passes × 16 SRV descriptors = 192 total.

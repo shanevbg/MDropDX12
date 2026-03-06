@@ -487,6 +487,7 @@ enum ChannelSource {
   CHAN_IMAGE_PREV,       // sampler_image (Image previous frame output)
   CHAN_AUDIO,            // sampler_audio (512x2 audio FFT + waveform)
   CHAN_RANDOM_TEX,       // sampler_rand00 (random texture from disk)
+  CHAN_BUFFER_B,         // sampler_bufferB (Buffer B output)
   CHAN_COUNT
 };
 

@@ -1686,11 +1686,12 @@ bool DXContext::AllocatePerFrameBindings()
     return true;
 }
 
-void DXContext::UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT bufferASrvSlots[16], const UINT compSrvSlots[16])
+void DXContext::UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT bufferASrvSlots[16],
+                                      const UINT bufferBSrvSlots[16], const UINT compSrvSlots[16])
 {
     if (m_perFrameBindingBase == UINT_MAX) return;
 
-    // Each frame gets 48 slots: [0..15] = warp, [16..31] = bufferA, [32..47] = comp
+    // Each frame gets 64 slots: [0..15] = warp, [16..31] = bufferA, [32..47] = bufferB, [48..63] = comp
     UINT frameBase = m_perFrameBindingBase + m_frameIndex * PASSES_PER_FRAME * BINDING_BLOCK_SIZE;
 
     D3D12_CPU_DESCRIPTOR_HANDLE nullSrc;
@@ -1715,7 +1716,8 @@ void DXContext::UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT b
 
     fillBlock(frameBase, warpSrvSlots);                              // pass 0: warp
     fillBlock(frameBase + BINDING_BLOCK_SIZE, bufferASrvSlots);      // pass 1: bufferA
-    fillBlock(frameBase + 2 * BINDING_BLOCK_SIZE, compSrvSlots);     // pass 2: comp
+    fillBlock(frameBase + 2 * BINDING_BLOCK_SIZE, bufferBSrvSlots);  // pass 2: bufferB
+    fillBlock(frameBase + 3 * BINDING_BLOCK_SIZE, compSrvSlots);     // pass 3: comp
 }
 
 D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetWarpBindingGpuHandle()
@@ -1736,9 +1738,18 @@ D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetBufferABindingGpuHandle()
     return h;
 }
 
-D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetCompBindingGpuHandle()
+D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetBufferBBindingGpuHandle()
 {
     UINT slot = m_perFrameBindingBase + m_frameIndex * PASSES_PER_FRAME * BINDING_BLOCK_SIZE + 2 * BINDING_BLOCK_SIZE;
+    D3D12_GPU_DESCRIPTOR_HANDLE h;
+    h.ptr = m_srvHeap->GetGPUDescriptorHandleForHeapStart().ptr +
+            (SIZE_T)slot * m_srvDescriptorSize;
+    return h;
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetCompBindingGpuHandle()
+{
+    UINT slot = m_perFrameBindingBase + m_frameIndex * PASSES_PER_FRAME * BINDING_BLOCK_SIZE + 3 * BINDING_BLOCK_SIZE;
     D3D12_GPU_DESCRIPTOR_HANDLE h;
     h.ptr = m_srvHeap->GetGPUDescriptorHandleForHeapStart().ptr +
             (SIZE_T)slot * m_srvDescriptorSize;
