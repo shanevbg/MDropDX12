@@ -133,15 +133,15 @@
 | Key | Action | Status |
 | --- | ------ | ------ |
 | Ctrl+X | Save screenshot to /capture folder (also via Settings → Remote or IPC) | ✅ |
-| T/t | Song title animation | ❌ Not rendering in DX12 |
-| Ctrl+T | Kill custom messages/song titles | ❌ No effect (nothing to kill) |
+| T/t | Song title animation | ✅ |
+| Ctrl+T | Kill custom messages/song titles | ✅ |
 
 ### Sprites & Custom Messages
 
 | Key | Action | Status |
 | --- | ------ | ------ |
 | K | Toggle sprite/message input mode | ✅ Handler works |
-| 00-99 | Launch sprite or custom message | ⚠️ Sprites render; custom messages need testing |
+| 00-99 | Launch sprite or custom message | ✅ |
 | \* | Reload custom_messages.ini | ✅ |
 | Delete | Kill newest sprite/message | ✅ |
 | Shift+Delete | Kill oldest sprite/message | ✅ |
