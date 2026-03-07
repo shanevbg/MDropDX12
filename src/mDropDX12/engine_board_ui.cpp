@@ -70,6 +70,13 @@ void ButtonBoardWindow::DoBuildControls() {
             p->m_colSettingsBg, p->m_colSettingsBtnFace,
             p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow,
             p->m_colSettingsText, p->m_colSettingsCtrlBg);
+    } else {
+        COLORREF face = GetSysColor(COLOR_BTNFACE);
+        COLORREF hi   = GetSysColor(COLOR_BTNHIGHLIGHT);
+        COLORREF sh   = GetSysColor(COLOR_BTNSHADOW);
+        COLORREF text = GetSysColor(COLOR_BTNTEXT);
+        COLORREF ctrl = GetSysColor(COLOR_WINDOW);
+        m_pPanel->SetThemeColors(face, face, hi, sh, text, ctrl);
     }
     m_pPanel->SetFont(hFont);
 

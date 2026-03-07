@@ -901,14 +901,17 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
   }
 
   case WM_ERASEBKGND:
+  {
+    HDC hdc = (HDC)wParam;
+    RECT rc;
+    GetClientRect(hWnd, &rc);
     if (p->IsDarkTheme() && p->m_hBrSettingsBg) {
-      HDC hdc = (HDC)wParam;
-      RECT rc;
-      GetClientRect(hWnd, &rc);
       FillRect(hdc, &rc, p->m_hBrSettingsBg);
-      return 1;
+    } else {
+      FillRect(hdc, &rc, (HBRUSH)(COLOR_BTNFACE + 1));
     }
-    break;
+    return 1;
+  }
 
   case WM_SETTINGCHANGE:
     if (p->m_nThemeMode == Engine::THEME_SYSTEM && lParam &&
