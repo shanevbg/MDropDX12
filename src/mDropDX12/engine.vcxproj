@@ -1,0 +1,490 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectName>MDropDX12</ProjectName>
+    <ProjectGuid>{881FB534-7396-485A-ADC2-6FBEBED7A0F4}</ProjectGuid>
+    <RootNamespace>mDropDX12</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <UseOfMfc>false</UseOfMfc>
+    <TargetExt>.exe</TargetExt>
+    <CharacterSet>MultiByte</CharacterSet>
+    <EnableASAN>false</EnableASAN>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <UseOfMfc>false</UseOfMfc>
+    <TargetExt>.exe</TargetExt>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <UseOfMfc>false</UseOfMfc>
+    <TargetExt>.exe</TargetExt>
+    <CharacterSet>MultiByte</CharacterSet>
+    <EnableASAN>false</EnableASAN>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <UseOfMfc>false</UseOfMfc>
+    <TargetExt>.exe</TargetExt>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(VCTargetsPath)Microsoft.CPP.UpgradeFromVC71.props" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(VCTargetsPath)Microsoft.CPP.UpgradeFromVC71.props" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(VCTargetsPath)Microsoft.CPP.UpgradeFromVC71.props" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(VCTargetsPath)Microsoft.CPP.UpgradeFromVC71.props" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>14.0.25431.1</_ProjectFileVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <OutDir>.\Release\</OutDir>
+    <IntDir>.\Release\</IntDir>
+    <LinkIncremental>false</LinkIncremental>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <OutDir>.\Debug\</OutDir>
+    <IntDir>.\Debug\</IntDir>
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>.\Release_x64\</OutDir>
+    <IntDir>.\Release_x64\</IntDir>
+    <LinkIncremental>false</LinkIncremental>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>.\Debug_x64\</OutDir>
+    <IntDir>.\Debug_x64\</IntDir>
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <!-- ============== Release|Win32 ============== -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Midl>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <MkTypLibCompatible>true</MkTypLibCompatible>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <TargetEnvironment>Win32</TargetEnvironment>
+      <TypeLibraryName>.\Release/plugin.tlb</TypeLibraryName>
+      <HeaderFileName />
+    </Midl>
+    <ClCompile>
+      <Optimization>MinSpace</Optimization>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
+      <OmitFramePointers>true</OmitFramePointers>
+      <AdditionalIncludeDirectories>..\ns-eel2;..\..\external\Spout2\SPOUTSDK\SpoutGL;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;USE_VIS_HDR_HWND;STRSAFE_NO_DEPRECATE;NSEEL_REENTRANT_EXECUTION;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <StringPooling>true</StringPooling>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <PrecompiledHeader />
+      <PrecompiledHeaderOutputFile>.\Release/plugin.pch</PrecompiledHeaderOutputFile>
+      <AssemblerListingLocation>.\Release/</AssemblerListingLocation>
+      <ObjectFileName>.\Release/</ObjectFileName>
+      <ProgramDataBaseFileName>.\Release/</ProgramDataBaseFileName>
+      <WarningLevel>Level3</WarningLevel>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <CompileAs>Default</CompileAs>
+      <DisableSpecificWarnings>4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <ExceptionHandling>Async</ExceptionHandling>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <Culture>0x0409</Culture>
+    </ResourceCompile>
+    <Link>
+      <AdditionalDependencies>windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;d3d11.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <AdditionalLibraryDirectories>..\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
+      <IgnoreSpecificDefaultLibraries>
+      </IgnoreSpecificDefaultLibraries>
+      <DelayLoadDLLs>
+      </DelayLoadDLLs>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <DataExecutionPrevention />
+      <ImportLibrary>.\Release/mDropDX12.lib</ImportLibrary>
+      <TargetMachine>MachineX86</TargetMachine>
+    </Link>
+    <PostBuildEvent>
+      <Command>
+      </Command>
+    </PostBuildEvent>
+    <Manifest />
+    <Manifest>
+      <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
+    </Manifest>
+  </ItemDefinitionGroup>
+  <!-- ============== Debug|Win32 ============== -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Midl>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <MkTypLibCompatible>true</MkTypLibCompatible>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <TargetEnvironment>Win32</TargetEnvironment>
+      <TypeLibraryName>.\Debug/plugin.tlb</TypeLibraryName>
+      <HeaderFileName />
+    </Midl>
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <AdditionalIncludeDirectories>..\ns-eel2;..\..\external\Spout2\SPOUTSDK\SpoutGL;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_NODEBUG;_WINDOWS;USE_VIS_HDR_HWND;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <PrecompiledHeader />
+      <PrecompiledHeaderOutputFile>.\Debug/plugin.pch</PrecompiledHeaderOutputFile>
+      <AssemblerListingLocation>.\Debug/</AssemblerListingLocation>
+      <ObjectFileName>.\Debug/</ObjectFileName>
+      <ProgramDataBaseFileName>.\Debug/</ProgramDataBaseFileName>
+      <BrowseInformation>true</BrowseInformation>
+      <WarningLevel>Level3</WarningLevel>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+      <CompileAs>Default</CompileAs>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <ExceptionHandling>Async</ExceptionHandling>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <Culture>0x0409</Culture>
+    </ResourceCompile>
+    <Link>
+      <AdditionalDependencies>windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;d3d11.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <AdditionalLibraryDirectories>..\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <DelayLoadDLLs>
+      </DelayLoadDLLs>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>.\Debug/mDropDX12.pdb</ProgramDatabaseFile>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <DataExecutionPrevention />
+      <ImportLibrary>.\Debug/mDropDX12.lib</ImportLibrary>
+      <TargetMachine>MachineX86</TargetMachine>
+      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
+    </Link>
+    <PostBuildEvent>
+      <Command>
+      </Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <!-- ============== Release|x64 ============== -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Midl>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <MkTypLibCompatible>true</MkTypLibCompatible>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <TargetEnvironment>x64</TargetEnvironment>
+      <TypeLibraryName>.\Release_x64/plugin.tlb</TypeLibraryName>
+      <HeaderFileName />
+    </Midl>
+    <ClCompile>
+      <Optimization>MinSpace</Optimization>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
+      <OmitFramePointers>true</OmitFramePointers>
+      <AdditionalIncludeDirectories>..\ns-eel2;..\..\external\Spout2\SPOUTSDK\SpoutGL;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_WIN64;NDEBUG;_WINDOWS;USE_VIS_HDR_HWND;STRSAFE_NO_DEPRECATE;NSEEL_REENTRANT_EXECUTION;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <StringPooling>true</StringPooling>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <PrecompiledHeader />
+      <PrecompiledHeaderOutputFile>.\Release_x64/plugin.pch</PrecompiledHeaderOutputFile>
+      <AssemblerListingLocation>.\Release_x64/</AssemblerListingLocation>
+      <ObjectFileName>.\Release_x64/</ObjectFileName>
+      <ProgramDataBaseFileName>.\Release_x64/</ProgramDataBaseFileName>
+      <WarningLevel>Level3</WarningLevel>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <CompileAs>Default</CompileAs>
+      <DisableSpecificWarnings>4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <ExceptionHandling>Async</ExceptionHandling>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <Culture>0x0409</Culture>
+    </ResourceCompile>
+    <Link>
+      <AdditionalDependencies>..\..\src\ns-eel2\asm-nseel-x64.obj;windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;d3d11.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <AdditionalLibraryDirectories>..\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
+      <IgnoreSpecificDefaultLibraries>
+      </IgnoreSpecificDefaultLibraries>
+      <DelayLoadDLLs>
+      </DelayLoadDLLs>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <RandomizedBaseAddress>true</RandomizedBaseAddress>
+      <DataExecutionPrevention />
+      <ImportLibrary>.\Release_x64/mDropDX12.lib</ImportLibrary>
+      <TargetMachine>MachineX64</TargetMachine>
+    </Link>
+    <PostBuildEvent>
+      <Command>
+      </Command>
+    </PostBuildEvent>
+    <Manifest />
+    <Manifest>
+      <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
+    </Manifest>
+  </ItemDefinitionGroup>
+  <!-- ============== Debug|x64 ============== -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Midl>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <MkTypLibCompatible>true</MkTypLibCompatible>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <TargetEnvironment>x64</TargetEnvironment>
+      <TypeLibraryName>.\Debug_x64/plugin.tlb</TypeLibraryName>
+      <HeaderFileName />
+    </Midl>
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <AdditionalIncludeDirectories>..\ns-eel2;..\..\external\Spout2\SPOUTSDK\SpoutGL;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX;..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_WIN64;_NODEBUG;_WINDOWS;USE_VIS_HDR_HWND;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <PrecompiledHeader />
+      <PrecompiledHeaderOutputFile>.\Debug_x64/plugin.pch</PrecompiledHeaderOutputFile>
+      <AssemblerListingLocation>.\Debug_x64/</AssemblerListingLocation>
+      <ObjectFileName>.\Debug_x64/</ObjectFileName>
+      <ProgramDataBaseFileName>.\Debug_x64/</ProgramDataBaseFileName>
+      <BrowseInformation>true</BrowseInformation>
+      <WarningLevel>Level3</WarningLevel>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+      <CompileAs>Default</CompileAs>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <ExceptionHandling>Async</ExceptionHandling>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <Culture>0x0409</Culture>
+    </ResourceCompile>
+    <Link>
+      <AdditionalDependencies>..\..\src\ns-eel2\asm-nseel-x64.obj;windowsapp.lib;DbgHelp.lib;Winmm.lib;d3d12.lib;d3d11.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;Shlwapi.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <AdditionalLibraryDirectories>..\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <DelayLoadDLLs>
+      </DelayLoadDLLs>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>.\Debug_x64/mDropDX12.pdb</ProgramDatabaseFile>
+      <RandomizedBaseAddress>true</RandomizedBaseAddress>
+      <DataExecutionPrevention />
+      <ImportLibrary>.\Debug_x64/mDropDX12.lib</ImportLibrary>
+      <TargetMachine>MachineX64</TargetMachine>
+    </Link>
+    <PostBuildEvent>
+      <Command>
+      </Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="audio_capture.cpp" />
+    <!-- Spout2 DX12 SDK (fetched by build.ps1 to external/Spout2/) -->
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutCopy.cpp" />
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutDirectX.cpp" />
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutFrameCount.cpp" />
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutSenderNames.cpp" />
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutSharedMemory.cpp" />
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutUtils.cpp" />
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX.cpp" />
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12\SpoutDX12.cpp" />
+    <ClCompile Include="dx12pipeline.cpp" />
+    <ClCompile Include="dxcontext.cpp" />
+    <ClCompile Include="fft.cpp" />
+    <ClCompile Include="menu.cpp" />
+    <ClCompile Include="App.cpp" />
+    <ClCompile Include="milkdropfs.cpp" />
+    <ClCompile Include="mdropdx12.cpp" />
+    <ClCompile Include="engine.cpp" />
+    <ClCompile Include="engine_input.cpp" />
+    <ClCompile Include="engine_displays.cpp" />
+    <ClCompile Include="engine_hotkeys.cpp" />
+    <ClCompile Include="engine_hotkeys_ui.cpp" />
+    <ClCompile Include="json_utils.cpp" />
+    <ClCompile Include="button_panel.cpp" />
+    <ClCompile Include="engine_board_ui.cpp" />
+    <ClCompile Include="engine_shader_import_ui.cpp" />
+    <ClCompile Include="engine_presets_ui.cpp" />
+    <ClCompile Include="engine_sprites_ui.cpp" />
+    <ClCompile Include="engine_messages_ui.cpp" />
+    <ClCompile Include="engine_spout_input.cpp" />
+    <ClCompile Include="video_capture.cpp" />
+    <ClCompile Include="engine_controller.cpp" />
+    <ClCompile Include="engine_messages.cpp" />
+    <ClCompile Include="engine_presets.cpp" />
+    <ClCompile Include="engine_script.cpp" />
+    <ClCompile Include="engine_rendering.cpp" />
+    <ClCompile Include="engine_settings_ui.cpp" />
+    <ClCompile Include="engine_displays_ui.cpp" />
+    <ClCompile Include="engine_video_effects_ui.cpp" />
+    <ClCompile Include="engine_vfx_profiles_ui.cpp" />
+    <ClCompile Include="engine_workspace_layout_ui.cpp" />
+    <ClCompile Include="engine_songinfo_ui.cpp" />
+    <ClCompile Include="engine_midi_ui.cpp" />
+    <ClCompile Include="midi_input.cpp" />
+    <ClCompile Include="tool_window.cpp" />
+    <ClCompile Include="engine_shaders.cpp" />
+    <ClCompile Include="engine_textures.cpp" />
+    <ClCompile Include="engineshell.cpp" />
+    <ClCompile Include="state.cpp" />
+    <ClCompile Include="support.cpp" />
+    <ClCompile Include="texmgr.cpp" />
+    <ClCompile Include="textmgr.cpp" />
+    <ClCompile Include="overlay.cpp" />
+    <ClCompile Include="utility.cpp" />
+    <ClCompile Include="wasabi.cpp" />
+    <!-- ns-eel2: native JIT expression evaluator (WDL) -->
+    <ClCompile Include="..\ns-eel2\nseel-compiler.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-cfunc.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-eval.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-ram.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-caltab.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-lextab.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-yylex.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-host.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="audio_capture.h" />
+    <ClInclude Include="video_capture.h" />
+    <ClInclude Include="..\ns-eel2\ns-eel.h" />
+    <ClInclude Include="..\ns-eel2\ns-eel-int.h" />
+    <ClInclude Include="..\ns-eel2\ns-eel-addfuncs.h" />
+    <ClInclude Include="..\ns-eel2\glue_x86_64_sse.h" />
+    <ClInclude Include="..\ns-eel2\glue_x86.h" />
+    <!-- Spout2 DX12 SDK headers (fetched by build.ps1 to external/Spout2/) -->
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutCommon.h" />
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutCopy.h" />
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutDirectX.h" />
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutFrameCount.h" />
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutSenderNames.h" />
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutSharedMemory.h" />
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutUtils.h" />
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX.h" />
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12\SpoutDX12.h" />
+    <ClInclude Include="api.h" />
+    <ClInclude Include="AutoCharFn.h" />
+    <ClInclude Include="AutoWide.h" />
+    <ClInclude Include="defines.h" />
+    <ClInclude Include="dx12helpers.h" />
+    <ClInclude Include="dx12pipeline.h" />
+    <ClInclude Include="dxcontext.h" />
+    <ClInclude Include="fft.h" />
+    <ClInclude Include="md_defines.h" />
+    <ClInclude Include="menu.h" />
+    <ClInclude Include="App.h" />
+    <ClInclude Include="mdropdx12.h" />
+    <ClInclude Include="display_output.h" />
+    <ClInclude Include="hotkeys.h" />
+    <ClInclude Include="json_utils.h" />
+    <ClInclude Include="button_panel.h" />
+    <ClInclude Include="midi_input.h" />
+    <ClInclude Include="engine.h" />
+    <ClInclude Include="tool_window.h" />
+    <ClInclude Include="engineshell.h" />
+    <ClInclude Include="render_commands.h" />
+    <ClInclude Include="resource.h" />
+    <ClInclude Include="shell_defines.h" />
+    <ClInclude Include="state.h" />
+    <ClInclude Include="support.h" />
+    <ClInclude Include="texmgr.h" />
+    <ClInclude Include="textmgr.h" />
+    <ClInclude Include="overlay.h" />
+    <ClInclude Include="utility.h" />
+    <ClInclude Include="wasabi.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="engine.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="text1.bin" />
+    <None Include="text1_page2.bin" />
+  </ItemGroup>
+  <ItemGroup>
+    <Xml Include="manifest.xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="engine_icon.ico" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
