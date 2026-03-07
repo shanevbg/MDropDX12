@@ -31,6 +31,23 @@ if (-not (Test-Path $vswhere)) {
 $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild `
            -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1
 
+# Fallback: vswhere without -requires (works after fresh VS install where component
+# registration may not be complete yet)
+if (-not $msbuild -or -not (Test-Path $msbuild)) {
+    $msbuild = & $vswhere -latest -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1
+}
+
+# Fallback: known installation paths
+if (-not $msbuild -or -not (Test-Path $msbuild)) {
+    $paths = @(
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
+    )
+    foreach ($p in $paths) { if (Test-Path $p) { $msbuild = $p; break } }
+}
+
 if (-not $msbuild -or -not (Test-Path $msbuild)) {
     Write-Error "MSBuild not found. Ensure Visual Studio 2022 with C++ workload is installed."
     exit 1
