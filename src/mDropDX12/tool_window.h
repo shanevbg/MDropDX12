@@ -126,6 +126,14 @@ public:
   // Helper for subclasses to track child controls for dark theme + rebuild
   void TrackControl(HWND h) { if (h) m_childCtrls.push_back(h); }
 
+  // Read owner-draw checkbox/radio state. Use instead of IsDlgButtonChecked()
+  // which does NOT work with BS_OWNERDRAW controls (always returns 0).
+  bool IsChecked(int controlID) const;
+
+  // Set owner-draw checkbox/radio state. Use instead of CheckDlgButton()
+  // which does NOT work with BS_OWNERDRAW controls (silently fails).
+  void SetChecked(int controlID, bool checked);
+
   // Track control on a specific tab page (adds to m_pageCtrls[page] + m_childCtrls)
   void TrackPageControl(int page, HWND h);
 

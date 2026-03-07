@@ -549,6 +549,19 @@ void ToolWindow::TrackPageControl(int page, HWND h) {
   TrackControl(h);
 }
 
+bool ToolWindow::IsChecked(int controlID) const {
+  HWND hCtrl = GetDlgItem(m_hWnd, controlID);
+  return hCtrl ? (bool)(intptr_t)GetPropW(hCtrl, L"Checked") : false;
+}
+
+void ToolWindow::SetChecked(int controlID, bool checked) {
+  HWND hCtrl = GetDlgItem(m_hWnd, controlID);
+  if (hCtrl) {
+    SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)(checked ? 1 : 0));
+    InvalidateRect(hCtrl, NULL, TRUE);
+  }
+}
+
 void ToolWindow::ResetPosition() {
   if (!m_hWnd || !IsWindow(m_hWnd)) return;
   int screenW = GetSystemMetrics(SM_CXSCREEN);
@@ -735,15 +748,16 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       return 0;
     }
 
-    // Owner-draw BN_CLICKED: toggle checkbox/radio state
+    // Owner-draw BN_CLICKED: auto-toggle checkbox state.
+    // Checkboxes are toggled here so subclasses don't need to.
+    // Radio groups are NOT toggled here — subclasses must handle group logic.
     if (code == BN_CLICKED) {
       HWND hCtrl = (HWND)lParam;
       bool bIsCheckbox = (bool)(intptr_t)GetPropW(hCtrl, L"IsCheckbox");
-      bool bIsRadio = (bool)(intptr_t)GetPropW(hCtrl, L"IsRadio");
-
-      if (bIsRadio || bIsCheckbox) {
-        // Subclass handles the actual toggle + state update
-        // We just dispatch — the subclass gets the raw id/code
+      if (bIsCheckbox) {
+        bool wasChecked = (bool)(intptr_t)GetPropW(hCtrl, L"Checked");
+        SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)(wasChecked ? 0 : 1));
+        InvalidateRect(hCtrl, NULL, TRUE);
       }
     }
 

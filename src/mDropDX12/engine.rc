@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include "resource.h"
+#include "version.h"
 
 #define APSTUDIO_READONLY_SYMBOLS
 /////////////////////////////////////////////////////////////////////////////
@@ -75,8 +76,8 @@ IDR_TEXT1_PAGE2         TEXT                    "text1_page2.bin"
 //
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 1, 3, 0, 0
-PRODUCTVERSION 1, 3, 0, 0
+FILEVERSION MDROP_VERSION_MAJOR, MDROP_VERSION_MINOR, MDROP_VERSION_PATCH, 0
+PRODUCTVERSION MDROP_VERSION_MAJOR, MDROP_VERSION_MINOR, MDROP_VERSION_PATCH, 0
 FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
 FILEFLAGS 0x1L
@@ -93,12 +94,12 @@ BLOCK "040904b0"
 BEGIN
 VALUE "CompanyName", "MDropDX12 Developers"
 VALUE "FileDescription", "MDropDX12 Visualizer"
-VALUE "FileVersion", "1.3.0.0"
+VALUE "FileVersion", MDROP_VERSION_STR
 VALUE "InternalName", "MDropDX12"
 VALUE "LegalCopyright", ""
 VALUE "OriginalFilename", "MDropDX12.exe"
 VALUE "ProductName", "MDropDX12 Visualizer"
-VALUE "ProductVersion", "1.3.0.0"
+VALUE "ProductVersion", MDROP_VERSION_STR
 END
 END
 BLOCK "VarFileInfo"

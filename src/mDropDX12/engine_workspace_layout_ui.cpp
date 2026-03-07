@@ -14,21 +14,6 @@
 
 using namespace mdrop;
 
-// ── Owner-draw prop helpers (BS_OWNERDRAW doesn't use IsDlgButtonChecked/CheckDlgButton) ──
-
-static bool IsCtrlChecked(HWND hDlg, int id) {
-    HWND hCtrl = GetDlgItem(hDlg, id);
-    return hCtrl ? (bool)(intptr_t)GetPropW(hCtrl, L"Checked") : false;
-}
-
-static void SetCtrlChecked(HWND hDlg, int id, bool checked) {
-    HWND hCtrl = GetDlgItem(hDlg, id);
-    if (hCtrl) {
-        SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)(checked ? 1 : 0));
-        InvalidateRect(hCtrl, NULL, TRUE);
-    }
-}
-
 // ── Layout window entry: extensible registry of tileable windows ──
 
 struct LayoutEntry {
@@ -106,16 +91,16 @@ void WorkspaceLayoutWindow::LoadLayoutPrefs() {
 
     // Render mode: 0=corner on work display, 1=fullscreen on separate display
     int mode = GetPrivateProfileIntW(sec, L"RenderMode", 0, ini);
-    SetCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_MODE_CORNER, mode == 0);
-    SetCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_MODE_DISPLAY, mode == 1);
+    SetChecked(IDC_MW_WSLAYOUT_MODE_CORNER, mode == 0);
+    SetChecked(IDC_MW_WSLAYOUT_MODE_DISPLAY, mode == 1);
 
     // Corner: 0=TL, 1=TR, 2=BL, 3=BR (default TR)
     int corner = GetPrivateProfileIntW(sec, L"Corner", 1, ini);
     if (corner < 0 || corner > 3) corner = 1;
-    SetCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_CORNER_TL, corner == 0);
-    SetCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_CORNER_TR, corner == 1);
-    SetCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_CORNER_BL, corner == 2);
-    SetCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_CORNER_BR, corner == 3);
+    SetChecked(IDC_MW_WSLAYOUT_CORNER_TL, corner == 0);
+    SetChecked(IDC_MW_WSLAYOUT_CORNER_TR, corner == 1);
+    SetChecked(IDC_MW_WSLAYOUT_CORNER_BL, corner == 2);
+    SetChecked(IDC_MW_WSLAYOUT_CORNER_BR, corner == 3);
 
     // Render size percent (default 20)
     int pct = GetPrivateProfileIntW(sec, L"RenderSizePct", 20, ini);
@@ -140,7 +125,7 @@ void WorkspaceLayoutWindow::LoadLayoutPrefs() {
         swprintf(key, 64, L"Window_%ls", s_layoutWindows[i].name);
         int val = GetPrivateProfileIntW(sec, key, -1, ini);
         bool checked = (val == -1) ? s_layoutWindows[i].defaultOn : (val != 0);
-        SetCtrlChecked(m_hWnd, s_layoutWindows[i].checkboxID, checked);
+        SetChecked(s_layoutWindows[i].checkboxID, checked);
     }
 
     UpdateModeState();
@@ -152,16 +137,16 @@ void WorkspaceLayoutWindow::SaveLayoutPrefs() {
     wchar_t buf[16];
 
     // Render mode
-    int mode = IsCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_MODE_DISPLAY) ? 1 : 0;
+    int mode = IsChecked(IDC_MW_WSLAYOUT_MODE_DISPLAY) ? 1 : 0;
     swprintf(buf, 16, L"%d", mode);
     WritePrivateProfileStringW(sec, L"RenderMode", buf, ini);
 
     // Corner
     int corner = 1;
-    if (IsCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_CORNER_TL)) corner = 0;
-    else if (IsCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_CORNER_TR)) corner = 1;
-    else if (IsCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_CORNER_BL)) corner = 2;
-    else if (IsCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_CORNER_BR)) corner = 3;
+    if (IsChecked(IDC_MW_WSLAYOUT_CORNER_TL)) corner = 0;
+    else if (IsChecked(IDC_MW_WSLAYOUT_CORNER_TR)) corner = 1;
+    else if (IsChecked(IDC_MW_WSLAYOUT_CORNER_BL)) corner = 2;
+    else if (IsChecked(IDC_MW_WSLAYOUT_CORNER_BR)) corner = 3;
     swprintf(buf, 16, L"%d", corner);
     WritePrivateProfileStringW(sec, L"Corner", buf, ini);
 
@@ -182,7 +167,7 @@ void WorkspaceLayoutWindow::SaveLayoutPrefs() {
     for (int i = 0; i < NUM_LAYOUT_WINDOWS; i++) {
         wchar_t key[64];
         swprintf(key, 64, L"Window_%ls", s_layoutWindows[i].name);
-        bool checked = IsCtrlChecked(m_hWnd, s_layoutWindows[i].checkboxID);
+        bool checked = IsChecked(s_layoutWindows[i].checkboxID);
         WritePrivateProfileStringW(sec, key, checked ? L"1" : L"0", ini);
     }
 }
@@ -196,7 +181,7 @@ void WorkspaceLayoutWindow::UpdateSizeLabel() {
 }
 
 void WorkspaceLayoutWindow::UpdateModeState() {
-    bool cornerMode = IsCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_MODE_CORNER);
+    bool cornerMode = IsChecked(IDC_MW_WSLAYOUT_MODE_CORNER);
 
     // Enable/disable corner controls
     EnableWindow(GetDlgItem(m_hWnd, IDC_MW_WSLAYOUT_CORNER_TL), cornerMode);
@@ -325,7 +310,7 @@ static ToolWindow* OpenAndGetWindow(Engine* e, int checkboxID) {
 
 void WorkspaceLayoutWindow::ApplyLayout() {
     Engine* p = m_pEngine;
-    bool useDisplay = IsCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_MODE_DISPLAY);
+    bool useDisplay = IsChecked(IDC_MW_WSLAYOUT_MODE_DISPLAY);
 
     // Enumerate monitors for display mode
     std::vector<MonitorEntry> monitors;
@@ -389,10 +374,10 @@ void WorkspaceLayoutWindow::ApplyLayout() {
     } else {
         // ── Corner mode ──
         int corner = 1;
-        if (IsCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_CORNER_TL)) corner = 0;
-        else if (IsCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_CORNER_TR)) corner = 1;
-        else if (IsCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_CORNER_BL)) corner = 2;
-        else if (IsCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_CORNER_BR)) corner = 3;
+        if (IsChecked(IDC_MW_WSLAYOUT_CORNER_TL)) corner = 0;
+        else if (IsChecked(IDC_MW_WSLAYOUT_CORNER_TR)) corner = 1;
+        else if (IsChecked(IDC_MW_WSLAYOUT_CORNER_BL)) corner = 2;
+        else if (IsChecked(IDC_MW_WSLAYOUT_CORNER_BR)) corner = 3;
 
         HWND hSlider = GetDlgItem(m_hWnd, IDC_MW_WSLAYOUT_SIZE_SLIDER);
         int sizePct = hSlider ? (int)SendMessageW(hSlider, TBM_GETPOS, 0, 0) : 20;
@@ -456,7 +441,7 @@ void WorkspaceLayoutWindow::ApplyLayout() {
     std::vector<OpenedWindow> opened;
 
     for (int i = 0; i < NUM_LAYOUT_WINDOWS; i++) {
-        bool chk = IsCtrlChecked(m_hWnd, s_layoutWindows[i].checkboxID);
+        bool chk = IsChecked(s_layoutWindows[i].checkboxID);
         DebugLogAFmt("WorkspaceLayout: checkbox %ls (id=%d) checked=%d",
             s_layoutWindows[i].name, s_layoutWindows[i].checkboxID, (int)chk);
         if (chk) {
@@ -522,14 +507,14 @@ void WorkspaceLayoutWindow::ApplyLayout() {
 
 void WorkspaceLayoutWindow::ResetDefaults() {
     // Mode: corner
-    SetCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_MODE_CORNER, true);
-    SetCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_MODE_DISPLAY, false);
+    SetChecked(IDC_MW_WSLAYOUT_MODE_CORNER, true);
+    SetChecked(IDC_MW_WSLAYOUT_MODE_DISPLAY, false);
 
     // Corner: Top-Right
-    SetCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_CORNER_TL, false);
-    SetCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_CORNER_TR, true);
-    SetCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_CORNER_BL, false);
-    SetCtrlChecked(m_hWnd, IDC_MW_WSLAYOUT_CORNER_BR, false);
+    SetChecked(IDC_MW_WSLAYOUT_CORNER_TL, false);
+    SetChecked(IDC_MW_WSLAYOUT_CORNER_TR, true);
+    SetChecked(IDC_MW_WSLAYOUT_CORNER_BL, false);
+    SetChecked(IDC_MW_WSLAYOUT_CORNER_BR, false);
 
     // Size: 20%
     HWND hSlider = GetDlgItem(m_hWnd, IDC_MW_WSLAYOUT_SIZE_SLIDER);
@@ -542,7 +527,7 @@ void WorkspaceLayoutWindow::ResetDefaults() {
 
     // Checkboxes: reset to defaults
     for (int i = 0; i < NUM_LAYOUT_WINDOWS; i++)
-        SetCtrlChecked(m_hWnd, s_layoutWindows[i].checkboxID, s_layoutWindows[i].defaultOn);
+        SetChecked(s_layoutWindows[i].checkboxID, s_layoutWindows[i].defaultOn);
 
     UpdateModeState();
 }
@@ -552,16 +537,10 @@ void WorkspaceLayoutWindow::ResetDefaults() {
 LRESULT WorkspaceLayoutWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     if (code != BN_CLICKED) return -1;
 
-    // ── Owner-draw checkbox/radio toggle ──
+    // Checkbox state is auto-toggled by base class. Handle radio groups here.
     HWND hCtrl = (HWND)lParam;
-    bool bIsCheckbox = (bool)(intptr_t)GetPropW(hCtrl, L"IsCheckbox");
     bool bIsRadio = (bool)(intptr_t)GetPropW(hCtrl, L"IsRadio");
-
-    if (bIsCheckbox) {
-        bool wasChecked = (bool)(intptr_t)GetPropW(hCtrl, L"Checked");
-        SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)(wasChecked ? 0 : 1));
-        InvalidateRect(hCtrl, NULL, TRUE);
-    } else if (bIsRadio) {
+    if (bIsRadio) {
         // Mode radio group
         static const int modeRadioIDs[] = { IDC_MW_WSLAYOUT_MODE_CORNER, IDC_MW_WSLAYOUT_MODE_DISPLAY };
         for (int rid : modeRadioIDs) {

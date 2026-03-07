@@ -1493,10 +1493,7 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
 
         bChecked = true; // radio is always "checked" when clicked
       } else if (bIsCheckbox) {
-        bool wasChecked = (bool)(intptr_t)GetPropW(hCtrl, L"Checked");
-        bChecked = !wasChecked;
-        SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)(bChecked ? 1 : 0));
-        InvalidateRect(hCtrl, NULL, TRUE);
+        bChecked = IsChecked(id); // base class already toggled checkbox state
       } else {
         bChecked = false; // not a checkbox, but let BN_CLICKED handling proceed
       }
@@ -2829,7 +2826,7 @@ void SettingsWindow::DoBuildControls() {
   PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"MDropDX12", x, y, rw, 24, hFontBold, false));
   y += 28;
 
-  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"Version 1.3", x, y, rw, lineH, hFont, false));
+  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"Version " MDROP_VERSION_STRW, x, y, rw, lineH, hFont, false));
   y += lineH + 4;
 
   {

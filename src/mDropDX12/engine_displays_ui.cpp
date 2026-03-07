@@ -404,9 +404,10 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
   HWND hw = p->GetPluginWindow();  // render window for PostMessage
 
   // ── Owner-draw BN_CLICKED handling ──
+  // Note: checkbox state is auto-toggled by the base class before DoCommand is called.
+  // Radio groups must still be toggled manually here.
   if (code == BN_CLICKED) {
     HWND hCtrl = (HWND)lParam;
-    bool bIsCheckbox = (bool)(intptr_t)GetPropW(hCtrl, L"IsCheckbox");
     bool bIsRadio = (bool)(intptr_t)GetPropW(hCtrl, L"IsRadio");
     bool bChecked = false;
 
@@ -426,11 +427,8 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         }
       }
       bChecked = true;
-    } else if (bIsCheckbox) {
-      bool wasChecked = (bool)(intptr_t)GetPropW(hCtrl, L"Checked");
-      bChecked = !wasChecked;
-      SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)(bChecked ? 1 : 0));
-      InvalidateRect(hCtrl, NULL, TRUE);
+    } else {
+      bChecked = IsChecked(id); // base already toggled checkbox
     }
 
     switch (id) {

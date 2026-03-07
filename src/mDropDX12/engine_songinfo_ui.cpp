@@ -326,15 +326,12 @@ LRESULT SongInfoWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     return 0;
   }
 
-  // Checkbox handlers
+  // Checkbox handlers (base class auto-toggles checkbox state before DoCommand)
   if (code == BN_CLICKED) {
     HWND hCtrl = (HWND)lParam;
     bool bIsCheckbox = (bool)(intptr_t)GetPropW(hCtrl, L"IsCheckbox");
     if (bIsCheckbox) {
-      BOOL bChecked = (BOOL)(intptr_t)GetPropW(hCtrl, L"Checked");
-      bChecked = !bChecked;
-      SetPropW(hCtrl, L"Checked", (HANDLE)(intptr_t)bChecked);
-      InvalidateRect(hCtrl, NULL, TRUE);
+      BOOL bChecked = IsChecked(id);
 
       switch (id) {
       case IDC_MW_SONG_TITLE:
