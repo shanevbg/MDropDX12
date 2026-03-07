@@ -15,7 +15,8 @@ $ErrorActionPreference = "Stop"
 $versionHeader = Get-Content "src\mDropDX12\version.h" -Raw
 if ($versionHeader -match '#define\s+MDROP_VERSION_MAJOR\s+(\d+)') { $major = $Matches[1] } else { Write-Error "Cannot read MDROP_VERSION_MAJOR"; exit 1 }
 if ($versionHeader -match '#define\s+MDROP_VERSION_MINOR\s+(\d+)') { $minor = $Matches[1] } else { Write-Error "Cannot read MDROP_VERSION_MINOR"; exit 1 }
-$version = "$major.$minor"
+if ($versionHeader -match '#define\s+MDROP_VERSION_PATCH\s+(\d+)') { $patch = $Matches[1] } else { $patch = "0" }
+if ($patch -eq "0") { $version = "$major.$minor" } else { $version = "$major.$minor.$patch" }
 $zipName = "MDropDX12-$version-Portable.zip"
 $zipPath = Join-Path $OutputDir $zipName
 

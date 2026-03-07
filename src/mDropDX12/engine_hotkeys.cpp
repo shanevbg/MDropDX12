@@ -124,6 +124,8 @@ void Engine::ResetHotkeyDefaults()
     HK_DEF(i++, HK_OPEN_SHADER_IMPORT,0,                    0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Shader Import",    L"OpenShaderImport");
     HK_DEF(i++, HK_OPEN_VIDEO_FX,    0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Video Effects",    L"OpenVideoFX");
     HK_DEF(i++, HK_OPEN_VFX_PROFILES,0,                    0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open VFX Profiles",    L"OpenVFXProfiles");
+    HK_DEF(i++, HK_OPEN_WORKSPACE_LAYOUT,0,               0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Workspace Layout", L"OpenWorkspaceLayout");
+    HK_DEF(i++, HK_APPLY_WORKSPACE_LAYOUT,0,              0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Apply Workspace Layout", L"ApplyWorkspaceLayout");
 
     // ── Shader/Effects ──
     HK_DEF(i++, HK_INJECT_EFFECT_CYCLE, 0,                   VK_F11,       HKSCOPE_LOCAL, HKCAT_SHADER, L"Inject Effect Cycle",  L"InjectEffectCycle");
@@ -673,6 +675,19 @@ bool Engine::DispatchHotkeyAction(int actionId)
         return true;
     case HK_OPEN_VFX_PROFILES:
         OpenVFXProfileWindow();
+        return true;
+    case HK_OPEN_WORKSPACE_LAYOUT:
+        OpenWorkspaceLayoutWindow();
+        return true;
+    case HK_APPLY_WORKSPACE_LAYOUT:
+        if (m_workspaceLayoutWindow && m_workspaceLayoutWindow->IsOpen()) {
+            m_workspaceLayoutWindow->ApplyLayout();
+        } else {
+            if (!m_workspaceLayoutWindow)
+                m_workspaceLayoutWindow = std::make_unique<WorkspaceLayoutWindow>(this);
+            m_workspaceLayoutWindow->SetAutoApply();
+            m_workspaceLayoutWindow->Open();
+        }
         return true;
 
     // ── Shader/Effects ──

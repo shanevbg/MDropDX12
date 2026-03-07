@@ -286,6 +286,12 @@ void WorkspaceLayoutWindow::DoBuildControls() {
 
     // Load saved preferences (overrides defaults)
     LoadLayoutPrefs();
+
+    // Auto-apply if requested (e.g. from ACTION=ApplyWorkspaceLayout)
+    if (m_bAutoApply) {
+        m_bAutoApply = false;
+        ApplyLayout();
+    }
 }
 
 // ── Open a tool window by checkbox ID and return its ToolWindow* ──

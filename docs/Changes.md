@@ -1,5 +1,20 @@
 # MDropDX12 Changelog
 
+## v1.4.1 (2026-03-06)
+
+### Scripting
+
+- Added comprehensive scripting guide (`docs/Scripts.md`) covering all script commands, ACTION= dispatch, and examples
+- Added `ACTION=OpenWorkspaceLayout` hotkey action to open the Workspace Layout window
+- Added `ACTION=ApplyWorkspaceLayout` hotkey action to apply saved workspace layout with a single keypress
+- Workspace layout can now be triggered via script, hotkey binding, or Button Board action
+
+### Bug Fixes
+
+- Fixed owner-draw checkboxes always reading as unchecked in ToolWindows (base class auto-toggle)
+- Fixed light mode rendering: ToolWindow backgrounds and Button Board now use system colors
+- Fixed About tab showing hardcoded version instead of reading from `version.h`
+
 ## v1.4 (2026-03-06)
 
 ### Shadertoy Import (.milk3)

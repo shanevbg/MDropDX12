@@ -131,6 +131,8 @@ enum HotkeyAction : int {
     HK_OPEN_SHADER_IMPORT,       // (unbound) — open Shader Import window
     HK_OPEN_VIDEO_FX,            // (unbound) — open Video Effects window
     HK_OPEN_VFX_PROFILES,        // (unbound) — open VFX Profile Picker window
+    HK_OPEN_WORKSPACE_LAYOUT,    // (unbound) — open Workspace Layout window
+    HK_APPLY_WORKSPACE_LAYOUT,   // (unbound) — apply saved workspace layout
 
     HK_COUNT  // = number of built-in actions + 1 (HK_NONE)
 };

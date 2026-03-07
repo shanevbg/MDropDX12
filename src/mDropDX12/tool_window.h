@@ -672,6 +672,9 @@ class WorkspaceLayoutWindow : public ToolWindow {
 public:
   WorkspaceLayoutWindow(Engine* pEngine);
 
+  void ApplyLayout();
+  void SetAutoApply() { m_bAutoApply = true; } // apply layout after window builds
+
 protected:
   const wchar_t* GetWindowTitle() const override { return L"Workspace Layout"; }
   const wchar_t* GetWindowClass() const override { return L"MDropDX12WorkspaceLayoutWnd"; }
@@ -689,10 +692,10 @@ protected:
 private:
   void LoadLayoutPrefs();
   void SaveLayoutPrefs();
-  void ApplyLayout();
   void ResetDefaults();
   void UpdateSizeLabel();
   void UpdateModeState();
+  bool m_bAutoApply = false;
 };
 
 // ── Concrete subclass: Welcome window (no-presets prompt) ──

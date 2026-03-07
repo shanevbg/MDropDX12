@@ -1,6 +1,6 @@
 ﻿MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geisswerks.com/milkdrop/) visualizer engine, with GPU-accelerated text rendering, an in-app settings UI, and broad preset compatibility improvements. Works with [Milkwave](https://github.com/IkeC/Milkwave) Remote via WM_COPYDATA IPC for extended control (messaging, wave manipulation, screenshots, and more).
 
-**Current version: 1.4** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
+**Current version: 1.4.1** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
 
 [**Click here**](https://github.com/shanevbg/MDropDX12/releases/latest) to get the latest version.
 
@@ -168,7 +168,7 @@ For a chronological list of MDropDX12 releases and features, read the [Changes](
 
 ## Installation
 
-Download `MDropDX12-1.4-Portable.zip` from the [latest release](https://github.com/shanevbg/MDropDX12/releases/latest), extract to any folder with write access (e.g. `C:\Tools\MDropDX12`), and run `MDropDX12.exe`. No installer or admin privileges required.
+Download `MDropDX12-1.4.1-Portable.zip` from the [latest release](https://github.com/shanevbg/MDropDX12/releases/latest), extract to any folder with write access (e.g. `C:\Tools\MDropDX12`), and run `MDropDX12.exe`. No installer or admin privileges required.
 
 See the [Installation Guide](docs/Install.md) for detailed instructions, directory layout, configuration files, and troubleshooting.
 
