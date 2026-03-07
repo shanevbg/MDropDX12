@@ -1,0 +1,80 @@
+{
+  "version": "2.0.0",
+  "options": {
+    "shell": {
+      "executable": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "& 'C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\Tools\\Launch-VsDevShell.ps1' -SkipAutomaticLocation;"
+      ]
+    }
+  },
+  "tasks": [
+    {
+      "label": "Build Visualizer (Debug)",
+      "type": "shell",
+      "command": "msbuild",
+      "args": [
+        "${workspaceFolder}\\src\\mDropDX12\\engine.vcxproj",
+        "/p:Configuration=Debug",
+        "/p:Platform=x64",
+        "/p:PlatformToolset=v143"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$msCompile",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+    {
+      "label": "Build Visualizer (Release)",
+      "type": "shell",
+      "command": "msbuild",
+      "args": [
+        "${workspaceFolder}\\src\\mDropDX12\\engine.vcxproj",
+        "/p:Configuration=Release",
+        "/p:Platform=x64",
+        "/p:PlatformToolset=v143"
+      ],
+      "group": "build",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "Build RELEASE",
+      "type": "shell",
+      "command": "& { msbuild '${workspaceFolder}\\src\\mDropDX12\\engine.vcxproj' /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143; $buildExit = $LASTEXITCODE; if ($buildExit -ne 0) { exit $buildExit }; Push-Location -LiteralPath '${workspaceFolder}\\config'; & '.\\release.cmd'; $releaseExit = $LASTEXITCODE; Pop-Location; if ($releaseExit -ne 0) { exit $releaseExit } }",
+      "group": "build",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "Run Release Post-Build",
+      "type": "shell",
+      "command": "${workspaceFolder}\\config\\release.cmd",
+      "problemMatcher": [],
+      "dependsOn": ["Build Visualizer (Release)"]
+    },
+    {
+      "label": "Clean",
+      "type": "shell",
+      "command": "msbuild",
+      "args": [
+        "${workspaceFolder}\\src\\mDropDX12\\engine.vcxproj",
+        "/t:Clean",
+        "/p:Configuration=Debug",
+        "/p:Platform=x64"
+      ],
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "Setup Developer Environment",
+      "type": "shell",
+      "command": "${workspaceFolder}\\Release\\Developer-Setup.cmd",
+      "problemMatcher": []
+    }
+  ]
+}
