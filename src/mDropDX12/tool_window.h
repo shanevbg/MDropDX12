@@ -658,6 +658,35 @@ private:
   static std::string BasicFormatShaderCode(const std::string& code);
 };
 
+// ── Concrete subclass: Workspace Layout window ──
+
+class WorkspaceLayoutWindow : public ToolWindow {
+public:
+  WorkspaceLayoutWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Workspace Layout"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12WorkspaceLayoutWnd"; }
+  const wchar_t* GetINISection() const override  { return L"WorkspaceLayout"; }
+  int GetPinControlID() const override       { return IDC_MW_WSLAYOUT_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_WSLAYOUT_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_WSLAYOUT_FONT_MINUS; }
+  int GetMinWidth() const override  { return 380; }
+  int GetMinHeight() const override { return 700; }
+
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  LRESULT DoHScroll(HWND hWnd, int id, int pos) override;
+
+private:
+  void LoadLayoutPrefs();
+  void SaveLayoutPrefs();
+  void ApplyLayout();
+  void ResetDefaults();
+  void UpdateSizeLabel();
+  void UpdateModeState();
+};
+
 // ── Concrete subclass: Welcome window (no-presets prompt) ──
 
 class WelcomeWindow : public ToolWindow {
@@ -672,7 +701,7 @@ protected:
   int GetFontPlusControlID() const override  { return 0; }
   int GetFontMinusControlID() const override { return 0; }
   int GetMinWidth() const override  { return 300; }
-  int GetMinHeight() const override { return 220; }
+  int GetMinHeight() const override { return 400; }
 
   void    DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;

@@ -383,6 +383,7 @@
     <ClCompile Include="engine_displays_ui.cpp" />
     <ClCompile Include="engine_video_effects_ui.cpp" />
     <ClCompile Include="engine_vfx_profiles_ui.cpp" />
+    <ClCompile Include="engine_workspace_layout_ui.cpp" />
     <ClCompile Include="engine_songinfo_ui.cpp" />
     <ClCompile Include="engine_midi_ui.cpp" />
     <ClCompile Include="midi_input.cpp" />

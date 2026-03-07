@@ -706,6 +706,38 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_VFXP_STARTUP       9296  // Checkbox: Load on startup
 #define IDC_MW_VFXP_SAVECLOSE     9297  // Checkbox: Save on close
 
+// Workspace Layout window (9300-9330)
+#define IDC_MW_WSLAYOUT_PIN           9300
+#define IDC_MW_WSLAYOUT_FONT_PLUS     9301
+#define IDC_MW_WSLAYOUT_FONT_MINUS    9302
+#define IDC_MW_WSLAYOUT_CORNER_TL     9303  // Radio: Top-Left
+#define IDC_MW_WSLAYOUT_CORNER_TR     9304  // Radio: Top-Right
+#define IDC_MW_WSLAYOUT_CORNER_BL     9305  // Radio: Bottom-Left
+#define IDC_MW_WSLAYOUT_CORNER_BR     9306  // Radio: Bottom-Right
+#define IDC_MW_WSLAYOUT_SIZE_SLIDER   9307  // Trackbar: render size %
+#define IDC_MW_WSLAYOUT_SIZE_LABEL    9308  // Static: "20%"
+#define IDC_MW_WSLAYOUT_APPLY         9309  // Button: Apply Layout
+#define IDC_MW_WSLAYOUT_RESET         9310  // Button: Reset to Defaults
+#define IDC_MW_WSLAYOUT_CHK_SETTINGS  9311
+#define IDC_MW_WSLAYOUT_CHK_HOTKEYS   9312
+#define IDC_MW_WSLAYOUT_CHK_MIDI      9313
+#define IDC_MW_WSLAYOUT_CHK_BOARD     9314
+#define IDC_MW_WSLAYOUT_CHK_PRESETS   9315
+#define IDC_MW_WSLAYOUT_CHK_DISPLAYS  9316
+#define IDC_MW_WSLAYOUT_CHK_SHIMPORT  9317
+#define IDC_MW_WSLAYOUT_CHK_SONGINFO  9318
+#define IDC_MW_WSLAYOUT_CHK_SPRITES   9319
+#define IDC_MW_WSLAYOUT_CHK_MESSAGES  9320
+#define IDC_MW_WSLAYOUT_MODE_CORNER   9323  // Radio: corner mode
+#define IDC_MW_WSLAYOUT_MODE_DISPLAY  9324  // Radio: fullscreen on display
+#define IDC_MW_WSLAYOUT_DISPLAY_COMBO 9325  // Combo: display picker
+
+// Welcome window — workspace layout button
+#define IDC_MW_WELCOME_LAYOUT         9135
+
+// Settings About tab — workspace layout button
+#define IDC_MW_OPEN_WORKSPACE_LAYOUT  9136
+
 // Launcher buttons on Settings General tab
 #define IDC_MW_OPEN_PRESETS       9080
 #define IDC_MW_OPEN_SPRITES       9081

@@ -1679,6 +1679,12 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       return 0;
     }
 
+    // About tab: Workspace Layout
+    if (id == IDC_MW_OPEN_WORKSPACE_LAYOUT && code == BN_CLICKED) {
+      m_pEngine->OpenWorkspaceLayoutWindow();
+      return 0;
+    }
+
     // About tab: Register File Association
     if (id == IDC_MW_FILE_ASSOC && code == BN_CLICKED) {
       wchar_t exePath[MAX_PATH];
@@ -2894,6 +2900,16 @@ void SettingsWindow::DoBuildControls() {
   }
   y += lineH + 2;
   PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"(Associates preset files with this exe for double-click open)", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
+  y += lineH + 8;
+
+  // Workspace Layout button
+  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"Workspace:", x, y, lw, lineH, hFont, false));
+  {
+    int btnW = MulDiv(200, lineH, 26);
+    PAGE_CTRL(SP_ABOUT, CreateBtn(hw, L"Setup Workspace Layout...", IDC_MW_OPEN_WORKSPACE_LAYOUT, x + lw + 4, y, btnW, lineH, hFont, false));
+  }
+  y += lineH + 2;
+  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"(Tile tool windows across screen with render preview in corner)", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
 
   // ===== Remote tab (page 5) =====
   y = tabTop + 10;

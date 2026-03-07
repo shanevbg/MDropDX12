@@ -1880,6 +1880,7 @@ void Engine::CleanUpMyNonDx9Stuff() {
   ClosePresetsWindow();
   CloseSpritesWindow();
   CloseMessagesWindow();
+  CloseWorkspaceLayoutWindow();
   CloseMidiDevice();
 
   // Join any in-flight preset load thread

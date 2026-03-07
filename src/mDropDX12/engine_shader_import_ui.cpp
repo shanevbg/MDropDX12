@@ -87,7 +87,7 @@ void Engine::CloseWelcomeWindow() {
         m_welcomeWindow->Close();
 }
 
-WelcomeWindow::WelcomeWindow(Engine* pEngine) : ToolWindow(pEngine, 420, 420) {
+WelcomeWindow::WelcomeWindow(Engine* pEngine) : ToolWindow(pEngine, 420, 500) {
 }
 
 void WelcomeWindow::DoBuildControls() {
@@ -137,6 +137,11 @@ void WelcomeWindow::DoBuildControls() {
         x, y, w, 2, hw, NULL, NULL, NULL);
     TrackControl(hSep);
     y += 2 + gap;
+
+    // Setup Workspace Layout button
+    TrackControl(CreateBtn(hw, L"Setup Workspace Layout...",
+        IDC_MW_WELCOME_LAYOUT, x, y, w, btnH, hFont));
+    y += btnH + gap;
 
     // Open Shader Import button
     TrackControl(CreateBtn(hw, L"Open Shader Import...",
@@ -223,6 +228,10 @@ LRESULT WelcomeWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     }
     case IDC_MW_WELCOME_SETTINGS:
         p->OpenSettingsWindow();
+        PostMessage(m_hWnd, WM_CLOSE, 0, 0);
+        return 0;
+    case IDC_MW_WELCOME_LAYOUT:
+        p->OpenWorkspaceLayoutWindow();
         PostMessage(m_hWnd, WM_CLOSE, 0, 0);
         return 0;
     case IDC_MW_WELCOME_SHADER_IMPORT:

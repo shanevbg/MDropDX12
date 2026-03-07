@@ -1215,6 +1215,11 @@ public:
   void OpenWelcomeWindow();
   void CloseWelcomeWindow();
 
+  // Workspace Layout window
+  std::unique_ptr<WorkspaceLayoutWindow> m_workspaceLayoutWindow;
+  void OpenWorkspaceLayoutWindow();
+  void CloseWorkspaceLayoutWindow();
+
   // Broadcast WM_MW_REBUILD_FONTS to all windows except the sender
   void BroadcastFontSync(HWND hSender);
 
