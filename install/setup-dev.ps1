@@ -39,8 +39,8 @@ function Wait-Install($proc, $label) {
 
 # ── 0. Prompt for clone directory ─────────────────────────────────────────────
 Write-Step "MDropDX12 Development Environment Setup"
-Write-Host "  This script installs Git and VS 2022 Build Tools, clones the"
-Write-Host "  MDropDX12 repo, and builds it. The VS Build Tools install can"
+Write-Host "  This script installs Git, VS 2022 Build Tools, and VSCodium,"
+Write-Host "  clones the MDropDX12 repo, and builds it. Build Tools install can"
 Write-Host "  take 15-30 minutes depending on your internet connection."
 Write-Host ""
 Write-Host "  Base directory for source code [default: $defaultDir]: " -NoNewline
@@ -189,7 +189,43 @@ if ($msbuild -and (Test-Path $msbuild)) {
     Write-Error "MSBuild not found. VS Build Tools may not have installed correctly."
 }
 
-# ── 3. Clone repo ────────────────────────────────────────────────────────────
+# ── 3. Install VSCodium ───────────────────────────────────────────────────────
+Write-Step "Checking VSCodium"
+$hasVSCodium = Get-Command codium -ErrorAction SilentlyContinue
+if (-not $hasVSCodium) {
+    Write-Host "  Finding latest VSCodium release..."
+    $apiUrl = "https://api.github.com/repos/VSCodium/vscodium/releases/latest"
+    $release = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing
+    $asset = $release.assets | Where-Object { $_.name -match "VSCodiumSetup-x64-.*\.exe$" } | Select-Object -First 1
+    if (-not $asset) {
+        Write-Host "  WARNING: Could not find VSCodium installer. Skipping." -ForegroundColor Yellow
+    } else {
+        Write-Host "  Downloading $($asset.name)..."
+        $vscodiumInstaller = "$env:TEMP\$($asset.name)"
+        Download $asset.browser_download_url $vscodiumInstaller
+
+        $proc = Start-Process -FilePath $vscodiumInstaller -ArgumentList "/VERYSILENT", "/NORESTART", "/MERGETASKS=!runcode,addcontextmenufiles,addcontextmenufolders,addtopath" -PassThru
+        Wait-Install $proc "Installing VSCodium"
+        Remove-Item $vscodiumInstaller -ErrorAction SilentlyContinue
+        Refresh-Path
+
+        if (-not (Get-Command codium -ErrorAction SilentlyContinue)) {
+            $codiumPath = "${env:LocalAppData}\Programs\VSCodium\bin"
+            if (Test-Path $codiumPath) { $env:Path += ";$codiumPath" }
+        }
+        if (Get-Command codium -ErrorAction SilentlyContinue) {
+            Write-Host "  Installing C/C++ extension..."
+            codium --install-extension ms-vscode.cpptools 2>$null
+            Write-Host "  VSCodium installed."
+        } else {
+            Write-Host "  WARNING: VSCodium installed but not on PATH." -ForegroundColor Yellow
+        }
+    }
+} else {
+    Write-Host "  VSCodium already available."
+}
+
+# ── 4. Clone repo ────────────────────────────────────────────────────────────
 Write-Step "Checking repository"
 $inRepo = $false
 try {
@@ -214,7 +250,7 @@ if (-not $inRepo) {
     }
 }
 
-# ── 4. Build ─────────────────────────────────────────────────────────────────
+# ── 5. Build ─────────────────────────────────────────────────────────────────
 Write-Step "Building MDropDX12 (Release x64)"
 Set-Location $cloneDir
 & powershell -ExecutionPolicy Bypass -File build.ps1 Release x64
