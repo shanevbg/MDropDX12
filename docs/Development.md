@@ -1,17 +1,29 @@
 # MDropDX12 Development Guide
 
-How to set up a development environment on a fresh Windows machine (or Windows Sandbox), clone the source, and build MDropDX12.
+How to set up a development environment on a fresh Windows machine, clone the source, and build MDropDX12.
 
-## Prerequisites
+## Automated Setup
 
-Install the following tools via `winget` from a PowerShell terminal. On **Windows Sandbox** or fresh installs where `winget` is not available, install it first:
+For a fresh Windows machine or Hyper-V VM, `install/setup-dev.ps1` automates the entire setup:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File setup-dev.ps1
+```
+
+This installs Git, VS 2022 Build Tools (MSVC v143, MSBuild, Windows 11 SDK), clones the repo, and runs a Release x64 build. The VS Build Tools install typically takes 1-2+ hours.
+
+> **Note:** Windows Sandbox is not suitable for development — the VS Build Tools installer hangs during the Windows SDK install due to Sandbox I/O constraints. Use a Hyper-V VM or a fresh Windows install instead.
+
+## Manual Setup (Prerequisites)
+
+Install the following tools via `winget` from a PowerShell terminal. On fresh installs where `winget` is not available, install it first:
 
 ```powershell
 # Install winget (App Installer) if not present
 Add-AppxPackage -RegisterByFamilyName Microsoft.DesktopAppInstaller_8wekyb3d8bbwe
 ```
 
-If that doesn't work (e.g. on older Sandbox images), download the latest `.msixbundle` from [github.com/microsoft/winget-cli/releases](https://github.com/microsoft/winget-cli/releases/latest) and install it manually:
+If that doesn't work, download the latest `.msixbundle` from [github.com/microsoft/winget-cli/releases](https://github.com/microsoft/winget-cli/releases/latest) and install it manually:
 
 ```powershell
 # Download and install winget + dependencies
