@@ -4,13 +4,22 @@ How to set up a development environment on a fresh Windows machine, clone the so
 
 ## Automated Setup
 
-For a fresh Windows machine or Hyper-V VM, `install/setup-dev.ps1` automates the entire setup:
+For a fresh Windows machine or Hyper-V VM, two scripts are available in `install/`:
+
+| Script | Installs | Use case |
+| ------ | -------- | -------- |
+| `setup-dev.ps1` | Git, VS Build Tools, VSCodium, clone + build | Full dev environment |
+| `install-noide.ps1` | Git, VS Build Tools, clone + build | Build-only (no editor) |
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File setup-dev.ps1
+# Full setup with VSCodium
+powershell -ExecutionPolicy Bypass -File install/setup-dev.ps1
+
+# Build-only (no IDE)
+powershell -ExecutionPolicy Bypass -File install/install-noide.ps1
 ```
 
-This installs Git, VS 2022 Build Tools (MSVC v143, MSBuild, Windows 11 SDK), clones the repo, and runs a Release x64 build. The VS Build Tools install typically takes 15-30 minutes.
+Both scripts install Git, VS 2022 Build Tools (MSVC v143, MSBuild, Windows 11 SDK), clone the repo, and run a Release x64 build. The VS Build Tools install typically takes 15-30 minutes.
 
 > **Note:** Windows Sandbox is not suitable for development — the VS Build Tools installer hangs during the Windows SDK install due to Sandbox I/O constraints. Use a Hyper-V VM or a fresh Windows install instead.
 
