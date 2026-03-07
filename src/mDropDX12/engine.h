@@ -186,8 +186,51 @@ typedef struct {
   int bRandEffects;
   int bRandGrowth;
   int bRandDuration;
+
+  int nAnimProfile;  // -1 = use message's own settings, -2 = random profile, 0+ = named profile index
 }
 td_custom_msg;
+
+#define MAX_ANIM_PROFILES 32
+
+struct td_anim_profile {
+  wchar_t szName[64] = {};        // profile name for UI (e.g. "Slide from Left")
+  bool    bEnabled = true;        // included in randomization pool
+
+  // Position
+  float   fX = 0.5f, fY = 0.5f;  // target position (0..1)
+  float   fRandX = 0.0f, fRandY = 0.0f;  // random offset ranges
+
+  // Entry animation
+  float   fStartX = -100.0f;     // start X (-100 = no slide)
+  float   fStartY = -100.0f;     // start Y (-100 = no slide)
+  float   fMoveTime = 0.0f;      // slide-in duration (seconds)
+  int     nEaseMode = 2;         // 0=linear, 1=ease-in, 2=ease-out
+  float   fEaseFactor = 2.0f;    // easing intensity
+
+  // Appearance
+  wchar_t szFontFace[128] = {};  // empty = use default
+  float   fFontSize = 50.0f;     // 0..100
+  int     bBold = 0, bItal = 0;
+  int     nColorR = 255, nColorG = 255, nColorB = 255;
+  int     nRandR = 0, nRandG = 0, nRandB = 0;
+
+  // Timing
+  float   fDuration = 5.0f;      // total display time
+  float   fFadeIn = 0.2f;        // fade-in fraction (0..1)
+  float   fFadeOut = 0.5f;       // fade-out time (seconds)
+  float   fBurnTime = 0.0f;      // burn/flare effect
+
+  // Effects
+  float   fGrowth = 1.0f;        // text scale-over-time
+  float   fShadowOffset = 0.0f;  // shadow distance
+  float   fBoxAlpha = 0.0f;      // background box opacity (0=none)
+  int     nBoxColR = 0, nBoxColG = 0, nBoxColB = 0;
+
+  // Per-trigger randomization flags
+  int     bRandPos = 0, bRandSize = 0, bRandColor = 0;
+  int     bRandGrowth = 0, bRandDuration = 0;
+};
 
 typedef struct td_supertext {
   float	fStartTime = -1.0f; // off state
@@ -712,8 +755,6 @@ public:
   int SendMessageToMDropDX12Remote(const wchar_t* presetFile);
   int SendMessageToMDropDX12Remote(const wchar_t* presetFile, bool doForce);
   void PostMessageToMDropDX12Remote(UINT msg);
-  void StartIpcWorkerThread();
-  void StopIpcWorkerThread();
 
 #define WM_USER_NEXT_PRESET WM_USER + 100
 #define WM_USER_PREV_PRESET WM_USER + 101
@@ -1059,6 +1100,12 @@ public:
   td_custom_msg_font   m_CustomMessageFont[MAX_CUSTOM_MESSAGE_FONTS];
   td_custom_msg        m_CustomMessage[MAX_CUSTOM_MESSAGES];
 
+  // Animation profiles
+  td_anim_profile      m_AnimProfiles[MAX_ANIM_PROFILES];
+  int                  m_nAnimProfileCount = 0;
+  int                  m_nSongTitleAnimProfile = -1;   // -1 = default hardcoded, -2 = random, 0+ = profile
+  int                  m_nPresetNameAnimProfile = -1;  // -1 = disabled, -2 = random, 0+ = profile
+
   texmgr      m_texmgr;		// for user sprites
   
   bool m_blackmode = false;
@@ -1127,6 +1174,12 @@ public:
   void    SetWaveParamsFromMessage(std::wstring& message);
   void		ReadCustomMessages();
   void		LaunchSongTitleAnim(int supertextIndex);
+  void    PushSongTitleAsMessage();
+  void    ApplyAnimProfileToSupertext(td_supertext& st, const td_anim_profile& prof);
+  int     PickRandomAnimProfile();
+  void    ReadAnimProfiles();
+  void    WriteAnimProfiles();
+  void    CreateDefaultAnimProfiles();
   void    CaptureScreenshot();
   bool    CaptureScreenshotWithFilename(wchar_t* outFilename, size_t outFilenameSize);
 
@@ -1214,6 +1267,11 @@ public:
   std::unique_ptr<WelcomeWindow> m_welcomeWindow;
   void OpenWelcomeWindow();
   void CloseWelcomeWindow();
+
+  // Text Animation Editor window (ToolWindow subclass, own thread)
+  std::unique_ptr<TextAnimWindow> m_textAnimWindow;
+  void OpenTextAnimWindow();
+  void CloseTextAnimWindow();
 
   // Workspace Layout window
   std::unique_ptr<WorkspaceLayoutWindow> m_workspaceLayoutWindow;

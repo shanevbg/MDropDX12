@@ -237,12 +237,9 @@ std::atomic<bool> g_bRenderReady{false};
 
 static HICON icon = nullptr;
 
-// --- IPC window thread (non-blocking Milkwave Remote handler) ---
-static std::atomic<HANDLE> threadIPC = nullptr;
-static unsigned threadIPCId = 0;
+// --- Named pipe IPC (replaces hidden WM_COPYDATA window) ---
 std::atomic<HWND> g_hRenderWindow{nullptr};  // set after render window CreateWindowW
-std::atomic<bool> g_bIPCRunning{false};
-WCHAR g_szIPCWindowTitle[256] = {};  // title for IPC window (set before thread start)
+PipeServer g_pipeServer;
 WCHAR g_szLastIPCMessage[2048] = {};  // last received IPC message (for settings monitor)
 WCHAR g_szLastIPCTime[16] = {};       // "HH:MM:SS" of last IPC message
 std::atomic<int> g_lastIPCMessageSeq{0};  // bumped on each new message
@@ -269,148 +266,7 @@ BOOL CALLBACK GetWindowNames(HWND h, LPARAM l) {
 }
 // ===============================================
 
-// --- IPC hidden window: receives WM_COPYDATA on its own thread, forwards to render thread ---
-static LRESULT CALLBACK IPCWindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-  switch (uMsg) {
-  case WM_COPYDATA:
-  {
-    PCOPYDATASTRUCT pCopyData = (PCOPYDATASTRUCT)lParam;
-    size_t cbData = pCopyData->cbData;
-    size_t messageLength = cbData / sizeof(wchar_t);
-    if (messageLength == 0)
-      return TRUE;
-
-    // Copy message to heap (WM_COPYDATA buffer is only valid during SendMessage)
-    wchar_t* copy = (wchar_t*)malloc((messageLength + 1) * sizeof(wchar_t));
-    if (!copy)
-      return TRUE;
-    memcpy(copy, pCopyData->lpData, cbData);
-    copy[messageLength] = L'\0';  // ensure null-terminated
-
-    // Post to render window — render thread will call LaunchMessage and free the buffer
-    // Pass dwData as WPARAM so render thread knows the message type
-    HWND hRender = g_hRenderWindow.load();
-    if (hRender && IsWindow(hRender)) {
-      if (!PostMessage(hRender, WM_MW_IPC_MESSAGE, (WPARAM)pCopyData->dwData, (LPARAM)copy)) {
-        free(copy);  // PostMessage failed (window closing?)
-      }
-    }
-    else {
-      free(copy);  // render window not ready yet
-    }
-    return TRUE;  // message handled — unblocks sender immediately
-  }
-  case WM_DESTROY:
-    PostQuitMessage(0);
-    return 0;
-  // Forward keyboard messages from Milkwave Remote to the render window
-  case WM_KEYDOWN:
-  case WM_KEYUP:
-  case WM_CHAR:
-  case WM_SYSKEYDOWN:
-  case WM_SYSKEYUP:
-  {
-    HWND hRender = g_hRenderWindow.load();
-    if (hRender && IsWindow(hRender))
-      PostMessage(hRender, uMsg, wParam, lParam);
-    return 0;
-  }
-  default:
-    // Forward WM_APP+ messages from Milkwave Remote to the render window
-    if (uMsg >= WM_APP) {
-      HWND hRender = g_hRenderWindow.load();
-      if (hRender && IsWindow(hRender))
-        PostMessage(hRender, uMsg, wParam, lParam);
-      return 0;
-    }
-    break;
-  }
-  // Must use DefWindowProcW — class is registered with RegisterClassW, so WM_NCCREATE
-  // passes wide strings. DefWindowProc resolves to DefWindowProcA in this _MBCS project,
-  // which truncates wide titles at the first 0x00 byte (e.g., "Milkwave Visualizer" → "M").
-  return DefWindowProcW(hWnd, uMsg, wParam, lParam);
-}
-
-static unsigned __stdcall IPCWindowThread(void* data) {
-  HINSTANCE hInst = (HINSTANCE)data;
-
-  // Register IPC window class
-  WNDCLASSW wc = {};
-  wc.lpfnWndProc = IPCWindowProc;
-  wc.hInstance = hInst;
-  wc.lpszClassName = L"MDropDX12_IPC";
-  if (!RegisterClassW(&wc)) {
-    if (GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
-      return 0;
-  }
-
-  // Build IPC window title — local copy, independent of render window title
-  WCHAR ipcTitle[256];
-  lstrcpyW(ipcTitle, g_szIPCWindowTitle);
-
-  // Create 1x1 borderless window for IPC (discoverable by EnumWindows/FindWindow)
-  HWND hIPC = CreateWindowExW(
-    0,
-    L"MDropDX12_IPC",
-    ipcTitle,
-    WS_POPUP,
-    -1, -1, 1, 1,
-    NULL, NULL, hInst, NULL);
-
-  if (!hIPC) {
-    DebugLogA("IPC thread: CreateWindowExW failed\n");
-    return 0;
-  }
-
-  ShowWindow(hIPC, SW_SHOWNOACTIVATE);
-  g_bIPCRunning.store(true);
-
-  // Verify title via GetWindowTextW (diagnostic for cross-process title issue)
-  wchar_t verifyTitle[256] = {};
-  GetWindowTextW(hIPC, verifyTitle, 256);
-  wchar_t dbg[512];
-  swprintf_s(dbg, L"IPC thread: window HWND=0x%p, requested=\"%s\", actual=\"%s\", len=%d\n",
-             (void*)hIPC, ipcTitle, verifyTitle, (int)wcslen(verifyTitle));
-  DebugLogW(dbg);
-
-  // Message loop — runs independently of the render thread
-  MSG msg;
-  while (GetMessage(&msg, NULL, 0, 0) > 0) {
-    TranslateMessage(&msg);
-    DispatchMessage(&msg);
-  }
-
-  DestroyWindow(hIPC);
-  UnregisterClassW(L"MDropDX12_IPC", hInst);
-  g_bIPCRunning.store(false);
-
-  DebugLogA("IPC thread: exited\n");
-  return 0;
-}
-
-void StartIPCThread(HINSTANCE hInst) {
-  // Copy the render window title for the IPC window
-  // (must be set before calling this — uses VisualizerWindowTitle from CreateWindowAndRun)
-  threadIPC.store((HANDLE)_beginthreadex(
-    nullptr, 0, &IPCWindowThread, (void*)hInst, 0, &threadIPCId));
-
-  if (threadIPC.load())
-    DebugLogA("IPC thread: started\n");
-  else
-    DebugLogA("IPC thread: failed to start\n");
-}
-
-void StopIPCThread() {
-  HANDLE h = threadIPC.exchange(nullptr);
-  if (h) {
-    if (threadIPCId != 0)
-      PostThreadMessage(threadIPCId, WM_QUIT, 0, 0);
-    WaitForSingleObject(h, 3000);
-    CloseHandle(h);
-    threadIPCId = 0;
-    DebugLogA("IPC thread: stopped\n");
-  }
-}
+// IPC window code removed — replaced by PipeServer (pipe_server.h/cpp)
 
 void InitD3d(HWND hwnd, int width, int height) {
   HRESULT hr;
@@ -2225,7 +2081,7 @@ unsigned __stdcall RenderThreadProc(void* data) {
       }
     }
 
-    g_engine.StartIpcWorkerThread();
+    // IPC worker thread removed — pipe server handles outgoing messages
     g_bRenderReady.store(true);
 
     mdropdx12.LogInfo(L"RenderThread: Render loop starting");
@@ -2255,8 +2111,7 @@ unsigned __stdcall RenderThreadProc(void* data) {
     mdropdx12.LogException(L"RenderThread: Exception in render thread", e, true);
   }
 
-  // Clean up: stop IPC worker, write config, plugin quit, deinit D3D
-  g_engine.StopIpcWorkerThread();
+  // Clean up: write config, plugin quit, deinit D3D
   g_engine.MyWriteConfig();
   g_engine.PluginQuit();
   DeinitD3d();
@@ -2410,9 +2265,8 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   // Publish render window HWND for the IPC thread
   g_hRenderWindow.store(hwnd);
 
-  // Start IPC hidden window thread (non-blocking WM_COPYDATA handler)
-  lstrcpyW(g_szIPCWindowTitle, VisualizerWindowTitle);
-  StartIPCThread(instance);
+  // Start named pipe IPC server (replaces hidden WM_COPYDATA window)
+  g_pipeServer.Start(hwnd, WM_MW_IPC_MESSAGE);
 
   // If a preset was specified on the command line, queue it as an IPC message
   // for the render thread to pick up after DX12 initialization
@@ -2547,8 +2401,8 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
     g_hDX12RenderThread = nullptr;
   }
 
-  // Stop IPC thread before tearing down the render window
-  StopIPCThread();
+  // Stop pipe server before tearing down the render window
+  g_pipeServer.Stop();
   g_hRenderWindow.store(nullptr);
 
   threadRender = nullptr;
@@ -3007,17 +2861,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
     }
   }
 
-  // If a preset was specified and an instance is already running, forward via IPC and exit
+  // If a preset was specified and an instance is already running, forward via pipe and exit
   if (g_szCmdLinePreset[0] != L'\0') {
-    HWND hExisting = FindWindowW(L"MDropDX12_IPC", NULL);
-    if (hExisting) {
-      std::wstring msg = L"PRESET=";
-      msg += g_szCmdLinePreset;
-      COPYDATASTRUCT cds = {};
-      cds.dwData = 1;
-      cds.cbData = (DWORD)((msg.size() + 1) * sizeof(wchar_t));
-      cds.lpData = (void*)msg.c_str();
-      SendMessageW(hExisting, WM_COPYDATA, 0, (LPARAM)&cds);
+    std::wstring msg = L"PRESET=";
+    msg += g_szCmdLinePreset;
+    if (PipeSendToExistingInstance(msg.c_str())) {
       return 0;
     }
   }

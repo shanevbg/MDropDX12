@@ -368,10 +368,12 @@
     <ClCompile Include="json_utils.cpp" />
     <ClCompile Include="button_panel.cpp" />
     <ClCompile Include="engine_board_ui.cpp" />
+    <ClCompile Include="pipe_server.cpp" />
     <ClCompile Include="engine_shader_import_ui.cpp" />
     <ClCompile Include="engine_presets_ui.cpp" />
     <ClCompile Include="engine_sprites_ui.cpp" />
     <ClCompile Include="engine_messages_ui.cpp" />
+    <ClCompile Include="engine_textanim_ui.cpp" />
     <ClCompile Include="engine_spout_input.cpp" />
     <ClCompile Include="video_capture.cpp" />
     <ClCompile Include="engine_controller.cpp" />
@@ -458,6 +460,7 @@
     <ClInclude Include="button_panel.h" />
     <ClInclude Include="midi_input.h" />
     <ClInclude Include="engine.h" />
+    <ClInclude Include="pipe_server.h" />
     <ClInclude Include="tool_window.h" />
     <ClInclude Include="engineshell.h" />
     <ClInclude Include="render_commands.h" />

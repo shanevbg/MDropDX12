@@ -559,19 +559,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     return 0;
   }
 
-  case WM_MW_RESTART_IPC:
-  {
-    // Settings thread requested IPC restart with new title
-    extern HINSTANCE api_orig_hinstance;
-    StopIPCThread();
-    // Build the IPC title from configured window title (or default)
-    const wchar_t* baseTitle = (g_engine.m_szWindowTitle[0] != L'\0')
-      ? g_engine.m_szWindowTitle
-      : L"MDropDX12 Visualizer";
-    lstrcpyW(g_szIPCWindowTitle, baseTitle);
-    StartIPCThread(api_orig_hinstance);
-    return 0;
-  }
+  // WM_MW_RESTART_IPC removed — pipe server uses PID-based naming, no restart needed
 
   case WM_MW_NO_PRESETS_PROMPT:
     OpenWelcomeWindow();

@@ -1579,20 +1579,10 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         GetWindowTextW(hEdit, buf, 256);
         lstrcpyW(p->m_szWindowTitle, buf);
       }
-      hEdit = GetDlgItem(hWnd, IDC_MW_IPC_REMOTE_TITLE);
-      if (hEdit) {
-        GetWindowTextW(hEdit, buf, 256);
-        lstrcpyW(p->m_szRemoteWindowTitle, buf);
-      }
       // Save to INI
       const wchar_t* pIni = p->GetConfigIniFile();
       WritePrivateProfileStringW(L"Milkwave", L"WindowTitle", p->m_szWindowTitle, pIni);
-      WritePrivateProfileStringW(L"Milkwave", L"RemoteWindowTitle", p->m_szRemoteWindowTitle, pIni);
-      // Restart IPC on render thread
-      HWND hw = p->GetPluginWindow();
-      if (hw) PostMessage(hw, WM_MW_RESTART_IPC, 0, 0);
-      // Give IPC thread a moment to restart, then refresh list
-      Sleep(200);
+      // Pipe server uses PID-based naming — no restart needed
       RefreshIPCList();
       return 0;
     }
@@ -1850,12 +1840,7 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         lstrcpyW(p->m_szWindowTitle, tbuf);
         return 0;
       }
-      case IDC_MW_IPC_REMOTE_TITLE: {
-        wchar_t tbuf[256];
-        GetWindowTextW((HWND)lParam, tbuf, 256);
-        lstrcpyW(p->m_szRemoteWindowTitle, tbuf);
-        return 0;
-      }
+      // IDC_MW_IPC_REMOTE_TITLE removed — pipe server uses PID-based naming
       case IDC_MW_SCRIPT_BPM: {
         double v = _wtof(buf);
         if (v > 0) p->m_script.bpm = v;
@@ -2903,26 +2888,17 @@ void SettingsWindow::DoBuildControls() {
   PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"(empty = \"MDropDX12 Visualizer\"  |  e.g. \"Milkwave Visualizer\")", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
   y += lineH + gap;
 
-  // Remote Window Title
-  PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"Remote Title:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(SP_REMOTE, CreateEdit(hw, m_szRemoteWindowTitle, IDC_MW_IPC_REMOTE_TITLE, x + lw + 4, y, rw - lw - 4, lineH, hFont, 0, false));
-  y += lineH + 2;
-
-  // Hint
-  PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"(empty = \"MDropDX12 Remote\"  |  e.g. \"Milkwave Remote\")", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
-  y += lineH + gap;
-
   // Apply button + Capture Screenshot button
   {
-    int applyW = MulDiv(150, lineH, 26);
-    PAGE_CTRL(SP_REMOTE, CreateBtn(hw, L"Apply && Restart IPC", IDC_MW_IPC_APPLY, x, y, applyW, lineH, hFont, false));
+    int applyW = MulDiv(100, lineH, 26);
+    PAGE_CTRL(SP_REMOTE, CreateBtn(hw, L"Apply", IDC_MW_IPC_APPLY, x, y, applyW, lineH, hFont, false));
     int captureW = MulDiv(130, lineH, 26);
     PAGE_CTRL(SP_REMOTE, CreateBtn(hw, L"Save Screenshot...", IDC_MW_IPC_CAPTURE, x + applyW + 8, y, captureW, lineH, hFont, false));
     y += lineH + gap + 8;
   }
 
-  // Active IPC Windows section
-  PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"Active IPC Windows", x, y, rw, lineH, hFontBold, false));
+  // Named Pipe IPC status
+  PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"Named Pipe IPC", x, y, rw, lineH, hFontBold, false));
   y += lineH + gap;
 
   // IPC list box
@@ -3037,12 +3013,16 @@ void SettingsWindow::RefreshIPCList() {
 
   SendMessage(hList, LB_RESETCONTENT, 0, 0);
 
-  if (g_bIPCRunning.load()) {
+  extern PipeServer g_pipeServer;
+  if (g_pipeServer.IsRunning()) {
     wchar_t entry[512];
-    swprintf_s(entry, L"%s  \u2014  Running", g_szIPCWindowTitle);
+    if (g_pipeServer.IsConnected())
+      swprintf_s(entry, L"%s  \u2014  Connected", g_pipeServer.GetPipeName());
+    else
+      swprintf_s(entry, L"%s  \u2014  Listening", g_pipeServer.GetPipeName());
     SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)entry);
   } else {
-    SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)L"(no IPC window active)");
+    SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)L"(pipe server not running)");
   }
 }
 

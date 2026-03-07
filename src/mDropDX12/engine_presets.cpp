@@ -7,6 +7,7 @@
 #include "engine.h"
 #include "engine_helpers.h"
 #include "json_utils.h"
+#include "pipe_server.h"
 #include "utility.h"
 #include "support.h"
 #include "resource.h"
@@ -1807,77 +1808,33 @@ void Engine::OnFinishedLoadingPreset() {
   // Auto-refresh resource viewer if open
   if (m_hResourceWnd && IsWindow(m_hResourceWnd) && IsWindowVisible(m_hResourceWnd))
     PostMessage(m_hResourceWnd, WM_COMMAND, MAKEWPARAM(IDC_RV_REFRESH, BN_CLICKED), 0);
-}
-// ─── IPC Worker Thread ─────────────────────────────────────────────────────
-// Fire-and-forget: callers enqueue messages, worker thread does the blocking
-// SendMessage(WM_COPYDATA) cross-process call off the render path.
-static std::queue<std::wstring>    s_ipcQueue;
-static std::mutex                  s_ipcMutex;
-static std::condition_variable     s_ipcCV;
-static std::atomic<bool>           s_ipcShutdown{false};
-static HANDLE                      s_hIpcThread = nullptr;
 
-static unsigned __stdcall IpcWorkerThread(void* pParam) {
-  Engine* engine = static_cast<Engine*>(pParam);
-
-  while (true) {
-    std::wstring msg;
-    {
-      std::unique_lock<std::mutex> lock(s_ipcMutex);
-      s_ipcCV.wait(lock, [] { return !s_ipcQueue.empty() || s_ipcShutdown.load(); });
-      if (s_ipcShutdown.load() && s_ipcQueue.empty())
-        break;
-      msg = std::move(s_ipcQueue.front());
-      s_ipcQueue.pop();
-    }
-
-    try {
-      // Find the Remote window
-      HWND hRemoteWnd = NULL;
-      if (engine->m_szRemoteWindowTitle[0] != L'\0')
-        hRemoteWnd = FindWindowW(NULL, engine->m_szRemoteWindowTitle);
-      if (!hRemoteWnd)
-        hRemoteWnd = FindWindowW(NULL, L"MDropDX12 Remote");
-      if (!hRemoteWnd || !IsWindow(hRemoteWnd))
-        continue;
-
-      COPYDATASTRUCT cds;
-      cds.dwData = 1;
-      cds.cbData = (DWORD)((msg.size() + 1) * sizeof(wchar_t));
-      cds.lpData = (void*)msg.c_str();
-
-      // Blocking SendMessage is fine here — we're on a dedicated worker thread.
-      // Use timeout as a safety net in case Remote is truly hung.
-      DWORD_PTR result = 0;
-      SendMessageTimeoutW(hRemoteWnd, WM_COPYDATA,
-        (WPARAM)engine->GetPluginWindow(), (LPARAM)&cds,
-        SMTO_ABORTIFHUNG | SMTO_BLOCK, 1000, &result);
-    } catch (...) {
-      // ignore
+  // Preset name animation (if profile assigned)
+  if (m_nPresetNameAnimProfile >= -1 && m_nPresetNameAnimProfile != -1) {
+    int profIdx = m_nPresetNameAnimProfile;
+    if (profIdx == -2) profIdx = PickRandomAnimProfile();
+    if (profIdx >= 0 && profIdx < m_nAnimProfileCount) {
+      int slot = GetNextFreeSupertextIndex();
+      // Extract preset filename without path/extension
+      const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
+      if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
+      name = name ? name + 1 : m_szCurrentPresetFile;
+      wchar_t szName[512];
+      lstrcpynW(szName, name, 512);
+      // Strip extension
+      wchar_t* dot = wcsrchr(szName, L'.');
+      if (dot) *dot = L'\0';
+      lstrcpyW(m_supertexts[slot].szTextW, szName);
+      m_supertexts[slot].bRedrawSuperText = true;
+      m_supertexts[slot].bIsSongTitle = false;
+      ApplyAnimProfileToSupertext(m_supertexts[slot], m_AnimProfiles[profIdx]);
+      m_supertexts[slot].fStartTime = GetTime();
     }
   }
-  return 0;
 }
-
-void Engine::StartIpcWorkerThread() {
-  if (s_hIpcThread)
-    return;
-  s_ipcShutdown.store(false);
-  s_hIpcThread = (HANDLE)_beginthreadex(nullptr, 0, IpcWorkerThread, this, 0, nullptr);
-}
-
-void Engine::StopIpcWorkerThread() {
-  if (!s_hIpcThread)
-    return;
-  {
-    std::lock_guard<std::mutex> lock(s_ipcMutex);
-    s_ipcShutdown.store(true);
-  }
-  s_ipcCV.notify_one();
-  WaitForSingleObject(s_hIpcThread, 3000);
-  CloseHandle(s_hIpcThread);
-  s_hIpcThread = nullptr;
-}
+// ─── IPC via Named Pipe ────────────────────────────────────────────────────
+// Outgoing messages are sent through g_pipeServer (pipe_server.h).
+// The old WM_COPYDATA worker thread has been removed.
 
 int Engine::SendMessageToMDropDX12Remote(const wchar_t* messageToSend) {
   return SendMessageToMDropDX12Remote(messageToSend, false);
@@ -1895,32 +1852,26 @@ int Engine::SendMessageToMDropDX12Remote(const wchar_t* messageToSend, bool doFo
       return 0;
     LastSentMDropDX12Message = now;
 
-    // Fire-and-forget: copy the string and enqueue for the IPC worker thread.
-    // The worker does the blocking SendMessage(WM_COPYDATA) off the render path.
-    {
-      std::lock_guard<std::mutex> lock(s_ipcMutex);
-      s_ipcQueue.emplace(messageToSend);
-    }
-    s_ipcCV.notify_one();
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(messageToSend);
   } catch (...) {
     // ignore
   }
-  return 1; // Optimistic — message is queued
+  return 1;
 }
 
 void Engine::PostMessageToMDropDX12Remote(UINT msg) {
   try {
-    // Find the Remote window (configured title first, then default)
-    HWND hRemoteWnd = NULL;
-    if (m_szRemoteWindowTitle[0] != L'\0')
-      hRemoteWnd = FindWindowW(NULL, m_szRemoteWindowTitle);
-    if (!hRemoteWnd)
-      hRemoteWnd = FindWindowW(NULL, L"MDropDX12 Remote");
-    if (!hRemoteWnd)
-      return;
-    if (IsWindow(hRemoteWnd)) {
-      PostMessageW(hRemoteWnd, msg, 0, 0);
-    }
+    extern PipeServer g_pipeServer;
+    // Map WM_USER+N constants to SIGNAL| pipe messages
+    const wchar_t* signal = nullptr;
+    if (msg == WM_USER + 100) signal = L"SIGNAL|NEXT_PRESET";
+    else if (msg == WM_USER + 101) signal = L"SIGNAL|PREV_PRESET";
+    else if (msg == WM_USER + 102) signal = L"SIGNAL|COVER_CHANGED";
+    else if (msg == WM_USER + 103) signal = L"SIGNAL|SPRITE_MODE";
+    else if (msg == WM_USER + 104) signal = L"SIGNAL|MESSAGE_MODE";
+    if (signal)
+      g_pipeServer.Send(signal);
   } catch (...) {
     // ignore
   }

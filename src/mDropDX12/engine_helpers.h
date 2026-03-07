@@ -457,6 +457,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MSGEDIT_RAND_EFFECTS  2121
 #define IDC_MSGEDIT_RAND_GROWTH   2122
 #define IDC_MSGEDIT_RAND_DURATION 2123
+#define IDC_MSGEDIT_ANIM_PROFILE  2124  // Animation Profile combo in message edit dialog
 
 // Message Overrides Dialog control IDs
 #define IDC_MSGOVERRIDE_RAND_FONT     4000
@@ -732,6 +733,65 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_WSLAYOUT_MODE_DISPLAY  9324  // Radio: fullscreen on display
 #define IDC_MW_WSLAYOUT_DISPLAY_COMBO 9325  // Combo: display picker
 
+// Text Animations window (9400-9490)
+#define IDC_MW_TEXTANIM_PIN           9400
+#define IDC_MW_TEXTANIM_FONT_PLUS     9401
+#define IDC_MW_TEXTANIM_FONT_MINUS    9402
+#define IDC_MW_TEXTANIM_LIST          9403  // ListView: animation profiles
+#define IDC_MW_TEXTANIM_ADD           9404
+#define IDC_MW_TEXTANIM_DUPLICATE     9405
+#define IDC_MW_TEXTANIM_DELETE        9406
+#define IDC_MW_TEXTANIM_MOVEUP        9407
+#define IDC_MW_TEXTANIM_MOVEDOWN      9408
+#define IDC_MW_TEXTANIM_PREVIEW       9409
+#define IDC_MW_TEXTANIM_SAVE          9410
+#define IDC_MW_TEXTANIM_TEMPLATES     9411  // Load Templates button
+#define IDC_MW_TEXTANIM_SONG_COMBO    9412  // Song Title Profile dropdown
+#define IDC_MW_TEXTANIM_PRESET_COMBO  9413  // Preset Name Profile dropdown
+#define IDC_MW_TEXTANIM_PUSH_TITLE    9414  // Push Song Title button
+#define IDC_MW_TEXTANIM_NAME          9420  // Edit: profile name
+#define IDC_MW_TEXTANIM_ENABLED       9421  // Checkbox: enabled in random pool
+#define IDC_MW_TEXTANIM_X             9422  // Edit: target X
+#define IDC_MW_TEXTANIM_Y             9423  // Edit: target Y
+#define IDC_MW_TEXTANIM_RANDX         9424  // Edit: random X offset
+#define IDC_MW_TEXTANIM_RANDY         9425  // Edit: random Y offset
+#define IDC_MW_TEXTANIM_STARTX        9426  // Edit: entry start X
+#define IDC_MW_TEXTANIM_STARTY        9427  // Edit: entry start Y
+#define IDC_MW_TEXTANIM_MOVETIME      9428  // Edit: move time
+#define IDC_MW_TEXTANIM_EASE_LINEAR   9429  // Radio: linear
+#define IDC_MW_TEXTANIM_EASE_IN       9430  // Radio: ease-in
+#define IDC_MW_TEXTANIM_EASE_OUT      9431  // Radio: ease-out
+#define IDC_MW_TEXTANIM_EASE_FACTOR   9432  // Edit: ease factor
+#define IDC_MW_TEXTANIM_FONTFACE      9433  // Edit: font face
+#define IDC_MW_TEXTANIM_FONTSIZE      9434  // Edit: font size
+#define IDC_MW_TEXTANIM_BOLD          9435  // Checkbox: bold
+#define IDC_MW_TEXTANIM_ITALIC        9436  // Checkbox: italic
+#define IDC_MW_TEXTANIM_COLORR        9437  // Edit: color R
+#define IDC_MW_TEXTANIM_COLORG        9438  // Edit: color G
+#define IDC_MW_TEXTANIM_COLORB        9439  // Edit: color B
+#define IDC_MW_TEXTANIM_RANDR         9440  // Edit: random R
+#define IDC_MW_TEXTANIM_RANDG         9441  // Edit: random G
+#define IDC_MW_TEXTANIM_RANDB         9442  // Edit: random B
+#define IDC_MW_TEXTANIM_DURATION      9443  // Edit: duration
+#define IDC_MW_TEXTANIM_FADEIN        9444  // Edit: fade in
+#define IDC_MW_TEXTANIM_FADEOUT       9445  // Edit: fade out
+#define IDC_MW_TEXTANIM_BURNTIME      9446  // Edit: burn time
+#define IDC_MW_TEXTANIM_GROWTH        9447  // Edit: growth
+#define IDC_MW_TEXTANIM_SHADOW        9448  // Edit: shadow offset
+#define IDC_MW_TEXTANIM_BOXALPHA      9449  // Edit: box alpha
+#define IDC_MW_TEXTANIM_BOXCOLR       9450  // Edit: box color R
+#define IDC_MW_TEXTANIM_BOXCOLG       9451  // Edit: box color G
+#define IDC_MW_TEXTANIM_BOXCOLB       9452  // Edit: box color B
+#define IDC_MW_TEXTANIM_RAND_POS      9453  // Checkbox: randomize position
+#define IDC_MW_TEXTANIM_RAND_SIZE     9454  // Checkbox: randomize size
+#define IDC_MW_TEXTANIM_RAND_COLOR    9455  // Checkbox: randomize color
+#define IDC_MW_TEXTANIM_RAND_GROWTH   9456  // Checkbox: randomize growth
+#define IDC_MW_TEXTANIM_RAND_DURATION 9457  // Checkbox: randomize duration
+#define IDC_MW_OPEN_TEXTANIM          9458  // Launch button on Settings Tools tab
+
+// Custom message for animation preview
+#define WM_MW_PUSH_ANIM_PREVIEW       (WM_APP + 25)
+
 // Welcome window — workspace layout button
 #define IDC_MW_WELCOME_LAYOUT         9135
 
@@ -768,7 +828,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_PRESET_CHANGED    (WM_APP + 7)
 #define WM_MW_RESTART_DEVICE    (WM_APP + 8)
 #define WM_MW_IPC_MESSAGE       (WM_APP + 9)  // lParam = heap-allocated wchar_t* from IPC thread
-#define WM_MW_RESTART_IPC       (WM_APP + 10) // settings thread requests IPC window restart
+// WM_APP + 10 was WM_MW_RESTART_IPC — removed (pipe server uses PID-based naming)
 #define WM_MW_PUSH_SPRITE       (WM_APP + 11) // wParam = spriteNum, lParam = slot (-1=auto)
 #define WM_MW_KILL_SPRITE       (WM_APP + 12) // wParam = slot index
 #define WM_MW_TOGGLE_DISPLAY    (WM_APP + 13) // wParam = output index in m_displayOutputs
