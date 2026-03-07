@@ -177,6 +177,8 @@ if (-not $hasVSCodium) {
         if (Get-Command codium -ErrorAction SilentlyContinue) {
             Write-Host "  Installing C/C++ extension..."
             # ms-vscode.cpptools is not on Open VSX; try clangd as fallback
+            $savedEAP = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
             codium --install-extension ms-vscode.cpptools 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) {
                 codium --install-extension llvm-vs-code-extensions.vscode-clangd 2>&1 | Out-Null
@@ -186,6 +188,7 @@ if (-not $hasVSCodium) {
                     Write-Host "  WARNING: Could not install C/C++ extension. Install manually in VSCodium." -ForegroundColor Yellow
                 }
             }
+            $ErrorActionPreference = $savedEAP
             Write-Host "  VSCodium installed."
         } else {
             Write-Host "  WARNING: VSCodium installed but not on PATH." -ForegroundColor Yellow
