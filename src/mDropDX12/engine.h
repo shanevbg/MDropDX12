@@ -606,6 +606,26 @@ public:
   float m_MediaKeyNotifyTime = 1.0f;  // seconds to show media key notification
   bool m_HideNotificationsWhenRemoteActive = false;
 
+  // Error Display Settings — Normal mode
+  float   m_ErrorDuration       = 8.0f;     // seconds
+  int     m_ErrorFontSize       = 20;        // pixels (0 = auto)
+  int     m_ErrorCorner         = 0;         // 0=UR, 1=UL, 2=LR, 3=LL
+  int     m_ErrorColorR         = 255;
+  int     m_ErrorColorG         = 255;
+  int     m_ErrorColorB         = 255;
+  wchar_t m_szErrorFontFace[128] = L"Segoe UI";
+
+  // Error Display Settings — LOUD mode
+  float   m_LoudDuration        = 30.0f;
+  int     m_LoudFontSize        = 0;         // 0 = auto (window height / 6)
+  int     m_LoudColorR1         = 255;
+  int     m_LoudColorG1         = 50;
+  int     m_LoudColorB1         = 50;
+  int     m_LoudColorR2         = 255;
+  int     m_LoudColorG2         = 255;
+  int     m_LoudColorB2         = 50;
+  int     m_LoudPulseSpeed      = 2;         // cycles per second
+
   int m_MinPSVersionConfig = 2;
   int m_MaxPSVersionConfig = 6;
   bool m_ShowUpArrowInDescriptionIfPSMinVersionForced = true;
@@ -806,6 +826,7 @@ public:
   void AddNotification(wchar_t* szMsg, float time);
   void AddNotificationColored(wchar_t* szMsg, float time, DWORD color);
   void AddError(wchar_t* szMsg, float fDuration, int category = ERR_ALL, bool bBold = true);
+  void AddLoudError(wchar_t* szMsg);
   void ClearErrors(int category = ERR_ALL);  // 0=all categories
 
 

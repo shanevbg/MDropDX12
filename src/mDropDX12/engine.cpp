@@ -1440,6 +1440,24 @@ void Engine::MyReadConfig() {
   m_bSongInfoAlwaysShow = GetPrivateProfileBoolW(L"Milkwave", L"SongInfoAlwaysShow", m_bSongInfoAlwaysShow, pIni);
   m_HideNotificationsWhenRemoteActive = GetPrivateProfileBoolW(L"Milkwave", L"HideNotificationsWhenRemoteActive", m_HideNotificationsWhenRemoteActive, pIni);
 
+  // Error Display Settings
+  m_ErrorDuration   = GetPrivateProfileFloatW(L"Milkwave", L"ErrorDuration", m_ErrorDuration, pIni);
+  m_ErrorFontSize   = GetPrivateProfileIntW(L"Milkwave", L"ErrorFontSize", m_ErrorFontSize, pIni);
+  m_ErrorCorner     = GetPrivateProfileIntW(L"Milkwave", L"ErrorCorner", m_ErrorCorner, pIni);
+  m_ErrorColorR     = GetPrivateProfileIntW(L"Milkwave", L"ErrorColorR", m_ErrorColorR, pIni);
+  m_ErrorColorG     = GetPrivateProfileIntW(L"Milkwave", L"ErrorColorG", m_ErrorColorG, pIni);
+  m_ErrorColorB     = GetPrivateProfileIntW(L"Milkwave", L"ErrorColorB", m_ErrorColorB, pIni);
+  GetPrivateProfileStringW(L"Milkwave", L"ErrorFontFace", m_szErrorFontFace, m_szErrorFontFace, _countof(m_szErrorFontFace), pIni);
+  m_LoudDuration    = GetPrivateProfileFloatW(L"Milkwave", L"LoudDuration", m_LoudDuration, pIni);
+  m_LoudFontSize    = GetPrivateProfileIntW(L"Milkwave", L"LoudFontSize", m_LoudFontSize, pIni);
+  m_LoudColorR1     = GetPrivateProfileIntW(L"Milkwave", L"LoudColorR1", m_LoudColorR1, pIni);
+  m_LoudColorG1     = GetPrivateProfileIntW(L"Milkwave", L"LoudColorG1", m_LoudColorG1, pIni);
+  m_LoudColorB1     = GetPrivateProfileIntW(L"Milkwave", L"LoudColorB1", m_LoudColorB1, pIni);
+  m_LoudColorR2     = GetPrivateProfileIntW(L"Milkwave", L"LoudColorR2", m_LoudColorR2, pIni);
+  m_LoudColorG2     = GetPrivateProfileIntW(L"Milkwave", L"LoudColorG2", m_LoudColorG2, pIni);
+  m_LoudColorB2     = GetPrivateProfileIntW(L"Milkwave", L"LoudColorB2", m_LoudColorB2, pIni);
+  m_LoudPulseSpeed  = GetPrivateProfileIntW(L"Milkwave", L"LoudPulseSpeed", m_LoudPulseSpeed, pIni);
+
   m_ShowLockSymbol = GetPrivateProfileBoolW(L"Milkwave", L"ShowLockSymbol", m_ShowLockSymbol, pIni);
   m_ShaderCaching = GetPrivateProfileBoolW(L"Milkwave", L"ShaderCaching", m_ShaderCaching, pIni);
   m_ShaderPrecompileOnStartup = GetPrivateProfileBoolW(L"Milkwave", L"ShaderPrecompileOnStartup", m_ShaderPrecompileOnStartup, pIni);
@@ -1697,6 +1715,24 @@ void Engine::MyWriteConfig() {
   WritePrivateProfileIntW(m_bSongInfoAlwaysShow, L"SongInfoAlwaysShow", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_blackmode, L"BlackMode", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_CheckDirectXOnStartup, L"CheckDirectXOnStartup", pIni, L"Milkwave");
+
+  // Error Display Settings
+  WritePrivateProfileFloatW(m_ErrorDuration, L"ErrorDuration", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_ErrorFontSize, L"ErrorFontSize", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_ErrorCorner, L"ErrorCorner", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_ErrorColorR, L"ErrorColorR", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_ErrorColorG, L"ErrorColorG", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_ErrorColorB, L"ErrorColorB", pIni, L"Milkwave");
+  WritePrivateProfileStringW(L"Milkwave", L"ErrorFontFace", m_szErrorFontFace, pIni);
+  WritePrivateProfileFloatW(m_LoudDuration, L"LoudDuration", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_LoudFontSize, L"LoudFontSize", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_LoudColorR1, L"LoudColorR1", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_LoudColorG1, L"LoudColorG1", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_LoudColorB1, L"LoudColorB1", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_LoudColorR2, L"LoudColorR2", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_LoudColorG2, L"LoudColorG2", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_LoudColorB2, L"LoudColorB2", pIni, L"Milkwave");
+  WritePrivateProfileIntW(m_LoudPulseSpeed, L"LoudPulseSpeed", pIni, L"Milkwave");
 
   WritePrivateProfileIntW(m_WindowBorderless, L"WindowBorderless", pIni, L"Milkwave");
   WritePrivateProfileIntW(m_bAlwaysOnTop, L"WindowAlwaysOnTop", pIni, L"Milkwave");
