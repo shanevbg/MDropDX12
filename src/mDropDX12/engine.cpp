@@ -1452,6 +1452,7 @@ void Engine::MyReadConfig() {
   DebugLogSetOutput(m_LogOutput);
   GetPrivateProfileStringW(L"Milkwave", L"WindowTitle", L"", m_szWindowTitle, 256, pIni);
   GetPrivateProfileStringW(L"Milkwave", L"RemoteWindowTitle", L"", m_szRemoteWindowTitle, 256, pIni);
+  GetPrivateProfileStringW(L"Milkwave", L"LastRemoteExePath", L"", m_szLastRemoteExePath, MAX_PATH, pIni);
 
   m_blackmode = GetPrivateProfileBoolW(L"Milkwave", L"BlackMode", m_blackmode, pIni);
 
@@ -1701,6 +1702,7 @@ void Engine::MyWriteConfig() {
   WritePrivateProfileIntW(m_bAlwaysOnTop, L"WindowAlwaysOnTop", pIni, L"Milkwave");
   WritePrivateProfileStringW(L"Milkwave", L"WindowTitle", m_szWindowTitle, pIni);
   WritePrivateProfileStringW(L"Milkwave", L"RemoteWindowTitle", m_szRemoteWindowTitle, pIni);
+  WritePrivateProfileStringW(L"Milkwave", L"LastRemoteExePath", m_szLastRemoteExePath, pIni);
 
   WritePrivateProfileFloatW(m_WindowWatermarkModeOpacity, L"WindowWatermarkModeOpacity", pIni, L"Milkwave");
   WritePrivateProfileFloatW(fOpacity, L"WindowOpacity", pIni, L"Milkwave");

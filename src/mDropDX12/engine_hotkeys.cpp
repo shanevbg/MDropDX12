@@ -127,6 +127,8 @@ void Engine::ResetHotkeyDefaults()
     HK_DEF(i++, HK_OPEN_WORKSPACE_LAYOUT,0,               0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Workspace Layout", L"OpenWorkspaceLayout");
     HK_DEF(i++, HK_APPLY_WORKSPACE_LAYOUT,0,              0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Apply Workspace Layout", L"ApplyWorkspaceLayout");
     HK_DEF(i++, HK_OPEN_TEXT_ANIM,   0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Text Animations",  L"OpenTextAnim");
+    HK_DEF(i++, HK_OPEN_REMOTE,     0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Remote",           L"OpenRemote");
+    HK_DEF(i++, HK_POLL_TRACK_INFO, 0,                     0,            HKSCOPE_LOCAL, HKCAT_MEDIA, L"Poll Track Info",       L"PollTrackInfo");
 
     // ── Shader/Effects ──
     HK_DEF(i++, HK_INJECT_EFFECT_CYCLE, 0,                   VK_F11,       HKSCOPE_LOCAL, HKCAT_SHADER, L"Inject Effect Cycle",  L"InjectEffectCycle");
@@ -693,6 +695,12 @@ bool Engine::DispatchHotkeyAction(int actionId)
     case HK_OPEN_TEXT_ANIM:
         OpenTextAnimWindow();
         return true;
+    case HK_OPEN_REMOTE:
+        OpenMDropDX12Remote();
+        return true;
+    case HK_POLL_TRACK_INFO:
+        if (hRender) PostMessage(hRender, WM_MW_HOTKEY_ACTION, (WPARAM)actionId, 0);
+        return true;
 
     // ── Shader/Effects ──
     case HK_INJECT_EFFECT_CYCLE:
@@ -1085,6 +1093,11 @@ std::wstring Engine::FormatHotkeyDisplay(UINT modifiers, UINT vk)
 
     // Map virtual key to name
     switch (vk) {
+    case VK_LBUTTON:    result += L"Left Mouse"; break;
+    case VK_RBUTTON:    result += L"Right Mouse"; break;
+    case VK_MBUTTON:    result += L"Middle Mouse"; break;
+    case VK_XBUTTON1:   result += L"X1 Mouse"; break;
+    case VK_XBUTTON2:   result += L"X2 Mouse"; break;
     case VK_RETURN:     result += L"ENTER"; break;
     case VK_ESCAPE:     result += L"ESC"; break;
     case VK_SPACE:      result += L"SPACE"; break;

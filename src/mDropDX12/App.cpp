@@ -1463,6 +1463,9 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       if (HardcutMode == 13) { HardcutMode = 0; g_engine.m_bHardCutsDisabled = true; g_engine.AddNotification(L"Hard Cut Mode: OFF"); }
       break;
     }
+    case HK_POLL_TRACK_INFO:
+      mdropdx12.doPollExplicit = true;
+      break;
     // HK_OPEN_PRESET_LIST, HK_SAVE_PRESET, HK_OPEN_MENU, HK_SPRITE_MODE
     // are handled directly in DispatchHotkeyAction (Engine member access)
     }
@@ -1640,14 +1643,24 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 
   case WM_MBUTTONDOWN:
   case WM_NCMBUTTONDOWN: // Middle mouse button clicked
-    if (rightMouseButtonHeld) {
-      // Right + Middle
+    if (g_engine.LookupLocalHotkey(VK_MBUTTON, 0)) {
+      // Dispatched via configurable hotkey binding
+    } else if (rightMouseButtonHeld) {
+      // Right + Middle (legacy fallback)
       g_engine.OpenMDropDX12Remote();
     } else {
-      // Middle only = explicit song info poll
+      // Middle only = explicit song info poll (legacy fallback)
       mdropdx12.doPollExplicit = true;
     }
     break;
+
+  case WM_XBUTTONDOWN:
+  case WM_NCXBUTTONDOWN: {
+    UINT xbutton = GET_XBUTTON_WPARAM(wParam);
+    UINT vk = (xbutton == XBUTTON1) ? VK_XBUTTON1 : VK_XBUTTON2;
+    g_engine.LookupLocalHotkey(vk, 0);
+    break;
+  }
 
   case WM_LBUTTONDBLCLK:
   {
@@ -2890,16 +2903,25 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
     fs::path exeDir = fs::path(exePath).parent_path();
     fs::path dir = exeDir;
 
-    // Walk up at most 4 levels looking for resources\data\ directory
+    // Look for resources directory:
+    // 1. Prefer exe directory if it has resources/ (even without data/ subfolder)
+    // 2. Only walk up parent directories if exe dir has no resources/ at all
     bool found = false;
-    for (int i = 0; i < 5; i++) {
-      if (fs::exists(dir / L"resources" / L"data")) {
-        found = true;
-        break;
+    if (fs::exists(exeDir / L"resources")) {
+      // Use exe directory — resources/ exists here (data/ may or may not exist yet)
+      dir = exeDir;
+      found = fs::exists(dir / L"resources" / L"data");
+    } else {
+      // Walk up at most 4 levels looking for resources\data\ directory
+      for (int i = 0; i < 5; i++) {
+        if (fs::exists(dir / L"resources" / L"data")) {
+          found = true;
+          break;
+        }
+        fs::path parent = dir.parent_path();
+        if (parent == dir) break;  // filesystem root
+        dir = parent;
       }
-      fs::path parent = dir.parent_path();
-      if (parent == dir) break;  // filesystem root
-      dir = parent;
     }
 
     if (!found) {

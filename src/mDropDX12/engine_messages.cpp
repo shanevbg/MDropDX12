@@ -7,6 +7,7 @@
 
 #include "engine.h"
 #include "engine_helpers.h"
+#include "pipe_server.h"
 #include "utility.h"
 #include "AutoCharFn.h"
 #include "support.h"
@@ -3396,30 +3397,54 @@ void Engine::SpoutReleaseWraps() {
 }
 
 void Engine::OpenMDropDX12Remote() {
+  // First try to find an existing Remote window and bring it to front
   HWND hwnd = FindWindowW(NULL, L"MDropDX12 Remote");
+  if (!hwnd)
+    hwnd = FindWindowW(NULL, L"Milkwave Remote");
   if (hwnd) {
-    // Bring the window to the front  
+    if (IsIconic(hwnd))
+      ShowWindow(hwnd, SW_RESTORE);
     SetForegroundWindow(hwnd);
-    ShowWindow(hwnd, SW_RESTORE);
+    return;
   }
-  else {
-    // Start the program "MDropDX12Remote.exe"  
-    // Ensure STARTUPINFOW is used for CreateProcessW
-    STARTUPINFOW si;
-    PROCESS_INFORMATION pi;
-    ZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-    ZeroMemory(&pi, sizeof(pi));
 
-    if (!CreateProcessW(L"MDropDX12Remote.exe", NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-      g_engine.AddError(L"Could not start MDropDX12 Remote", 3.0f, ERR_MISC, false);
-    }
-    else {
-      g_engine.AddNotification(L"Starting MDropDX12 Remote");
+  // Update stored path from pipe server if a client has connected this session
+  extern PipeServer g_pipeServer;
+  const wchar_t* clientExe = g_pipeServer.GetLastClientExePath();
+  if (clientExe[0] != L'\0' && wcscmp(clientExe, m_szLastRemoteExePath) != 0) {
+    wcscpy_s(m_szLastRemoteExePath, clientExe);
+    WritePrivateProfileStringW(L"Milkwave", L"LastRemoteExePath", m_szLastRemoteExePath, GetConfigIniFile());
+  }
+
+  STARTUPINFOW si = {};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi = {};
+
+  // Try the last known Remote exe path first (remembered across sessions)
+  if (m_szLastRemoteExePath[0] != L'\0') {
+    if (CreateProcessW(m_szLastRemoteExePath, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+      wchar_t szName[MAX_PATH];
+      wchar_t* pName = wcsrchr(m_szLastRemoteExePath, L'\\');
+      swprintf_s(szName, L"Starting %s", pName ? pName + 1 : m_szLastRemoteExePath);
+      AddNotification(szName);
       CloseHandle(pi.hProcess);
       CloseHandle(pi.hThread);
+      return;
     }
   }
+
+  // Fallback: try MDropDX12Remote.exe in exe directory, then PATH
+  wchar_t szPath[MAX_PATH] = {};
+  swprintf(szPath, MAX_PATH, L"%sMDropDX12Remote.exe", m_szBaseDir);
+  if (!CreateProcessW(szPath, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+    if (!CreateProcessW(L"MDropDX12Remote.exe", NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+      AddError(L"Could not start Remote app", 3.0f, ERR_MISC, false);
+      return;
+    }
+  }
+  AddNotification(L"Starting MDropDX12 Remote");
+  CloseHandle(pi.hProcess);
+  CloseHandle(pi.hThread);
 }
 
 void Engine::SetAudioDeviceDisplayName(const wchar_t* displayName, bool isRenderDevice) {

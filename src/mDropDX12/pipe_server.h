@@ -35,6 +35,9 @@ public:
     // Get the pipe name (for display in settings UI)
     const wchar_t* GetPipeName() const { return m_szPipeName; }
 
+    // Get the full exe path of the last connected client (empty if never connected)
+    const wchar_t* GetLastClientExePath() const { return m_szLastClientExePath; }
+
 private:
     static unsigned __stdcall ServerThread(void* pParam);
     void ServerLoop();
@@ -65,6 +68,7 @@ private:
     HANDLE m_hServerThread = nullptr;
 
     wchar_t m_szPipeName[64] = {};
+    wchar_t m_szLastClientExePath[MAX_PATH] = {};
 };
 
 // Connect to a running visualizer's pipe by PID and send a message.

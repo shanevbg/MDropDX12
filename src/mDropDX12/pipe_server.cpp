@@ -185,8 +185,21 @@ void PipeServer::ServerLoop() {
         }
         CloseHandle(ovConnect.hEvent);
 
-        // Client is connected
+        // Client is connected — capture its exe path for "Open Remote" launch
         m_bClientConnected.store(true);
+        {
+            ULONG clientPid = 0;
+            if (GetNamedPipeClientProcessId(m_hPipe, &clientPid) && clientPid != 0) {
+                HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, clientPid);
+                if (hProc) {
+                    DWORD pathLen = MAX_PATH;
+                    if (QueryFullProcessImageNameW(hProc, 0, m_szLastClientExePath, &pathLen)) {
+                        PipeLog("PipeServer: client exe: %ls\n", m_szLastClientExePath);
+                    }
+                    CloseHandle(hProc);
+                }
+            }
+        }
         PipeLog("PipeServer: client connected\n");
 
         // ─── Read/Write loop ───────────────────────────────────────────────
@@ -301,8 +314,13 @@ void PipeServer::ServerLoop() {
 }
 
 void PipeServer::DispatchMessage(const wchar_t* message, size_t len) {
-    if (!message || len == 0 || !m_hTargetWindow)
+    if (!message || len == 0 || !m_hTargetWindow) {
+        PipeLog("PipeServer::DispatchMessage: null/empty (msg=%p len=%zu hwnd=%p)\n",
+                message, len, m_hTargetWindow);
         return;
+    }
+
+    PipeLog("PipeServer: received [%ls] len=%zu\n", message, len);
 
     // Check for SIGNAL| prefix — these map to PostMessage calls
     if (wcsncmp(message, L"SIGNAL|", 7) == 0) {
@@ -334,7 +352,10 @@ void PipeServer::DispatchMessage(const wchar_t* message, size_t len) {
     if (copy) {
         wcscpy_s(copy, msgLen + 1, message);
         if (!PostMessageW(m_hTargetWindow, m_wmIPCMessage, (WPARAM)1, (LPARAM)copy)) {
+            PipeLog("PipeServer: PostMessage FAILED err=%u\n", GetLastError());
             free(copy);
+        } else {
+            PipeLog("PipeServer: posted IPC message to hwnd=%p\n", m_hTargetWindow);
         }
     }
 }

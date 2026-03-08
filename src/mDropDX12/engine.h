@@ -95,7 +95,7 @@ typedef char* CHARPTR;
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 
 #define MY_FFT_SAMPLES 512     // for old [pre-vms] milkdrop sound analysis
-typedef struct {
+struct td_mysounddata {
   float   imm[3];			// bass, mids, treble (absolute)
   float	  imm_rel[3];		// bass, mids, treble (relative to song; 1=avg, 0.9~below, 1.1~above)
   float	  avg[3];			// bass, mids, treble (absolute)
@@ -110,7 +110,7 @@ typedef struct {
   int     recent_len[3];
   float	  smooth[3];
   float	  smooth_rel[3];
-} td_mysounddata;
+};
 
 typedef struct {
   int 	bActive;
@@ -841,6 +841,7 @@ public:
   wchar_t     m_SongInfoFormat[MAX_PATH];
   wchar_t     m_szWindowTitle[256];         // configurable window title (empty = "MDropDX12 Visualizer")
   wchar_t     m_szRemoteWindowTitle[256];   // configurable remote title (empty = "MDropDX12 Remote")
+  wchar_t     m_szLastRemoteExePath[MAX_PATH] = {};  // last pipe-connected Remote exe path (for launch)
   int m_nSettingsCurSel = 0;       // currently highlighted setting in UI_SETTINGS
   bool m_bSettingsNeedAttention = false; // force settings open on bad config
   int m_nAudioLoopState = 0; // 0: Running, 1: Cancel running thread, 2: Must restart

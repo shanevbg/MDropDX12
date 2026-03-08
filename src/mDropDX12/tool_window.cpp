@@ -1059,6 +1059,10 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
       INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_HOTKEY_CLASS };
       InitCommonControlsEx(&icc);
 
+      // Check if current VK is a mouse button
+      bool isMouseVK = (d->vk == VK_LBUTTON || d->vk == VK_RBUTTON ||
+                        d->vk == VK_MBUTTON || d->vk == VK_XBUTTON1 || d->vk == VK_XBUTTON2);
+
       y += 4;
       CreateWindowExW(0, L"STATIC", L"Key:", WS_CHILD | WS_VISIBLE,
         margin, y + 2, labelW, lineH, hDlg, NULL, hInst, NULL);
@@ -1075,14 +1079,38 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
       SendMessageW(hClear, WM_SETFONT, (WPARAM)hFont, TRUE);
       y += lineH + gap;
 
-      // Populate hotkey control
-      if (hHK && d->vk != 0) {
+      // Populate hotkey control (only for keyboard keys)
+      if (hHK && d->vk != 0 && !isMouseVK) {
         UINT hkMod = 0;
         if (d->modifiers & MOD_ALT)     hkMod |= HOTKEYF_ALT;
         if (d->modifiers & MOD_CONTROL) hkMod |= HOTKEYF_CONTROL;
         if (d->modifiers & MOD_SHIFT)   hkMod |= HOTKEYF_SHIFT;
         SendMessageW(hHK, HKM_SETHOTKEY, MAKEWORD(d->vk, hkMod), 0);
       }
+
+      // Mouse button dropdown
+      CreateWindowExW(0, L"STATIC", L"Mouse:", WS_CHILD | WS_VISIBLE,
+        margin, y + 2, labelW, lineH, hDlg, NULL, hInst, NULL);
+      HWND hMouse = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
+        WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
+        margin + labelW, y, cw - labelW - clearW - 6, 200, hDlg,
+        (HMENU)(INT_PTR)IDC_AE_MOUSE, hInst, NULL);
+      SendMessageW(hMouse, WM_SETFONT, (WPARAM)hFont, TRUE);
+      SendMessageW(hMouse, CB_ADDSTRING, 0, (LPARAM)L"(none)");
+      SendMessageW(hMouse, CB_ADDSTRING, 0, (LPARAM)L"Left Mouse");
+      SendMessageW(hMouse, CB_ADDSTRING, 0, (LPARAM)L"Right Mouse");
+      SendMessageW(hMouse, CB_ADDSTRING, 0, (LPARAM)L"Middle Mouse");
+      SendMessageW(hMouse, CB_ADDSTRING, 0, (LPARAM)L"X1 Mouse");
+      SendMessageW(hMouse, CB_ADDSTRING, 0, (LPARAM)L"X2 Mouse");
+      // Map current VK to dropdown index
+      int mouseIdx = 0;
+      if (d->vk == VK_LBUTTON) mouseIdx = 1;
+      else if (d->vk == VK_RBUTTON) mouseIdx = 2;
+      else if (d->vk == VK_MBUTTON) mouseIdx = 3;
+      else if (d->vk == VK_XBUTTON1) mouseIdx = 4;
+      else if (d->vk == VK_XBUTTON2) mouseIdx = 5;
+      SendMessageW(hMouse, CB_SETCURSEL, mouseIdx, 0);
+      y += lineH + gap;
 
       // Scope checkbox
       HWND hScope = CreateWindowExW(0, L"BUTTON", L"Global (system-wide)",
@@ -1177,6 +1205,30 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
     if (id == IDC_AE_CLEAR_KEY && code == BN_CLICKED) {
       HWND hHK = GetDlgItem(hDlg, IDC_AE_HOTKEY);
       if (hHK) SendMessageW(hHK, HKM_SETHOTKEY, 0, 0);
+      HWND hMouse = GetDlgItem(hDlg, IDC_AE_MOUSE);
+      if (hMouse) SendMessageW(hMouse, CB_SETCURSEL, 0, 0);  // "(none)"
+      return TRUE;
+    }
+
+    // Keyboard key changed — clear mouse dropdown
+    if (id == IDC_AE_HOTKEY && code == EN_CHANGE) {
+      HWND hHK = GetDlgItem(hDlg, IDC_AE_HOTKEY);
+      DWORD hk = hHK ? (DWORD)SendMessageW(hHK, HKM_GETHOTKEY, 0, 0) : 0;
+      if (LOBYTE(LOWORD(hk)) != 0) {
+        HWND hMouse = GetDlgItem(hDlg, IDC_AE_MOUSE);
+        if (hMouse) SendMessageW(hMouse, CB_SETCURSEL, 0, 0);
+      }
+      return TRUE;
+    }
+
+    // Mouse dropdown changed — clear keyboard key
+    if (id == IDC_AE_MOUSE && code == CBN_SELCHANGE) {
+      HWND hMouse = GetDlgItem(hDlg, IDC_AE_MOUSE);
+      int sel = hMouse ? (int)SendMessageW(hMouse, CB_GETCURSEL, 0, 0) : 0;
+      if (sel > 0) {
+        HWND hHK = GetDlgItem(hDlg, IDC_AE_HOTKEY);
+        if (hHK) SendMessageW(hHK, HKM_SETHOTKEY, 0, 0);
+      }
       return TRUE;
     }
 
@@ -1262,17 +1314,32 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
 
       // Read key binding
       if (d->showKeyBinding) {
-        HWND hHK = GetDlgItem(hDlg, IDC_AE_HOTKEY);
-        DWORD hk = hHK ? (DWORD)SendMessageW(hHK, HKM_GETHOTKEY, 0, 0) : 0;
-        d->vk = LOBYTE(LOWORD(hk));
-        UINT hkMod = HIBYTE(LOWORD(hk));
-        d->modifiers = 0;
-        if (hkMod & HOTKEYF_ALT)     d->modifiers |= MOD_ALT;
-        if (hkMod & HOTKEYF_CONTROL) d->modifiers |= MOD_CONTROL;
-        if (hkMod & HOTKEYF_SHIFT)   d->modifiers |= MOD_SHIFT;
+        // Check mouse dropdown first
+        HWND hMouse = GetDlgItem(hDlg, IDC_AE_MOUSE);
+        int mouseIdx = hMouse ? (int)SendMessageW(hMouse, CB_GETCURSEL, 0, 0) : 0;
+        static const UINT mouseVKs[] = { 0, VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2 };
+
+        if (mouseIdx > 0 && mouseIdx < _countof(mouseVKs)) {
+          // Mouse button selected — use it as the VK
+          d->vk = mouseVKs[mouseIdx];
+          d->modifiers = 0;
+          d->scope = HKSCOPE_LOCAL;  // mouse buttons can only be local
+        } else {
+          // Read keyboard hotkey
+          HWND hHK = GetDlgItem(hDlg, IDC_AE_HOTKEY);
+          DWORD hk = hHK ? (DWORD)SendMessageW(hHK, HKM_GETHOTKEY, 0, 0) : 0;
+          d->vk = LOBYTE(LOWORD(hk));
+          UINT hkMod = HIBYTE(LOWORD(hk));
+          d->modifiers = 0;
+          if (hkMod & HOTKEYF_ALT)     d->modifiers |= MOD_ALT;
+          if (hkMod & HOTKEYF_CONTROL) d->modifiers |= MOD_CONTROL;
+          if (hkMod & HOTKEYF_SHIFT)   d->modifiers |= MOD_SHIFT;
+        }
 
         d->scope = (IsDlgButtonChecked(hDlg, IDC_AE_SCOPE) == BST_CHECKED)
             ? HKSCOPE_GLOBAL : HKSCOPE_LOCAL;
+        // Force local scope for mouse buttons (can't RegisterHotKey for mouse)
+        if (mouseIdx > 0) d->scope = HKSCOPE_LOCAL;
       }
 
       d->accepted = true;

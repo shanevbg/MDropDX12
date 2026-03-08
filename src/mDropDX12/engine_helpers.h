@@ -394,6 +394,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_AE_CLEAR_KEY      8015  // Button: clear key binding
 #define IDC_AE_SCOPE          8016  // Checkbox: global scope
 #define IDC_AE_ACTION_LABEL   8017  // Edit (read-only): built-in action name
+#define IDC_AE_MOUSE          8018  // Combobox: mouse button selector
 
 // MIDI window controls (7090-7109)
 #define IDC_MW_MIDI_PIN         7090
