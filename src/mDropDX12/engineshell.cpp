@@ -1783,8 +1783,8 @@ void EngineShell::AnalyzeNewSound(unsigned char* pWaveL, unsigned char* pWaveR) 
 
   // sum (left channel) spectrum up into 3 bands
   // [note: the new ranges do it so that the 3 bands are equally spaced, pitch-wise]
-  float min_freq = 20.0f;
-  float max_freq = 20000.0f;
+  float min_freq = 200.0f;
+  float max_freq = 11025.0f;
   float net_octaves = (logf(max_freq / min_freq) / logf(2.0f));     // 5.7846348455575205777914165223593
   float octaves_per_band = net_octaves / 3.0f;                    // 1.9282116151858401925971388407864
   float mult = powf(2.0f, octaves_per_band); // each band's highest freq. divided by its lowest freq.; 3.805831305510122517035102576162
@@ -1800,8 +1800,8 @@ void EngineShell::AnalyzeNewSound(unsigned char* pWaveL, unsigned char* pWaveR) 
       //   bass:  0-1097          200-761
       //   mids:  1097-4705       761-2897
       //   treb:  4705-11025      2897-11025
-      int start = (int)(NUM_FREQUENCIES * min_freq * powf(mult, (float)i) / max_freq);
-      int end = (int)(NUM_FREQUENCIES * min_freq * powf(mult, (float)(i + 1)) / max_freq);
+      int start = (int)(NUM_FREQUENCIES * min_freq * powf(mult, (float)i) / 11025.0f);
+      int end = (int)(NUM_FREQUENCIES * min_freq * powf(mult, (float)(i + 1)) / 11025.0f);
       if (start < 0) start = 0;
       if (end > NUM_FREQUENCIES) end = NUM_FREQUENCIES;
 

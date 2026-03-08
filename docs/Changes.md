@@ -1,5 +1,31 @@
 # MDropDX12 Changelog
 
+## v1.6.0 (2026-03-08)
+
+### Audio Reactivity
+
+- Fixed frequency band ranges in AnalyzeNewSound — restored original 200–11025 Hz range (was incorrectly changed to 20–20000 Hz, spreading energy across 10 octaves instead of 5.8 and using wrong FFT bin divisor)
+- Bass/mid/treb reactivity now matches Milkwave reference
+
+### Code Reorganization
+
+- Created `engine_midi.cpp` — MIDI persistence, device lifecycle, knob/button dispatch (extracted from engine_midi_ui.cpp)
+- Created `engine_sprites.cpp` — sprite lifecycle, INI I/O, property management (extracted from engine_messages.cpp and engine_settings_ui.cpp)
+- Created `engine_config.cpp` — settings persistence, theme, user defaults, folder picker, screenshots, Remote launch (extracted from engine_settings_ui.cpp and engine_messages.cpp)
+- Moved Spout output functions (OpenSender, SpoutReleaseWraps, ToggleSpout, SetSpoutFixedSize) from engine_messages.cpp to engine_displays.cpp
+- Promoted duplicated sprite helpers (FormatSpriteSection, FormatSpriteSectionA, MakeRelativeSpritePath) to inline functions in engine_helpers.h
+- Removed ~1,680 lines of duplicated/misplaced code from engine_messages.cpp (~515 lines), engine_settings_ui.cpp (~811 lines), engine_midi_ui.cpp (~332 lines)
+
+### Documentation
+
+- Added Coding Patterns section to docs/Development.md (file organization convention, where to put new code, shared helpers)
+- Added Common Pitfalls section (BS_OWNERDRAW controls, HWND_NOTOPMOST, wide strings, descriptor heap ordering, thread safety, sampler architecture, Shadertoy mode flags, IPC window titles)
+- Added DX12 Rendering Pipeline section (render target ping-pong, binding layout, key differences from DX9)
+
+### Bug Fixes
+
+- Fixed folder picker dialog opening behind PresetsWindow (now passes caller's HWND as owner)
+
 ## v1.5.1 (2026-03-08)
 
 ### Shader Pipeline

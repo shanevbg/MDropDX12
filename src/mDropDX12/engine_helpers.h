@@ -38,6 +38,36 @@ inline std::wstring StripNamedGroups(const std::wstring& pattern) {
 #define IsAlphanumericChar(x) ((x >= 'a' && x <= 'z') || (x >= 'A' && x <= 'Z') || (x >= '0' && x <= '9') || x == '.')
 #define IsNumericChar(x) (x >= '0' && x <= '9')
 
+// Sprite section helpers — used by engine_sprites.cpp, engine_settings_ui.cpp, engine_sprites_ui.cpp.
+inline void FormatSpriteSection(wchar_t* buf, int bufSize, int index) {
+  if (index < 100)
+    swprintf(buf, bufSize, L"img%02d", index);
+  else
+    swprintf(buf, bufSize, L"img%d", index);
+}
+
+inline void FormatSpriteSectionA(char* buf, int bufSize, int index) {
+  if (index < 100)
+    sprintf_s(buf, bufSize, "img%02d", index);
+  else
+    sprintf_s(buf, bufSize, "img%d", index);
+}
+
+inline std::wstring MakeRelativeSpritePath(const wchar_t* szAbsPath,
+                                           const wchar_t* szContentBasePath,
+                                           const wchar_t* szMilkdrop2Path) {
+  if (!szAbsPath || !szAbsPath[0]) return L"";
+  if (szAbsPath[1] != L':') return szAbsPath;
+  const wchar_t* bases[] = { szContentBasePath, szMilkdrop2Path };
+  for (auto base : bases) {
+    if (!base || !base[0]) continue;
+    size_t baseLen = wcslen(base);
+    if (_wcsnicmp(szAbsPath, base, baseLen) == 0)
+      return szAbsPath + baseLen;
+  }
+  return szAbsPath;
+}
+
 namespace mdrop {
 
 // Forward declarations for standalone helpers shared across engine_*.cpp modules.

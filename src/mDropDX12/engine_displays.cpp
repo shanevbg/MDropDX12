@@ -978,4 +978,142 @@ bool Engine::LoadDisplayProfile(const wchar_t* filePath)
     return true;
 }
 
+//======================================================================
+// Spout output — sender lifecycle and control
+//======================================================================
+
+bool Engine::OpenSender(unsigned int width, unsigned int height) {
+  SpoutLogNotice("Engine::OpenSender(%d, %d)", width, height);
+
+  // Close existing sender
+  SpoutReleaseWraps();
+  if (bInitialized) {
+    spoutsender.CloseDirectX12();
+    bInitialized = false;
+  }
+
+  if (!m_lpDX || !m_lpDX->m_device || !m_lpDX->m_commandQueue) {
+    DebugLogA("Spout: OpenSender failed - no DX12 device/queue", LOG_ERROR);
+    return false;
+  }
+
+  // Give the sender a name
+  spoutsender.SetSenderName(WinampSenderName);
+
+  // Initialize SpoutDX12 with our DX12 device + command queue
+  if (!spoutsender.OpenDirectX12(m_lpDX->m_device.Get(),
+          reinterpret_cast<IUnknown**>(m_lpDX->m_commandQueue.GetAddressOf()))) {
+    DebugLogA("Spout: OpenDirectX12 failed", LOG_ERROR);
+    return false;
+  }
+
+  // Wrap each swap chain backbuffer for DX11 access
+  for (int n = 0; n < DXC_FRAME_COUNT; n++) {
+    if (!spoutsender.WrapDX12Resource(
+            m_lpDX->m_renderTargets[n].Get(),
+            &m_pWrappedBackBuffers[n],
+            D3D12_RESOURCE_STATE_RENDER_TARGET)) {
+      DebugLogA("Spout: WrapDX12Resource failed for backbuffer", LOG_ERROR);
+      SpoutReleaseWraps();
+      spoutsender.CloseDirectX12();
+      return false;
+    }
+  }
+
+  g_Width = width;
+  g_Height = height;
+  bSpoutOut = true;
+  bInitialized = true;
+  m_bSpoutDX12Ready = true;
+
+  DebugLogA("Spout: DX12 sender initialized successfully");
+
+  return true;
+
+} // end OpenSender
+
+// Release wrapped DX12 backbuffers
+void Engine::SpoutReleaseWraps() {
+  for (auto& w : m_pWrappedBackBuffers) {
+    if (w) { w->Release(); w = nullptr; }
+  }
+  m_bSpoutDX12Ready = false;
+}
+
+int Engine::ToggleSpout() {
+  bSpoutChanged = true; // write config on exit
+  bSpoutOut = !bSpoutOut;
+  if (bSpoutOut) {
+    AddNotification(L"Spout output enabled");
+  }
+  else {
+    AddNotification(L"Spout output disabled");
+  }
+
+  // Sync first Spout output in m_displayOutputs
+  for (auto& o : m_displayOutputs) {
+    if (o.config.type == DisplayOutputType::Spout) {
+      o.config.bEnabled = bSpoutOut;
+      if (!bSpoutOut && o.spoutState) {
+        DestroyDisplayOutput(o);
+      }
+      break;
+    }
+  }
+
+  SetSpoutFixedSize(false, false);
+
+  if (bInitialized || m_bSpoutDX12Ready) {
+    SpoutReleaseWraps();
+    spoutsender.CloseDirectX12();
+    bInitialized = false;
+  }
+
+  ResetBufferAndFonts();
+  SendSettingsInfoToMDropDX12Remote();
+  return 0;
+}
+
+int Engine::SetSpoutFixedSize(bool toggleSwitch, bool showNotifications) {
+  bSpoutChanged = true; // write config on exit
+  if (toggleSwitch) {
+    bSpoutFixedSize = !bSpoutFixedSize;
+  }
+  // Sync first Spout output in m_displayOutputs
+  for (auto& o : m_displayOutputs) {
+    if (o.config.type == DisplayOutputType::Spout) {
+      o.config.bFixedSize = bSpoutFixedSize;
+      o.config.nWidth = nSpoutFixedWidth;
+      o.config.nHeight = nSpoutFixedHeight;
+      break;
+    }
+  }
+  if (IsSpoutActiveAndFixed()) {
+    if (toggleSwitch && showNotifications) {
+      std::wstring msg = L"Fixed Spout output size enabled ("
+        + std::to_wstring(nSpoutFixedWidth) + L"x"
+        + std::to_wstring(nSpoutFixedHeight) + L")";
+      AddNotification(msg.data());
+    }
+    else if (showNotifications) {
+      std::wstring msg = L"Spout output size set to "
+        + std::to_wstring(nSpoutFixedWidth) + L"x"
+        + std::to_wstring(nSpoutFixedHeight);
+      AddNotification(msg.data());
+    }
+    // DX12 TODO: Fixed-size Spout requires a separate render target + copy/scale.
+    // For now, Spout sends at window resolution regardless of fixed-size setting.
+    ResetBufferAndFonts();
+  }
+  else {
+    // bSpoutFixedSize OR bSpoutOut is false
+    if (toggleSwitch && showNotifications && bSpoutOut) {
+      AddNotification(L"Fixed Spout output size disabled");
+    }
+    ResetBufferAndFonts();
+  }
+  SendSettingsInfoToMDropDX12Remote();
+  return 0;
+}
+
 } // namespace mdrop

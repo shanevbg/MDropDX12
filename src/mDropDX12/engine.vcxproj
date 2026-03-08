@@ -372,11 +372,13 @@
     <ClCompile Include="engine_shader_import_ui.cpp" />
     <ClCompile Include="engine_presets_ui.cpp" />
     <ClCompile Include="engine_sprites_ui.cpp" />
+    <ClCompile Include="engine_sprites.cpp" />
     <ClCompile Include="engine_messages_ui.cpp" />
     <ClCompile Include="engine_textanim_ui.cpp" />
     <ClCompile Include="engine_spout_input.cpp" />
     <ClCompile Include="video_capture.cpp" />
     <ClCompile Include="engine_controller.cpp" />
+    <ClCompile Include="engine_config.cpp" />
     <ClCompile Include="engine_messages.cpp" />
     <ClCompile Include="engine_presets.cpp" />
     <ClCompile Include="engine_script.cpp" />
@@ -388,6 +390,7 @@
     <ClCompile Include="engine_workspace_layout_ui.cpp" />
     <ClCompile Include="engine_songinfo_ui.cpp" />
     <ClCompile Include="engine_midi_ui.cpp" />
+    <ClCompile Include="engine_midi.cpp" />
     <ClCompile Include="midi_input.cpp" />
     <ClCompile Include="tool_window.cpp" />
     <ClCompile Include="engine_shaders.cpp" />

@@ -284,3 +284,124 @@ The Shader Import window (opened from Settings) converts Shadertoy GLSL to HLSL 
 Import projects (`.json`) store raw GLSL, channel mappings, and notes. The `.milk3` preset format stores converted HLSL and is what the visualizer loads at runtime.
 
 See `docs/GLSL_importing.md` for details on the GLSL→HLSL conversion pipeline.
+
+## Coding Patterns
+
+### File Organization Convention
+
+Engine source files follow a split pattern:
+
+- **`engine_<feature>.cpp`** — Engine:: business logic (persistence, dispatch, lifecycle)
+- **`engine_<feature>_ui.cpp`** — ToolWindow subclass + `Open<Feature>Window` / `Close<Feature>Window` bridge methods only
+
+Examples: `engine_midi.cpp` (MIDI persistence, device lifecycle, knob/button dispatch) vs `engine_midi_ui.cpp` (MidiWindow ToolWindow subclass and open/close bridges).
+
+### Where to Put New Code
+
+| Domain | File |
+| ------ | ---- |
+| DX12 rendering, shader passes | `milkdropfs.cpp` |
+| Preset loading/parsing/blending | `engine_presets.cpp` |
+| Shader compilation, text assembly | `engine_shaders.cpp` |
+| GLSL→HLSL conversion | `engine_shader_import_ui.cpp` |
+| Settings persistence, theme, user defaults, folder picker | `engine_config.cpp` |
+| Sprite lifecycle, INI I/O | `engine_sprites.cpp` |
+| MIDI persistence, device lifecycle, dispatch | `engine_midi.cpp` |
+| Display outputs, Spout sender | `engine_displays.cpp` |
+| Keyboard/mouse input, hotkey dispatch | `engine_input.cpp` |
+| Texture loading, fallback logic | `engine_textures.cpp` |
+| Message/supertext system | `engine_messages.cpp` |
+| Text animation profiles | `engine_textanim.cpp` / `engine_textanim_ui.cpp` |
+| UI window for feature X | `engine_<x>_ui.cpp` |
+
+### Engine:: Method Distribution
+
+All methods are declared in `engine.h` but defined across 40+ `.cpp` files. When looking for a method's implementation, check the file matching the method's domain (above table), not just `engine.cpp`.
+
+### Shared Helpers
+
+Standalone helpers used across multiple `engine_*.cpp` files live in `engine_helpers.h` as `inline` functions or `extern` declarations:
+
+- `FormatSpriteSection` / `FormatSpriteSectionA` — sprite INI section name formatting
+- `MakeRelativeSpritePath` — convert absolute texture paths to relative
+- `StripNamedGroups` — regex named capture group stripping
+- `ReadFileToString`, `StripComments`, `ConvertLLCto1310` — text processing
+- `g_settingsDesc[]`, `SettingDesc`, `SettingType` — settings screen types
+
+## Common Pitfalls
+
+### BS_OWNERDRAW Controls
+
+All ToolWindow controls use `BS_OWNERDRAW`. This means:
+
+- `IsDlgButtonChecked()` / `CheckDlgButton()` / `BM_GETCHECK` **silently return 0** — they don't work with owner-draw buttons
+- Use `ToolWindow::IsChecked(id)` / `SetChecked(id, bool)` instead
+- **Checkboxes** are auto-toggled by the base class `WndProc` before `DoCommand` is called
+- **Radio groups** must be toggled manually in `DoCommand` (the base class doesn't know group membership)
+
+See `docs/tool_window.md` for the full ToolWindow reference.
+
+### HWND_NOTOPMOST Spelling
+
+`HWND_NOTOPMOST` has **one T** — never spell it `HWND_NOTTOPMOST`. The compiler won't catch this because it's a `#define` value.
+
+### Wide Strings for File Paths
+
+All file paths use `wchar_t` / `std::wstring`. Never use `char*` for paths — Windows APIs return wide strings and non-ASCII characters in filenames will be silently corrupted.
+
+### Descriptor Heap Ordering
+
+Font atlas SRV slots must be allocated **before** `m_srvSlotBaseline` is set. `ResetDynamicDescriptors()` rewinds to baseline on resize — anything allocated after baseline gets reclaimed.
+
+- Font atlases are **permanent** (allocated before baseline)
+- Render targets (VS[0], VS[1], blur) are **dynamic** (allocated after baseline)
+- `AllocateDX9Stuff()` builds font atlases first, advances baseline, then creates render targets
+- `ResetBufferAndFonts()` must rebuild font atlases after `CleanUpFonts()` (they're destroyed)
+
+### Thread Safety
+
+- Use `std::atomic` for cross-thread flags (e.g., `m_bScreenshotRequested`, `m_bMirrorStylesDirty`)
+- **Render thread** owns DX12 resources; **message pump thread** owns HWNDs
+- Use the `RenderCommand` queue (`EnqueueRenderCmd`) for cross-thread communication
+- ToolWindows run on **their own threads** — don't access DX12 from ToolWindow code
+
+### Sampler Architecture
+
+4 shared `SamplerState` objects (s0–s3) cover all preset sampling needs. Textures use `Texture2D` t-registers (~128 limit). `#define tex2D` macro routes through `_samp_lw`. Special-mode samplers use text substitution in `LoadShaderFromMemory`.
+
+- `s0` = LINEAR + WRAP
+- `s1` = LINEAR + CLAMP
+- `s2` = POINT + CLAMP
+- `s3` = POINT + WRAP
+- Blur uses `_samp_lc` (CLAMP) via text substitution
+
+### Shadertoy Mode Flags
+
+Use **`m_bLoadingShadertoyMode`** (not `m_bShadertoyMode`) in `LoadShaderFromMemory`. The latter isn't set until after shader compilation — too late for shader text generation. `m_bLoadingShadertoyMode` is set in `LoadPreset` before the async thread starts.
+
+### IPC Window Titles
+
+The render window and IPC window must have **different titles**. Milkwave Remote uses `EnumWindows` + title match and stops at the first hit. If both windows share the same title, Remote may find the render window (which doesn't handle `WM_COPYDATA`).
+
+## DX12 Rendering Pipeline
+
+### Render Target Ping-Pong
+
+Two render targets (VS[0] and VS[1]) ping-pong each frame:
+
+1. **Warp pass**: Reads VS[0] → applies warp mesh distortion → writes to VS[1]
+2. **Shape/wave injection**: Custom shapes and waves drawn directly into VS[1]
+3. **Comp pass**: Reads VS[1] → applies comp mesh + comp shader → writes to backbuffer
+
+### Binding Layout
+
+- `BINDING_BLOCK_SIZE = 32` descriptors per texture set
+- `PASSES_PER_FRAME = 4` (warp + bufferA + bufferB + comp)
+- Static samplers: s0=LINEAR+WRAP, s1=LINEAR+CLAMP, s2=POINT+CLAMP, s3=POINT+WRAP
+
+### Key Differences from DX9
+
+- **No projection matrix**: DX12 vertex shaders output directly to clip space
+- **No half-texel offset**: DX12 pixel centers are at integer+0.5 (DX9 at integers)
+- **No Y-flip compensation**: DX9 used `OrthoLH(2,-2)` which negated Y; DX12 passthrough VS doesn't flip
+- **Post-processing via shader**: `RenderInjectEffect()` handles brighten/darken/solarize/invert via pixel shader (not blend states)
