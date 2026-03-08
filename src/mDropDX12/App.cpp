@@ -1709,6 +1709,12 @@ static void PerformDeviceRecovery() {
   int h = rc.bottom - rc.top;
   if (w <= 0 || h <= 0) { w = 960; h = 540; }
 
+  // Save current preset path — PluginQuit + PluginInitialize will reset engine state.
+  // We want to reload the same preset, not skip to next (recovery is often caused
+  // by benign ResizeBuffers failures in VMs, not shader-caused crashes).
+  wchar_t szSavedPreset[MAX_PATH] = {};
+  wcscpy_s(szSavedPreset, g_engine.m_szCurrentPresetFile);
+
   mdropdx12.LogInfo(L"Device Recovery: Attempting full device recreation");
   DebugLogA("Device Recovery: Beginning teardown and recreation");
 
@@ -1730,6 +1736,7 @@ static void PerformDeviceRecovery() {
   }
 
   // 5. Reinitialize the plugin with the fresh device
+  //    (PluginInitialize will load a startup/random preset via AllocateMyDX9Stuff)
   int ok = g_engine.PluginInitialize(
     pD3DDevice.Get(), pCommandQueue.Get(), pDXGIFactory.Get(),
     hwnd, w, h);
@@ -1752,15 +1759,17 @@ static void PerformDeviceRecovery() {
     }
   }
 
-  // 7. Skip to next preset (the current one likely caused the crash)
-  g_engine.NextPreset(0.0f);
+  // 7. Reload the preset that was active before recovery (not random/next).
+  //    Recovery is often caused by benign ResizeBuffers failures in VMs,
+  //    not shader-caused crashes. Must happen AFTER PluginInitialize since
+  //    MyPreInit reads settings from INI and overwrites in-memory values.
+  if (szSavedPreset[0]) {
+    g_engine.LoadPreset(szSavedPreset, 0.0f);
+  }
 
-  mdropdx12.LogInfo(L"Device Recovery: Device recreated successfully — skipped to next preset");
-  DebugLogA("Device Recovery: SUCCESS — device recreated, advanced to next preset");
-
-  wchar_t msg[256];
-  swprintf(msg, 256, L"Device recovered — skipped to next preset");
-  g_engine.AddError(msg, 8.0f, ERR_NOTIFY, true);
+  mdropdx12.LogInfo(L"Device Recovery: Device recreated successfully");
+  DebugLogA("Device Recovery: SUCCESS — device recreated");
+  g_engine.AddNotification(L"Device recovered");
 }
 
 // Poll track info from a window title (TRACK_SOURCE_WINDOW)

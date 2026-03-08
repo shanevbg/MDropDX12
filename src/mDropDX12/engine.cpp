@@ -3183,6 +3183,7 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
   //  when trying to use its stuff.
   if (m_nLoadingPreset != 0) {
     // finish up the pre-load — must wait for bg thread to complete.
+    // A pending preset load was interrupted by resize — force it to complete.
     // Use a timed wait: D3DCompile can stall indefinitely on malformed shaders,
     // which would hang CleanUpMyDX9Stuff (and the render thread) forever.
     if (m_presetLoadThread.joinable()) {
