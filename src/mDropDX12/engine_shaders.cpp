@@ -692,7 +692,8 @@ bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int sh
   }
 
   if (!LoadShaderFromMemory(szShadersText, "PS", ver, &si->CT, (void**)&si->ptr, shaderType, bHardErrors, bCompileOnly, &si->bytecodeBlob, szDiagName)) {
-    DebugLogWFmt(LOG_ERROR, L"DX12: RecompilePShader FAILED: %s", m_pState ? m_pState->m_szDesc : L"(unknown)");
+    DebugLogWFmt(LOG_ERROR, L"DX12: RecompilePShader FAILED: %s [%s]",
+                 m_pState ? m_pState->m_szDesc : L"(unknown)", m_szCurrentPresetFile);
     return false;
   }
 
@@ -1012,6 +1013,7 @@ static void FixShadowedBuiltins(char* szShaderText) {
     "abs", "min", "max", "step", "lerp", "frac", "sqrt",
     "floor", "ceil", "round", "sign", "clamp", "saturate",
     "normalize", "length", "distance", "cross", "clip",
+    "line",  // geometry shader primitive type keyword
   };
   static const int nBuiltins = sizeof(builtins) / sizeof(builtins[0]);
 
@@ -1175,6 +1177,31 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
       char* pos = strstr(szShaderText, decl);
       if (pos) memset(pos, ' ', strlen(decl));
     }
+  }
+
+  // Strip Shadertoy-specific sampler declarations for non-Shadertoy presets.
+  // These have explicit register(sN) annotations that force register slots to be
+  // occupied even when unused, leaving fewer slots for preset textures and causing
+  // X4510 "maximum sampler register index exceeded" on texture-heavy presets.
+  if (!m_bLoadingShadertoyMode) {
+    // Helper: blank out a declaration line from the include text
+    auto blankDecl = [&](const char* pattern) {
+      char* pos = strstr(szShaderText, pattern);
+      if (pos && pos < &szShaderText[writePos]) {
+        // Blank from pattern start to the next semicolon (inclusive)
+        char* end = strchr(pos, ';');
+        if (end) memset(pos, ' ', end - pos + 1);
+      }
+    };
+    blankDecl("sampler2D sampler_feedback");
+    blankDecl("sampler2D sampler_image");
+    blankDecl("sampler2D sampler_bufferB");
+    blankDecl("sampler2D sampler_audio");
+    blankDecl("sampler2D sampler_noise_lq_st");
+    blankDecl("sampler2D sampler_noise_mq_st");
+    blankDecl("sampler2D sampler_noise_hq_st");
+    blankDecl("sampler3D sampler_noisevol_lq_st");
+    blankDecl("sampler3D sampler_noisevol_hq_st");
   }
 
   // paste in any custom #defines for this shader type
