@@ -327,16 +327,16 @@ LRESULT VideoEffectsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam
     switch (id) {
     // ── Checkboxes ──
     case IDC_MW_VFX_MIRRORH:
-        fx.mirrorH = (SendMessage((HWND)lParam, BM_GETCHECK, 0, 0) == BST_CHECKED);
+        fx.mirrorH = IsChecked(id);
         SaveFX(); return 0;
     case IDC_MW_VFX_MIRRORV:
-        fx.mirrorV = (SendMessage((HWND)lParam, BM_GETCHECK, 0, 0) == BST_CHECKED);
+        fx.mirrorV = IsChecked(id);
         SaveFX(); return 0;
     case IDC_MW_VFX_INVERT:
-        fx.invert = (SendMessage((HWND)lParam, BM_GETCHECK, 0, 0) == BST_CHECKED);
+        fx.invert = IsChecked(id);
         SaveFX(); return 0;
     case IDC_MW_VFX_EDGEDETECT:
-        fx.edgeDetect = (SendMessage((HWND)lParam, BM_GETCHECK, 0, 0) == BST_CHECKED);
+        fx.edgeDetect = IsChecked(id);
         SaveFX(); return 0;
 
     // ── Blend mode combo ──

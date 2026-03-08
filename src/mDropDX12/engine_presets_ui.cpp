@@ -437,7 +437,7 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
 
     // ── Checkboxes ──
     if (code == BN_CLICKED) {
-        bool bChecked = (SendMessage((HWND)lParam, BM_GETCHECK, 0, 0) == BST_CHECKED);
+        bool bChecked = IsChecked(id);
         switch (id) {
         case IDC_MW_HARD_CUTS:
             p->m_bHardCutsDisabled = bChecked;

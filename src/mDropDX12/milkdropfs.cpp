@@ -2434,7 +2434,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
   // warp and comp needs (ApplyShaderParams for comp runs AFTER blur passes).
   {
     CShaderParams* cp = &m_shaders.comp.params;
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < 32; i++) {
       if (cp->m_texcode[i] >= TEX_BLUR1 && cp->m_texcode[i] <= TEX_BLUR_LAST)
         m_nHighestBlurTexUsedThisFrame = max(m_nHighestBlurTexUsedThisFrame,
             ((int)cp->m_texcode[i] - (int)TEX_BLUR1) + 1);

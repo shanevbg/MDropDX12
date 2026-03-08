@@ -220,14 +220,14 @@ LRESULT VFXProfileWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
     }
 
     case IDC_MW_VFXP_STARTUP:
-        m_pEngine->m_bEnableVFXStartup = (SendMessage((HWND)lParam, BM_GETCHECK, 0, 0) == BST_CHECKED);
+        m_pEngine->m_bEnableVFXStartup = IsChecked(id);
         if (m_pEngine->m_bEnableVFXStartup)
             wcscpy_s(m_pEngine->m_szVFXStartup, m_pEngine->m_szCurrentVFXProfile);
         m_pEngine->SaveSpoutInputSettings();
         return 0;
 
     case IDC_MW_VFXP_SAVECLOSE:
-        m_pEngine->m_bEnableVFXStartupSavingOnClose = (SendMessage((HWND)lParam, BM_GETCHECK, 0, 0) == BST_CHECKED);
+        m_pEngine->m_bEnableVFXStartupSavingOnClose = IsChecked(id);
         m_pEngine->SaveSpoutInputSettings();
         return 0;
     }

@@ -439,7 +439,7 @@ LRESULT MessagesWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         case IDC_MW_MSG_PLAY: {
             p->m_bMsgAutoplay = !p->m_bMsgAutoplay;
             SetWindowTextW(GetDlgItem(hWnd, IDC_MW_MSG_PLAY), p->m_bMsgAutoplay ? L"Stop" : L"Play");
-            CheckDlgButton(hWnd, IDC_MW_MSG_AUTOPLAY, p->m_bMsgAutoplay ? BST_CHECKED : BST_UNCHECKED);
+            SetChecked(IDC_MW_MSG_AUTOPLAY, p->m_bMsgAutoplay);
             if (p->m_bMsgAutoplay)
                 p->ScheduleNextAutoMessage();
             else

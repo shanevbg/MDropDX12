@@ -1614,7 +1614,7 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
 
     // Script tab: Loop checkbox
     if (id == IDC_MW_SCRIPT_LOOP && code == BN_CLICKED) {
-      p->m_script.loop = (SendMessage((HWND)lParam, BM_GETCHECK, 0, 0) == BST_CHECKED);
+      p->m_script.loop = IsChecked(id);
       return 0;
     }
 
@@ -4124,9 +4124,10 @@ void Engine::UpdateSpriteProperties(int sel) {
 
   SendDlgItemMessageW(hw, IDC_MW_SPR_BLENDMODE, CB_SETCURSEL, blendmode, 0);
   SendDlgItemMessageW(hw, IDC_MW_SPR_LAYER, CB_SETCURSEL, (layer >= 0 && layer <= 1) ? layer : 0, 0);
-  CheckDlgButton(hw, IDC_MW_SPR_FLIPX, flipx ? BST_CHECKED : BST_UNCHECKED);
-  CheckDlgButton(hw, IDC_MW_SPR_FLIPY, flipy ? BST_CHECKED : BST_UNCHECKED);
-  CheckDlgButton(hw, IDC_MW_SPR_BURN, burn ? BST_CHECKED : BST_UNCHECKED);
+  // Use ToolWindow's SetChecked — CheckDlgButton doesn't work with BS_OWNERDRAW
+  ToolWindow* tw = (m_spritesWindow && m_spritesWindow->IsOpen()) ? (ToolWindow*)m_spritesWindow.get() :
+                   (ToolWindow*)m_settingsWindow.get();
+  if (tw) { tw->SetChecked(IDC_MW_SPR_FLIPX, flipx); tw->SetChecked(IDC_MW_SPR_FLIPY, flipy); tw->SetChecked(IDC_MW_SPR_BURN, burn); }
 
   // Set code editors - convert \n to \r\n for edit control
   {
@@ -4175,9 +4176,12 @@ void Engine::SaveCurrentSpriteProperties() {
     if (blend == CB_ERR) blend = 0;
     int layer = (int)SendDlgItemMessageW(hw, IDC_MW_SPR_LAYER, CB_GETCURSEL, 0, 0);
     if (layer == CB_ERR) layer = 0;
-    bool flipx = (IsDlgButtonChecked(hw, IDC_MW_SPR_FLIPX) == BST_CHECKED);
-    bool flipy = (IsDlgButtonChecked(hw, IDC_MW_SPR_FLIPY) == BST_CHECKED);
-    bool burn  = (IsDlgButtonChecked(hw, IDC_MW_SPR_BURN)  == BST_CHECKED);
+    // Use ToolWindow's IsChecked — IsDlgButtonChecked doesn't work with BS_OWNERDRAW
+    ToolWindow* tw = (m_spritesWindow && m_spritesWindow->IsOpen()) ? (ToolWindow*)m_spritesWindow.get() :
+                     (ToolWindow*)m_settingsWindow.get();
+    bool flipx = tw ? tw->IsChecked(IDC_MW_SPR_FLIPX) : false;
+    bool flipy = tw ? tw->IsChecked(IDC_MW_SPR_FLIPY) : false;
+    bool burn  = tw ? tw->IsChecked(IDC_MW_SPR_BURN)  : false;
 
     // Build init code from property values
     sprintf(initBuf, "blendmode = %d;\r\nx = %.6g; y = %.6g;\r\nsx = %.6g; sy = %.6g; rot = %.6g;\r\n"

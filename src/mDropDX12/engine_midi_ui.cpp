@@ -657,7 +657,7 @@ LRESULT MidiWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
       else {
         p->AddError(L"Failed to open MIDI device", 3.0f, ERR_MISC, false);
         p->m_bMidiEnabled = false;
-        CheckDlgButton(hWnd, IDC_MW_MIDI_ENABLE, BST_UNCHECKED);
+        SetChecked(IDC_MW_MIDI_ENABLE, false);
       }
     } else {
       p->CloseMidiDevice();
