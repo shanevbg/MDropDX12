@@ -2634,6 +2634,16 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     CaptureScreenshot();
     DebugLogW(L"[CAPTURE] CaptureScreenshot() returned");
   }
+  else if (wcsncmp(sMessage, L"FFT_ATTACK=", 11) == 0) {
+    m_fFFTAttackGlobal = (float)_wtof(sMessage + 11);
+    m_fFFTAttackGlobal = max(0.0f, min(1.0f, m_fFFTAttackGlobal));
+    m_bFFTSmoothingActive = true;
+  }
+  else if (wcsncmp(sMessage, L"FFT_DECAY=", 10) == 0) {
+    m_fFFTDecayGlobal = (float)_wtof(sMessage + 10);
+    m_fFFTDecayGlobal = max(0.0f, min(1.0f, m_fFFTDecayGlobal));
+    m_bFFTSmoothingActive = true;
+  }
   else {
     // Fallback: treat as pipe-chained script command (NEXT, PREV, LOCK,
     // SEND=0x.., etc.)  This unifies IPC and button board dispatch.
@@ -2680,7 +2690,9 @@ void Engine::SendSettingsInfoToMDropDX12Remote() {
     + L"|QUALITY=" + std::to_wstring(m_fRenderQuality)
     + L"|AUTO=" + std::wstring(bQualityAuto ? L"1" : L"0")
     + L"|HUE=" + std::to_wstring(m_ColShiftHue)
-    + L"|LOCKED=" + std::wstring(m_bPresetLockedByUser ? L"1" : L"0");
+    + L"|LOCKED=" + std::wstring(m_bPresetLockedByUser ? L"1" : L"0")
+    + L"|FFTATTACK=" + std::to_wstring(m_fFFTAttackGlobal)
+    + L"|FFTDECAY=" + std::to_wstring(m_fFFTDecayGlobal);
   SendMessageToMDropDX12Remote(msg.c_str(), true);
 }
 

@@ -1038,7 +1038,7 @@ void Engine::LaunchOrFocusApp(const std::wstring& path)
     } else {
         wchar_t msg[MAX_PATH + 64];
         swprintf(msg, MAX_PATH + 64, L"Could not launch %s", exeName);
-        AddError(msg, 3.0f, ERR_MISC, false);
+        AddError(msg, m_ErrorDuration, ERR_MISC, false);
     }
 }
 

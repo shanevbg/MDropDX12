@@ -2,7 +2,7 @@
 
 MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geisswerks.com/milkdrop/) visualizer engine, with GPU-accelerated text rendering, an in-app settings UI, and broad preset compatibility improvements. Works with [Milkwave](https://github.com/IkeC/Milkwave) Remote via Named Pipe IPC for extended control (messaging, wave manipulation, screenshots, and more).
 
-**Current version: 1.5.1** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
+**Current version: 1.7.0** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
 
 [**Click here**](https://github.com/shanevbg/MDropDX12/releases/latest) to get the latest version.
 
@@ -37,6 +37,8 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geiss
 * Workspace Layout window for tiling tool windows across the screen with render preview in a corner or on a separate display
 * Text Animations window with DX12 warped text, color/font pickers, animation profile export/import, and custom preview
 * ToolWindow system — Settings, Displays, Song Info, Hotkeys, MIDI, Presets, Sprites, Messages, Shader Import, Video Effects, Text Animations, and Workspace Layout windows run on their own threads with sticky positions and tab memory
+* FFT EQ smoothing with attack/decay and peak hold — `get_fft()` / `get_fft_peak()` shader functions for EQ visualization presets
+* Error Display Settings window for configuring shader error notification appearance
 * Improved window handling, input methods and stability
 * Use independently or with [Milkwave](https://github.com/IkeC/Milkwave) Remote for extended control (messaging, shader conversion, wave manipulation, and more)
 
@@ -170,7 +172,7 @@ For a chronological list of MDropDX12 releases and features, read the [Changes](
 
 ## Installation
 
-Download `MDropDX12-1.5.1-Portable.zip` from the [latest release](https://github.com/shanevbg/MDropDX12/releases/latest), extract to any folder with write access (e.g. `C:\Tools\MDropDX12`), and run `MDropDX12.exe`. No installer or admin privileges required.
+Download `MDropDX12-v1.7.0-Portable.zip` from the [latest release](https://github.com/shanevbg/MDropDX12/releases/latest), extract to any folder with write access (e.g. `C:\Tools\MDropDX12`), and run `MDropDX12.exe`. No installer or admin privileges required.
 
 See the [Installation Guide](docs/Install.md) for detailed instructions, directory layout, configuration files, and troubleshooting.
 

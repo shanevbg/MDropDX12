@@ -399,7 +399,7 @@ void LoadPresetFilesViaDragAndDrop(WPARAM wParam) {
 
   int totalItems = (int)milkFiles.size() + (int)folders.size();
   if (totalItems == 0) {
-    g_engine.AddError((wchar_t*)L"No preset files or folders found in drop", 3.5f, ERR_NOTIFY, true);
+    g_engine.AddError((wchar_t*)L"No preset files or folders found in drop", g_engine.m_ErrorDuration, ERR_NOTIFY, true);
     return;
   }
 
@@ -428,7 +428,7 @@ void LoadPresetFilesViaDragAndDrop(WPARAM wParam) {
     ScanFolderForPresets(folder.c_str(), milkFiles);
 
   if (milkFiles.empty()) {
-    g_engine.AddError((wchar_t*)L"No preset files found in dropped items", 3.5f, ERR_NOTIFY, true);
+    g_engine.AddError((wchar_t*)L"No preset files found in dropped items", g_engine.m_ErrorDuration, ERR_NOTIFY, true);
     return;
   }
 
@@ -462,7 +462,7 @@ void LoadPresetFilesViaDragAndDrop(WPARAM wParam) {
   }
 
   if (copied == 0) {
-    g_engine.AddError((wchar_t*)L"Failed to copy preset files", 3.5f, ERR_NOTIFY, true);
+    g_engine.AddError((wchar_t*)L"Failed to copy preset files", g_engine.m_ErrorDuration, ERR_NOTIFY, true);
     return;
   }
 
@@ -705,11 +705,11 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
             wParam == '&'))	// NOTE: '&' is legal in filenames, but we try to avoid it since during GDI display it acts as a control code (it will not show up, but instead, underline the character following it).
         {
           // illegal char
-          AddError(wasabiApiLangString(IDS_ILLEGAL_CHARACTER), 2.5f, ERR_MISC, true);
+          AddError(wasabiApiLangString(IDS_ILLEGAL_CHARACTER), m_ErrorDuration, ERR_MISC, true);
         }
         else if (len + nRepeat >= m_waitstring.nMaxLen) {
           // m_waitstring.szText has reached its limit
-          AddError(wasabiApiLangString(IDS_STRING_TOO_LONG), 2.5f, ERR_MISC, true);
+          AddError(wasabiApiLangString(IDS_STRING_TOO_LONG), m_ErrorDuration, ERR_MISC, true);
         }
         else {
           //m_fShowUserMessageUntilThisTime = GetTime();	// if there was an error message already, clear it
@@ -1257,7 +1257,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
                 wasabiApiLangString(IDS_ERROR_IMPORTING_BAD_FILENAME, buf, 1024);
               else
                 wasabiApiLangString(IDS_ERROR_IMPORTING_BAD_FILENAME_OR_NOT_OVERWRITEABLE, buf, 1024);
-              AddError(wasabiApiLangString(IDS_STRING_TOO_LONG), 2.5f, ERR_MISC, true);
+              AddError(wasabiApiLangString(IDS_STRING_TOO_LONG), m_ErrorDuration, ERR_MISC, true);
             }
 
             m_waitstring.bActive = false;
@@ -1301,7 +1301,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
               }
               else {
                 // m_waitstring.szText has reached its limit
-                AddError(wasabiApiLangString(IDS_STRING_TOO_LONG), 2.5f, ERR_MISC, true);
+                AddError(wasabiApiLangString(IDS_STRING_TOO_LONG), m_ErrorDuration, ERR_MISC, true);
               }
             }
             else {
@@ -1998,7 +1998,7 @@ void Engine::WaitString_Paste() {
       chars_to_insert = m_waitstring.nMaxLen - len - 1;
 
       // inform user
-      AddError(wasabiApiLangString(IDS_STRING_TOO_LONG), 2.5f, ERR_MISC, true);
+      AddError(wasabiApiLangString(IDS_STRING_TOO_LONG), m_ErrorDuration, ERR_MISC, true);
     }
     else {
       //m_fShowUserMessageUntilThisTime = GetTime();	// if there was an error message already, clear it

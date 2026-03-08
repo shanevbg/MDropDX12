@@ -482,10 +482,13 @@ void COverlayThread::RenderOverlayToDIB() {
     // --- HUD: Notifications (per-corner stacking) ---
     if (m_currentData.nNotifications > 0) {
         int notifY[4] = { upperRightY, upperLeftY, lowerRightY, lowerLeftY };
+
+        // Notifications: per-corner stacking
         for (int i = 0; i < m_currentData.nNotifications; i++) {
             const auto& n = m_currentData.notifications[i];
             if (!n.text[0]) continue;
-            int  c       = n.corner;
+
+            int c = n.corner;
             if (c < 0 || c > 3) c = 0;
             bool right   = (c == 0 || c == 2);
             bool fromBot = (c == 2 || c == 3);

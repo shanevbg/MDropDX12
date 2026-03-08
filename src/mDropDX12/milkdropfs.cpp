@@ -932,6 +932,9 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
 
     RunPerFrameEquations(code);
 
+    // Update audio texture (FFT + waveform/peak) for sampler_audio / get_fft() access
+    UpdateAudioTexture();
+
     // Per-vertex warp computation (CPU-only, no device dependency).
     // Moved here from inside the DX9 rendering block so DX12 path can use the results.
     ComputeGridAlphaValues();

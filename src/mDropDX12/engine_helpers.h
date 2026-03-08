@@ -845,6 +845,9 @@ extern bool g_bSettingsWndClassRegistered;
 // Settings About tab — workspace layout button
 #define IDC_MW_OPEN_WORKSPACE_LAYOUT  9136
 
+// Settings About tab — error display settings button
+#define IDC_MW_ERROR_DISPLAY_SETTINGS 9137  // Error Duration edit on About tab
+
 // Launcher buttons on Settings General tab
 #define IDC_MW_OPEN_PRESETS       9080
 #define IDC_MW_OPEN_SPRITES       9081

@@ -2011,7 +2011,7 @@ void Engine::LoadPresetTick() {
     m_NewShaders.comp.Clear();
 
     ClearErrors(ERR_NOTIFY);
-    AddError(L"Shader compile timed out \u2014 skipping preset", 4.0f, ERR_NOTIFY, true);
+    AddError(L"Shader compile timed out \u2014 skipping preset", m_ErrorDuration, ERR_NOTIFY, true);
 
     // Try next preset (will start a new async load)
     NextPreset(m_fLoadingPresetBlendTime);
@@ -2139,7 +2139,7 @@ retry:
       // --> revert back to plugins dir
       wchar_t buf[1024];
       swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILES_OR_DIRS_FOUND_IN_X), g_engine.m_szPresetDir);
-      g_engine.AddError(buf, 4.0f, ERR_MISC, true);
+      g_engine.AddError(buf, g_engine.m_ErrorDuration, ERR_MISC, true);
 
       if (bRetrying) {
         LeaveCriticalSection(&g_cs);
@@ -2350,7 +2350,7 @@ retry:
     // --> revert back to plugins dir
     wchar_t buf[1024];
     swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILES_OR_DIRS_FOUND_IN_X), g_engine.m_szPresetDir);
-    g_engine.AddError(buf, 4.0f, ERR_MISC, true);
+    g_engine.AddError(buf, g_engine.m_ErrorDuration, ERR_MISC, true);
 
     if (bRetrying) {
       LeaveCriticalSection(&g_cs);
@@ -2577,7 +2577,7 @@ void Engine::RenamePresetFile(wchar_t* szOldFile, wchar_t* szNewFile) {
     }
     else {
       // pop up confirmation
-      AddError(wasabiApiLangString(IDS_RENAME_SUCCESSFUL), 3.0f, ERR_NOTIFY, false);
+      AddError(wasabiApiLangString(IDS_RENAME_SUCCESSFUL), m_ErrorDuration, ERR_NOTIFY, false);
 
       // if this preset was the active one, update m_pState->m_szDesc with the new name
       wchar_t buf[512];
@@ -2796,7 +2796,7 @@ bool Engine::ChangePresetDir(wchar_t* newDir, wchar_t* oldDir) {
     lstrcpyW(g_engine.m_szPresetDir, oldDir);
 
     // give them a warning
-    AddError(wasabiApiLangString(IDS_INVALID_PATH), 3.5f, ERR_MISC, true);
+    AddError(wasabiApiLangString(IDS_INVALID_PATH), m_ErrorDuration, ERR_MISC, true);
   }
 
   return bSuccess;

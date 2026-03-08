@@ -1259,6 +1259,18 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       return 0;
     }
 
+    // About tab: Error Duration edit
+    if (id == IDC_MW_ERROR_DISPLAY_SETTINGS && code == EN_KILLFOCUS) {
+      wchar_t buf[32];
+      GetDlgItemTextW(hWnd, IDC_MW_ERROR_DISPLAY_SETTINGS, buf, 32);
+      float val = (float)_wtof(buf);
+      if (val < 0.5f) val = 0.5f;
+      if (val > 120.0f) val = 120.0f;
+      m_pEngine->m_ErrorDuration = val;
+      m_pEngine->MyWriteConfig();
+      return 0;
+    }
+
     // About tab: Register File Association
     if (id == IDC_MW_FILE_ASSOC && code == BN_CLICKED) {
       wchar_t exePath[MAX_PATH];
@@ -1314,7 +1326,7 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       if (ok)
         p->AddNotification(L"File association registered for .milk, .milk2, and .milk3");
       else
-        p->AddError((wchar_t*)L"Failed to register file association", 3.5f, ERR_NOTIFY, true);
+        p->AddError((wchar_t*)L"Failed to register file association", p->m_ErrorDuration, ERR_NOTIFY, true);
       return 0;
     }
 
@@ -2453,6 +2465,17 @@ void SettingsWindow::DoBuildControls() {
   }
   y += lineH + 2;
   PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"(Tile tool windows across screen with render preview in corner)", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
+  y += lineH + 8;
+
+  // Error Duration
+  PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"Error Duration (s):", x, y, lw, lineH, hFont, false));
+  {
+    int ew = 60;
+    PAGE_CTRL(SP_ABOUT, CreateEdit(hw, L"", IDC_MW_ERROR_DISPLAY_SETTINGS, x + lw + 4, y, ew, lineH, hFont, false));
+    wchar_t buf[32];
+    swprintf(buf, 32, L"%.1f", m_pEngine->m_ErrorDuration);
+    SetDlgItemTextW(hw, IDC_MW_ERROR_DISPLAY_SETTINGS, buf);
+  }
 
   // ===== Remote tab (page 5) =====
   y = tabTop + 10;

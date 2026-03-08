@@ -1192,7 +1192,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
     blankDecl("Texture2D sampler_feedback");
     blankDecl("Texture2D sampler_image");
     blankDecl("Texture2D sampler_bufferB");
-    blankDecl("Texture2D sampler_audio");
+    // NOTE: sampler_audio is NOT blanked — get_fft() functions in include.fx need it
     blankDecl("Texture2D sampler_noise_lq_st");
     blankDecl("Texture2D sampler_noise_mq_st");
     blankDecl("Texture2D sampler_noise_hq_st");

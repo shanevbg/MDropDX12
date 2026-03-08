@@ -2926,23 +2926,41 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
     }
 
     if (!found) {
-      // First-run: ask user whether to set up workspace here or pick another folder.
+      // First-run: ask user whether to set up workspace here, pick another folder,
+      // or import settings from an existing install.
       // This runs before any Engine init, so use raw Win32 APIs only.
+      enum { BTN_MOVE = 1000, BTN_IMPORT, BTN_CONTINUE, BTN_EXIT };
       {
-        std::wstring msg = L"MDropDX12 will create resource directories (presets, textures, etc.) in its working folder.\n\n";
-        msg += L"Current location:\n";
-        msg += exeDir.wstring();
-        msg += L"\n\nWould you like to choose a different folder?\n";
-        msg += L"(Yes = pick a folder, No = continue here, Cancel = exit)";
+        std::wstring content = L"MDropDX12 will create resource directories (presets, textures, etc.) in its working folder.\n\n";
+        content += L"Current location:\n";
+        content += exeDir.wstring();
 
-        int result = MessageBoxW(NULL, msg.c_str(),
-          L"MDropDX12 \x2014 First Run", MB_YESNOCANCEL | MB_ICONQUESTION | MB_SETFOREGROUND);
+        TASKDIALOG_BUTTON buttons[] = {
+          { BTN_MOVE,     L"Choose a workspace folder\nCopy MDropDX12 to another directory and launch from there" },
+          { BTN_IMPORT,   L"Copy settings from existing install\nImport .ini files from another MDropDX12 directory" },
+          { BTN_CONTINUE, L"Continue here\nUse the current directory" },
+          { BTN_EXIT,     L"Exit" },
+        };
 
-        if (result == IDCANCEL)
+        TASKDIALOGCONFIG tdc = {};
+        tdc.cbSize = sizeof(tdc);
+        tdc.dwFlags = TDF_USE_COMMAND_LINKS | TDF_ALLOW_DIALOG_CANCELLATION;
+        tdc.pszWindowTitle = L"MDropDX12 \x2014 First Run";
+        tdc.pszMainIcon = TD_INFORMATION_ICON;
+        tdc.pszMainInstruction = L"Welcome to MDropDX12";
+        tdc.pszContent = content.c_str();
+        tdc.cButtons = _countof(buttons);
+        tdc.pButtons = buttons;
+        tdc.nDefaultButton = BTN_CONTINUE;
+
+        int clicked = BTN_CONTINUE;
+        TaskDialogIndirect(&tdc, &clicked, NULL, NULL);
+
+        if (clicked == BTN_EXIT || clicked == IDCANCEL)
           return 0;
 
-        if (result == IDYES) {
-          // Open folder picker via IFileDialog
+        if (clicked == BTN_MOVE) {
+          // Open folder picker via IFileDialog — copy exe to chosen folder and relaunch
           CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
           bool relocated = false;
 
@@ -2954,7 +2972,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
             pfd->SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
             pfd->SetTitle(L"Choose MDropDX12 workspace folder");
 
-            // Start the folder picker in the exe's current directory
             IShellItem* psiFolder = NULL;
             if (SUCCEEDED(SHCreateItemFromParsingName(exeDir.c_str(), NULL, IID_PPV_ARGS(&psiFolder)))) {
               pfd->SetFolder(psiFolder);
@@ -2977,18 +2994,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
                   if (fs::exists(destExe)) {
                     int ow = MessageBoxW(NULL,
                       L"MDropDX12.exe already exists in that folder. Overwrite it?",
-                      L"MDropDX12 — First Run", MB_YESNO | MB_ICONQUESTION);
+                      L"MDropDX12 \x2014 First Run", MB_YESNO | MB_ICONQUESTION);
                     if (ow != IDYES) doCopy = false;
                   }
 
                   if (doCopy && CopyFileW(exePath, destExe.c_str(), FALSE)) {
-                    // Launch the copy and exit this instance
                     ShellExecuteW(NULL, L"open", destExe.c_str(), NULL,
                                   destDir.c_str(), SW_SHOWNORMAL);
                     relocated = true;
                   } else if (doCopy) {
                     MessageBoxW(NULL, L"Failed to copy MDropDX12 to the selected folder.",
-                                L"MDropDX12 — First Run", MB_OK | MB_ICONERROR);
+                                L"MDropDX12 \x2014 First Run", MB_OK | MB_ICONERROR);
                   }
                 }
                 psi->Release();
@@ -2999,7 +3015,57 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
           CoUninitialize();
 
           if (relocated)
-            return 0;  // exit — new instance launched from chosen folder
+            return 0;
+        }
+
+        if (clicked == BTN_IMPORT) {
+          // Pick an existing MDropDX12 directory and copy all .ini files from it
+          CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+          IFileDialog* pfd = NULL;
+          HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd));
+          if (SUCCEEDED(hr)) {
+            DWORD opts = 0;
+            pfd->GetOptions(&opts);
+            pfd->SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+            pfd->SetTitle(L"Select existing MDropDX12 directory (containing .ini files)");
+
+            hr = pfd->Show(NULL);
+            if (SUCCEEDED(hr)) {
+              IShellItem* psi = NULL;
+              hr = pfd->GetResult(&psi);
+              if (SUCCEEDED(hr)) {
+                PWSTR pszPath = NULL;
+                hr = psi->GetDisplayName(SIGDN_FILESYSPATH, &pszPath);
+                if (SUCCEEDED(hr) && pszPath) {
+                  fs::path srcDir(pszPath);
+                  CoTaskMemFree(pszPath);
+
+                  int copied = 0;
+                  std::error_code ec;
+                  for (auto& entry : fs::directory_iterator(srcDir, ec)) {
+                    if (!entry.is_regular_file()) continue;
+                    auto ext = entry.path().extension();
+                    if (_wcsicmp(ext.c_str(), L".ini") != 0) continue;
+                    fs::path dest = exeDir / entry.path().filename();
+                    if (fs::copy_file(entry.path(), dest, fs::copy_options::overwrite_existing, ec))
+                      copied++;
+                  }
+
+                  if (copied > 0) {
+                    std::wstring info = std::to_wstring(copied) + L" .ini file(s) copied from:\n" + srcDir.wstring();
+                    MessageBoxW(NULL, info.c_str(), L"MDropDX12 \x2014 Import Complete", MB_OK | MB_ICONINFORMATION);
+                  } else {
+                    MessageBoxW(NULL, L"No .ini files found in the selected directory.",
+                                L"MDropDX12 \x2014 Import", MB_OK | MB_ICONWARNING);
+                  }
+                }
+                psi->Release();
+              }
+            }
+            pfd->Release();
+          }
+          CoUninitialize();
         }
       }
 

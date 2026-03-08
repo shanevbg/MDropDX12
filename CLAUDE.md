@@ -43,7 +43,7 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - Logging via `mdropdx12.LogInfo()`, `mdropdx12.LogException()`, etc.
 - `settings.ini`: `LogLevel=2` for verbose logging
 
-## Key Features (current: v1.5.1)
+## Key Features (current: v1.7.0)
 
 - DirectX 12 rendering backend (migrated from DX9Ex)
 - GDI overlay window for HUD text (preset name, FPS, debug info, notifications)
@@ -74,6 +74,8 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - Shadertoy import: GLSL→HLSL converter with .milk3 JSON format (SM5.0 / `ps_5_0`), separate render path (`RenderFrameShadertoy`), FLOAT32 ping-pong feedback buffers (see `docs/GLSL_importing.md`)
 - Preset filter by type (All / .milk / .milk2 / .milk3) in preset browser; random/sequential selection respects filter
 - Custom preset variables: `bass_smooth`, `mid_smooth`, `treb_smooth`, `vol_smooth`, `vis_intensity`, `vis_shift`, `vis_version`, `colshift_hue`
+- FFT EQ smoothing with attack/decay and peak hold — `get_fft()`, `get_fft_hz()`, `get_fft_peak()`, `get_fft_peak_hz()` shader functions; audio texture 512x2 R32_FLOAT (row 0 = smoothed, row 1 = peak)
+- Error Display Settings ToolWindow for configuring shader error notification appearance
 
 ## DX12 Rendering Pipeline
 

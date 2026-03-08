@@ -13,7 +13,7 @@ MDropDX12 captures audio from your system's default output device via WASAPI loo
 
 ## Download
 
-Download `MDropDX12-1.5.1-Portable.zip` from the [GitHub Releases](https://github.com/shanevbg/MDropDX12/releases/latest) page.
+Download `MDropDX12-v1.7.0-Portable.zip` from the [GitHub Releases](https://github.com/shanevbg/MDropDX12/releases/latest) page.
 
 ## Installation
 
@@ -30,11 +30,14 @@ No registry entries are created and nothing is installed system-wide. To remove,
 
 ## First Run
 
-On first launch, MDropDX12 self-bootstraps: it creates `resources/presets/`, `resources/textures/`, and other directories automatically. A **Welcome window** appears with options to:
+On first launch, MDropDX12 self-bootstraps: it creates `resources/presets/`, `resources/textures/`, and other directories automatically. A first-run dialog appears with four options:
 
-- **Browse for Resources Folder** — point it at an existing folder containing presets (`.milk`, `.milk2`, `.milk3` files) and textures
-- **Open Shader Import** — import Shadertoy shaders directly (no presets needed)
-- **Open Settings** — configure paths, audio, display options
+- **Choose a workspace folder** — copy MDropDX12 to another directory and launch from there
+- **Copy settings from existing install** — import .ini files from another MDropDX12 directory
+- **Continue here** — use the current directory as workspace
+- **Exit** — close without setup
+
+After bootstrap, a **Welcome window** appears with options to browse for resources, open Shader Import, open Settings, or set up a workspace layout.
 
 Once presets are loaded, the visualizer begins rendering. It captures audio from your system's default output device via WASAPI loopback — play some music and the visuals respond automatically.
 

@@ -302,11 +302,13 @@ bool ModalDialog::Show(HWND hParent, int clientW, int clientH) {
     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
     DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
 
-  // Compute window rect from desired client area
+  // Compute window rect from desired client area (DPI-aware)
   DWORD dwStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
   DWORD dwExStyle = WS_EX_DLGMODALFRAME;
+  UINT dpi = GetDpiForWindow(hParent);
+  if (dpi == 0) dpi = 96;
   RECT rc = { 0, 0, clientW, clientH };
-  AdjustWindowRectEx(&rc, dwStyle, FALSE, dwExStyle);
+  AdjustWindowRectExForDpi(&rc, dwStyle, FALSE, dwExStyle, dpi);
   int wndW = rc.right - rc.left;
   int wndH = rc.bottom - rc.top;
 
@@ -386,7 +388,24 @@ int ModalDialog::GetLineHeight() {
   GetTextMetrics(hdc, &tm);
   SelectObject(hdc, hOld);
   ReleaseDC(m_hWnd, hdc);
-  return tm.tmHeight + tm.tmExternalLeading + 4;
+  int h = tm.tmHeight + tm.tmExternalLeading + 6;
+  return max(h, 20); // match ToolWindow::GetLineHeight()
+}
+
+ModalDialog::BaseLayout ModalDialog::GetBaseLayout() {
+  return { GetLineHeight(), 6, 16, 85 };
+}
+
+void ModalDialog::FitToContent(int clientW, int contentH) {
+  HWND hDlg = m_hWnd;
+  DWORD dwStyle = (DWORD)GetWindowLongPtrW(hDlg, GWL_STYLE);
+  DWORD dwExStyle = (DWORD)GetWindowLongPtrW(hDlg, GWL_EXSTYLE);
+  UINT dpi = GetDpiForWindow(hDlg);
+  if (dpi == 0) dpi = 96;
+  RECT rc = { 0, 0, clientW, contentH };
+  AdjustWindowRectExForDpi(&rc, dwStyle, FALSE, dwExStyle, dpi);
+  SetWindowPos(hDlg, NULL, 0, 0, rc.right - rc.left, rc.bottom - rc.top,
+    SWP_NOMOVE | SWP_NOZORDER);
 }
 
 LRESULT CALLBACK ModalDialog::ModalWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
@@ -1297,13 +1316,14 @@ class ActionEditDialog : public ModalDialog {
   void DoBuildControls(int clientW, int clientH) override {
     HFONT hFont = GetFont();
     HWND hDlg = GetHWND();
+    auto L = GetBaseLayout();
 
-    int margin = 12;
+    int margin = L.margin;
     int cw = clientW - 2 * margin;
     int y = margin;
-    int labelW = 85;
-    int lineH = 22;
-    int gap = 6;
+    int labelW = L.labelW;
+    int lineH = L.lineH;
+    int gap = L.gap;
     int browseW = 70;
 
     if (m_data.isBuiltInHotkey) {
@@ -1369,7 +1389,7 @@ class ActionEditDialog : public ModalDialog {
 
       if (m_data.isBuiltInHotkey) {
         // ── Built-in hotkey: dual binding (Local + Global) ──
-        y += 4;
+        y += gap;
 
         // Local key row
         TrackControl(CreateLabel(hDlg, L"Local Key:", margin, y + 2, labelW, lineH, hFont));
@@ -1396,7 +1416,7 @@ class ActionEditDialog : public ModalDialog {
         TrackControl(hMouse);
         PopulateMouseCombo(hMouse);
         SendMessageW(hMouse, CB_SETCURSEL, MouseVKToIdx(m_data.vk), 0);
-        y += lineH + gap + 4;
+        y += lineH + gap + gap;
 
         // Global key row
         TrackControl(CreateLabel(hDlg, L"Global Key:", margin, y + 2, labelW, lineH, hFont));
@@ -1427,7 +1447,7 @@ class ActionEditDialog : public ModalDialog {
 
       } else {
         // ── User hotkey: single binding with scope checkbox ──
-        y += 4;
+        y += gap;
         TrackControl(CreateLabel(hDlg, L"Key:", margin, y + 2, labelW, lineH, hFont));
         HWND hHK = CreateWindowExW(WS_EX_CLIENTEDGE, HOTKEY_CLASSW, NULL,
           WS_CHILD | WS_VISIBLE | WS_TABSTOP,
@@ -1462,24 +1482,18 @@ class ActionEditDialog : public ModalDialog {
       }
     }
 
-    y += 8;
+    y += gap;
 
     // OK / Cancel
-    int btnW = 75;
-    int btnH = 26;
+    int btnW = 80;
+    int btnH = lineH + 4;
     int totalBtnW = btnW * 2 + 12;
     int btnX = margin + (cw - totalBtnW) / 2;
     TrackControl(CreateBtn(hDlg, L"OK", IDOK, btnX, y, btnW, btnH, hFont));
     TrackControl(CreateBtn(hDlg, L"Cancel", IDCANCEL, btnX + btnW + 12, y, btnW, btnH, hFont));
     y += btnH + margin;
 
-    // Resize window to fit content
-    DWORD dwStyle = (DWORD)GetWindowLongPtrW(hDlg, GWL_STYLE);
-    DWORD dwExStyle = (DWORD)GetWindowLongPtrW(hDlg, GWL_EXSTYLE);
-    RECT rc = { 0, 0, clientW, y };
-    AdjustWindowRectEx(&rc, dwStyle, FALSE, dwExStyle);
-    SetWindowPos(hDlg, NULL, 0, 0, rc.right - rc.left, rc.bottom - rc.top,
-      SWP_NOMOVE | SWP_NOZORDER);
+    FitToContent(clientW, y);
   }
 
   LRESULT DoCommand(int id, int code, LPARAM lParam) override {
@@ -1687,8 +1701,8 @@ public:
 bool ShowActionEditDialog(HWND hParent, ActionEditData& data)
 {
   ActionEditDialog dlg(data.pEngine, data);
-  // Initial client size — DoBuildControls resizes to fit content
-  bool ok = dlg.Show(hParent, 370, 300);
+  // Initial client size — DoBuildControls resizes height to fit content
+  bool ok = dlg.Show(hParent, 420, 500);
   return ok && data.accepted;
 }
 

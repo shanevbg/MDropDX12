@@ -781,6 +781,13 @@ protected:
     virtual LRESULT DoNotify(NMHDR* pnm) { return -1; }
     virtual LRESULT DoMessage(UINT msg, WPARAM wParam, LPARAM lParam) { return -1; }
 
+    // Layout metrics — computed from actual font, consistent with ToolWindow
+    struct BaseLayout { int lineH, gap, margin, labelW; };
+    BaseLayout GetBaseLayout();
+
+    // Resize window to fit content height (call at end of DoBuildControls)
+    void FitToContent(int clientW, int contentH);
+
 public:
     ModalDialog(Engine* pEngine) : m_pEngine(pEngine) {}
     virtual ~ModalDialog() {}

@@ -606,6 +606,17 @@ public:
   float m_MediaKeyNotifyTime = 1.0f;  // seconds to show media key notification
   bool m_HideNotificationsWhenRemoteActive = false;
 
+  // Error Display Settings
+  float   m_ErrorDuration       = 8.0f;     // seconds
+
+  // FFT EQ Smoothing (Milkwave Remote)
+  float   m_fFFTAttackGlobal    = 0.5f;     // attack rate (0..1), set via IPC or INI
+  float   m_fFFTDecayGlobal     = 0.5f;     // decay rate (0..1), set via IPC or INI
+  bool    m_bFFTSmoothingActive = false;     // true once Remote sends FFT params
+  float   m_fFFTSmoothed[MY_FFT_SAMPLES];   // smoothed spectrum per bin
+  float   m_fFFTPeak[MY_FFT_SAMPLES];       // peak hold per bin
+  int     m_nFFTPeakHold[MY_FFT_SAMPLES];   // frames remaining in peak hold
+
   int m_MinPSVersionConfig = 2;
   int m_MaxPSVersionConfig = 6;
   bool m_ShowUpArrowInDescriptionIfPSMinVersionForced = true;
@@ -1280,6 +1291,7 @@ public:
   std::unique_ptr<WorkspaceLayoutWindow> m_workspaceLayoutWindow;
   void OpenWorkspaceLayoutWindow();
   void CloseWorkspaceLayoutWindow();
+
 
   // Broadcast WM_MW_REBUILD_FONTS to all windows except the sender
   void BroadcastFontSync(HWND hSender);

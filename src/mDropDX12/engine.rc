@@ -16,6 +16,11 @@
 #undef APSTUDIO_READONLY_SYMBOLS
 
 /////////////////////////////////////////////////////////////////////////////
+// Application manifest (Common Controls v6, DPI awareness, Windows 10/11)
+//
+1 RT_MANIFEST "manifest.xml"
+
+/////////////////////////////////////////////////////////////////////////////
 // English (United States) resources
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)

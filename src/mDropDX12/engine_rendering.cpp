@@ -347,7 +347,7 @@ void Engine::AddError(wchar_t* szMsg, float fDuration, int category, bool bBold)
   x.expireTime = GetTime() + fDuration;
   x.category = category;
   x.bBold = bBold;
-  x.bSentToRemote = false; // not sent to remote yet
+  x.bSentToRemote = false;
   x.color = 0; // default font color
   m_errors.push_back(x);
 }
@@ -534,7 +534,7 @@ void Engine::MyRenderUI(
             auto& n = od.notifications[od.nNotifications++];
             swprintf(n.text, 256, L"%s ", m_errors[i].msg.c_str());
             n.color = m_errors[i].color ? (m_errors[i].color & 0x00FFFFFF) : 0x00FFFFFF;
-            n.corner = MTO_UPPER_RIGHT;
+            n.corner = 0; // upper-right
           }
         }
       }

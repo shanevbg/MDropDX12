@@ -169,7 +169,7 @@ void Engine::OpenFolderPickerForPresetDir(HWND hOwnerOverride) {
     DebugLogW(dbg, LOG_VERBOSE);
   }
   if (FAILED(hrCom) && hrCom != RPC_E_CHANGED_MODE) {
-    AddError(L"Failed to initialize COM for folder picker.", 4.0f, ERR_MISC, true);
+    AddError(L"Failed to initialize COM for folder picker.", m_ErrorDuration, ERR_MISC, true);
     return;
   }
 
@@ -592,7 +592,7 @@ void Engine::OpenMDropDX12Remote() {
   swprintf(szPath, MAX_PATH, L"%sMDropDX12Remote.exe", m_szBaseDir);
   if (!CreateProcessW(szPath, NULL, NULL, NULL, FALSE, 0, NULL, m_szBaseDir, &si, &pi)) {
     if (!CreateProcessW(L"MDropDX12Remote.exe", NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-      AddError(L"Could not start Remote app", 3.0f, ERR_MISC, false);
+      AddError(L"Could not start Remote app", m_ErrorDuration, ERR_MISC, false);
       return;
     }
   }

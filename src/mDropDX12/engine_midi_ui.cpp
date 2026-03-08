@@ -642,7 +642,7 @@ LRESULT MidiWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
       if (p->m_midiInput.IsOpen())
         p->AddNotification(L"MIDI enabled");
       else {
-        p->AddError(L"Failed to open MIDI device", 3.0f, ERR_MISC, false);
+        p->AddError(L"Failed to open MIDI device", p->m_ErrorDuration, ERR_MISC, false);
         p->m_bMidiEnabled = false;
         SetChecked(IDC_MW_MIDI_ENABLE, false);
       }

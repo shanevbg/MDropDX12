@@ -228,6 +228,30 @@ Texture2D sampler_feedback;
 Texture2D sampler_image;
 Texture2D sampler_bufferB;
 Texture2D sampler_audio;
+#define sampler_fft sampler_audio
+
+#define HAS_FFT_PEAK 1
+
+// Get FFT magnitude at normalized position [0..1] in the spectrum
+// 0.0 = lowest frequency (DC), 1.0 = highest frequency (~22kHz)
+float get_fft(float pos) {
+    return sqrt(tex2D(sampler_audio, float2(saturate(pos), 0.25)).x);
+}
+
+// Get FFT magnitude at a specific frequency in Hz
+float get_fft_hz(float freq) {
+    return get_fft(freq / 22050.0);
+}
+
+// Get peak-hold FFT magnitude at normalized position [0..1]
+float get_fft_peak(float pos) {
+    return sqrt(tex2D(sampler_audio, float2(saturate(pos), 0.75)).x);
+}
+
+// Get peak-hold FFT magnitude at a specific frequency in Hz
+float get_fft_peak_hz(float freq) {
+    return get_fft_peak(freq / 22050.0);
+}
 
 // procedural blur textures:
 Texture2D sampler_blur1;
