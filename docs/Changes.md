@@ -1,5 +1,45 @@
 # MDropDX12 Changelog
 
+## v1.7.0 (2026-03-08)
+
+### FFT EQ Smoothing & Peak Hold
+
+- Added FFT smoothing with configurable attack/decay interpolation for shader `get_fft()` / `get_fft_peak()` functions
+- Audio texture upgraded to 512x2 R32_FLOAT: row 0 = smoothed FFT spectrum, row 1 = peak hold values
+- Peak hold algorithm: 30-frame hold then 0.97x per-frame decay
+- New shader helper functions in include.fx: `get_fft(pos)`, `get_fft_hz(freq)`, `get_fft_peak(pos)`, `get_fft_peak_hz(freq)`
+- `HAS_FFT_PEAK` define for conditional peak access in presets
+- `sampler_fft` alias for `sampler_audio` compatibility
+- Milkwave EQ visualization presets now work (e.g. IkeC - Equalizer.milk)
+
+### Milkwave Remote IPC
+
+- Handle `FFT_ATTACK=` and `FFT_DECAY=` IPC commands (0.0–1.0 range, clamped)
+- Report `FFTATTACK` and `FFTDECAY` values in status response to Remote
+- INI persistence for FFTAttack/FFTDecay defaults under `[Milkwave]` section
+
+### Bootstrap & First Run
+
+- Upgraded first-run dialog from MessageBox to TaskDialogIndirect with 4 command-link buttons
+- New "Copy settings from existing install" option: folder picker imports all .ini files from another MDropDX12 directory
+- Proper Common Controls v6 manifest activation (fixes ordinal 345 / TaskDialogIndirect crash)
+- PerMonitorV2 DPI awareness and Windows 10/11 compatibility declarations in manifest
+- Manifest now embedded via resource compiler (`1 RT_MANIFEST "manifest.xml"`)
+
+### Error Display Settings
+
+- New Error Display Settings ToolWindow for configuring shader error notification appearance
+- Normal and LOUD display modes with separate font size, duration, and color settings
+- Configurable error duration used across the codebase (replaces hardcoded values)
+- DPI-aware modal dialog sizing with BaseLayout for consistent metrics
+
+### Bug Fixes
+
+- Fixed DX9 caps garbage causing "PSVersion=0x2" shader model error on DX12 (hardcoded MD2_PS_3_0)
+- Fixed `blankDecl` stripping `sampler_audio` declaration needed by `get_fft()` shader functions
+- Fixed `UpdateAudioTexture()` not called in regular `RenderFrame()` path (only in Shadertoy path)
+- Fixed FFT scaling factor producing near-zero values (was 0.00035f from Milkwave Visualizer, now 2.0f for MDropDX12's FFT range)
+
 ## v1.6.0 (2026-03-08)
 
 ### Audio Reactivity
