@@ -1,5 +1,37 @@
 # MDropDX12 Changelog
 
+## v1.5.1 (2026-03-08)
+
+### Shader Pipeline
+
+- Rearchitected sampler registers: switched .milk/.milk2 pipeline from `sampler2D` (1 s-register per texture, 16 limit) to separated `Texture2D` + 4 shared `SamplerState` objects (LINEAR+WRAP, LINEAR+CLAMP, POINT+CLAMP, POINT+WRAP)
+- Textures now use t-registers (~128 limit), eliminating X4510 "maximum sampler register exceeded" errors on texture-heavy presets
+- Old preset code preserved via compatibility macros (`sampler2D`, `tex2D`, `tex2Dlod`, `tex2Dbias`)
+- Special-mode samplers (fc_main, pc_main, pw_main, blur) handled via text substitution in LoadShaderFromMemory
+- Root signature reduced from 16 to 4 static samplers; blur root signature shares main
+- Expanded texture binding arrays from 16 to 32 slots, descriptor table from 16 to 32 SRVs
+- SRV heap increased from 1280 to 2560 with overflow protection
+- Fixed `sampler_rand` redefinition errors (~20 presets) by stripping include declarations when preset declares its own
+- Fixed `line` keyword conflict (HLSL geometry shader keyword) by adding it to shadowed builtins list
+- Stripped Shadertoy-specific texture declarations for non-Shadertoy presets to avoid register pressure
+- Added `tex2Dbias` compatibility macro for presets using the DX9 intrinsic
+- Improved shader error logging: failures logged at LOG_ERROR with preset filename
+
+### ToolWindow System
+
+- Added ModalDialog base class for themed popup dialogs with shared font/theme/DPI support
+- Migrated all popup dialogs to ModalDialog (save preset, rename, delete, etc.)
+- Fixed all owner-draw checkbox/radio controls across all ToolWindow tabs — `BM_GETCHECK`/`IsDlgButtonChecked`/`CheckDlgButton` do not work with BS_OWNERDRAW controls
+- Affected controls: Sequential Preset Order, Hard Cuts Disabled, Preset Lock, Script Loop, Sprite flipx/flipy/burn, Video Effects mirror/invert/edge detect, VFX Profiles startup/save-on-close, MIDI Enable, Messages Autoplay
+- Added text shrink-to-fit for messages, song titles, and preset names
+- Added Animations tab to Message Overrides dialog
+- Fixed ToolWindow resize bugs
+
+### Debug Logging
+
+- Debug log now reports log level name when starting a new log and when the level is changed
+- Shader compilation failures now include the preset filename in the log message
+
 ## v1.5.0 (2026-03-07)
 
 ### Named Pipe IPC
