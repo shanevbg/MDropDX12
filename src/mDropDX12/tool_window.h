@@ -874,7 +874,7 @@ protected:
   int GetFontPlusControlID() const override  { return IDC_ERRDLG_FONT_PLUS; }
   int GetFontMinusControlID() const override { return IDC_ERRDLG_FONT_MINUS; }
   int GetMinWidth() const override  { return 400; }
-  int GetMinHeight() const override { return 520; }
+  int GetMinHeight() const override { return 620; }
 
   void DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;

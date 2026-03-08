@@ -22,7 +22,7 @@ void Engine::CloseErrorDisplayWindow() {
 // ── ErrorDisplayWindow ──
 
 ErrorDisplayWindow::ErrorDisplayWindow(Engine* pEngine)
-  : ToolWindow(pEngine, 460, 560) {}
+  : ToolWindow(pEngine, 460, 680) {}
 
 static void SetEditInt(HWND hWnd, int id, int val) {
   wchar_t buf[32];
