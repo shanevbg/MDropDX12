@@ -722,12 +722,22 @@ void TextAnimWindow::DoBuildControls()
   }
   y += lineH + gap + 4;
 
-  // ── Bottom buttons: Preview, Save ──
+  // ── Bottom: Preview text + Preview/Save buttons ──
   {
     int btnW = MulDiv(70, lineH, 26);
     int btnGap = 6;
-    TrackControl(CreateBtn(hw, L"Preview", IDC_MW_TEXTANIM_PREVIEW, x, y, btnW, lineH, hFont));
-    TrackControl(CreateBtn(hw, L"Save", IDC_MW_TEXTANIM_SAVE, x + btnW + btnGap, y, btnW, lineH, hFont));
+    int cx = x;
+
+    TrackControl(CreateBtn(hw, L"Preview", IDC_MW_TEXTANIM_PREVIEW, cx, y, btnW, lineH, hFont));
+    cx += btnW + btnGap;
+
+    // Preview text edit (user can type custom preview message)
+    int editPreviewW = rw - btnW - btnW - btnGap * 2;
+    TrackControl(CreateEdit(hw, L"Preview Animation", IDC_MW_TEXTANIM_PREVIEW_TEXT,
+      cx, y, editPreviewW, lineH, hFont, ES_AUTOHSCROLL));
+    cx += editPreviewW + btnGap;
+
+    TrackControl(CreateBtn(hw, L"Save", IDC_MW_TEXTANIM_SAVE, cx, y, btnW, lineH, hFont));
   }
 
   // Initial selection
@@ -912,9 +922,12 @@ LRESULT TextAnimWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
   case IDC_MW_TEXTANIM_PREVIEW:
     if (m_nSelectedRow >= 0 && m_nSelectedRow < p->m_nAnimProfileCount) {
       SaveEditControls();
-      // Launch a preview supertext with the selected profile
+      wchar_t previewText[256] = {};
+      GetDlgItemTextW(hWnd, IDC_MW_TEXTANIM_PREVIEW_TEXT, previewText, 256);
+      if (!previewText[0]) wcscpy_s(previewText, L"Preview Animation");
+
       int slot = p->GetNextFreeSupertextIndex();
-      lstrcpyW(p->m_supertexts[slot].szTextW, L"Preview Animation");
+      lstrcpyW(p->m_supertexts[slot].szTextW, previewText);
       p->m_supertexts[slot].bRedrawSuperText = true;
       p->m_supertexts[slot].bIsSongTitle = false;
       p->ApplyAnimProfileToSupertext(p->m_supertexts[slot], p->m_AnimProfiles[m_nSelectedRow]);
