@@ -3421,20 +3421,17 @@ void Engine::OpenResourceViewer() {
   }
 
   // Apply dark theme to resource viewer
-  if (IsDarkTheme()) {
-    BOOL bDark = TRUE;
-    DwmSetWindowAttribute(m_hResourceWnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &bDark, sizeof(bDark));
-    DwmSetWindowAttribute(m_hResourceWnd, 35 /* DWMWA_CAPTION_COLOR */, &m_colSettingsBg, sizeof(m_colSettingsBg));
-    DwmSetWindowAttribute(m_hResourceWnd, 34 /* DWMWA_BORDER_COLOR */, &m_colSettingsBorder, sizeof(m_colSettingsBorder));
-    DwmSetWindowAttribute(m_hResourceWnd, 36 /* DWMWA_TEXT_COLOR */, &m_colSettingsText, sizeof(m_colSettingsText));
-
-    // Strip visual styles so custom painting works reliably
-    SetWindowTheme(m_hResourceList, L"", L"");
+  mdrop::ApplyDarkThemeToWindow(this, m_hResourceWnd);
+  {
+    std::vector<HWND> ctrls;
+    ctrls.push_back(m_hResourceList);
     HWND hCopy = GetDlgItem(m_hResourceWnd, IDC_RV_COPY_PATH);
     HWND hRefresh = GetDlgItem(m_hResourceWnd, IDC_RV_REFRESH);
-    if (hCopy) SetWindowTheme(hCopy, L"", L"");
-    if (hRefresh) SetWindowTheme(hRefresh, L"", L"");
-
+    if (hCopy) ctrls.push_back(hCopy);
+    if (hRefresh) ctrls.push_back(hRefresh);
+    mdrop::ApplyDarkThemeToChildren(this, ctrls);
+  }
+  if (IsDarkTheme()) {
     ListView_SetBkColor(m_hResourceList, m_colSettingsBg);
     ListView_SetTextBkColor(m_hResourceList, m_colSettingsBg);
     ListView_SetTextColor(m_hResourceList, m_colSettingsText);
@@ -3476,31 +3473,26 @@ LRESULT CALLBACK Engine::ResourceViewerWndProc(HWND hWnd, UINT uMsg, WPARAM wPar
   }
 
   case WM_ERASEBKGND:
-    if (p && p->IsDarkTheme() && p->m_hBrSettingsBg) {
-      HDC hdc = (HDC)wParam;
-      RECT rc;
-      GetClientRect(hWnd, &rc);
-      FillRect(hdc, &rc, p->m_hBrSettingsBg);
-      return 1;
-    }
+    if (p)
+      return mdrop::HandleDarkEraseBkgnd(p, hWnd, (HDC)wParam);
     break;
 
+  case WM_CTLCOLOREDIT:
+  case WM_CTLCOLORLISTBOX:
+  case WM_CTLCOLORSTATIC:
   case WM_CTLCOLORBTN:
-    if (p && p->IsDarkTheme() && p->m_hBrSettingsBg) {
-      SetTextColor((HDC)wParam, p->m_colSettingsText);
-      SetBkColor((HDC)wParam, p->m_colSettingsBg);
-      return (LRESULT)p->m_hBrSettingsBg;
+  case WM_CTLCOLORDLG:
+    if (p) {
+      LRESULT lr = mdrop::HandleDarkCtlColor(p, uMsg, wParam, lParam);
+      if (lr) return lr;
     }
     break;
 
   case WM_DRAWITEM:
     if (p) {
       DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
-      if (pDIS && pDIS->CtlType == ODT_BUTTON) {
-        DrawOwnerButton(pDIS, p->IsDarkTheme(),
-          p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
-        return TRUE;
-      }
+      LRESULT lr = mdrop::HandleDarkDrawItem(p, pDIS);
+      if (lr) return lr;
     }
     break;
 
@@ -4596,6 +4588,15 @@ static LRESULT CALLBACK WTPWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
       CreateBtn(hWnd, L"Cancel", IDC_MW_WTP_CANCEL, rw + pad - cancelW, y, cancelW, lineH, hFont);
     }
 
+    // Apply dark theme
+    mdrop::ApplyDarkThemeToWindow(ctx->pEngine, hWnd);
+    {
+      std::vector<HWND> ctrls;
+      HWND hChild = GetWindow(hWnd, GW_CHILD);
+      while (hChild) { ctrls.push_back(hChild); hChild = GetWindow(hChild, GW_HWNDNEXT); }
+      mdrop::ApplyDarkThemeToChildren(ctx->pEngine, ctrls);
+    }
+
     // Populate and load
     WTPPopulateProfileCombo(hWnd, ctx);
     WTPLoadProfileFields(hWnd, ctx);
@@ -4604,37 +4605,25 @@ static LRESULT CALLBACK WTPWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
 
   case WM_CTLCOLOREDIT:
   case WM_CTLCOLORLISTBOX:
-    if (ctx && ctx->pEngine->m_hBrSettingsCtrlBg) {
-      SetTextColor((HDC)wParam, ctx->pEngine->m_colSettingsText);
-      SetBkColor((HDC)wParam, ctx->pEngine->m_colSettingsCtrlBg);
-      return (LRESULT)ctx->pEngine->m_hBrSettingsCtrlBg;
+  case WM_CTLCOLORSTATIC:
+  case WM_CTLCOLORBTN:
+  case WM_CTLCOLORDLG:
+    if (ctx) {
+      LRESULT lr = mdrop::HandleDarkCtlColor(ctx->pEngine, msg, wParam, lParam);
+      if (lr) return lr;
     }
     break;
 
-  case WM_CTLCOLORSTATIC:
-    if (ctx && ctx->pEngine->m_hBrSettingsBg) {
-      SetTextColor((HDC)wParam, ctx->pEngine->m_colSettingsText);
-      SetBkColor((HDC)wParam, ctx->pEngine->m_colSettingsBg);
-      return (LRESULT)ctx->pEngine->m_hBrSettingsBg;
-    }
+  case WM_ERASEBKGND:
+    if (ctx)
+      return mdrop::HandleDarkEraseBkgnd(ctx->pEngine, hWnd, (HDC)wParam);
     break;
 
   case WM_DRAWITEM: {
     DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
-    if (pDIS && pDIS->CtlType == ODT_BUTTON && ctx) {
-      Engine* p = ctx->pEngine;
-      bool bIsCheck = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsCheck");
-      bool bIsRadio = (bool)(intptr_t)GetPropW(pDIS->hwndItem, L"IsRadio");
-      if (bIsCheck)
-        DrawOwnerCheckbox(pDIS, p->IsDarkTheme(),
-          p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
-      else if (bIsRadio)
-        DrawOwnerRadio(pDIS, p->IsDarkTheme(),
-          p->m_colSettingsBg, p->m_colSettingsCtrlBg, p->m_colSettingsBorder, p->m_colSettingsText);
-      else
-        DrawOwnerButton(pDIS, p->IsDarkTheme(),
-          p->m_colSettingsBtnFace, p->m_colSettingsBtnHi, p->m_colSettingsBtnShadow, p->m_colSettingsText);
-      return TRUE;
+    if (ctx) {
+      LRESULT lr = mdrop::HandleDarkDrawItem(ctx->pEngine, pDIS);
+      if (lr) return lr;
     }
     break;
   }

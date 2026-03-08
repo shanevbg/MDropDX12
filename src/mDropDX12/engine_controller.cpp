@@ -6,8 +6,8 @@
 #include "engine.h"
 #include "utility.h"
 #include "render_commands.h"
+#include "tool_window.h"
 #include <mmsystem.h>
-#include <dwmapi.h>
 #include <fstream>
 #include <sstream>
 
@@ -668,14 +668,7 @@ void Engine::ShowControllerHelpPopup(HWND hParent)
         hParent, NULL, GetModuleHandle(NULL), data);
 
     if (hPopup) {
-        // Apply dark mode title bar
-        BOOL bDark = IsDarkTheme() ? TRUE : FALSE;
-        DwmSetWindowAttribute(hPopup, 20, &bDark, sizeof(bDark));
-        if (IsDarkTheme()) {
-            DwmSetWindowAttribute(hPopup, 35, &m_colSettingsBg, sizeof(m_colSettingsBg));
-            DwmSetWindowAttribute(hPopup, 34, &m_colSettingsBorder, sizeof(m_colSettingsBorder));
-            DwmSetWindowAttribute(hPopup, 36, &m_colSettingsText, sizeof(m_colSettingsText));
-        }
+        ApplyDarkThemeToWindow(this, hPopup);
         ShowWindow(hPopup, SW_SHOWNORMAL);
     }
 }

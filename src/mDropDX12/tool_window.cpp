@@ -1248,56 +1248,72 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
 
 //----------------------------------------------------------------------
 // Shared Action Edit Dialog — used by both Button Board and Hotkeys windows.
-// Creates controls dynamically in WM_INITDIALOG (bare DLGTEMPLATE, cdit=0).
+// Subclass of ModalDialog; dark theme handled automatically by the base class.
 //----------------------------------------------------------------------
 
-static HBRUSH s_hAEDlgBrush  = NULL;
-static HBRUSH s_hAECtrlBrush = NULL;
+class ActionEditDialog : public ModalDialog {
+  ActionEditData& m_data;
 
-static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
-{
-  ActionEditData* d = (ActionEditData*)GetWindowLongPtrW(hDlg, GWLP_USERDATA);
+  const wchar_t* GetDialogTitle() const override {
+    return m_data.isBuiltInHotkey ? L"Edit Hotkey" : L"Edit Action";
+  }
+  const wchar_t* GetDialogClass() const override {
+    return L"MDropActionEditDlg";
+  }
 
-  switch (msg) {
-  case WM_INITDIALOG:
-  {
-    d = (ActionEditData*)lParam;
-    SetWindowLongPtrW(hDlg, GWLP_USERDATA, (LONG_PTR)d);
+  static bool IsMouseVK(UINT v) {
+    return v == VK_LBUTTON || v == VK_RBUTTON || v == VK_MBUTTON ||
+           v == VK_XBUTTON1 || v == VK_XBUTTON2;
+  }
+  static int MouseVKToIdx(UINT v) {
+    if (v == VK_LBUTTON) return 1; if (v == VK_RBUTTON) return 2;
+    if (v == VK_MBUTTON) return 3; if (v == VK_XBUTTON1) return 4;
+    if (v == VK_XBUTTON2) return 5; return 0;
+  }
+  static void PopulateMouseCombo(HWND hCombo) {
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"(none)");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Left Mouse");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Right Mouse");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Middle Mouse");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"X1 Mouse");
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"X2 Mouse");
+  }
+  static void SetHotkeyCtrl(HWND hHK, UINT mod, UINT vk) {
+    UINT hkMod = 0;
+    if (mod & MOD_ALT)     hkMod |= HOTKEYF_ALT;
+    if (mod & MOD_CONTROL) hkMod |= HOTKEYF_CONTROL;
+    if (mod & MOD_SHIFT)   hkMod |= HOTKEYF_SHIFT;
+    SendMessageW(hHK, HKM_SETHOTKEY, MAKEWORD(vk, hkMod), 0);
+  }
 
-    SetWindowTextW(hDlg, d->isBuiltInHotkey ? L"Edit Hotkey" : L"Edit Action");
-
-    HFONT hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-    HINSTANCE hInst = GetModuleHandle(NULL);
+  void DoBuildControls(int clientW, int clientH) override {
+    HFONT hFont = GetFont();
+    HWND hDlg = GetHWND();
 
     int margin = 12;
-    RECT dlgRc;
-    GetClientRect(hDlg, &dlgRc);
-    int cw = dlgRc.right - 2 * margin;
+    int cw = clientW - 2 * margin;
     int y = margin;
     int labelW = 85;
     int lineH = 22;
     int gap = 6;
     int browseW = 70;
 
-    if (d->isBuiltInHotkey) {
+    if (m_data.isBuiltInHotkey) {
       // Built-in hotkey: read-only action name
-      CreateWindowExW(0, L"STATIC", L"Action:", WS_CHILD | WS_VISIBLE,
-        margin, y + 2, labelW, lineH, hDlg, NULL, hInst, NULL);
-      HWND hAction = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", d->actionName.c_str(),
-        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_READONLY,
-        margin + labelW, y, cw - labelW, lineH, hDlg,
-        (HMENU)(INT_PTR)IDC_AE_ACTION_LABEL, hInst, NULL);
-      SendMessageW(hAction, WM_SETFONT, (WPARAM)hFont, TRUE);
+      TrackControl(CreateLabel(hDlg, L"Action:", margin, y + 2, labelW, lineH, hFont));
+      HWND hAction = CreateEdit(hDlg, m_data.actionName.c_str(), IDC_AE_ACTION_LABEL,
+        margin + labelW, y, cw - labelW, lineH, hFont, ES_READONLY);
+      TrackControl(hAction);
       y += lineH + gap;
     } else {
       // Action type dropdown
-      CreateWindowExW(0, L"STATIC", L"Action:", WS_CHILD | WS_VISIBLE,
-        margin, y + 2, labelW, lineH, hDlg, NULL, hInst, NULL);
+      TrackControl(CreateLabel(hDlg, L"Action:", margin, y + 2, labelW, lineH, hFont));
       HWND hType = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
         WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
         margin + labelW, y, cw - labelW, 200, hDlg,
-        (HMENU)(INT_PTR)IDC_AE_ACTION_TYPE, hInst, NULL);
+        (HMENU)(INT_PTR)IDC_AE_ACTION_TYPE, GetModuleHandle(NULL), NULL);
       SendMessageW(hType, WM_SETFONT, (WPARAM)hFont, TRUE);
+      TrackControl(hType);
       SendMessageW(hType, CB_ADDSTRING, 0, (LPARAM)L"None");
       SendMessageW(hType, CB_ADDSTRING, 0, (LPARAM)L"Load Preset");
       SendMessageW(hType, CB_ADDSTRING, 0, (LPARAM)L"Push Sprite");
@@ -1305,182 +1321,135 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
       SendMessageW(hType, CB_ADDSTRING, 0, (LPARAM)L"Launch Message");
       SendMessageW(hType, CB_ADDSTRING, 0, (LPARAM)L"Run Script File");
       SendMessageW(hType, CB_ADDSTRING, 0, (LPARAM)L"Launch App");
-      SendMessageW(hType, CB_SETCURSEL, (int)d->actionType, 0);
+      SendMessageW(hType, CB_SETCURSEL, (int)m_data.actionType, 0);
       y += lineH + gap;
 
       // Label
-      CreateWindowExW(0, L"STATIC", L"Label:", WS_CHILD | WS_VISIBLE,
-        margin, y + 2, labelW, lineH, hDlg, NULL, hInst, NULL);
-      HWND hLabel = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", d->label.c_str(),
-        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
-        margin + labelW, y, cw - labelW, lineH, hDlg,
-        (HMENU)(INT_PTR)IDC_AE_LABEL, hInst, NULL);
-      SendMessageW(hLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+      TrackControl(CreateLabel(hDlg, L"Label:", margin, y + 2, labelW, lineH, hFont));
+      TrackControl(CreateEdit(hDlg, m_data.label.c_str(), IDC_AE_LABEL,
+        margin + labelW, y, cw - labelW, lineH, hFont));
       y += lineH + gap;
 
       // Payload (multiline) + Browse
-      CreateWindowExW(0, L"STATIC", L"Command:", WS_CHILD | WS_VISIBLE,
-        margin, y + 2, labelW, lineH, hDlg, NULL, hInst, NULL);
+      TrackControl(CreateLabel(hDlg, L"Command:", margin, y + 2, labelW, lineH, hFont));
 
       // Convert pipes to newlines for display (script commands)
-      std::wstring displayPayload = d->payload;
-      if (d->actionType == ButtonAction::ScriptCommand ||
-          d->actionType == ButtonAction::LaunchMessage) {
+      std::wstring displayPayload = m_data.payload;
+      if (m_data.actionType == ButtonAction::ScriptCommand ||
+          m_data.actionType == ButtonAction::LaunchMessage) {
         for (size_t pos = 0; (pos = displayPayload.find(L'|', pos)) != std::wstring::npos; pos += 2)
           displayPayload.replace(pos, 1, L"\r\n");
       }
 
       int cmdH = lineH * 4;
-      HWND hPayload = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", displayPayload.c_str(),
-        WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_WANTRETURN | ES_AUTOVSCROLL | WS_VSCROLL,
-        margin + labelW, y, cw - labelW - browseW - 6, cmdH, hDlg,
-        (HMENU)(INT_PTR)IDC_AE_PAYLOAD, hInst, NULL);
-      SendMessageW(hPayload, WM_SETFONT, (WPARAM)hFont, TRUE);
-      HWND hBrowse = CreateWindowExW(0, L"BUTTON", L"Browse...",
-        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        margin + cw - browseW, y, browseW, lineH, hDlg,
-        (HMENU)(INT_PTR)IDC_AE_BROWSE, hInst, NULL);
-      SendMessageW(hBrowse, WM_SETFONT, (WPARAM)hFont, TRUE);
+      TrackControl(CreateEdit(hDlg, displayPayload.c_str(), IDC_AE_PAYLOAD,
+        margin + labelW, y, cw - labelW - browseW - 6, cmdH, hFont,
+        ES_MULTILINE | ES_WANTRETURN | ES_AUTOVSCROLL | WS_VSCROLL));
+      TrackControl(CreateBtn(hDlg, L"Browse...", IDC_AE_BROWSE,
+        margin + cw - browseW, y, browseW, lineH, hFont));
       y += cmdH + gap;
     }
 
     // Key binding section
-    if (d->showKeyBinding) {
+    if (m_data.showKeyBinding) {
       // Ensure HOTKEY_CLASS is available
       INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_HOTKEY_CLASS };
       InitCommonControlsEx(&icc);
 
       int clearW = 50;
+      HINSTANCE hInst = GetModuleHandle(NULL);
 
-      auto isMouseVK = [](UINT v) {
-        return v == VK_LBUTTON || v == VK_RBUTTON || v == VK_MBUTTON ||
-               v == VK_XBUTTON1 || v == VK_XBUTTON2;
-      };
-      auto mouseVKToIdx = [](UINT v) -> int {
-        if (v == VK_LBUTTON) return 1; if (v == VK_RBUTTON) return 2;
-        if (v == VK_MBUTTON) return 3; if (v == VK_XBUTTON1) return 4;
-        if (v == VK_XBUTTON2) return 5; return 0;
-      };
-      auto populateMouseCombo = [&](HWND hCombo) {
-        SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"(none)");
-        SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Left Mouse");
-        SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Right Mouse");
-        SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"Middle Mouse");
-        SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"X1 Mouse");
-        SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"X2 Mouse");
-      };
-      auto setHotkeyCtrl = [](HWND hHK, UINT mod, UINT vk) {
-        UINT hkMod = 0;
-        if (mod & MOD_ALT)     hkMod |= HOTKEYF_ALT;
-        if (mod & MOD_CONTROL) hkMod |= HOTKEYF_CONTROL;
-        if (mod & MOD_SHIFT)   hkMod |= HOTKEYF_SHIFT;
-        SendMessageW(hHK, HKM_SETHOTKEY, MAKEWORD(vk, hkMod), 0);
-      };
-
-      if (d->isBuiltInHotkey) {
+      if (m_data.isBuiltInHotkey) {
         // ── Built-in hotkey: dual binding (Local + Global) ──
         y += 4;
 
         // Local key row
-        CreateWindowExW(0, L"STATIC", L"Local Key:", WS_CHILD | WS_VISIBLE,
-          margin, y + 2, labelW, lineH, hDlg, NULL, hInst, NULL);
+        TrackControl(CreateLabel(hDlg, L"Local Key:", margin, y + 2, labelW, lineH, hFont));
         HWND hHK = CreateWindowExW(WS_EX_CLIENTEDGE, HOTKEY_CLASSW, NULL,
           WS_CHILD | WS_VISIBLE | WS_TABSTOP,
           margin + labelW, y, cw - labelW - clearW - 6, lineH, hDlg,
           (HMENU)(INT_PTR)IDC_AE_HOTKEY, hInst, NULL);
         SendMessageW(hHK, WM_SETFONT, (WPARAM)hFont, TRUE);
-        HWND hClear = CreateWindowExW(0, L"BUTTON", L"Clear",
-          WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-          margin + cw - clearW, y, clearW, lineH, hDlg,
-          (HMENU)(INT_PTR)IDC_AE_CLEAR_KEY, hInst, NULL);
-        SendMessageW(hClear, WM_SETFONT, (WPARAM)hFont, TRUE);
+        TrackControl(hHK);
+        TrackControl(CreateBtn(hDlg, L"Clear", IDC_AE_CLEAR_KEY,
+          margin + cw - clearW, y, clearW, lineH, hFont));
         y += lineH + gap;
 
-        if (hHK && d->vk != 0 && !isMouseVK(d->vk))
-          setHotkeyCtrl(hHK, d->modifiers, d->vk);
+        if (hHK && m_data.vk != 0 && !IsMouseVK(m_data.vk))
+          SetHotkeyCtrl(hHK, m_data.modifiers, m_data.vk);
 
         // Local mouse dropdown
-        CreateWindowExW(0, L"STATIC", L"Mouse:", WS_CHILD | WS_VISIBLE,
-          margin, y + 2, labelW, lineH, hDlg, NULL, hInst, NULL);
+        TrackControl(CreateLabel(hDlg, L"Mouse:", margin, y + 2, labelW, lineH, hFont));
         HWND hMouse = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
           WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
           margin + labelW, y, cw - labelW - clearW - 6, 200, hDlg,
           (HMENU)(INT_PTR)IDC_AE_MOUSE, hInst, NULL);
         SendMessageW(hMouse, WM_SETFONT, (WPARAM)hFont, TRUE);
-        populateMouseCombo(hMouse);
-        SendMessageW(hMouse, CB_SETCURSEL, mouseVKToIdx(d->vk), 0);
+        TrackControl(hMouse);
+        PopulateMouseCombo(hMouse);
+        SendMessageW(hMouse, CB_SETCURSEL, MouseVKToIdx(m_data.vk), 0);
         y += lineH + gap + 4;
 
         // Global key row
-        CreateWindowExW(0, L"STATIC", L"Global Key:", WS_CHILD | WS_VISIBLE,
-          margin, y + 2, labelW, lineH, hDlg, NULL, hInst, NULL);
+        TrackControl(CreateLabel(hDlg, L"Global Key:", margin, y + 2, labelW, lineH, hFont));
         HWND hGHK = CreateWindowExW(WS_EX_CLIENTEDGE, HOTKEY_CLASSW, NULL,
           WS_CHILD | WS_VISIBLE | WS_TABSTOP,
           margin + labelW, y, cw - labelW - clearW - 6, lineH, hDlg,
           (HMENU)(INT_PTR)IDC_AE_GLOBAL_HOTKEY, hInst, NULL);
         SendMessageW(hGHK, WM_SETFONT, (WPARAM)hFont, TRUE);
-        HWND hGClear = CreateWindowExW(0, L"BUTTON", L"Clear",
-          WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-          margin + cw - clearW, y, clearW, lineH, hDlg,
-          (HMENU)(INT_PTR)IDC_AE_GLOBAL_CLEAR, hInst, NULL);
-        SendMessageW(hGClear, WM_SETFONT, (WPARAM)hFont, TRUE);
+        TrackControl(hGHK);
+        TrackControl(CreateBtn(hDlg, L"Clear", IDC_AE_GLOBAL_CLEAR,
+          margin + cw - clearW, y, clearW, lineH, hFont));
         y += lineH + gap;
 
-        if (hGHK && d->globalVK != 0 && !isMouseVK(d->globalVK))
-          setHotkeyCtrl(hGHK, d->globalMod, d->globalVK);
+        if (hGHK && m_data.globalVK != 0 && !IsMouseVK(m_data.globalVK))
+          SetHotkeyCtrl(hGHK, m_data.globalMod, m_data.globalVK);
 
         // Global mouse dropdown
-        CreateWindowExW(0, L"STATIC", L"Mouse:", WS_CHILD | WS_VISIBLE,
-          margin, y + 2, labelW, lineH, hDlg, NULL, hInst, NULL);
+        TrackControl(CreateLabel(hDlg, L"Mouse:", margin, y + 2, labelW, lineH, hFont));
         HWND hGMouse = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
           WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
           margin + labelW, y, cw - labelW - clearW - 6, 200, hDlg,
           (HMENU)(INT_PTR)IDC_AE_GLOBAL_MOUSE, hInst, NULL);
         SendMessageW(hGMouse, WM_SETFONT, (WPARAM)hFont, TRUE);
-        populateMouseCombo(hGMouse);
-        SendMessageW(hGMouse, CB_SETCURSEL, mouseVKToIdx(d->globalVK), 0);
+        TrackControl(hGMouse);
+        PopulateMouseCombo(hGMouse);
+        SendMessageW(hGMouse, CB_SETCURSEL, MouseVKToIdx(m_data.globalVK), 0);
         y += lineH + gap;
 
       } else {
         // ── User hotkey: single binding with scope checkbox ──
         y += 4;
-        CreateWindowExW(0, L"STATIC", L"Key:", WS_CHILD | WS_VISIBLE,
-          margin, y + 2, labelW, lineH, hDlg, NULL, hInst, NULL);
+        TrackControl(CreateLabel(hDlg, L"Key:", margin, y + 2, labelW, lineH, hFont));
         HWND hHK = CreateWindowExW(WS_EX_CLIENTEDGE, HOTKEY_CLASSW, NULL,
           WS_CHILD | WS_VISIBLE | WS_TABSTOP,
           margin + labelW, y, cw - labelW - clearW - 6, lineH, hDlg,
           (HMENU)(INT_PTR)IDC_AE_HOTKEY, hInst, NULL);
         SendMessageW(hHK, WM_SETFONT, (WPARAM)hFont, TRUE);
-        HWND hClear = CreateWindowExW(0, L"BUTTON", L"Clear",
-          WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-          margin + cw - clearW, y, clearW, lineH, hDlg,
-          (HMENU)(INT_PTR)IDC_AE_CLEAR_KEY, hInst, NULL);
-        SendMessageW(hClear, WM_SETFONT, (WPARAM)hFont, TRUE);
+        TrackControl(hHK);
+        TrackControl(CreateBtn(hDlg, L"Clear", IDC_AE_CLEAR_KEY,
+          margin + cw - clearW, y, clearW, lineH, hFont));
         y += lineH + gap;
 
-        if (hHK && d->vk != 0 && !isMouseVK(d->vk))
-          setHotkeyCtrl(hHK, d->modifiers, d->vk);
+        if (hHK && m_data.vk != 0 && !IsMouseVK(m_data.vk))
+          SetHotkeyCtrl(hHK, m_data.modifiers, m_data.vk);
 
         // Mouse button dropdown
-        CreateWindowExW(0, L"STATIC", L"Mouse:", WS_CHILD | WS_VISIBLE,
-          margin, y + 2, labelW, lineH, hDlg, NULL, hInst, NULL);
+        TrackControl(CreateLabel(hDlg, L"Mouse:", margin, y + 2, labelW, lineH, hFont));
         HWND hMouse = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
           WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
           margin + labelW, y, cw - labelW - clearW - 6, 200, hDlg,
           (HMENU)(INT_PTR)IDC_AE_MOUSE, hInst, NULL);
         SendMessageW(hMouse, WM_SETFONT, (WPARAM)hFont, TRUE);
-        populateMouseCombo(hMouse);
-        SendMessageW(hMouse, CB_SETCURSEL, mouseVKToIdx(d->vk), 0);
+        TrackControl(hMouse);
+        PopulateMouseCombo(hMouse);
+        SendMessageW(hMouse, CB_SETCURSEL, MouseVKToIdx(m_data.vk), 0);
         y += lineH + gap;
 
-        // Scope checkbox
-        HWND hScope = CreateWindowExW(0, L"BUTTON", L"Global (system-wide)",
-          WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-          margin + labelW, y, cw - labelW, lineH, hDlg,
-          (HMENU)(INT_PTR)IDC_AE_SCOPE, hInst, NULL);
-        SendMessageW(hScope, WM_SETFONT, (WPARAM)hFont, TRUE);
-        CheckDlgButton(hDlg, IDC_AE_SCOPE,
-          d->scope == HKSCOPE_GLOBAL ? BST_CHECKED : BST_UNCHECKED);
+        // Scope checkbox (owner-draw via CreateCheck)
+        TrackControl(CreateCheck(hDlg, L"Global (system-wide)", IDC_AE_SCOPE,
+          margin + labelW, y, cw - labelW, lineH, hFont,
+          m_data.scope == HKSCOPE_GLOBAL));
         y += lineH + gap;
       }
     }
@@ -1492,77 +1461,21 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
     int btnH = 26;
     int totalBtnW = btnW * 2 + 12;
     int btnX = margin + (cw - totalBtnW) / 2;
-    HWND hOK = CreateWindowExW(0, L"BUTTON", L"OK",
-      WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-      btnX, y, btnW, btnH, hDlg,
-      (HMENU)(INT_PTR)IDOK, hInst, NULL);
-    SendMessageW(hOK, WM_SETFONT, (WPARAM)hFont, TRUE);
-    HWND hCancel = CreateWindowExW(0, L"BUTTON", L"Cancel",
-      WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-      btnX + btnW + 12, y, btnW, btnH, hDlg,
-      (HMENU)(INT_PTR)IDCANCEL, hInst, NULL);
-    SendMessageW(hCancel, WM_SETFONT, (WPARAM)hFont, TRUE);
+    TrackControl(CreateBtn(hDlg, L"OK", IDOK, btnX, y, btnW, btnH, hFont));
+    TrackControl(CreateBtn(hDlg, L"Cancel", IDCANCEL, btnX + btnW + 12, y, btnW, btnH, hFont));
     y += btnH + margin;
 
-    // Resize dialog to fit content
-    RECT wr;
-    GetWindowRect(hDlg, &wr);
-    int borderW = (wr.right - wr.left) - dlgRc.right;
-    int borderH = (wr.bottom - wr.top) - dlgRc.bottom;
-    SetWindowPos(hDlg, NULL, 0, 0,
-      dlgRc.right + borderW, y + borderH,
+    // Resize window to fit content
+    DWORD dwStyle = (DWORD)GetWindowLongPtrW(hDlg, GWL_STYLE);
+    DWORD dwExStyle = (DWORD)GetWindowLongPtrW(hDlg, GWL_EXSTYLE);
+    RECT rc = { 0, 0, clientW, y };
+    AdjustWindowRectEx(&rc, dwStyle, FALSE, dwExStyle);
+    SetWindowPos(hDlg, NULL, 0, 0, rc.right - rc.left, rc.bottom - rc.top,
       SWP_NOMOVE | SWP_NOZORDER);
-
-    // Dark theme
-    if (d->pEngine && d->pEngine->IsDarkTheme()) {
-      BOOL useDark = TRUE;
-      DwmSetWindowAttribute(hDlg, 20 /*DWMWA_USE_IMMERSIVE_DARK_MODE*/, &useDark, sizeof(useDark));
-      s_hAEDlgBrush  = CreateSolidBrush(d->pEngine->m_colSettingsBg);
-      s_hAECtrlBrush = CreateSolidBrush(d->pEngine->m_colSettingsCtrlBg);
-    }
-
-    // Set font on static labels
-    EnumChildWindows(hDlg, [](HWND hChild, LPARAM lp) -> BOOL {
-      wchar_t cls[64];
-      GetClassNameW(hChild, cls, 64);
-      if (_wcsicmp(cls, L"Static") == 0)
-        SendMessageW(hChild, WM_SETFONT, (WPARAM)lp, TRUE);
-      return TRUE;
-    }, (LPARAM)hFont);
-
-    // Center on parent
-    HWND hParent = GetParent(hDlg);
-    if (hParent) {
-      RECT rp, rd;
-      GetWindowRect(hParent, &rp);
-      GetWindowRect(hDlg, &rd);
-      int cx = rp.left + ((rp.right - rp.left) - (rd.right - rd.left)) / 2;
-      int cy = rp.top + ((rp.bottom - rp.top) - (rd.bottom - rd.top)) / 2;
-      SetWindowPos(hDlg, NULL, cx, cy, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
-    }
-
-    return TRUE;
   }
 
-  case WM_CTLCOLORDLG:
-    if (d && d->pEngine && d->pEngine->IsDarkTheme())
-      return (INT_PTR)s_hAEDlgBrush;
-    break;
-  case WM_CTLCOLORSTATIC:
-  case WM_CTLCOLOREDIT:
-  case WM_CTLCOLORBTN:
-  case WM_CTLCOLORLISTBOX:
-    if (d && d->pEngine && d->pEngine->IsDarkTheme()) {
-      SetTextColor((HDC)wParam, d->pEngine->m_colSettingsText);
-      SetBkColor((HDC)wParam, d->pEngine->m_colSettingsCtrlBg);
-      return (INT_PTR)s_hAECtrlBrush;
-    }
-    break;
-
-  case WM_COMMAND:
-  {
-    int id = LOWORD(wParam);
-    int code = HIWORD(wParam);
+  LRESULT DoCommand(int id, int code, LPARAM lParam) override {
+    HWND hDlg = GetHWND();
 
     // Clear local key
     if (id == IDC_AE_CLEAR_KEY && code == BN_CLICKED) {
@@ -1570,7 +1483,7 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
       if (hHK) SendMessageW(hHK, HKM_SETHOTKEY, 0, 0);
       HWND hMouse = GetDlgItem(hDlg, IDC_AE_MOUSE);
       if (hMouse) SendMessageW(hMouse, CB_SETCURSEL, 0, 0);
-      return TRUE;
+      return 0;
     }
 
     // Clear global key
@@ -1579,7 +1492,7 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
       if (hGHK) SendMessageW(hGHK, HKM_SETHOTKEY, 0, 0);
       HWND hGMouse = GetDlgItem(hDlg, IDC_AE_GLOBAL_MOUSE);
       if (hGMouse) SendMessageW(hGMouse, CB_SETCURSEL, 0, 0);
-      return TRUE;
+      return 0;
     }
 
     // Local keyboard key changed — clear local mouse dropdown
@@ -1590,7 +1503,7 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
         HWND hMouse = GetDlgItem(hDlg, IDC_AE_MOUSE);
         if (hMouse) SendMessageW(hMouse, CB_SETCURSEL, 0, 0);
       }
-      return TRUE;
+      return 0;
     }
 
     // Global keyboard key changed — clear global mouse dropdown
@@ -1601,7 +1514,7 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
         HWND hGMouse = GetDlgItem(hDlg, IDC_AE_GLOBAL_MOUSE);
         if (hGMouse) SendMessageW(hGMouse, CB_SETCURSEL, 0, 0);
       }
-      return TRUE;
+      return 0;
     }
 
     // Local mouse dropdown changed — clear local keyboard key
@@ -1612,7 +1525,7 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
         HWND hHK = GetDlgItem(hDlg, IDC_AE_HOTKEY);
         if (hHK) SendMessageW(hHK, HKM_SETHOTKEY, 0, 0);
       }
-      return TRUE;
+      return 0;
     }
 
     // Global mouse dropdown changed — clear global keyboard key
@@ -1623,13 +1536,13 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
         HWND hGHK = GetDlgItem(hDlg, IDC_AE_GLOBAL_HOTKEY);
         if (hGHK) SendMessageW(hGHK, HKM_SETHOTKEY, 0, 0);
       }
-      return TRUE;
+      return 0;
     }
 
     if (id == IDC_AE_BROWSE && code == BN_CLICKED) {
       HWND hType = GetDlgItem(hDlg, IDC_AE_ACTION_TYPE);
       int sel = hType ? (int)SendMessageW(hType, CB_GETCURSEL, 0, 0) : -1;
-      ButtonAction act = (sel >= 0) ? (ButtonAction)sel : d->actionType;
+      ButtonAction act = (sel >= 0) ? (ButtonAction)sel : m_data.actionType;
 
       wchar_t szFile[MAX_PATH] = {};
       OPENFILENAMEW ofn = {};
@@ -1658,31 +1571,29 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
         break;
       }
 
-      if (d->pEngine) {
+      if (m_pEngine) {
         static std::wstring s_initDir;
-        s_initDir = d->pEngine->m_szBaseDir;
+        s_initDir = m_pEngine->m_szBaseDir;
         ofn.lpstrInitialDir = s_initDir.c_str();
       }
 
       if (GetOpenFileNameW(&ofn))
         SetWindowTextW(GetDlgItem(hDlg, IDC_AE_PAYLOAD), szFile);
-      return TRUE;
+      return 0;
     }
 
     if (id == IDOK && code == BN_CLICKED) {
-      if (!d) { EndDialog(hDlg, IDCANCEL); return TRUE; }
-
       // Read action + payload (user/button mode)
-      if (!d->isBuiltInHotkey) {
+      if (!m_data.isBuiltInHotkey) {
         HWND hType = GetDlgItem(hDlg, IDC_AE_ACTION_TYPE);
         if (hType) {
           int sel = (int)SendMessageW(hType, CB_GETCURSEL, 0, 0);
-          d->actionType = (ButtonAction)sel;
+          m_data.actionType = (ButtonAction)sel;
         }
 
         wchar_t buf[512] = {};
         GetDlgItemTextW(hDlg, IDC_AE_LABEL, buf, 512);
-        d->label = buf;
+        m_data.label = buf;
 
         // Read payload
         HWND hPayload = GetDlgItem(hDlg, IDC_AE_PAYLOAD);
@@ -1692,8 +1603,8 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
         payload.resize(payLen);
 
         // For script/message actions, convert newlines to pipes
-        if (d->actionType == ButtonAction::ScriptCommand ||
-            d->actionType == ButtonAction::LaunchMessage) {
+        if (m_data.actionType == ButtonAction::ScriptCommand ||
+            m_data.actionType == ButtonAction::LaunchMessage) {
           size_t pos = 0;
           while ((pos = payload.find(L"\r\n", pos)) != std::wstring::npos)
             payload.replace(pos, 2, L"|");
@@ -1703,11 +1614,11 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
           while (!payload.empty() && payload.back() == L'|')
             payload.pop_back();
         }
-        d->payload = payload;
+        m_data.payload = payload;
       }
 
       // Read key binding
-      if (d->showKeyBinding) {
+      if (m_data.showKeyBinding) {
         static const UINT mouseVKs[] = { 0, VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2 };
 
         auto readBinding = [&](int hkID, int mouseID, UINT& outMod, UINT& outVK) {
@@ -1729,72 +1640,48 @@ static INT_PTR CALLBACK ActionEditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LP
         };
 
         // Read local binding
-        readBinding(IDC_AE_HOTKEY, IDC_AE_MOUSE, d->modifiers, d->vk);
+        readBinding(IDC_AE_HOTKEY, IDC_AE_MOUSE, m_data.modifiers, m_data.vk);
 
-        if (d->isBuiltInHotkey) {
+        if (m_data.isBuiltInHotkey) {
           // Read global binding
-          readBinding(IDC_AE_GLOBAL_HOTKEY, IDC_AE_GLOBAL_MOUSE, d->globalMod, d->globalVK);
+          readBinding(IDC_AE_GLOBAL_HOTKEY, IDC_AE_GLOBAL_MOUSE, m_data.globalMod, m_data.globalVK);
           // Mouse buttons can't be registered as global hotkeys
           HWND hGMouse = GetDlgItem(hDlg, IDC_AE_GLOBAL_MOUSE);
           int gMouseIdx = hGMouse ? (int)SendMessageW(hGMouse, CB_GETCURSEL, 0, 0) : 0;
-          if (gMouseIdx > 0) { d->globalVK = 0; d->globalMod = 0; }  // reject mouse for global
+          if (gMouseIdx > 0) { m_data.globalVK = 0; m_data.globalMod = 0; }
         } else {
           // User hotkeys: single binding with scope
-          d->scope = (IsDlgButtonChecked(hDlg, IDC_AE_SCOPE) == BST_CHECKED)
-              ? HKSCOPE_GLOBAL : HKSCOPE_LOCAL;
+          m_data.scope = IsChecked(IDC_AE_SCOPE) ? HKSCOPE_GLOBAL : HKSCOPE_LOCAL;
           HWND hMouse = GetDlgItem(hDlg, IDC_AE_MOUSE);
           int mouseIdx = hMouse ? (int)SendMessageW(hMouse, CB_GETCURSEL, 0, 0) : 0;
-          if (mouseIdx > 0) d->scope = HKSCOPE_LOCAL;
+          if (mouseIdx > 0) m_data.scope = HKSCOPE_LOCAL;
         }
       }
 
-      d->accepted = true;
-      EndDialog(hDlg, IDOK);
-      return TRUE;
+      m_data.accepted = true;
+      EndDialog(true);
+      return 0;
     }
 
     if (id == IDCANCEL && code == BN_CLICKED) {
-      EndDialog(hDlg, IDCANCEL);
-      return TRUE;
+      EndDialog(false);
+      return 0;
     }
-    break;
+
+    return -1;
   }
 
-  case WM_CLOSE:
-    EndDialog(hDlg, IDCANCEL);
-    return TRUE;
-
-  case WM_DESTROY:
-    if (s_hAEDlgBrush)  { DeleteObject(s_hAEDlgBrush);  s_hAEDlgBrush  = NULL; }
-    if (s_hAECtrlBrush) { DeleteObject(s_hAECtrlBrush); s_hAECtrlBrush = NULL; }
-    return TRUE;
-  }
-
-  return FALSE;
-}
+public:
+  ActionEditDialog(Engine* pEngine, ActionEditData& data)
+    : ModalDialog(pEngine), m_data(data) {}
+};
 
 bool ShowActionEditDialog(HWND hParent, ActionEditData& data)
 {
-  // Build in-memory DLGTEMPLATE (bare container, controls created in WM_INITDIALOG)
-  __declspec(align(4)) BYTE buf[1024] = {};
-  DLGTEMPLATE* pDlg = (DLGTEMPLATE*)buf;
-  pDlg->style = DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_SETFONT;
-  pDlg->cx = 340;
-  pDlg->cy = 300;
-  pDlg->cdit = 0;
-
-  WORD* pw = (WORD*)(pDlg + 1);
-  *pw++ = 0; // no menu
-  *pw++ = 0; // default class
-  *pw++ = 0; // empty title (set in WM_INITDIALOG)
-  *pw++ = 9; // font size
-  wcscpy((wchar_t*)pw, L"Segoe UI");
-  pw += 9; // 8 chars + null
-
-  DialogBoxIndirectParamW(GetModuleHandle(NULL),
-    pDlg, hParent, ActionEditDlgProc, (LPARAM)&data);
-
-  return data.accepted;
+  ActionEditDialog dlg(data.pEngine, data);
+  // Initial client size — DoBuildControls resizes to fit content
+  bool ok = dlg.Show(hParent, 370, 300);
+  return ok && data.accepted;
 }
 
 } // namespace mdrop
