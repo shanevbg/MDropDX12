@@ -147,6 +147,7 @@ using Microsoft::WRL::ComPtr;
 
 #include <shellapi.h>        // for CommandLineToArgvW
 #include <ShellScalingApi.h> // for dpi awareness
+#include <shobjidl.h>        // for IFileDialog (bootstrap folder picker)
 #pragma comment(lib, "shcore.lib") // for dpi awareness
 // older Windows versions: Entry Point Not Found Fix
 
@@ -2925,6 +2926,83 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
     }
 
     if (!found) {
+      // First-run: ask user whether to set up workspace here or pick another folder.
+      // This runs before any Engine init, so use raw Win32 APIs only.
+      {
+        std::wstring msg = L"MDropDX12 will create resource directories (presets, textures, etc.) in its working folder.\n\n";
+        msg += L"Current location:\n";
+        msg += exeDir.wstring();
+        msg += L"\n\nWould you like to choose a different folder?\n";
+        msg += L"(Yes = pick a folder, No = continue here, Cancel = exit)";
+
+        int result = MessageBoxW(NULL, msg.c_str(),
+          L"MDropDX12 \x2014 First Run", MB_YESNOCANCEL | MB_ICONQUESTION | MB_SETFOREGROUND);
+
+        if (result == IDCANCEL)
+          return 0;
+
+        if (result == IDYES) {
+          // Open folder picker via IFileDialog
+          CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+          bool relocated = false;
+
+          IFileDialog* pfd = NULL;
+          HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd));
+          if (SUCCEEDED(hr)) {
+            DWORD opts = 0;
+            pfd->GetOptions(&opts);
+            pfd->SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+            pfd->SetTitle(L"Choose MDropDX12 workspace folder");
+
+            // Start the folder picker in the exe's current directory
+            IShellItem* psiFolder = NULL;
+            if (SUCCEEDED(SHCreateItemFromParsingName(exeDir.c_str(), NULL, IID_PPV_ARGS(&psiFolder)))) {
+              pfd->SetFolder(psiFolder);
+              psiFolder->Release();
+            }
+
+            hr = pfd->Show(NULL);
+            if (SUCCEEDED(hr)) {
+              IShellItem* psi = NULL;
+              hr = pfd->GetResult(&psi);
+              if (SUCCEEDED(hr)) {
+                PWSTR pszPath = NULL;
+                hr = psi->GetDisplayName(SIGDN_FILESYSPATH, &pszPath);
+                if (SUCCEEDED(hr) && pszPath) {
+                  fs::path destDir(pszPath);
+                  fs::path destExe = destDir / fs::path(exePath).filename();
+                  CoTaskMemFree(pszPath);
+
+                  bool doCopy = true;
+                  if (fs::exists(destExe)) {
+                    int ow = MessageBoxW(NULL,
+                      L"MDropDX12.exe already exists in that folder. Overwrite it?",
+                      L"MDropDX12 — First Run", MB_YESNO | MB_ICONQUESTION);
+                    if (ow != IDYES) doCopy = false;
+                  }
+
+                  if (doCopy && CopyFileW(exePath, destExe.c_str(), FALSE)) {
+                    // Launch the copy and exit this instance
+                    ShellExecuteW(NULL, L"open", destExe.c_str(), NULL,
+                                  destDir.c_str(), SW_SHOWNORMAL);
+                    relocated = true;
+                  } else if (doCopy) {
+                    MessageBoxW(NULL, L"Failed to copy MDropDX12 to the selected folder.",
+                                L"MDropDX12 — First Run", MB_OK | MB_ICONERROR);
+                  }
+                }
+                psi->Release();
+              }
+            }
+            pfd->Release();
+          }
+          CoUninitialize();
+
+          if (relocated)
+            return 0;  // exit — new instance launched from chosen folder
+        }
+      }
+
       // Self-bootstrap: use exe directory and create the directory structure.
       // Shaders are served from embedded memory; disk .fx files are optional overrides.
       dir = exeDir;
