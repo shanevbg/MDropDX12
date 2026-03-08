@@ -70,7 +70,14 @@ if (-not (Test-Path (Join-Path $spoutDir "SPOUTSDK"))) {
     }
 }
 
-# ── 4. Run the build ───────────────────────────────────────────────────────────
+# ── 4. Kill running exe (async, non-blocking) ─────────────────────────────────
+$exeName = "MDropDX12"
+Get-Process -Name $exeName -ErrorAction SilentlyContinue | ForEach-Object {
+    Write-Host "Killing $exeName.exe (PID $($_.Id))..."
+    Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+}
+
+# ── 5. Run the build ───────────────────────────────────────────────────────────
 $project = Join-Path $PSScriptRoot "src\mDropDX12\engine.vcxproj"
 
 & $msbuild $project `

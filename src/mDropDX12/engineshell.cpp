@@ -668,9 +668,15 @@ int EngineShell::AllocateDX9Stuff() {
 }
 
 void EngineShell::CleanUpDX9Stuff(int final_cleanup) {
+  // Signal overlay to shut down early (it will wind down during GPU wait)
+  if (!m_vj_mode && final_cleanup)
+    m_overlay.RequestShutdown();
+
   // In DX12, wait for GPU idle before releasing resources
   if (m_lpDX) {
     m_lpDX->WaitForGpu();
+    if (final_cleanup)
+      m_lpDX->m_ready = FALSE;  // prevent redundant WaitForGpu in ~DXContext
   }
 
   // ALWAYS unbind the textures before releasing textures,
@@ -684,7 +690,7 @@ void EngineShell::CleanUpDX9Stuff(int final_cleanup) {
     m_helpUploadBuffer.Reset();
     m_helpTexturePage = 0;
 
-    // Shutdown debug overlay thread
+    // Wait for overlay thread to finish (should already be done after GPU wait)
     m_overlay.Shutdown();
   }
 

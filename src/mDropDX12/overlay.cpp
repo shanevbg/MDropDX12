@@ -27,6 +27,10 @@ bool COverlayThread::Init(HWND hParentWnd, int width, int height) {
     return true;
 }
 
+void COverlayThread::RequestShutdown() {
+    m_bShutdown.store(true);
+}
+
 void COverlayThread::Shutdown() {
     m_bShutdown.store(true);
     if (m_thread.joinable())

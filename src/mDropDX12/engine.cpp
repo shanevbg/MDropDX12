@@ -1876,18 +1876,31 @@ void Engine::CleanUpMyNonDx9Stuff() {
   // Be sure to clean up any objects here that were
   //   created/initialized in AllocateMyNonDx9Stuff.
 
-  // Close settings window and tool windows if open
-  CloseSettingsWindow();
-  CloseDisplaysWindow();
-  CloseSongInfoWindow();
-  CloseHotkeysWindow();
-  CloseMidiWindow();
-  CloseBoardWindow();
-  ClosePresetsWindow();
-  CloseSpritesWindow();
-  CloseMessagesWindow();
-  CloseTextAnimWindow();
-  CloseWorkspaceLayoutWindow();
+  // Phase 1: Signal all tool windows to close (non-blocking PostMessage)
+  if (m_settingsWindow)       m_settingsWindow->SignalClose();
+  if (m_displaysWindow)       m_displaysWindow->SignalClose();
+  if (m_songInfoWindow)       m_songInfoWindow->SignalClose();
+  if (m_hotkeysWindow)        m_hotkeysWindow->SignalClose();
+  if (m_midiWindow)           m_midiWindow->SignalClose();
+  if (m_boardWindow)          m_boardWindow->SignalClose();
+  if (m_presetsWindow)        m_presetsWindow->SignalClose();
+  if (m_spritesWindow)        m_spritesWindow->SignalClose();
+  if (m_messagesWindow)       m_messagesWindow->SignalClose();
+  if (m_textAnimWindow)       m_textAnimWindow->SignalClose();
+  if (m_workspaceLayoutWindow) m_workspaceLayoutWindow->SignalClose();
+
+  // Phase 2: Wait for all to finish (they're shutting down in parallel)
+  if (m_settingsWindow)       m_settingsWindow->WaitClose();
+  if (m_displaysWindow)       m_displaysWindow->WaitClose();
+  if (m_songInfoWindow)       m_songInfoWindow->WaitClose();
+  if (m_hotkeysWindow)        m_hotkeysWindow->WaitClose();
+  if (m_midiWindow)           m_midiWindow->WaitClose();
+  if (m_boardWindow)          m_boardWindow->WaitClose();
+  if (m_presetsWindow)        m_presetsWindow->WaitClose();
+  if (m_spritesWindow)        m_spritesWindow->WaitClose();
+  if (m_messagesWindow)       m_messagesWindow->WaitClose();
+  if (m_textAnimWindow)       m_textAnimWindow->WaitClose();
+  if (m_workspaceLayoutWindow) m_workspaceLayoutWindow->WaitClose();
   CloseMidiDevice();
 
   // Join any in-flight preset load thread

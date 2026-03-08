@@ -57,8 +57,16 @@ void ToolWindow::Open() {
 }
 
 void ToolWindow::Close() {
+  SignalClose();
+  WaitClose();
+}
+
+void ToolWindow::SignalClose() {
   if (m_hWnd && IsWindow(m_hWnd))
     PostMessage(m_hWnd, WM_CLOSE, 0, 0);
+}
+
+void ToolWindow::WaitClose() {
   if (m_thread.joinable())
     m_thread.join();
 }

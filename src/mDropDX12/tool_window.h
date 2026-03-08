@@ -105,6 +105,10 @@ public:
   // Close the window and join the thread
   void Close();
 
+  // Two-phase close: signal first, join later (for parallel shutdown)
+  void SignalClose();
+  void WaitClose();
+
   // Is the window currently open?
   bool IsOpen() const;
 

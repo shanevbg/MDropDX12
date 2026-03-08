@@ -90,7 +90,8 @@ public:
 
     // Lifecycle (called from main thread)
     bool Init(HWND hParentWnd, int width, int height);
-    void Shutdown();
+    void RequestShutdown();  // Non-blocking: signal thread to exit
+    void Shutdown();          // Blocking: signal + join
 
     // Called by main thread each frame — copies data snapshot
     void UpdateData(const OverlayData& data);
