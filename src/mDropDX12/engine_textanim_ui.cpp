@@ -7,17 +7,20 @@
 #include "engine_helpers.h"
 #include "utility.h"
 #include <commctrl.h>
+#include <commdlg.h>
 
 namespace mdrop {
 
 extern Engine g_engine;
+
+COLORREF TextAnimWindow::s_acrCustColors[16] = {};
 
 //======================================================================
 // TextAnimWindow — ToolWindow subclass
 //======================================================================
 
 TextAnimWindow::TextAnimWindow(Engine* pEngine)
-  : ToolWindow(pEngine, 560, 720) {}
+  : ToolWindow(pEngine, 560, 840) {}
 
 //----------------------------------------------------------------------
 // Engine bridge: Open / Close
@@ -241,6 +244,16 @@ void TextAnimWindow::UpdateEditControls(int sel)
   EnableWindow(GetDlgItem(hw, IDC_MW_TEXTANIM_RAND_COLOR), valid);
   EnableWindow(GetDlgItem(hw, IDC_MW_TEXTANIM_RAND_GROWTH), valid);
   EnableWindow(GetDlgItem(hw, IDC_MW_TEXTANIM_RAND_DURATION), valid);
+
+  // Picker button enable state
+  EnableWindow(GetDlgItem(hw, IDC_MW_TEXTANIM_CHOOSE_FONT), valid);
+  EnableWindow(GetDlgItem(hw, IDC_MW_TEXTANIM_CHOOSE_COLOR), valid);
+  EnableWindow(GetDlgItem(hw, IDC_MW_TEXTANIM_CHOOSE_BOXCOL), valid);
+
+  // Update visual previews
+  UpdateColorSwatch(IDC_MW_TEXTANIM_COLOR_SWATCH, prof.nColorR, prof.nColorG, prof.nColorB);
+  UpdateColorSwatch(IDC_MW_TEXTANIM_BOXCOL_SWATCH, prof.nBoxColR, prof.nBoxColG, prof.nBoxColB);
+  UpdateFontPreview();
 }
 
 //----------------------------------------------------------------------
@@ -538,52 +551,80 @@ void TextAnimWindow::DoBuildControls()
   TrackControl(CreateLabel(hw, L"Appearance", x, y, rw, lineH, hFontBold));
   y += lineH + 2;
 
+  // Font picker button + preview + size
   {
     int cx = x;
+    int btnW = MulDiv(60, lineH, 26);
     int medLbl = MulDiv(40, lineH, 26);
 
-    TrackControl(CreateLabel(hw, L"Font:", cx, y, medLbl, lineH, hFont));
-    cx += medLbl;
-    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_FONTFACE, cx, y, editWide, lineH, hFont, ES_AUTOHSCROLL));
-    cx += editWide + 4;
+    TrackControl(CreateBtn(hw, L"Font...", IDC_MW_TEXTANIM_CHOOSE_FONT, cx, y, btnW, lineH, hFont));
+    cx += btnW + 4;
+
+    // Font preview label (shows "Segoe UI, Bold")
+    int previewW = rw - btnW - medLbl - editW - 12;
+    HWND hPreview = CreateWindowExW(0, L"STATIC", L"",
+      WS_CHILD | WS_VISIBLE | SS_LEFT | SS_ENDELLIPSIS,
+      cx, y, previewW, lineH, hw,
+      (HMENU)(INT_PTR)IDC_MW_TEXTANIM_FONT_PREVIEW, GetModuleHandle(NULL), NULL);
+    if (hPreview && hFont) SendMessage(hPreview, WM_SETFONT, (WPARAM)hFont, TRUE);
+    TrackControl(hPreview);
+    cx += previewW + 4;
+
     TrackControl(CreateLabel(hw, L"Size:", cx, y, medLbl, lineH, hFont));
     cx += medLbl;
     TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_FONTSIZE, cx, y, editW, lineH, hFont));
-    cx += editW + 4;
-    TrackControl(CreateCheck(hw, L"B", IDC_MW_TEXTANIM_BOLD, cx, y, MulDiv(30, lineH, 26), lineH, hFont, false));
-    cx += MulDiv(30, lineH, 26) + 2;
-    TrackControl(CreateCheck(hw, L"I", IDC_MW_TEXTANIM_ITALIC, cx, y, MulDiv(25, lineH, 26), lineH, hFont, false));
+
+    // Hidden controls for font data (read by SaveEditControls)
+    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_FONTFACE, 0, 0, 0, 0, hFont, ES_AUTOHSCROLL));
+    ShowWindow(GetDlgItem(hw, IDC_MW_TEXTANIM_FONTFACE), SW_HIDE);
+    TrackControl(CreateCheck(hw, L"", IDC_MW_TEXTANIM_BOLD, 0, 0, 0, 0, hFont, false));
+    ShowWindow(GetDlgItem(hw, IDC_MW_TEXTANIM_BOLD), SW_HIDE);
+    TrackControl(CreateCheck(hw, L"", IDC_MW_TEXTANIM_ITALIC, 0, 0, 0, 0, hFont, false));
+    ShowWindow(GetDlgItem(hw, IDC_MW_TEXTANIM_ITALIC), SW_HIDE);
   }
   y += lineH + gap;
 
-  // Color
+  // Color picker button + swatch + rand
   {
     int cx = x;
-    int smallLbl = MulDiv(20, lineH, 26);
+    int btnW = MulDiv(60, lineH, 26);
+    int swatchW = MulDiv(30, lineH, 26);
     int medLbl = MulDiv(42, lineH, 26);
     int colEditW = MulDiv(35, lineH, 26);
+    int smallLbl = MulDiv(20, lineH, 26);
 
-    TrackControl(CreateLabel(hw, L"Color:", cx, y, medLbl, lineH, hFont));
+    TrackControl(CreateBtn(hw, L"Color...", IDC_MW_TEXTANIM_CHOOSE_COLOR, cx, y, btnW, lineH, hFont));
+    cx += btnW + 4;
+
+    // Color swatch (owner-drawn static)
+    HWND hSwatch = CreateWindowExW(WS_EX_STATICEDGE, L"STATIC", L"",
+      WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
+      cx, y, swatchW, lineH, hw,
+      (HMENU)(INT_PTR)IDC_MW_TEXTANIM_COLOR_SWATCH, GetModuleHandle(NULL), NULL);
+    TrackControl(hSwatch);
+    cx += swatchW + 8;
+
+    TrackControl(CreateLabel(hw, L"Rand:", cx, y, medLbl, lineH, hFont));
     cx += medLbl;
     TrackControl(CreateLabel(hw, L"R:", cx, y, smallLbl, lineH, hFont));
     cx += smallLbl;
-    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_COLORR, cx, y, colEditW, lineH, hFont));
+    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_RANDR, cx, y, colEditW, lineH, hFont));
     cx += colEditW + 2;
     TrackControl(CreateLabel(hw, L"G:", cx, y, smallLbl, lineH, hFont));
     cx += smallLbl;
-    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_COLORG, cx, y, colEditW, lineH, hFont));
+    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_RANDG, cx, y, colEditW, lineH, hFont));
     cx += colEditW + 2;
     TrackControl(CreateLabel(hw, L"B:", cx, y, smallLbl, lineH, hFont));
     cx += smallLbl;
-    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_COLORB, cx, y, colEditW, lineH, hFont));
-    cx += colEditW + 8;
-    TrackControl(CreateLabel(hw, L"Rand:", cx, y, medLbl, lineH, hFont));
-    cx += medLbl;
-    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_RANDR, cx, y, colEditW, lineH, hFont));
-    cx += colEditW + 2;
-    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_RANDG, cx, y, colEditW, lineH, hFont));
-    cx += colEditW + 2;
     TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_RANDB, cx, y, colEditW, lineH, hFont));
+
+    // Hidden R/G/B edit controls for data storage
+    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_COLORR, 0, 0, 0, 0, hFont));
+    ShowWindow(GetDlgItem(hw, IDC_MW_TEXTANIM_COLORR), SW_HIDE);
+    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_COLORG, 0, 0, 0, 0, hFont));
+    ShowWindow(GetDlgItem(hw, IDC_MW_TEXTANIM_COLORG), SW_HIDE);
+    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_COLORB, 0, 0, 0, 0, hFont));
+    ShowWindow(GetDlgItem(hw, IDC_MW_TEXTANIM_COLORB), SW_HIDE);
   }
   y += lineH + gap + 4;
 
@@ -635,26 +676,28 @@ void TextAnimWindow::DoBuildControls()
   }
   y += lineH + gap;
 
-  // Box color
+  // Box color picker + swatch
   {
     int cx = x;
-    int medLbl = MulDiv(60, lineH, 26);
-    int smallLbl = MulDiv(20, lineH, 26);
-    int colEditW = MulDiv(35, lineH, 26);
+    int btnW = MulDiv(80, lineH, 26);
+    int swatchW = MulDiv(30, lineH, 26);
 
-    TrackControl(CreateLabel(hw, L"Box Color:", cx, y, medLbl, lineH, hFont));
-    cx += medLbl;
-    TrackControl(CreateLabel(hw, L"R:", cx, y, smallLbl, lineH, hFont));
-    cx += smallLbl;
-    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_BOXCOLR, cx, y, colEditW, lineH, hFont));
-    cx += colEditW + 2;
-    TrackControl(CreateLabel(hw, L"G:", cx, y, smallLbl, lineH, hFont));
-    cx += smallLbl;
-    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_BOXCOLG, cx, y, colEditW, lineH, hFont));
-    cx += colEditW + 2;
-    TrackControl(CreateLabel(hw, L"B:", cx, y, smallLbl, lineH, hFont));
-    cx += smallLbl;
-    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_BOXCOLB, cx, y, colEditW, lineH, hFont));
+    TrackControl(CreateBtn(hw, L"Box Color...", IDC_MW_TEXTANIM_CHOOSE_BOXCOL, cx, y, btnW, lineH, hFont));
+    cx += btnW + 4;
+
+    HWND hBoxSwatch = CreateWindowExW(WS_EX_STATICEDGE, L"STATIC", L"",
+      WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
+      cx, y, swatchW, lineH, hw,
+      (HMENU)(INT_PTR)IDC_MW_TEXTANIM_BOXCOL_SWATCH, GetModuleHandle(NULL), NULL);
+    TrackControl(hBoxSwatch);
+
+    // Hidden R/G/B edit controls for data storage
+    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_BOXCOLR, 0, 0, 0, 0, hFont));
+    ShowWindow(GetDlgItem(hw, IDC_MW_TEXTANIM_BOXCOLR), SW_HIDE);
+    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_BOXCOLG, 0, 0, 0, 0, hFont));
+    ShowWindow(GetDlgItem(hw, IDC_MW_TEXTANIM_BOXCOLG), SW_HIDE);
+    TrackControl(CreateEdit(hw, L"", IDC_MW_TEXTANIM_BOXCOLB, 0, 0, 0, 0, hFont));
+    ShowWindow(GetDlgItem(hw, IDC_MW_TEXTANIM_BOXCOLB), SW_HIDE);
   }
   y += lineH + gap;
 
@@ -684,6 +727,47 @@ void TextAnimWindow::DoBuildControls()
 
   // Initial selection
   UpdateEditControls(p->m_nAnimProfileCount > 0 ? 0 : -1);
+}
+
+//----------------------------------------------------------------------
+// UpdateColorSwatch — repaint a color swatch control
+//----------------------------------------------------------------------
+
+void TextAnimWindow::UpdateColorSwatch(int ctrlID, int r, int g, int b)
+{
+  HWND hSwatch = GetDlgItem(m_hWnd, ctrlID);
+  if (hSwatch) {
+    // Store the color as window property for WM_DRAWITEM
+    SetPropW(hSwatch, L"SwatchColor", (HANDLE)(intptr_t)RGB(r, g, b));
+    InvalidateRect(hSwatch, NULL, TRUE);
+  }
+}
+
+//----------------------------------------------------------------------
+// UpdateFontPreview — show "FontFace, Bold Italic" in the preview label
+//----------------------------------------------------------------------
+
+void TextAnimWindow::UpdateFontPreview()
+{
+  HWND hw = m_hWnd;
+  if (!hw) return;
+  int sel = m_nSelectedRow;
+  if (sel < 0 || sel >= m_pEngine->m_nAnimProfileCount) {
+    SetDlgItemTextW(hw, IDC_MW_TEXTANIM_FONT_PREVIEW, L"");
+    return;
+  }
+  const td_anim_profile& prof = m_pEngine->m_AnimProfiles[sel];
+  wchar_t preview[256];
+  const wchar_t* face = prof.szFontFace[0] ? prof.szFontFace : L"(default)";
+  if (prof.bBold && prof.bItal)
+    swprintf(preview, 256, L"%s, Bold Italic", face);
+  else if (prof.bBold)
+    swprintf(preview, 256, L"%s, Bold", face);
+  else if (prof.bItal)
+    swprintf(preview, 256, L"%s, Italic", face);
+  else
+    swprintf(preview, 256, L"%s", face);
+  SetDlgItemTextW(hw, IDC_MW_TEXTANIM_FONT_PREVIEW, preview);
 }
 
 //----------------------------------------------------------------------
@@ -795,6 +879,70 @@ LRESULT TextAnimWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
   case IDC_MW_TEXTANIM_PRESET_COMBO:
     if (code == CBN_SELCHANGE) {
       p->m_nPresetNameAnimProfile = ComboToProfileIndex(GetDlgItem(hWnd, IDC_MW_TEXTANIM_PRESET_COMBO));
+    }
+    return 0;
+
+  case IDC_MW_TEXTANIM_CHOOSE_FONT:
+    if (m_nSelectedRow >= 0 && m_nSelectedRow < p->m_nAnimProfileCount) {
+      td_anim_profile& prof = p->m_AnimProfiles[m_nSelectedRow];
+      LOGFONTW lf = {};
+      wcscpy_s(lf.lfFaceName, 32, prof.szFontFace[0] ? prof.szFontFace : L"Segoe UI");
+      lf.lfWeight = prof.bBold ? FW_BOLD : FW_NORMAL;
+      lf.lfItalic = prof.bItal ? TRUE : FALSE;
+      lf.lfHeight = -24;
+
+      CHOOSEFONTW cf = { sizeof(cf) };
+      cf.hwndOwner = hWnd;
+      cf.lpLogFont = &lf;
+      cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS;
+      cf.rgbColors = RGB(prof.nColorR, prof.nColorG, prof.nColorB);
+
+      if (ChooseFontW(&cf)) {
+        wcscpy_s(prof.szFontFace, 128, lf.lfFaceName);
+        prof.bBold = (lf.lfWeight >= FW_BOLD) ? 1 : 0;
+        prof.bItal = lf.lfItalic ? 1 : 0;
+        prof.nColorR = GetRValue(cf.rgbColors);
+        prof.nColorG = GetGValue(cf.rgbColors);
+        prof.nColorB = GetBValue(cf.rgbColors);
+        UpdateEditControls(m_nSelectedRow);
+        UpdateListViewRow(m_nSelectedRow);
+      }
+    }
+    return 0;
+
+  case IDC_MW_TEXTANIM_CHOOSE_COLOR:
+    if (m_nSelectedRow >= 0 && m_nSelectedRow < p->m_nAnimProfileCount) {
+      td_anim_profile& prof = p->m_AnimProfiles[m_nSelectedRow];
+      CHOOSECOLORW cc = { sizeof(cc) };
+      cc.hwndOwner = hWnd;
+      cc.rgbResult = RGB(prof.nColorR, prof.nColorG, prof.nColorB);
+      cc.lpCustColors = s_acrCustColors;
+      cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+
+      if (ChooseColorW(&cc)) {
+        prof.nColorR = GetRValue(cc.rgbResult);
+        prof.nColorG = GetGValue(cc.rgbResult);
+        prof.nColorB = GetBValue(cc.rgbResult);
+        UpdateEditControls(m_nSelectedRow);
+      }
+    }
+    return 0;
+
+  case IDC_MW_TEXTANIM_CHOOSE_BOXCOL:
+    if (m_nSelectedRow >= 0 && m_nSelectedRow < p->m_nAnimProfileCount) {
+      td_anim_profile& prof = p->m_AnimProfiles[m_nSelectedRow];
+      CHOOSECOLORW cc = { sizeof(cc) };
+      cc.hwndOwner = hWnd;
+      cc.rgbResult = RGB(prof.nBoxColR, prof.nBoxColG, prof.nBoxColB);
+      cc.lpCustColors = s_acrCustColors;
+      cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+
+      if (ChooseColorW(&cc)) {
+        prof.nBoxColR = GetRValue(cc.rgbResult);
+        prof.nBoxColG = GetGValue(cc.rgbResult);
+        prof.nBoxColB = GetBValue(cc.rgbResult);
+        UpdateEditControls(m_nSelectedRow);
+      }
     }
     return 0;
 

@@ -551,7 +551,7 @@ protected:
   int GetFontPlusControlID() const override  { return IDC_MW_TEXTANIM_FONT_PLUS; }
   int GetFontMinusControlID() const override { return IDC_MW_TEXTANIM_FONT_MINUS; }
   int GetMinWidth() const override  { return 520; }
-  int GetMinHeight() const override { return 650; }
+  int GetMinHeight() const override { return 750; }
 
   DWORD   GetCommonControlFlags() const override;
   void    OnResize() override;
@@ -564,12 +564,15 @@ private:
   HWND m_hList = NULL;
   int  m_nTopY = 0;
   int  m_nSelectedRow = -1;
+  static COLORREF s_acrCustColors[16];  // ChooseColor custom colors
 
   void PopulateListView();
   void UpdateListViewRow(int idx);
   void UpdateEditControls(int sel);
   void SaveEditControls();
   void SelectProfile(int idx);
+  void UpdateColorSwatch(int ctrlID, int r, int g, int b);
+  void UpdateFontPreview();
 };
 
 // ── Channel input sources for Shadertoy passes ──

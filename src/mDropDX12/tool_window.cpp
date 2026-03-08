@@ -910,6 +910,16 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
       }
       return TRUE;
     }
+    // Static swatch controls (SS_OWNERDRAW) — paint with stored SwatchColor property
+    if (pDIS && pDIS->CtlType == ODT_STATIC) {
+      COLORREF col = (COLORREF)(intptr_t)GetPropW(pDIS->hwndItem, L"SwatchColor");
+      HDC hdc = pDIS->hDC;
+      RECT rc = pDIS->rcItem;
+      HBRUSH hBr = CreateSolidBrush(col);
+      FillRect(hdc, &rc, hBr);
+      DeleteObject(hBr);
+      return TRUE;
+    }
     break;
   }
 

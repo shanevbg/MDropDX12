@@ -788,6 +788,12 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_TEXTANIM_RAND_GROWTH   9456  // Checkbox: randomize growth
 #define IDC_MW_TEXTANIM_RAND_DURATION 9457  // Checkbox: randomize duration
 #define IDC_MW_OPEN_TEXTANIM          9458  // Launch button on Settings Tools tab
+#define IDC_MW_TEXTANIM_CHOOSE_FONT   9459  // "Font..." button → ChooseFont dialog
+#define IDC_MW_TEXTANIM_CHOOSE_COLOR  9460  // "Color..." button → ChooseColor dialog
+#define IDC_MW_TEXTANIM_CHOOSE_BOXCOL 9461  // "Box Color..." button → ChooseColor dialog
+#define IDC_MW_TEXTANIM_COLOR_SWATCH  9462  // Static: text color preview swatch
+#define IDC_MW_TEXTANIM_BOXCOL_SWATCH 9463  // Static: box color preview swatch
+#define IDC_MW_TEXTANIM_FONT_PREVIEW  9464  // Static: font name/style preview
 
 // Custom message for animation preview
 #define WM_MW_PUSH_ANIM_PREVIEW       (WM_APP + 25)
