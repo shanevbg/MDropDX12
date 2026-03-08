@@ -170,8 +170,9 @@ SamplerState _samp_pw : register(s3);  // POINT  + WRAP  (pw_main)
 // tex2D/tex3D macros — default to LINEAR+WRAP.
 // Special-mode samplers (fc_main, pc_main, pw_main, blur) are text-substituted
 // in LoadShaderFromMemory to bypass these macros and use the correct SamplerState.
-#define tex2D(t, uv)     t.Sample(_samp_lw, uv)
+#define tex2D(t, uv)      t.Sample(_samp_lw, uv)
 #define tex2Dlod(t, v)    t.SampleLevel(_samp_lw, (v).xy, (v).w)
+#define tex2Dbias(t, v)   t.SampleBias(_samp_lw, (v).xy, (v).w)
 #define tex3D(t, uvw)     t.Sample(_samp_lw, uvw)
 #define tex2d(t, uv)      t.Sample(_samp_lw, uv)
 #define tex3d(t, uvw)     t.Sample(_samp_lw, uvw)

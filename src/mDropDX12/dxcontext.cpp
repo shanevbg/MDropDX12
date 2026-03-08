@@ -1577,6 +1577,10 @@ void DXContext::CreateBindingBlockForTexture(DX12Texture& tex)
     if (m_nullTexture.srvIndex == UINT_MAX || tex.srvIndex == UINT_MAX) return;
 
     // Reserve 32 contiguous SRV slots for this texture's binding block
+    if (m_nextFreeSrvSlot + BINDING_BLOCK_SIZE > DXC_MAX_SRV) {
+        DebugLogA("ERROR: SRV heap overflow in CreateBindingBlockForTexture!", LOG_ERROR);
+        return;
+    }
     tex.bindingBlockStart = m_nextFreeSrvSlot;
 
     D3D12_CPU_DESCRIPTOR_HANDLE nullSrvCpu;
