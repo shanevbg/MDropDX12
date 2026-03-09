@@ -1491,6 +1491,10 @@ void Engine::LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime) 
     DLOG_INFO("Render: Active preset: %ls", name);
   }
 
+  // SEH protection: Import + EEL compilation + shader compile can crash on
+  // malformed presets or JIT issues.  Catch and skip instead of hard-crashing.
+  __try {
+
   // Import preset 1 into m_pOldState (the "from" state)
   m_pOldState->Import(temp1, GetTime(), nullptr, STATE_ALL);
 
@@ -1543,6 +1547,15 @@ void Engine::LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime) 
   m_fNextPresetTime  = -1.0f;
   m_nLoadingPreset = 0;  // synchronous load complete — clear async flag
   OnFinishedLoadingPreset();
+
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    DLOG_ERROR("LoadMilk2Preset: CRASH during import/compile of %ls (code 0x%08X)",
+               szPresetFilename, GetExceptionCode());
+    wchar_t buf[512];
+    swprintf_s(buf, L"Preset crashed during load — skipped");
+    AddError(buf, 6.0f, ERR_PRESET, true);
+    m_nLoadingPreset = 0;
+  }
 
   // Clean up temp files
   DeleteFileW(temp1);
@@ -1757,14 +1770,19 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
 
   uint64_t myGeneration = ++m_nLoadGeneration;
   m_presetLoadThread = std::thread([this, loadTime, ApplyFlags, myGeneration]() {
-    // Import preset (parses .milk file, compiles NSEEL expressions)
-    m_pNewState->Import(m_szLoadingPreset, loadTime, m_pOldState, ApplyFlags);
-    // Compile both warp + comp pixel shaders (D3DCompile — the expensive part)
-    LoadShaders(&m_NewShaders, m_pNewState, false, false);
-    // Only signal ready if we're still the current generation
-    // (a newer load may have started and detached us)
-    if (m_nLoadGeneration.load() == myGeneration)
-      m_bPresetLoadReady.store(true);
+    __try {
+      // Import preset (parses .milk file, compiles NSEEL expressions)
+      m_pNewState->Import(m_szLoadingPreset, loadTime, m_pOldState, ApplyFlags);
+      // Compile both warp + comp pixel shaders (D3DCompile — the expensive part)
+      LoadShaders(&m_NewShaders, m_pNewState, false, false);
+      // Only signal ready if we're still the current generation
+      // (a newer load may have started and detached us)
+      if (m_nLoadGeneration.load() == myGeneration)
+        m_bPresetLoadReady.store(true);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      DLOG_ERROR("LoadPreset: CRASH during async import/compile of %ls (code 0x%08X)",
+                 m_szLoadingPreset, GetExceptionCode());
+    }
   });
 }
 
