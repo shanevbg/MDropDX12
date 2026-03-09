@@ -2337,6 +2337,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     BuildBindingSlots(&m_shaders.warp.params, m_dx12VS[0], warpSlots);
 
     // Buffer A reads feedback[read] (own previous output), comp reads feedback[write] (Buffer A's current output)
+    // Comp always reads VS[1] = current frame's warp+shapes output
     if (m_bHasBufferA) {
       BuildBindingSlots(&m_shaders.bufferA.params, m_dx12VS[1], bufferASlots, &m_dx12Feedback[fbRead]);
       BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots, &m_dx12Feedback[fbWrite]);
@@ -2420,11 +2421,25 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     // Bind VS0 via per-frame binding block (main tex at correct t-register, null elsewhere)
     cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetWarpBindingGpuHandle());
 
-    // Compute decay color (modulates previous frame to create trail fade)
-    float fDecay = (float)(*m_pState->var_pf_decay);
-    D3DCOLOR cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
+    // Vertex decay: In DX9's WarpedBlit_Shaders (shader warp path), vertex colors
+    // are NOT modulated by decay — the custom warp pixel shader handles decay itself.
+    // Only WarpedBlit_NoShaders (non-shader path) applies decay via vertex color, where
+    // the fixed-function pipeline multiplies texture color by vertex diffuse.
+    // In DX12, custom shaders ignore vertex color RGB (only _vDiffuse.w/alpha is used
+    // in the output wrapper), so applying decay to vertices would be harmless but wrong.
+    // For the fallback PSO (PSO_TEXTURED_MYVERTEX), vertex color IS used as a texture
+    // modulator, so decay must be applied there.
+    D3DCOLOR cDecay;
+    if (!m_dx12WarpPSO) {
+      // Non-shader path: apply decay via vertex color (matches DX9 WarpedBlit_NoShaders)
+      float fDecay = (float)(*m_pState->var_pf_decay);
+      cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
+    } else {
+      // Shader path: keep vertex color white (matches DX9 WarpedBlit_Shaders)
+      cDecay = 0xFFFFFFFF;
+    }
 
-    // Expand warp mesh to triangle list (same logic as WarpedBlit_NoShaders)
+    // Expand warp mesh to triangle list
     int primCount = m_nGridX * m_nGridY * 2;
     int totalVerts = primCount * 3;
     MYVERTEX tempv[1024 * 3];
@@ -2437,9 +2452,6 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       while (prims_queued < max_per_batch && src_idx < totalVerts) {
         for (int j = 0; j < 3; j++) {
           tempv[i++] = m_verts[m_indices_list[src_idx++]];
-          // Note: DX9 flips Y here to compensate for the OrthoLH(2,-2) projection.
-          // DX12 vertex shaders output directly to clip space (no projection), so
-          // Y flip is NOT needed.
           tempv[i - 1].Diffuse = (cDecay & 0x00FFFFFF) | (tempv[i - 1].Diffuse & 0xFF000000);
         }
         prims_queued++;
@@ -2453,14 +2465,17 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
   // ── Blur passes: build blur pyramid from VS0 (just-warped frame) ──
   // Must run after warp (which wrote VS1 from VS0) so that comp shaders
   // can sample blur textures via GetBlur1/2/3().
-  // Pre-scan comp shader's blur texture usage so blur passes cover both
-  // warp and comp needs (ApplyShaderParams for comp runs AFTER blur passes).
+  // Pre-scan both warp and comp shader blur texture usage so blur passes
+  // cover all needs (ApplyShaderParams for comp runs AFTER blur passes).
+  // Some presets use GetBlur1() in the warp shader (e.g. organic12-3d-2.milk).
   {
-    CShaderParams* cp = &m_shaders.comp.params;
-    for (int i = 0; i < 32; i++) {
-      if (cp->m_texcode[i] >= TEX_BLUR1 && cp->m_texcode[i] <= TEX_BLUR_LAST)
-        m_nHighestBlurTexUsedThisFrame = max(m_nHighestBlurTexUsedThisFrame,
-            ((int)cp->m_texcode[i] - (int)TEX_BLUR1) + 1);
+    CShaderParams* shaderParams[] = { &m_shaders.warp.params, &m_shaders.comp.params };
+    for (auto* sp : shaderParams) {
+      for (int i = 0; i < 32; i++) {
+        if (sp->m_texcode[i] >= TEX_BLUR1 && sp->m_texcode[i] <= TEX_BLUR_LAST)
+          m_nHighestBlurTexUsedThisFrame = max(m_nHighestBlurTexUsedThisFrame,
+              ((int)sp->m_texcode[i] - (int)TEX_BLUR1) + 1);
+      }
     }
   }
   DX12_BlurPasses();
