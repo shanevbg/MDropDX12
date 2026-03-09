@@ -1013,7 +1013,8 @@ static void FixShadowedBuiltins(char* szShaderText) {
     "abs", "min", "max", "step", "lerp", "frac", "sqrt",
     "floor", "ceil", "round", "sign", "clamp", "saturate",
     "normalize", "length", "distance", "cross", "clip",
-    "line",  // geometry shader primitive type keyword
+    "line",   // geometry shader primitive type keyword
+    "point",  // geometry shader primitive type keyword
   };
   static const int nBuiltins = sizeof(builtins) / sizeof(builtins[0]);
 

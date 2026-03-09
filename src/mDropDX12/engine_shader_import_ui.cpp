@@ -2463,7 +2463,18 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                         size_t afterStar = s + 1;
                         while (afterStar < inp.size() && inp[afterStar] == ' ') afterStar++;
                         size_t opStart = afterStar;
-                        while (afterStar < inp.size() && isIdent(inp[afterStar])) afterStar++;
+                        // Handle parenthesized expressions: matVar * (expr)
+                        if (afterStar < inp.size() && inp[afterStar] == '(') {
+                            int depth = 1;
+                            afterStar++;
+                            while (afterStar < inp.size() && depth > 0) {
+                                if (inp[afterStar] == '(') depth++;
+                                else if (inp[afterStar] == ')') depth--;
+                                afterStar++;
+                            }
+                        } else {
+                            while (afterStar < inp.size() && isIdent(inp[afterStar])) afterStar++;
+                        }
                         if (afterStar > opStart) {
                             if (afterStar < inp.size() && inp[afterStar] == '(') {
                                 int depth = 1;
@@ -2572,13 +2583,15 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                     size_t callEnd = afterName + 1 + closingIdx + 1; // past closing ')'
                     std::string funcCall = inp.substr(pos, callEnd - pos);
 
+                    auto isWS = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
+
                     // Check for "expr *= matFunc(args)" pattern
                     size_t bk = pos;
-                    while (bk > 0 && inp[bk - 1] == ' ') bk--;
+                    while (bk > 0 && isWS(inp[bk - 1])) bk--;
                     if (bk >= 2 && inp[bk - 1] == '=' && inp[bk - 2] == '*') {
                         size_t eqPos = bk - 2; // position of '*'
                         size_t lEnd = eqPos;
-                        while (lEnd > 0 && inp[lEnd - 1] == ' ') lEnd--;
+                        while (lEnd > 0 && isWS(inp[lEnd - 1])) lEnd--;
                         // Walk back to find lvalue (may include dots/swizzles like "p.xz")
                         size_t lStart = lEnd;
                         while (lStart > 0 && (isIdent(inp[lStart - 1]) || inp[lStart - 1] == '.')) lStart--;
@@ -2599,7 +2612,7 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                     if (bk > 0 && inp[bk - 1] == '*' && (bk < 2 || inp[bk - 2] != '=')) {
                         size_t starPos = bk - 1;
                         size_t opEnd = starPos;
-                        while (opEnd > 0 && inp[opEnd - 1] == ' ') opEnd--;
+                        while (opEnd > 0 && isWS(inp[opEnd - 1])) opEnd--;
                         size_t opStart = opEnd;
                         // Walk backward through parens to capture func(args) as LHS operand
                         if (opStart > 0 && inp[opStart - 1] == ')') {
@@ -2631,11 +2644,11 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                     // GLSL (column-major): M * v → HLSL (row-major): mul(v, M) for square
                     {
                         size_t afterCall = callEnd;
-                        while (afterCall < inp.size() && inp[afterCall] == ' ') afterCall++;
+                        while (afterCall < inp.size() && isWS(inp[afterCall])) afterCall++;
                         if (afterCall < inp.size() && inp[afterCall] == '*' &&
                             (afterCall + 1 >= inp.size() || inp[afterCall + 1] != '=')) {
                             size_t rhsStart = afterCall + 1;
-                            while (rhsStart < inp.size() && inp[rhsStart] == ' ') rhsStart++;
+                            while (rhsStart < inp.size() && isWS(inp[rhsStart])) rhsStart++;
                             // Find end of RHS operand
                             size_t rhsEnd = rhsStart;
                             int depth = 0;
@@ -2643,14 +2656,48 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                                 char c = inp[rhsEnd];
                                 if (c == '(' || c == '[') depth++;
                                 else if (c == ')' || c == ']') { if (depth == 0) break; depth--; }
-                                else if ((c == ';' || c == ',' || c == '+' || c == '-') && depth == 0) break;
+                                else if ((c == ';' || c == ',' || c == '+' || c == '-' || c == '*') && depth == 0) break;
                                 rhsEnd++;
                             }
                             if (rhsEnd > rhsStart) {
                                 std::string rhs = inp.substr(rhsStart, rhsEnd - rhsStart);
                                 while (!rhs.empty() && rhs.back() == ' ') rhs.pop_back();
-                                std::string prefix = inp.substr(0, pos);
+                                // Check for chain: if there's a "* expr" after the RHS, fold it in.
+                                // e.g. matFunc1(...) * matFunc2(...) * vec → mul(mul(vec, M2), M1)
                                 std::string suffix = inp.substr(rhsEnd);
+                                size_t chainStar = 0;
+                                while (chainStar < suffix.size() && (suffix[chainStar] == ' ' || suffix[chainStar] == '\n' || suffix[chainStar] == '\r')) chainStar++;
+                                if (chainStar < suffix.size() && suffix[chainStar] == '*' &&
+                                    (chainStar + 1 >= suffix.size() || suffix[chainStar + 1] != '=')) {
+                                    // There's another "* expr" after — capture it
+                                    size_t chainRhsStart = chainStar + 1;
+                                    while (chainRhsStart < suffix.size() && (suffix[chainRhsStart] == ' ' || suffix[chainRhsStart] == '\n')) chainRhsStart++;
+                                    size_t chainRhsEnd = chainRhsStart;
+                                    int cd = 0;
+                                    while (chainRhsEnd < suffix.size()) {
+                                        char cc = suffix[chainRhsEnd];
+                                        if (cc == '(' || cc == '[') cd++;
+                                        else if (cc == ')' || cc == ']') { if (cd == 0) break; cd--; }
+                                        else if ((cc == ';' || cc == ',' || cc == '+' || cc == '-' || cc == '*') && cd == 0) break;
+                                        chainRhsEnd++;
+                                    }
+                                    if (chainRhsEnd > chainRhsStart) {
+                                        std::string chainRhs = suffix.substr(chainRhsStart, chainRhsEnd - chainRhsStart);
+                                        while (!chainRhs.empty() && chainRhs.back() == ' ') chainRhs.pop_back();
+                                        // M1 * M2 * v → mul(mul(v, M2), M1) for square (SWAPPED)
+                                        std::string inner = mf.isSquare
+                                            ? "mul(" + chainRhs + ", " + rhs + ")"
+                                            : "mul(" + rhs + ", " + chainRhs + ")";
+                                        std::string repl = mf.isSquare
+                                            ? "mul(" + inner + ", " + funcCall + ")"
+                                            : "mul(" + funcCall + ", " + inner + ")";
+                                        inp = inp.substr(0, pos) + repl + suffix.substr(chainRhsEnd);
+                                        pos += repl.size();
+                                        continue;
+                                    }
+                                }
+                                std::string prefix = inp.substr(0, pos);
+                                suffix = inp.substr(rhsEnd);
                                 std::string repl;
                                 if (mf.isSquare)
                                     repl = "mul(" + rhs + ", " + funcCall + ")";  // SWAPPED

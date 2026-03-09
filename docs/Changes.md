@@ -1,5 +1,15 @@
 # MDropDX12 Changelog
 
+## v1.7.2 (2026-03-09)
+
+### GLSL→HLSL Converter
+
+- Unified non-square matrix conversion to use mul-swap strategy (same as square matrices) — fixes `M[i]` indexing returning wrong vector type/size
+- Fixed audio channel auto-detection overriding JSON `CHAN_FEEDBACK` assignment — `texelFetch(iChannel, ivec2(x,0))` false positive
+- Fixed matrix-returning function chains across newlines (`M1(...)\n* M2(...)\n* v` now correctly wraps with nested `mul()`)
+- Fixed `matVar * (expr)` not converting parenthesized expressions to `mul()`
+- Added `point` to HLSL reserved keyword renaming (geometry shader primitive type)
+
 ## v1.7.1 (2026-03-09)
 
 ### FFT Accuracy
