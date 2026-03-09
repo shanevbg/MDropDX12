@@ -1367,7 +1367,36 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // Replace tex2D/tex2Dlod calls for samplers that need non-default addressing modes.
   // The generic tex2D macro uses _samp_lw (LINEAR+WRAP). These replacements bypass
   // the macro by directly emitting .Sample() / .SampleLevel() with the correct sampler.
+  //
+  // First: normalize whitespace between tex2D/tex2Dlod/tex2Dbias and '(' so that
+  // "tex2D (sampler_pc_main, ...)" matches the replacement pattern.
+  // Some presets have spaces here (e.g. organic12-3d-2.milk), which would otherwise
+  // skip the replacement and fall through to the tex2D macro with the wrong sampler.
   {
+    const char* texFuncs[] = { "tex2Dlod", "tex2Dbias", "tex2D", "tex3Dlod", "tex3D" };
+    for (const char* fn : texFuncs) {
+      int fnLen = (int)strlen(fn);
+      char* p = szShaderText;
+      while ((p = strstr(p, fn)) != nullptr) {
+        // Ensure we're at a word boundary (not inside another identifier)
+        if (p > szShaderText) {
+          char prev = *(p - 1);
+          if ((prev >= 'a' && prev <= 'z') || (prev >= 'A' && prev <= 'Z') || (prev >= '0' && prev <= '9') || prev == '_') {
+            p += fnLen;
+            continue;
+          }
+        }
+        char* after = p + fnLen;
+        // Count whitespace between function name and '('
+        int spaces = 0;
+        while (after[spaces] == ' ' || after[spaces] == '\t') spaces++;
+        if (spaces > 0 && after[spaces] == '(') {
+          // Collapse: shift everything left by 'spaces' chars
+          memmove(after, after + spaces, strlen(after + spaces) + 1);
+        }
+        p = after + 1;  // advance past the '('
+      }
+    }
     auto replaceTex2D = [&](const char* sampName, const char* sampState) {
       char from[80], to[80];
       // tex2D(sampler_name, ...) → sampler_name.Sample(sampState, ...)

@@ -2337,6 +2337,7 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     BuildBindingSlots(&m_shaders.warp.params, m_dx12VS[0], warpSlots);
 
     // Buffer A reads feedback[read] (own previous output), comp reads feedback[write] (Buffer A's current output)
+    // Comp always reads VS[1] = current frame's warp+shapes output
     if (m_bHasBufferA) {
       BuildBindingSlots(&m_shaders.bufferA.params, m_dx12VS[1], bufferASlots, &m_dx12Feedback[fbRead]);
       BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots, &m_dx12Feedback[fbWrite]);
@@ -2420,11 +2421,25 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     // Bind VS0 via per-frame binding block (main tex at correct t-register, null elsewhere)
     cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetWarpBindingGpuHandle());
 
-    // Compute decay color (modulates previous frame to create trail fade)
-    float fDecay = (float)(*m_pState->var_pf_decay);
-    D3DCOLOR cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
+    // Vertex decay: In DX9's WarpedBlit_Shaders (shader warp path), vertex colors
+    // are NOT modulated by decay — the custom warp pixel shader handles decay itself.
+    // Only WarpedBlit_NoShaders (non-shader path) applies decay via vertex color, where
+    // the fixed-function pipeline multiplies texture color by vertex diffuse.
+    // In DX12, custom shaders ignore vertex color RGB (only _vDiffuse.w/alpha is used
+    // in the output wrapper), so applying decay to vertices would be harmless but wrong.
+    // For the fallback PSO (PSO_TEXTURED_MYVERTEX), vertex color IS used as a texture
+    // modulator, so decay must be applied there.
+    D3DCOLOR cDecay;
+    if (!m_dx12WarpPSO) {
+      // Non-shader path: apply decay via vertex color (matches DX9 WarpedBlit_NoShaders)
+      float fDecay = (float)(*m_pState->var_pf_decay);
+      cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
+    } else {
+      // Shader path: keep vertex color white (matches DX9 WarpedBlit_Shaders)
+      cDecay = 0xFFFFFFFF;
+    }
 
-    // Expand warp mesh to triangle list (same logic as WarpedBlit_NoShaders)
+    // Expand warp mesh to triangle list
     int primCount = m_nGridX * m_nGridY * 2;
     int totalVerts = primCount * 3;
     MYVERTEX tempv[1024 * 3];
@@ -2437,9 +2452,6 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       while (prims_queued < max_per_batch && src_idx < totalVerts) {
         for (int j = 0; j < 3; j++) {
           tempv[i++] = m_verts[m_indices_list[src_idx++]];
-          // Note: DX9 flips Y here to compensate for the OrthoLH(2,-2) projection.
-          // DX12 vertex shaders output directly to clip space (no projection), so
-          // Y flip is NOT needed.
           tempv[i - 1].Diffuse = (cDecay & 0x00FFFFFF) | (tempv[i - 1].Diffuse & 0xFF000000);
         }
         prims_queued++;
@@ -2453,14 +2465,17 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
   // ── Blur passes: build blur pyramid from VS0 (just-warped frame) ──
   // Must run after warp (which wrote VS1 from VS0) so that comp shaders
   // can sample blur textures via GetBlur1/2/3().
-  // Pre-scan comp shader's blur texture usage so blur passes cover both
-  // warp and comp needs (ApplyShaderParams for comp runs AFTER blur passes).
+  // Pre-scan both warp and comp shader blur texture usage so blur passes
+  // cover all needs (ApplyShaderParams for comp runs AFTER blur passes).
+  // Some presets use GetBlur1() in the warp shader (e.g. organic12-3d-2.milk).
   {
-    CShaderParams* cp = &m_shaders.comp.params;
-    for (int i = 0; i < 32; i++) {
-      if (cp->m_texcode[i] >= TEX_BLUR1 && cp->m_texcode[i] <= TEX_BLUR_LAST)
-        m_nHighestBlurTexUsedThisFrame = max(m_nHighestBlurTexUsedThisFrame,
-            ((int)cp->m_texcode[i] - (int)TEX_BLUR1) + 1);
+    CShaderParams* shaderParams[] = { &m_shaders.warp.params, &m_shaders.comp.params };
+    for (auto* sp : shaderParams) {
+      for (int i = 0; i < 32; i++) {
+        if (sp->m_texcode[i] >= TEX_BLUR1 && sp->m_texcode[i] <= TEX_BLUR_LAST)
+          m_nHighestBlurTexUsedThisFrame = max(m_nHighestBlurTexUsedThisFrame,
+              ((int)sp->m_texcode[i] - (int)TEX_BLUR1) + 1);
+      }
     }
   }
   DX12_BlurPasses();
@@ -2603,16 +2618,41 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     // Bind VS1 via per-frame binding block (main tex at correct t-register, null elsewhere)
     cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetCompBindingGpuHandle());
 
+    // Compute hue_shader corner colors (matches ShowToUser_Shaders comp grid logic).
+    // hue_shader is bilinearly interpolated from 4 animated corner colors; the GPU's
+    // vertex interpolation across the quad produces the exact same result.
+    float shade[4][3];
+    for (int i = 0; i < 4; i++) {
+      shade[i][0] = 0.6f + 0.3f * sinf(GetTime() * 30.0f * 0.0143f + 3 + i * 21 + m_fRandStart[3]);
+      shade[i][1] = 0.6f + 0.3f * sinf(GetTime() * 30.0f * 0.0107f + 1 + i * 13 + m_fRandStart[1]);
+      shade[i][2] = 0.6f + 0.3f * sinf(GetTime() * 30.0f * 0.0129f + 6 + i * 9 + m_fRandStart[2]);
+      float mx = ((shade[i][0] > shade[i][1]) ? shade[i][0] : shade[i][1]);
+      if (shade[i][2] > mx) mx = shade[i][2];
+      for (int k = 0; k < 3; k++) {
+        shade[i][k] /= mx;
+        shade[i][k] = 0.5f + 0.5f * shade[i][k];
+      }
+    }
+    // Bilinear mapping: shade[0]=x*y, shade[1]=(1-x)*y, shade[2]=x*(1-y), shade[3]=(1-x)*(1-y)
+    // quad[0]=(-1,1) → uv(0,0) → shade[1]; quad[1]=(1,1) → uv(1,0) → shade[0]
+    // quad[2]=(-1,-1)→ uv(0,1) → shade[3]; quad[3]=(1,-1)→ uv(1,1) → shade[2]
+    DWORD cShade[4] = {
+      D3DCOLOR_RGBA_01(shade[1][0], shade[1][1], shade[1][2], 1),  // top-left
+      D3DCOLOR_RGBA_01(shade[0][0], shade[0][1], shade[0][2], 1),  // top-right
+      D3DCOLOR_RGBA_01(shade[3][0], shade[3][1], shade[3][2], 1),  // bottom-left
+      D3DCOLOR_RGBA_01(shade[2][0], shade[2][1], shade[2][2], 1),  // bottom-right
+    };
+
     // Fullscreen quad using MYVERTEX for proper UV/rad/ang passthrough
     MYVERTEX quad[4];
     ZeroMemory(quad, sizeof(quad));
-    quad[0].x = -1.f; quad[0].y =  1.f; quad[0].z = 0.f; quad[0].Diffuse = 0xFFFFFFFF;
+    quad[0].x = -1.f; quad[0].y =  1.f; quad[0].z = 0.f; quad[0].Diffuse = cShade[0];
     quad[0].tu = 0.f; quad[0].tv = 0.f; quad[0].tu_orig = 0.f; quad[0].tv_orig = 0.f; quad[0].rad = 1.f; quad[0].ang = 3.14159f;
-    quad[1].x =  1.f; quad[1].y =  1.f; quad[1].z = 0.f; quad[1].Diffuse = 0xFFFFFFFF;
+    quad[1].x =  1.f; quad[1].y =  1.f; quad[1].z = 0.f; quad[1].Diffuse = cShade[1];
     quad[1].tu = 1.f; quad[1].tv = 0.f; quad[1].tu_orig = 1.f; quad[1].tv_orig = 0.f; quad[1].rad = 1.f; quad[1].ang = 0.f;
-    quad[2].x = -1.f; quad[2].y = -1.f; quad[2].z = 0.f; quad[2].Diffuse = 0xFFFFFFFF;
+    quad[2].x = -1.f; quad[2].y = -1.f; quad[2].z = 0.f; quad[2].Diffuse = cShade[2];
     quad[2].tu = 0.f; quad[2].tv = 1.f; quad[2].tu_orig = 0.f; quad[2].tv_orig = 1.f; quad[2].rad = 1.f; quad[2].ang = 3.14159f;
-    quad[3].x =  1.f; quad[3].y = -1.f; quad[3].z = 0.f; quad[3].Diffuse = 0xFFFFFFFF;
+    quad[3].x =  1.f; quad[3].y = -1.f; quad[3].z = 0.f; quad[3].Diffuse = cShade[3];
     quad[3].tu = 1.f; quad[3].tv = 1.f; quad[3].tu_orig = 1.f; quad[3].tv_orig = 1.f; quad[3].rad = 1.f; quad[3].ang = 0.f;
     m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, quad, 4, sizeof(MYVERTEX));
   }
