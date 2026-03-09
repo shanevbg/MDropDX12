@@ -300,6 +300,13 @@ private:
   void LayoutControls();
   void OpenEditDialog(int lvItem);
   void UpdateDeleteButton();
+  void BuildBindingsPage(int x, int y, int rw, int lineH, int gap);
+  void BuildHelpOrderPage(int x, int y, int rw, int lineH, int gap);
+  void RefreshCatOrderList();
+  HWND m_hCatList = NULL;
+  HWND m_hBtnCatUp = NULL;
+  HWND m_hBtnCatDown = NULL;
+  HWND m_hBtnCatReset = NULL;
 };
 
 // ── Concrete subclass: MIDI window ──

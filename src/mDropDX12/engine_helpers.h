@@ -404,6 +404,14 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_HOTKEYS_DELETE     7087  // Delete button (user entries only)
 #define IDC_MW_HOTKEYS_CLEARKEY   7088  // Clear Key button (unbind without deleting)
 #define IDC_MW_HOTKEYS_RESET      7089  // Reset to Defaults button
+#define IDC_MW_HOTKEYS_TAB        7095  // Tab control
+#define IDC_MW_HOTKEYS_CATLIST    7096  // Help Display: category order listbox
+#define IDC_MW_HOTKEYS_CAT_UP     7097  // Help Display: move up button
+#define IDC_MW_HOTKEYS_CAT_DOWN   7098  // Help Display: move down button
+#define IDC_MW_HOTKEYS_CAT_RESET  7099  // Help Display: reset order button
+#define HOTKEYS_NUM_PAGES         2
+#define HOTKEYS_PAGE_BINDINGS     0
+#define HOTKEYS_PAGE_HELPORDER    1
 
 // Edit Hotkey modal dialog controls
 #define IDC_HK_EDIT_ACTION        8001  // Static: action name (read-only)

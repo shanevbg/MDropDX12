@@ -413,6 +413,61 @@ void Engine::SaveHotkeySettings()
     }
 }
 
+// ── Help display category order ──
+
+void Engine::ResetHelpCatOrder()
+{
+    // Default order: Window, Navigation, Tools, Visual, Misc, Launch, Media, Shader, Script
+    const int defaultOrder[] = {
+        HKCAT_WINDOW, HKCAT_NAVIGATION, HKCAT_TOOLS, HKCAT_VISUAL,
+        HKCAT_MISC, HKCAT_LAUNCH, HKCAT_MEDIA, HKCAT_SHADER, HKCAT_SCRIPT
+    };
+    for (int i = 0; i < HKCAT_COUNT; i++)
+        m_helpCatOrder[i] = defaultOrder[i];
+}
+
+void Engine::LoadHelpCatOrder()
+{
+    ResetHelpCatOrder();
+    wchar_t* pIni = GetConfigIniFile();
+    wchar_t buf[256] = {};
+    GetPrivateProfileStringW(L"Hotkeys", L"HelpCatOrder", L"", buf, 256, pIni);
+    if (buf[0] == L'\0') return;
+
+    // Parse comma-separated ints
+    int order[HKCAT_COUNT];
+    int count = 0;
+    wchar_t* ctx = nullptr;
+    wchar_t* tok = wcstok_s(buf, L",", &ctx);
+    while (tok && count < HKCAT_COUNT) {
+        int v = _wtoi(tok);
+        if (v >= 0 && v < HKCAT_COUNT) order[count++] = v;
+        tok = wcstok_s(nullptr, L",", &ctx);
+    }
+    if (count == HKCAT_COUNT) {
+        // Validate: must contain each category exactly once
+        bool seen[HKCAT_COUNT] = {};
+        bool valid = true;
+        for (int i = 0; i < HKCAT_COUNT; i++) {
+            if (seen[order[i]]) { valid = false; break; }
+            seen[order[i]] = true;
+        }
+        if (valid)
+            memcpy(m_helpCatOrder, order, sizeof(m_helpCatOrder));
+    }
+}
+
+void Engine::SaveHelpCatOrder()
+{
+    wchar_t buf[256] = {};
+    wchar_t* p = buf;
+    for (int i = 0; i < HKCAT_COUNT; i++) {
+        if (i > 0) *p++ = L',';
+        p += swprintf(p, 16, L"%d", m_helpCatOrder[i]);
+    }
+    WritePrivateProfileStringW(L"Hotkeys", L"HelpCatOrder", buf, GetConfigIniFile());
+}
+
 void Engine::RegisterGlobalHotkeys(HWND hwnd)
 {
     if (!hwnd) return;
@@ -1188,124 +1243,121 @@ std::wstring Engine::FormatHotkeyDisplay(UINT modifiers, UINT vk)
 
 void Engine::GenerateHelpText()
 {
-    // Build two help pages from the binding table.
-    // Page 1: grouped by category with current bindings.
-    // Page 2: remaining categories + fixed keys section.
+    // Build all help text into a single buffer. Pagination happens at render
+    // time based on window height so pages adapt to any resolution.
+    // Order: fixed keys first, then reassignable hotkeys grouped by category,
+    // sorted alphabetically by action within each group.
 
-    wchar_t* p1 = m_szHelpPage1;
-    wchar_t* p2 = m_szHelpPage2;
-    int rem1 = _countof(m_szHelpPage1) - 1;
-    int rem2 = _countof(m_szHelpPage2) - 1;
-    bool usePage2 = false;
+    wchar_t* p = m_szHelpAll;
+    int rem = _countof(m_szHelpAll) - 1;
+    int lineCount = 0;
 
     auto appendLine = [&](const wchar_t* line) {
         int len = (int)wcslen(line);
-        if (!usePage2) {
-            if (rem1 > len + 2) {
-                wcscpy(p1, line);
-                p1 += len;
-                *p1++ = L'\n'; rem1 -= len + 1;
-            } else {
-                usePage2 = true;
-            }
-        }
-        if (usePage2 && rem2 > len + 2) {
-            wcscpy(p2, line);
-            p2 += len;
-            *p2++ = L'\n'; rem2 -= len + 1;
+        if (rem > len + 2) {
+            wcscpy(p, line);
+            p += len;
+            *p++ = L'\n'; rem -= len + 1;
+            lineCount++;
         }
     };
 
-    appendLine(L"MDropDX12 Keyboard Shortcuts (F1 to cycle pages, ESC to close)");
+    // ── Fixed keys first ──
+    appendLine(L"\x2500\x2500\x2500 Fixed Keys (not reassignable) \x2500\x2500\x2500");
+    appendLine(L"  F1                             Toggle Help Overlay");
+    appendLine(L"  F2                             (reserved)");
+    appendLine(L"  CTRL+F2                        Kill Switch \x2014 disable all outputs");
+    appendLine(L"  ESC                            Close menu / Close app");
+    appendLine(L"  0-9                            Numeric input (sprites/messages)");
     appendLine(L"");
 
-    // Iterate categories (built-in hotkeys)
-    for (int cat = 0; cat < HKCAT_COUNT; cat++) {
-        // Check if any bound built-in or user entries exist for this category
-        bool hasBuiltIn = false;
+    // ── Reassignable hotkeys, grouped by category, sorted by action ──
+    struct HelpEntry { std::wstring key; std::wstring action; };
+
+    for (int ci = 0; ci < HKCAT_COUNT; ci++) {
+        int cat = m_helpCatOrder[ci];
+        std::vector<HelpEntry> entries;
+
+        // Collect bound built-in hotkeys in this category
         for (int i = 0; i < NUM_HOTKEYS; i++) {
-            if ((int)m_hotkeys[i].category == cat && (m_hotkeys[i].vk != 0 || m_hotkeys[i].globalVK != 0)) { hasBuiltIn = true; break; }
+            if ((int)m_hotkeys[i].category != cat) continue;
+            if (m_hotkeys[i].vk == 0 && m_hotkeys[i].globalVK == 0) continue;
+            HelpEntry e;
+            if (m_hotkeys[i].vk != 0 && m_hotkeys[i].globalVK != 0) {
+                e.key = FormatHotkeyDisplay(m_hotkeys[i].modifiers, m_hotkeys[i].vk);
+                e.key += L" / ";
+                e.key += FormatHotkeyDisplay(m_hotkeys[i].globalMod, m_hotkeys[i].globalVK);
+            } else if (m_hotkeys[i].vk != 0) {
+                e.key = FormatHotkeyDisplay(m_hotkeys[i].modifiers, m_hotkeys[i].vk);
+            } else {
+                e.key = FormatHotkeyDisplay(m_hotkeys[i].globalMod, m_hotkeys[i].globalVK);
+                e.key += L" (G)";
+            }
+            e.action = m_hotkeys[i].szAction;
+            entries.push_back(std::move(e));
         }
-        bool hasUser = false;
-        HotkeyCategory userCat = (cat == HKCAT_SCRIPT || cat == HKCAT_LAUNCH)
-            ? (HotkeyCategory)cat : HKCAT_COUNT;
-        if (userCat != HKCAT_COUNT) {
+
+        // Collect user hotkeys under Script/Launch categories
+        if (cat == HKCAT_SCRIPT || cat == HKCAT_LAUNCH) {
             UserHotkeyType matchType = (cat == HKCAT_SCRIPT) ? USER_HK_SCRIPT : USER_HK_LAUNCH;
             for (const auto& uh : m_userHotkeys) {
-                if (uh.type == matchType && uh.vk != 0) { hasUser = true; break; }
+                if (uh.type != matchType || uh.vk == 0) continue;
+                HelpEntry e;
+                e.key = FormatHotkeyDisplay(uh.modifiers, uh.vk);
+                e.action = uh.label;
+                if (!uh.command.empty()) {
+                    if (uh.type == USER_HK_SCRIPT) {
+                        e.action += L" (" + uh.command + L")";
+                    } else {
+                        const wchar_t* exeName = wcsrchr(uh.command.c_str(), L'\\');
+                        if (!exeName) exeName = wcsrchr(uh.command.c_str(), L'/');
+                        exeName = exeName ? exeName + 1 : uh.command.c_str();
+                        e.action += L" (";
+                        e.action += exeName;
+                        e.action += L")";
+                    }
+                }
+                entries.push_back(std::move(e));
             }
         }
-        if (!hasBuiltIn && !hasUser) continue;
+
+        if (entries.empty()) continue;
+
+        // Sort alphabetically by action (case-insensitive)
+        std::sort(entries.begin(), entries.end(), [](const HelpEntry& a, const HelpEntry& b) {
+            return _wcsicmp(a.action.c_str(), b.action.c_str()) < 0;
+        });
 
         // Category header
         wchar_t header[128];
         swprintf(header, 128, L"\x2500\x2500\x2500 %s \x2500\x2500\x2500", kCategoryNames[cat]);
         appendLine(header);
 
-        // List built-in bindings in this category (skip fully unbound)
-        for (int i = 0; i < NUM_HOTKEYS; i++) {
-            if ((int)m_hotkeys[i].category != cat) continue;
-            if (m_hotkeys[i].vk == 0 && m_hotkeys[i].globalVK == 0) continue;
-            std::wstring key;
-            if (m_hotkeys[i].vk != 0 && m_hotkeys[i].globalVK != 0) {
-                key = FormatHotkeyDisplay(m_hotkeys[i].modifiers, m_hotkeys[i].vk);
-                key += L" / ";
-                key += FormatHotkeyDisplay(m_hotkeys[i].globalMod, m_hotkeys[i].globalVK);
-            } else if (m_hotkeys[i].vk != 0) {
-                key = FormatHotkeyDisplay(m_hotkeys[i].modifiers, m_hotkeys[i].vk);
-            } else {
-                key = FormatHotkeyDisplay(m_hotkeys[i].globalMod, m_hotkeys[i].globalVK);
-                key += L" (G)";
-            }
+        for (const auto& e : entries) {
             wchar_t line[256];
-            swprintf(line, 256, L"  %-28s %s", key.c_str(), m_hotkeys[i].szAction);
+            swprintf(line, 256, L"  %-32s %s", e.key.c_str(), e.action.c_str());
             appendLine(line);
         }
-
-        // List user hotkeys under Script/Launch categories
-        if (hasUser) {
-            UserHotkeyType matchType = (cat == HKCAT_SCRIPT) ? USER_HK_SCRIPT : USER_HK_LAUNCH;
-            for (const auto& uh : m_userHotkeys) {
-                if (uh.type != matchType || uh.vk == 0) continue;
-                std::wstring key = FormatHotkeyDisplay(uh.modifiers, uh.vk);
-                std::wstring actionName = uh.label;
-                if (!uh.command.empty()) {
-                    if (uh.type == USER_HK_SCRIPT) {
-                        actionName += L" (" + uh.command + L")";
-                    } else {
-                        const wchar_t* exeName = wcsrchr(uh.command.c_str(), L'\\');
-                        if (!exeName) exeName = wcsrchr(uh.command.c_str(), L'/');
-                        exeName = exeName ? exeName + 1 : uh.command.c_str();
-                        actionName += L" (";
-                        actionName += exeName;
-                        actionName += L")";
-                    }
-                }
-                wchar_t line[256];
-                swprintf(line, 256, L"  %-20s %s", key.c_str(), actionName.c_str());
-                appendLine(line);
-            }
-        }
         appendLine(L"");
-
-        // Switch to page 2 after about 3500 chars used on page 1
-        if (!usePage2 && (_countof(m_szHelpPage1) - 1 - rem1) > 3500)
-            usePage2 = true;
     }
 
-    // Fixed keys section on page 2
-    usePage2 = true;
-    appendLine(L"\x2500\x2500\x2500 Fixed Keys (not reassignable) \x2500\x2500\x2500");
-    appendLine(L"  F1                   Toggle Help Overlay");
-    appendLine(L"  F2                   (reserved)");
-    appendLine(L"  CTRL+F2              Kill Switch \x2014 disable all outputs");
-    appendLine(L"  ESC                  Close menu / Close app");
-    appendLine(L"  0-9                  Numeric input (sprites/messages)");
-    appendLine(L"");
-    appendLine(L"Reassign keys in the Hotkeys window (CTRL+F7)");
+    // Look up actual binding for "Open Hotkeys"
+    std::wstring hotkeyHint;
+    for (int i = 0; i < NUM_HOTKEYS; i++) {
+        if (m_hotkeys[i].id == HK_OPEN_HOTKEYS && m_hotkeys[i].vk != 0) {
+            hotkeyHint = FormatHotkeyDisplay(m_hotkeys[i].modifiers, m_hotkeys[i].vk);
+            break;
+        }
+    }
+    wchar_t footer[256];
+    if (!hotkeyHint.empty())
+        swprintf(footer, 256, L"Reassign keys in the Hotkeys window (%s)", hotkeyHint.c_str());
+    else
+        swprintf(footer, 256, L"Reassign keys in the Hotkeys window");
+    appendLine(footer);
 
-    *p1 = L'\0';
-    *p2 = L'\0';
+    *p = L'\0';
+    m_nHelpLineCount = lineCount;
 }
 
 } // namespace mdrop

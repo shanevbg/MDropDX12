@@ -15,6 +15,7 @@
 namespace mdrop {
 
 extern Engine g_engine;
+extern int g_nHelpLineCount;
 
 //----------------------------------------------------------------------
 // Constructor
@@ -245,6 +246,8 @@ static void SaveAndReRegister(Engine* p)
 {
   p->SaveHotkeySettings();
   p->GenerateHelpText();
+  g_nHelpLineCount = p->m_nHelpLineCount;
+  p->InvalidateHelpTexture();
   HWND hRender = p->GetPluginWindow();
   if (hRender)
     PostMessage(hRender, WM_MW_REGISTER_HOTKEYS, 0, 0);
@@ -430,12 +433,31 @@ void HotkeysWindow::DoBuildControls()
 
   auto L = BuildBaseControls();
   int y = L.y, lineH = L.lineH, gap = L.gap, x = L.x, rw = L.rw;
-  HFONT hFont = GetFont();
-  HFONT hFontBold = GetFontBold();
 
-  // Title label
-  TrackControl(CreateLabel(hw, L"Keyboard Shortcuts", x, y, rw, lineH, hFontBold));
-  y += lineH + gap;
+  RECT rc;
+  GetClientRect(hw, &rc);
+
+  const wchar_t* tabNames[] = { L"Key Bindings", L"Help Display" };
+  RECT rcTab = BuildTabControl(IDC_MW_HOTKEYS_TAB, tabNames, HOTKEYS_NUM_PAGES,
+                                0, y, rc.right, rc.bottom - y);
+
+  int tabX = rcTab.left + x;
+  int tabY = rcTab.top + 4;
+  int tabRW = rcTab.right - rcTab.left - x * 2;
+
+  BuildBindingsPage(tabX, tabY, tabRW, lineH, gap);
+  BuildHelpOrderPage(tabX, tabY, tabRW, lineH, gap);
+
+  SelectInitialTab();
+  UpdateDeleteButton();
+}
+
+void HotkeysWindow::BuildBindingsPage(int x, int y, int rw, int lineH, int gap)
+{
+  HWND hw = m_hWnd;
+  HFONT hFont = GetFont();
+
+  #define PAGE_TC(page, expr) TrackPageControl(page, (expr))
 
   m_headerH = y;  // save for LayoutControls
 
@@ -450,7 +472,7 @@ void HotkeysWindow::DoBuildControls()
 
   m_hList = CreateThemedListView(IDC_MW_HOTKEYS_LIST, x, y, rw, listH,
                                   /*visible=*/true, /*sortable=*/true);
-  TrackControl(m_hList);
+  PAGE_TC(HOTKEYS_PAGE_BINDINGS, m_hList);
   if (m_hList) {
     int scrollW = GetSystemMetrics(SM_CXVSCROLL) + 4;
     int colCategory = MulDiv(rw, 16, 100);
@@ -478,34 +500,97 @@ void HotkeysWindow::DoBuildControls()
   }
   y += listH + gap;
 
-  // Button row: [+] [Edit] [Delete] on left, [Reset to Defaults] on right
+  // Button row
   int btnW = MulDiv(60, lineH, 26);
   int addW = MulDiv(30, lineH, 26);
   int btnGap = 8;
 
   m_hBtnAdd = CreateBtn(hw, L"+", IDC_MW_HOTKEYS_ADD, x, y, addW, lineH, hFont);
-  TrackControl(m_hBtnAdd);
+  PAGE_TC(HOTKEYS_PAGE_BINDINGS, m_hBtnAdd);
   int bx = x + addW + btnGap;
 
   m_hBtnEdit = CreateBtn(hw, L"Edit", IDC_MW_HOTKEYS_EDITBTN, bx, y, btnW, lineH, hFont);
-  TrackControl(m_hBtnEdit);
+  PAGE_TC(HOTKEYS_PAGE_BINDINGS, m_hBtnEdit);
   bx += btnW + btnGap;
 
   m_hBtnDelete = CreateBtn(hw, L"Delete", IDC_MW_HOTKEYS_DELETE, bx, y, btnW, lineH, hFont);
-  TrackControl(m_hBtnDelete);
+  PAGE_TC(HOTKEYS_PAGE_BINDINGS, m_hBtnDelete);
   bx += btnW + btnGap;
 
   int clearKeyW = MulDiv(80, lineH, 26);
   m_hBtnClearKey = CreateBtn(hw, L"Clear Key", IDC_MW_HOTKEYS_CLEARKEY, bx, y, clearKeyW, lineH, hFont);
-  TrackControl(m_hBtnClearKey);
+  PAGE_TC(HOTKEYS_PAGE_BINDINGS, m_hBtnClearKey);
 
   int resetW = MulDiv(160, lineH, 26);
   m_hBtnReset = CreateBtn(hw, L"Reset to Defaults", IDC_MW_HOTKEYS_RESET,
     x + rw - resetW, y, resetW, lineH, hFont);
-  TrackControl(m_hBtnReset);
+  PAGE_TC(HOTKEYS_PAGE_BINDINGS, m_hBtnReset);
 
-  // Set initial delete button state
-  UpdateDeleteButton();
+  #undef PAGE_TC
+}
+
+void HotkeysWindow::BuildHelpOrderPage(int x, int y, int rw, int lineH, int gap)
+{
+  HWND hw = m_hWnd;
+  HFONT hFont = GetFont();
+  HFONT hFontBold = GetFontBold();
+
+  #define PAGE_TC(page, expr) TrackPageControl(page, (expr))
+
+  PAGE_TC(HOTKEYS_PAGE_HELPORDER,
+    CreateLabel(hw, L"F1 Help Category Order", x, y, rw, lineH, hFontBold));
+  y += lineH + gap;
+
+  PAGE_TC(HOTKEYS_PAGE_HELPORDER,
+    CreateLabel(hw, L"Set the order categories appear on the F1 help overlay:", x, y, rw, lineH, hFont));
+  y += lineH + gap;
+
+  // Category list
+  RECT rc;
+  GetClientRect(hw, &rc);
+  int listH = rc.bottom - y - lineH - gap * 3;
+  if (listH < lineH * 5) listH = lineH * 5;
+
+  int btnColW = MulDiv(80, lineH, 26) + 16;
+  int listW = rw - btnColW;
+
+  m_hCatList = CreateWindowExW(0, WC_LISTBOXW, NULL,
+    WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_NOTIFY,
+    x, y, listW, listH, hw, (HMENU)(INT_PTR)IDC_MW_HOTKEYS_CATLIST,
+    GetModuleHandle(NULL), NULL);
+  SendMessageW(m_hCatList, WM_SETFONT, (WPARAM)hFont, TRUE);
+  PAGE_TC(HOTKEYS_PAGE_HELPORDER, m_hCatList);
+
+  // Up/Down/Reset buttons to the right of the list
+  int btnX = x + listW + 12;
+  int btnW = btnColW - 12;
+
+  m_hBtnCatUp = CreateBtn(hw, L"Move Up", IDC_MW_HOTKEYS_CAT_UP, btnX, y, btnW, lineH, hFont);
+  PAGE_TC(HOTKEYS_PAGE_HELPORDER, m_hBtnCatUp);
+
+  m_hBtnCatDown = CreateBtn(hw, L"Move Down", IDC_MW_HOTKEYS_CAT_DOWN, btnX, y + lineH + gap, btnW, lineH, hFont);
+  PAGE_TC(HOTKEYS_PAGE_HELPORDER, m_hBtnCatDown);
+
+  m_hBtnCatReset = CreateBtn(hw, L"Reset Order", IDC_MW_HOTKEYS_CAT_RESET, btnX, y + (lineH + gap) * 2, btnW, lineH, hFont);
+  PAGE_TC(HOTKEYS_PAGE_HELPORDER, m_hBtnCatReset);
+
+  RefreshCatOrderList();
+
+  #undef PAGE_TC
+}
+
+void HotkeysWindow::RefreshCatOrderList()
+{
+  if (!m_hCatList) return;
+  int sel = (int)SendMessageW(m_hCatList, LB_GETCURSEL, 0, 0);
+  SendMessageW(m_hCatList, LB_RESETCONTENT, 0, 0);
+  for (int i = 0; i < HKCAT_COUNT; i++) {
+    int cat = m_pEngine->m_helpCatOrder[i];
+    if (cat >= 0 && cat < HKCAT_COUNT)
+      SendMessageW(m_hCatList, LB_ADDSTRING, 0, (LPARAM)kCategoryNames[cat]);
+  }
+  if (sel >= 0 && sel < HKCAT_COUNT)
+    SendMessageW(m_hCatList, LB_SETCURSEL, sel, 0);
 }
 
 //----------------------------------------------------------------------
@@ -658,6 +743,53 @@ LRESULT HotkeysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM /*lParam*/)
     return 0;
   }
 
+  // ── Help Display page: category order buttons ──
+
+  if (id == IDC_MW_HOTKEYS_CAT_UP && code == BN_CLICKED) {
+    int sel = (int)SendMessageW(m_hCatList, LB_GETCURSEL, 0, 0);
+    if (sel > 0) {
+      int tmp = p->m_helpCatOrder[sel - 1];
+      p->m_helpCatOrder[sel - 1] = p->m_helpCatOrder[sel];
+      p->m_helpCatOrder[sel] = tmp;
+      p->SaveHelpCatOrder();
+      SendMessageW(m_hCatList, LB_SETCURSEL, sel - 1, 0);
+      RefreshCatOrderList();
+      SendMessageW(m_hCatList, LB_SETCURSEL, sel - 1, 0);
+      p->GenerateHelpText();
+      g_nHelpLineCount = p->m_nHelpLineCount;
+      p->InvalidateHelpTexture();
+    }
+    return 0;
+  }
+
+  if (id == IDC_MW_HOTKEYS_CAT_DOWN && code == BN_CLICKED) {
+    int sel = (int)SendMessageW(m_hCatList, LB_GETCURSEL, 0, 0);
+    if (sel >= 0 && sel < HKCAT_COUNT - 1) {
+      int tmp = p->m_helpCatOrder[sel + 1];
+      p->m_helpCatOrder[sel + 1] = p->m_helpCatOrder[sel];
+      p->m_helpCatOrder[sel] = tmp;
+      p->SaveHelpCatOrder();
+      SendMessageW(m_hCatList, LB_SETCURSEL, sel + 1, 0);
+      RefreshCatOrderList();
+      SendMessageW(m_hCatList, LB_SETCURSEL, sel + 1, 0);
+      p->GenerateHelpText();
+      g_nHelpLineCount = p->m_nHelpLineCount;
+      p->InvalidateHelpTexture();
+    }
+    return 0;
+  }
+
+  if (id == IDC_MW_HOTKEYS_CAT_RESET && code == BN_CLICKED) {
+    p->ResetHelpCatOrder();
+    p->SaveHelpCatOrder();
+    RefreshCatOrderList();
+    p->GenerateHelpText();
+    g_nHelpLineCount = p->m_nHelpLineCount;
+    p->InvalidateHelpTexture();
+    p->AddNotification(L"Help category order reset to default");
+    return 0;
+  }
+
   return -1;
 }
 
@@ -667,6 +799,8 @@ LRESULT HotkeysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM /*lParam*/)
 
 LRESULT HotkeysWindow::DoNotify(HWND hWnd, NMHDR* pnm)
 {
+  // Tab control handled by base class (TCN_SELCHANGE → ShowPage)
+
   if (pnm->idFrom != IDC_MW_HOTKEYS_LIST) return -1;
 
   if (pnm->code == LVN_ITEMCHANGED) {

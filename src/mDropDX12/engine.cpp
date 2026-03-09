@@ -901,9 +901,8 @@ void OnUserEditedCompShaders(LPARAM param1, LPARAM param2) {
 //   and watch the length of the lines, since there is no wordwrap.
 // A good guideline: your entire help screen should be visible when fullscreen
 //   @ 640x480 and using the default help screen font.
-wchar_t* g_szHelp = 0;
-wchar_t* g_szHelp_Page2 = 0;
-int g_szHelp_W = 0;
+wchar_t* g_szHelpAll = 0;
+int g_nHelpLineCount = 0;
 
 // this is for integrating modern skins (with their Random button)
 // and having it match our Scroll Lock (preset lock) state...
@@ -997,13 +996,8 @@ void Engine::MyPreInitialize() {
   // seed the system's random number generator w/the current system time:
   //srand((unsigned)time(NULL));  -don't - let winamp do it
 
-// Generate F1 help text dynamically from the hotkey binding table.
-  // This replaces the old static .bin resource loading so the help
-  // overlay always reflects the user's current key assignments.
-  GenerateHelpText();
-  g_szHelp = m_szHelpPage1;
-  g_szHelp_Page2 = m_szHelpPage2;
-  g_szHelp_W = 1;
+// Set up help text pointer — actual content generated after hotkeys are loaded.
+  g_szHelpAll = m_szHelpAll;
 
   // CONFIG PANEL SETTINGS THAT WE'VE ADDED (TAB #2)
   m_bFirstRun = true;
@@ -1242,6 +1236,11 @@ void Engine::MyReadConfig() {
 
   // Global hotkeys
   LoadHotkeySettings();
+
+  // Load help category display order and generate F1 help text.
+  LoadHelpCatOrder();
+  GenerateHelpText();
+  g_nHelpLineCount = m_nHelpLineCount;
 
   // Idle timer (screensaver mode)
   LoadIdleTimerSettings();

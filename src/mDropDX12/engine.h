@@ -475,10 +475,16 @@ public:
   bool DispatchHotkeyByTag(const std::wstring& tag);
   std::wstring FormatHotkeyDisplay(UINT modifiers, UINT vk);
 
-  // Dynamic F1 help text (generated from binding table)
-  wchar_t m_szHelpPage1[8192] = {};
-  wchar_t m_szHelpPage2[8192] = {};
+  // Dynamic F1 help text (generated from binding table, all pages in one buffer)
+  wchar_t m_szHelpAll[16384] = {};
+  int     m_nHelpLineCount = 0;   // total lines in m_szHelpAll
   void GenerateHelpText();
+
+  // Help display category order (user-configurable)
+  int  m_helpCatOrder[HKCAT_COUNT] = {};
+  void ResetHelpCatOrder();
+  void LoadHelpCatOrder();
+  void SaveHelpCatOrder();
 
   // Dynamic user-added hotkeys (Script Commands and Launch Apps)
   std::vector<UserHotkey> m_userHotkeys;

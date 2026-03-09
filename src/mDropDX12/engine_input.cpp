@@ -36,6 +36,7 @@ extern float TimeToAutoLockPreset;
 extern int beatcount;
 extern bool TranspaMode;
 extern bool AutoLockedPreset;
+extern int g_nHelpLineCount;
 
 void Engine::SetFPSCap(int fps) {
   m_max_fps_fs = fps;
@@ -1018,6 +1019,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
         ResetHotkeyDefaults();
         SaveHotkeySettings();
         GenerateHelpText();
+        g_nHelpLineCount = m_nHelpLineCount;
         HWND hRender = GetPluginWindow();
         if (hRender)
           PostMessage(hRender, WM_MW_REGISTER_HOTKEYS, 0, 0);

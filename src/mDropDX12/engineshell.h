@@ -394,10 +394,12 @@ private:
   DX12Texture m_helpTexture;
   ComPtr<ID3D12Resource> m_helpUploadBuffer;
   int m_helpTexturePage = 0;  // 0 = not rendered yet
+  int m_helpTotalPages  = 1;  // computed at render time from window height
 
   int  GetCanvasMarginX();     // returns the # of pixels that exist on the canvas, on each side, that the user will never see.  Mainly here for windowed mode, where sometimes, up to 15 pixels get cropped at edges of the screen.
   int  GetCanvasMarginY();     // returns the # of pixels that exist on the canvas, on each side, that the user will never see.  Mainly here for windowed mode, where sometimes, up to 15 pixels get cropped at edges of the screen.
 public:
+  void InvalidateHelpTexture() { m_helpTexturePage = -1; }
   void DrawDarkTranslucentBox(RECT* pr);
 
   void DrawDarkTranslucentBoxFullWindow();

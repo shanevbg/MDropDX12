@@ -171,9 +171,8 @@ typedef struct _SIMPLEVERTEX {
 } SIMPLEVERTEX, * LPSIMPLEVERTEX;
 #define SIMPLE_VERTEX_FORMAT (D3DFVF_XYZ | D3DFVF_DIFFUSE)
 
-extern wchar_t* g_szHelp;
-extern wchar_t* g_szHelp_Page2;
-extern int g_szHelp_W;
+extern wchar_t* g_szHelpAll;
+extern int g_nHelpLineCount;
 
 // resides in vms_desktop.dll/lib:
 //void getItemData(int x);
@@ -645,10 +644,25 @@ int EngineShell::AllocateDX9Stuff() {
         if (m_lpDX->m_commandQueue)
           m_lpDX->WaitForGpu();
         m_text.InitDX12(m_lpDX, m_font, NUM_BASIC_FONTS + NUM_EXTRA_FONTS, m_fontinfo);
-        // Advance baseline past font atlas slots so they survive resize reclamation
-        m_lpDX->m_srvSlotBaseline = m_lpDX->m_nextFreeSrvSlot;
-        m_lpDX->m_rtvSlotBaseline = m_lpDX->m_nextFreeRtvSlot;
       }
+    }
+
+    // Create help texture BEFORE dynamic render targets so its SRV/binding block
+    // slots are below the baseline and survive ResetDynamicDescriptors().
+    if (m_lpDX) {
+      if (m_helpTexture.IsValid() &&
+          (m_helpTexture.width != (UINT)m_lpDX->m_client_width ||
+           m_helpTexture.height != (UINT)m_lpDX->m_client_height)) {
+        m_helpTexture.ResetResource();
+        m_helpUploadBuffer.Reset();
+        m_helpTexturePage = 0;
+      }
+      if (!m_helpTexture.IsValid())
+        CreateHelpTexture();
+
+      // Advance baseline past font atlas + help texture slots
+      m_lpDX->m_srvSlotBaseline = m_lpDX->m_nextFreeSrvSlot;
+      m_lpDX->m_rtvSlotBaseline = m_lpDX->m_nextFreeRtvSlot;
     }
   }
 
@@ -1935,15 +1949,22 @@ bool EngineShell::CreateHelpTexture() {
   m_helpTexture.format = DXGI_FORMAT_B8G8R8A8_UNORM;
   m_helpTexture.currentState = D3D12_RESOURCE_STATE_COPY_DEST;
 
-  // Allocate SRV descriptor
-  D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_lpDX->AllocateSrvCpu();
-  m_helpTexture.srvIndex = m_lpDX->m_nextFreeSrvSlot;
-
-  CreateSRV2D(device, m_helpTexture.resource.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, srvCpu);
-  m_lpDX->AllocateSrvGpu();
-
-  // Create 16-entry binding block for texture binding
-  m_lpDX->CreateBindingBlockForTexture(m_helpTexture);
+  // Allocate SRV descriptor (or reuse existing slot on resize)
+  if (m_helpTexture.srvIndex == UINT_MAX) {
+    // First creation — allocate new SRV + binding block slots
+    D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_lpDX->AllocateSrvCpu();
+    m_helpTexture.srvIndex = m_lpDX->m_nextFreeSrvSlot;
+    CreateSRV2D(device, m_helpTexture.resource.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, srvCpu);
+    m_lpDX->AllocateSrvGpu();
+    m_lpDX->CreateBindingBlockForTexture(m_helpTexture);
+  } else {
+    // Resize — reuse pre-allocated slots, just refresh SRV descriptor + binding block
+    D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = m_lpDX->GetSrvCpuHandleAt(m_helpTexture.srvIndex);
+    CreateSRV2D(device, m_helpTexture.resource.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, srvCpu);
+    // Refresh slot 0 of the binding block with the updated SRV
+    D3D12_CPU_DESCRIPTOR_HANDLE blockDst = m_lpDX->GetSrvCpuHandleAt(m_helpTexture.bindingBlockStart);
+    device->CopyDescriptorsSimple(1, blockDst, srvCpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+  }
 
   // Create upload buffer (row-pitch aligned for CopyTextureRegion)
   UINT rowPitch = (w * 4 + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1)
@@ -1978,17 +1999,12 @@ bool EngineShell::CreateHelpTexture() {
 
 void EngineShell::UpdateHelpTexture(int page) {
   if (!m_helpTexture.IsValid() || !m_helpUploadBuffer || !m_lpDX) return;
+  if (!g_szHelpAll || !g_szHelpAll[0]) return;
 
   UINT w = m_helpTexture.width;
   UINT h = m_helpTexture.height;
   UINT rowPitch = (w * 4 + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1)
                   & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
-
-  // Select help text for the requested page.
-  // g_szHelp_W == 1 means Unicode; 0 means ANSI bytes cast to wchar_t*.
-  void* helpText = (page == 1) ? (void*)g_szHelp : (void*)g_szHelp_Page2;
-  if (!helpText) return;
-  bool isUnicode = (g_szHelp_W != 0);
 
   // Create GDI DIB section for text rendering
   BITMAPINFO bmi = {};
@@ -2008,18 +2024,14 @@ void EngineShell::UpdateHelpTexture(int page) {
   }
 
   HGDIOBJ oldBmp = SelectObject(memDC, hBmp);
-
-  // Clear to fully transparent black
   memset(dibBits, 0, (size_t)w * h * 4);
 
-  // Scale font to window height — large enough for accessibility.
-  // Compensate for DPI: the memory DC inherits the display's DPI, so GDI
-  // inflates font sizes by dpi/96. Divide out so we get true pixel sizes.
+  // Scale font to window height.
   int dpiY = GetDeviceCaps(memDC, LOGPIXELSY);
   if (dpiY <= 0) dpiY = 96;
-  int fontSize = max(22, (int)h / 32);
-  int fontRequest = MulDiv(fontSize, 96, dpiY);  // actual pixels, DPI-neutral
-  LONG pad = max(20L, (LONG)h / 40);
+  int fontSize = max(16, (int)h / 48);
+  int fontRequest = MulDiv(fontSize, 96, dpiY);
+  LONG pad = max(16L, (LONG)h / 50);
 
   HFONT hFont = CreateFontW(
       -fontRequest, 0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE,
@@ -2027,17 +2039,59 @@ void EngineShell::UpdateHelpTexture(int page) {
       ANTIALIASED_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
   HGDIOBJ oldFont = SelectObject(memDC, hFont);
 
-  // White text on transparent background
+  // Measure line height
+  TEXTMETRICW tm;
+  GetTextMetricsW(memDC, &tm);
+  int lineHeight = tm.tmHeight + tm.tmExternalLeading;
+  if (lineHeight <= 0) lineHeight = fontSize + 4;
+
+  // Calculate lines per page (reserve 2 lines for header/footer)
+  int usableH = (int)h - 2 * (int)pad;
+  int linesPerPage = max(1, (usableH / lineHeight) - 2);
+
+  // Calculate total pages
+  int totalLines = g_nHelpLineCount;
+  int totalPages = max(1, (totalLines + linesPerPage - 1) / linesPerPage);
+
+  // Clamp page (1-based)
+  if (page < 1) page = 1;
+  if (page > totalPages) page = totalPages;
+  m_helpTotalPages = totalPages;
+
+  // Find the start of the requested page's lines
+  int startLine = (page - 1) * linesPerPage;
+  int endLine = min(startLine + linesPerPage, totalLines);
+
+  // Walk to startLine in the text
+  const wchar_t* src = g_szHelpAll;
+  for (int i = 0; i < startLine && *src; i++) {
+    while (*src && *src != L'\n') src++;
+    if (*src == L'\n') src++;
+  }
+
+  // Extract lines for this page
+  std::wstring pageText;
+  // Header
+  wchar_t hdr[128];
+  swprintf(hdr, 128, L"MDropDX12 Keyboard Shortcuts  (Page %d/%d, F1 = next, ESC = close)\n\n",
+           page, totalPages);
+  pageText = hdr;
+
+  for (int i = startLine; i < endLine && *src; i++) {
+    const wchar_t* lineStart = src;
+    while (*src && *src != L'\n') src++;
+    pageText.append(lineStart, src - lineStart);
+    pageText += L'\n';
+    if (*src == L'\n') src++;
+  }
+
+  // Render text
   SetBkMode(memDC, TRANSPARENT);
   SetTextColor(memDC, RGB(255, 255, 255));
 
   RECT textRect = { pad, pad, (LONG)w - pad, (LONG)h - pad };
-  if (isUnicode)
-    ::DrawTextW(memDC, (const wchar_t*)helpText, -1, &textRect,
-                DT_LEFT | DT_TOP | DT_EXPANDTABS);
-  else
-    ::DrawTextA(memDC, (const char*)helpText, -1, &textRect,
-                DT_LEFT | DT_TOP | DT_EXPANDTABS);
+  ::DrawTextW(memDC, pageText.c_str(), (int)pageText.size(), &textRect,
+              DT_LEFT | DT_TOP | DT_EXPANDTABS);
 
   SelectObject(memDC, oldFont);
   DeleteObject(hFont);
@@ -2045,8 +2099,6 @@ void EngineShell::UpdateHelpTexture(int page) {
   DeleteDC(memDC);
 
   // Post-process: convert GDI grayscale antialiasing to proper alpha
-  // GDI renders white text (R=G=B=intensity) but leaves A=0.
-  // Convert: text pixels → BGRA(255,255,255, intensity), bg → BGRA(0,0,0,0)
   BYTE* pixels = (BYTE*)dibBits;
   for (UINT y = 0; y < h; y++) {
     for (UINT x = 0; x < w; x++) {
@@ -2056,15 +2108,15 @@ void EngineShell::UpdateHelpTexture(int page) {
       BYTE r = pixels[idx + 2];
       BYTE intensity = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
       if (intensity > 0) {
-        pixels[idx + 0] = 255;       // B
-        pixels[idx + 1] = 255;       // G
-        pixels[idx + 2] = 255;       // R
-        pixels[idx + 3] = intensity; // A = text coverage
+        pixels[idx + 0] = 255;
+        pixels[idx + 1] = 255;
+        pixels[idx + 2] = 255;
+        pixels[idx + 3] = intensity;
       }
     }
   }
 
-  // Copy DIB to upload buffer with row-pitch alignment
+  // Copy DIB to upload buffer
   BYTE* uploadPtr = nullptr;
   m_helpUploadBuffer->Map(0, nullptr, (void**)&uploadPtr);
   if (uploadPtr) {
@@ -2081,22 +2133,22 @@ void EngineShell::UpdateHelpTexture(int page) {
 
   m_lpDX->TransitionResource(m_helpTexture, D3D12_RESOURCE_STATE_COPY_DEST);
 
-  D3D12_TEXTURE_COPY_LOCATION src = {};
-  src.pResource = m_helpUploadBuffer.Get();
-  src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-  src.PlacedFootprint.Offset = 0;
-  src.PlacedFootprint.Footprint.Format   = DXGI_FORMAT_B8G8R8A8_UNORM;
-  src.PlacedFootprint.Footprint.Width    = w;
-  src.PlacedFootprint.Footprint.Height   = h;
-  src.PlacedFootprint.Footprint.Depth    = 1;
-  src.PlacedFootprint.Footprint.RowPitch = rowPitch;
+  D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+  srcLoc.pResource = m_helpUploadBuffer.Get();
+  srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  srcLoc.PlacedFootprint.Offset = 0;
+  srcLoc.PlacedFootprint.Footprint.Format   = DXGI_FORMAT_B8G8R8A8_UNORM;
+  srcLoc.PlacedFootprint.Footprint.Width    = w;
+  srcLoc.PlacedFootprint.Footprint.Height   = h;
+  srcLoc.PlacedFootprint.Footprint.Depth    = 1;
+  srcLoc.PlacedFootprint.Footprint.RowPitch = rowPitch;
 
-  D3D12_TEXTURE_COPY_LOCATION dst = {};
-  dst.pResource = m_helpTexture.resource.Get();
-  dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-  dst.SubresourceIndex = 0;
+  D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+  dstLoc.pResource = m_helpTexture.resource.Get();
+  dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  dstLoc.SubresourceIndex = 0;
 
-  cmdList->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+  cmdList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
 
   m_lpDX->TransitionResource(m_helpTexture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
@@ -2109,10 +2161,11 @@ void EngineShell::RenderBuiltInTextMsgs() {
   UINT curW = (UINT)m_lpDX->m_client_width;
   UINT curH = (UINT)m_lpDX->m_client_height;
 
-  // Recreate if window size changed (fullscreen toggle, resize)
+  // Recreate if window size changed (fullscreen toggle, resize).
+  // Use ResetResource() to preserve pre-allocated SRV/binding block slots.
   if (m_helpTexture.IsValid() &&
       (m_helpTexture.width != curW || m_helpTexture.height != curH)) {
-    m_helpTexture.Reset();
+    m_helpTexture.ResetResource();
     m_helpUploadBuffer.Reset();
     m_helpTexturePage = 0;
   }
@@ -2561,11 +2614,9 @@ LRESULT EngineShell::PluginShellWindowProc(HWND hWnd, unsigned uMsg, WPARAM wPar
 void EngineShell::ToggleHelp() {
   if (m_show_help == 0) {
     m_show_help = 1;
-  }
-  else if (m_show_help == 1) {
-    m_show_help = 2;
-  }
-  else if (m_show_help == 2) {
+  } else if (m_show_help < m_helpTotalPages) {
+    m_show_help++;
+  } else {
     m_show_help = 0;
   }
 }
