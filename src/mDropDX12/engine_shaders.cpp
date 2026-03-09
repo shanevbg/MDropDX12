@@ -1312,6 +1312,20 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         p += lstrlen(p);
         lstrcpy(p, temp);
 
+        // For comp shaders: compute rad/ang per-pixel from UV coordinates.
+        // The fullscreen quad has only 4 vertices with hardcoded rad=1.0,
+        // so vertex interpolation gives wrong values. Compute per-pixel instead,
+        // matching the formula from engine.cpp grid precomputation (line ~2930).
+        // _c0.xy = (aspect_x, aspect_y), UV in [0,1] → NDC in [-1,1].
+        if (shaderType == SHADER_COMP && !m_bLoadingShadertoyMode) {
+          lstrcpy(temp, p);
+          sprintf(p,
+            "    float2 __d = float2((_uv.x * 2.0 - 1.0) * _c0.x, (_uv.y * 2.0 - 1.0) * _c0.y);\n"
+            "    _rad_ang = float2(length(__d), atan2(__d.y, __d.x));\n");
+          p += lstrlen(p);
+          lstrcpy(p, temp);
+        }
+
         // find the ending curly brace
         p = strrchr(p, '}');
         if (p) {

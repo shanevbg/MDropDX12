@@ -43,6 +43,25 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 void NSEEL_VM_resetvars(NSEEL_VMCTX ctx);
 #include "md_defines.h"
 
+// ---------------------------------------------------------------------------
+// EEL compile-context tracking for crash diagnostics.
+// A thread_local struct records which EEL expression is currently being
+// compiled so that the SEH handler can write it to diag_eel_error.txt.
+// ---------------------------------------------------------------------------
+struct EelCompileContext {
+    const char*    phase      = nullptr; // e.g. "per_frame", "wave_2_per_point"
+    const char*    sourceText = nullptr; // EEL expression source
+    const wchar_t* presetName = nullptr; // m_szDesc
+};
+extern thread_local EelCompileContext g_eelCompileCtx;
+
+struct EelCompileScope {
+    EelCompileScope(const char* phase, const char* src, const wchar_t* preset) {
+        g_eelCompileCtx = { phase, src, preset };
+    }
+    ~EelCompileScope() { g_eelCompileCtx = {}; }
+};
+
 // flags for CState::RecompileExpressions():
 #define RECOMPILE_PRESET_CODE  1
 #define RECOMPILE_WAVE_CODE    2

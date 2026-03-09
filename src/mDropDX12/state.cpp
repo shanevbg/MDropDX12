@@ -42,6 +42,9 @@ using namespace mdrop;
 
 namespace mdrop { extern Engine g_engine; }
 
+// Thread-local EEL compile context for SEH crash diagnostics
+thread_local EelCompileContext g_eelCompileCtx;
+
 #define FRAND ((rand() % 7381)/7380.0f)
 
 
@@ -1697,6 +1700,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
       if (buf[0] && bReInit) {
         NSEEL_CODEHANDLE	pf_codehandle_init;
 
+        EelCompileScope _eel_scope_init("preset_init", buf, m_szDesc);
         if (!(pf_codehandle_init = NSEEL_code_compile(m_pf_eel, buf, 0))) {
           const char* err = NSEEL_code_getcodeerror(m_pf_eel);
           DLOG_WARN("EEL: preset init compile FAILED: %s", err ? err : "(unknown)");
@@ -1727,6 +1731,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
       // 2. compile preset per-frame code
       StripLinefeedCharsAndComments(m_szPerFrameExpr, buf);
       if (buf[0]) {
+        EelCompileScope _eel_scope_pf("per_frame", buf, m_szDesc);
         if (!(m_pf_codehandle = NSEEL_code_compile(m_pf_eel, buf, 0))) {
           const char* err = NSEEL_code_getcodeerror(m_pf_eel);
           DLOG_WARN("EEL: per-frame compile FAILED: %s", err ? err : "(unknown)");
@@ -1739,6 +1744,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
       // 3. compile preset per-pixel code
       StripLinefeedCharsAndComments(m_szPerPixelExpr, buf);
       if (buf[0]) {
+        EelCompileScope _eel_scope_pp("per_pixel", buf, m_szDesc);
         if (!(m_pp_codehandle = NSEEL_code_compile(m_pv_eel, buf, 0))) {
           const char* err = NSEEL_code_getcodeerror(m_pv_eel);
           DLOG_WARN("EEL: per-pixel compile FAILED: %s", err ? err : "(unknown)");
@@ -1759,6 +1765,8 @@ void CState::RecompileExpressions(int flags, int bReInit) {
 #ifndef _NO_EXPR_
           {
             NSEEL_CODEHANDLE	codehandle_temp;
+            char _eel_phase[32]; snprintf(_eel_phase, sizeof(_eel_phase), "wave_%d_init", i);
+            EelCompileScope _eel_scope_wi(_eel_phase, buf, m_szDesc);
             if (!(codehandle_temp = NSEEL_code_compile(m_wave[i].m_pf_eel, buf, 0))) {
               wchar_t buf[1024];
               swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_WAVE_X_INIT_CODE), m_szDesc, i);
@@ -1793,6 +1801,8 @@ void CState::RecompileExpressions(int flags, int bReInit) {
         StripLinefeedCharsAndComments(m_wave[i].m_szPerFrame, buf);
         if (buf[0]) {
 #ifndef _NO_EXPR_
+          { char _eel_phase[32]; snprintf(_eel_phase, sizeof(_eel_phase), "wave_%d_per_frame", i);
+          EelCompileScope _eel_scope_wpf(_eel_phase, buf, m_szDesc);
           if (!(m_wave[i].m_pf_codehandle = NSEEL_code_compile(m_wave[i].m_pf_eel, buf, 0))) {
             const char* err = NSEEL_code_getcodeerror(m_wave[i].m_pf_eel);
             DLOG_WARN("EEL: wave %d per-frame compile FAILED: %s", i, err ? err : "(unknown)");
@@ -1800,12 +1810,15 @@ void CState::RecompileExpressions(int flags, int bReInit) {
             swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_WAVE_X_PER_FRAME_CODE), m_szDesc, i);
             g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
           }
+          } // EelCompileScope
 #endif
         }
 
         // 3. compile custom waveform per-point code
         StripLinefeedCharsAndComments(m_wave[i].m_szPerPoint, buf);
         if (buf[0]) {
+          char _eel_phase[32]; snprintf(_eel_phase, sizeof(_eel_phase), "wave_%d_per_point", i);
+          EelCompileScope _eel_scope_wpp(_eel_phase, buf, m_szDesc);
           if (!(m_wave[i].m_pp_codehandle = NSEEL_code_compile(m_wave[i].m_pp_eel, buf, 0))) {
             const char* err = NSEEL_code_getcodeerror(m_wave[i].m_pp_eel);
             DLOG_WARN("EEL: wave %d per-point compile FAILED: %s", i, err ? err : "(unknown)");
@@ -1825,6 +1838,8 @@ void CState::RecompileExpressions(int flags, int bReInit) {
 #ifndef _NO_EXPR_
           {
             NSEEL_CODEHANDLE	codehandle_temp;
+            char _eel_phase[32]; snprintf(_eel_phase, sizeof(_eel_phase), "shape_%d_init", i);
+            EelCompileScope _eel_scope_si(_eel_phase, buf, m_szDesc);
             if (!(codehandle_temp = NSEEL_code_compile(m_shape[i].m_pf_eel, buf, 0))) {
               const char* err = NSEEL_code_getcodeerror(m_shape[i].m_pf_eel);
               DLOG_WARN("EEL: shape %d init compile FAILED: %s", i, err ? err : "(unknown)");
@@ -1861,6 +1876,8 @@ void CState::RecompileExpressions(int flags, int bReInit) {
         StripLinefeedCharsAndComments(m_shape[i].m_szPerFrame, buf);
         if (buf[0]) {
 #ifndef _NO_EXPR_
+          { char _eel_phase[32]; snprintf(_eel_phase, sizeof(_eel_phase), "shape_%d_per_frame", i);
+          EelCompileScope _eel_scope_spf(_eel_phase, buf, m_szDesc);
           if (!(m_shape[i].m_pf_codehandle = NSEEL_code_compile(m_shape[i].m_pf_eel, buf, 0))) {
             const char* err = NSEEL_code_getcodeerror(m_shape[i].m_pf_eel);
             DLOG_WARN("EEL: shape %d per-frame compile FAILED: %s", i, err ? err : "(unknown)");
@@ -1868,6 +1885,7 @@ void CState::RecompileExpressions(int flags, int bReInit) {
             swprintf(buf, wasabiApiLangString(IDS_WARNING_PRESET_X_ERROR_IN_SHAPE_X_PER_FRAME_CODE), m_szDesc, i);
             g_engine.AddError(buf, 6.0f, ERR_PRESET, true);
           }
+          } // EelCompileScope
 #endif
         }
 

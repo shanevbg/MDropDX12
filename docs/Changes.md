@@ -1,5 +1,22 @@
 # MDropDX12 Changelog
 
+## v1.7.3 (2026-03-09)
+
+### Rendering
+
+- Fixed comp shader `rad`/`ang` per-pixel computation — presets using `(1-rad)` in comp shaders no longer render as black screen (fullscreen quad had `rad=1.0` hardcoded at all vertices; now computed per-pixel from UV coordinates with aspect correction)
+
+### Shader Infrastructure
+
+- Embedded (compiled) shaders are now always the primary source — disk `.fx` files no longer override the DX12-correct versions
+- Disk `.fx` user overrides are merged: `#define` directives override compiled defaults, and custom functions not in compiled are appended
+- Fixes `_samp_lc` / DX12 sampler errors when running from a directory with legacy DX9 `.fx` files (e.g. Milkwave)
+
+### Crash Diagnostics
+
+- SEH crash handler now writes full post-mortem diagnostics to `diag_seh_crash.txt` — register state (RAX-R15, RIP, EFLAGS), stack trace (StackWalk64 + SymFromAddr), exception details, and module resolution
+- EEL compile context tracking: thread-local RAII scope records which EEL expression phase/source/preset is being compiled, written to `diag_eel_error.txt` on crash
+
 ## v1.7.2 (2026-03-09)
 
 ### GLSL→HLSL Converter
