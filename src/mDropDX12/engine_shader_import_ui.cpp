@@ -2156,47 +2156,35 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
         replaceAll(inp, "mat3x3", "float3x3");
         replaceAll(inp, "mat4x4", "float4x4");
 
-        // Non-square matrix types: constructor vs declaration need different handling.
-        // GLSL matAxB(args) fills COLUMNS (A cols × B rows); HLSL floatAxB(args) fills ROWS.
-        // Constructor fix: matAxB(args) → transpose(floatAxB(args))
-        //   floatAxB stores args as rows; transpose flips rows→columns, matching GLSL.
-        // Declaration fix: matAxB varName → floatBxA varName (dimensions swapped)
+        // Non-square matrix types: same mul-swap strategy as square matrices.
+        // GLSL matAxB(args) fills COLUMNS; HLSL floatAxB(args) fills ROWS.
+        // floatAxB(col0,col1,...) stores GLSL columns as HLSL rows (no transpose needed).
+        // M[i] returns row i = GLSL column i — correct type and data.
+        // mul() uses SWAPPED order (same as square) to compensate for row/column swap.
         {
             auto isIdentNS = [](char c) -> bool {
                 return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
                        (c >= '0' && c <= '9') || c == '_';
             };
-            struct NonSqMat { const char* pat; const char* dims; const char* decl; };
+            struct NonSqMat { const char* from; const char* to; };
             NonSqMat nsTypes[] = {
-                {"mat2x3(", "2x3", "float3x2"},
-                {"mat2x4(", "2x4", "float4x2"},
-                {"mat3x2(", "3x2", "float2x3"},
-                {"mat3x4(", "3x4", "float4x3"},
-                {"mat4x2(", "4x2", "float2x4"},
-                {"mat4x3(", "4x3", "float3x4"},
+                {"mat2x3", "float2x3"},
+                {"mat2x4", "float2x4"},
+                {"mat3x2", "float3x2"},
+                {"mat3x4", "float3x4"},
+                {"mat4x2", "float4x2"},
+                {"mat4x3", "float4x3"},
             };
             for (auto& ns : nsTypes) {
-                std::string pat(ns.pat);
-                // Wrap constructors: matAxB(args) → transpose(floatAxB(args))
+                // Replace both constructors and declarations: matAxB → floatAxB (same dims)
                 size_t pos = 0;
-                while ((pos = inp.find(pat, pos)) != std::string::npos) {
+                while ((pos = inp.find(ns.from, pos)) != std::string::npos) {
                     if (pos > 0 && isIdentNS(inp[pos - 1])) { pos++; continue; }
-                    size_t argsStart = pos + pat.size();
-                    std::string rest = inp.substr(argsStart);
-                    int closingIdx = FindClosingBracket(rest, '(', ')', 1);
-                    if (closingIdx >= 0) {
-                        size_t closePos = argsStart + closingIdx;
-                        std::string args = inp.substr(argsStart, closingIdx);
-                        std::string repl = "transpose(float" + std::string(ns.dims) + "(" + args + "))";
-                        inp = inp.substr(0, pos) + repl + inp.substr(closePos + 1);
-                        pos += repl.size();
-                    } else {
-                        pos += pat.size();
-                    }
+                    size_t after = pos + strlen(ns.from);
+                    if (after < inp.size() && isIdentNS(inp[after]) && inp[after] != '(') { pos++; continue; }
+                    inp.replace(pos, strlen(ns.from), ns.to);
+                    pos += strlen(ns.to);
                 }
-                // Replace remaining type declarations: matAxB → floatBxA (dims swapped)
-                std::string typeName = pat.substr(0, pat.size() - 1);
-                replaceAll(inp, typeName, ns.decl);
             }
         }
 
@@ -2417,8 +2405,7 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
 
         // Phase 1b: Collect matrix variable names and fix matrix*vector multiplication
         // HLSL requires mul() for matrix-vector multiply; the * operator causes X3020 type mismatch.
-        // Square matrices use mul-swap (no transpose on constructor, rows≡GLSL columns, M[i] works).
-        // Non-square matrices use standard mul (constructor wrapped with transpose() in Phase 1).
+        // All matrices (square and non-square) use mul-swap: rows≡GLSL columns, M[i] works.
         {
             auto isIdent = [](char c) -> bool {
                 return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
@@ -2432,8 +2419,8 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                 {"mat2", true}, {"mat3", true}, {"mat4", true},
                 // Post-replacement HLSL forms
                 {"float2x2", true}, {"float3x3", true}, {"float4x4", true},
-                {"float2x3", false}, {"float3x2", false}, {"float2x4", false},
-                {"float4x2", false}, {"float3x4", false}, {"float4x3", false},
+                {"float2x3", true}, {"float3x2", true}, {"float2x4", true},
+                {"float4x2", true}, {"float3x4", true}, {"float4x3", true},
             };
             struct MatFunc { std::string name; bool isSquare; };
             std::vector<MatFunc> matFuncs;
@@ -2460,11 +2447,9 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                 }
             }
             // Convert matVar*expr and expr*matVar to mul() calls.
-            // Square (mul-swap): matVar*expr → mul(expr, matVar), expr*matVar → mul(matVar, expr)
-            //   Because float3x3(a,b,c) stores a,b,c as ROWS but GLSL treats them as COLUMNS.
-            //   Swapping mul() args compensates. Also preserves M[i] indexing (row i = GLSL col i).
-            // Non-square (standard): matVar*expr → mul(matVar, expr), expr*matVar → mul(expr, matVar)
-            //   Because constructor was wrapped with transpose(), matrix is correct. Standard order.
+            // All matrices use mul-swap: matVar*expr → mul(expr, matVar), expr*matVar → mul(matVar, expr)
+            //   floatNxM(a,b,c) stores a,b,c as ROWS but GLSL treats them as COLUMNS.
+            //   Swapping mul() args compensates. Preserves M[i] indexing (row i = GLSL col i).
             for (const auto& mv : matVars) {
                 int mvLen = (int)mv.name.size();
                 size_t pos = 0;
