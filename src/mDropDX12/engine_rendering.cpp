@@ -1214,10 +1214,11 @@ void Engine::MyRenderUI(
     }
     else if (m_UI_mode == UI_MASHUP) {
       if (m_nPresets - m_nDirs == 0) {
-        // note: this error message is repeated in milkdrop.cpp in LoadRandomPreset()
-        wchar_t buf[1024];
-        swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILE_FOUND_IN_X_MILK), m_szPresetDir);
-        AddError(buf, 6.0f, ERR_MISC, true);
+        if (wcscmp(m_pState->m_szDesc, INVALID_PRESET_DESC) == 0) {
+          wchar_t buf[1024];
+          swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILE_FOUND_IN_X_MILK), m_szPresetDir);
+          AddError(buf, 6.0f, ERR_MISC, true);
+        }
         m_UI_mode = UI_REGULAR;
       }
       else {

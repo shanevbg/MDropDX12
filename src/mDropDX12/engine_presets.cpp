@@ -85,15 +85,20 @@ void Engine::LoadRandomPreset(float fBlendTime) {
 
   // make sure file list is ok
   if (m_nPresets - m_nDirs == 0) {
-    wchar_t buf[1024];
-    swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILE_FOUND_IN_X_MILK), m_szPresetDir);
-    AddError(buf, 6.0f, ERR_MISC, true);
-    DebugLogA("ERROR: No preset files found in preset directory", LOG_ERROR);
+    // Only nag if no preset is currently loaded (first run / empty dir).
+    // If a preset is already playing, just silently stay on it.
+    bool bHasPreset = wcscmp(m_pState->m_szDesc, INVALID_PRESET_DESC) != 0;
+    if (!bHasPreset) {
+      wchar_t buf[1024];
+      swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILE_FOUND_IN_X_MILK), m_szPresetDir);
+      AddError(buf, 6.0f, ERR_MISC, true);
+      DebugLogA("ERROR: No preset files found in preset directory", LOG_ERROR);
 
-    if (m_UI_mode == UI_REGULAR || m_UI_mode == UI_MENU) {
-      m_UI_mode = UI_LOAD;
-      m_bUserPagedUp = false;
-      m_bUserPagedDown = false;
+      if (m_UI_mode == UI_REGULAR || m_UI_mode == UI_MENU) {
+        m_UI_mode = UI_LOAD;
+        m_bUserPagedUp = false;
+        m_bUserPagedDown = false;
+      }
     }
     return;
   }
@@ -2160,10 +2165,13 @@ retry:
     //if( (hFile = _findfirst(szMask, &c_file )) != -1L )		// note: returns filename -without- path
     if ((h = FindFirstFileW(g_engine.m_szUpdatePresetMask, &fd)) == INVALID_HANDLE_VALUE)		// note: returns filename -without- path
     {
-      // --> revert back to plugins dir
-      wchar_t buf[1024];
-      swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILES_OR_DIRS_FOUND_IN_X), g_engine.m_szPresetDir);
-      g_engine.AddError(buf, g_engine.m_ErrorDuration, ERR_MISC, true);
+      // Only show error if no preset is currently loaded (first run / empty dir)
+      bool bHasPreset = wcscmp(g_engine.m_pState->m_szDesc, INVALID_PRESET_DESC) != 0;
+      if (!bHasPreset) {
+        wchar_t buf[1024];
+        swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILES_OR_DIRS_FOUND_IN_X), g_engine.m_szPresetDir);
+        g_engine.AddError(buf, g_engine.m_ErrorDuration, ERR_MISC, true);
+      }
 
       if (bRetrying) {
         LeaveCriticalSection(&g_cs);
@@ -2370,11 +2378,14 @@ retry:
   g_engine.m_bPresetListReady = true;
 
   if (g_engine.m_bPresetListReady && g_engine.m_nPresets == 0) {
-    // no presets OR directories found - weird - but it happens.
-    // --> revert back to plugins dir
-    wchar_t buf[1024];
-    swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILES_OR_DIRS_FOUND_IN_X), g_engine.m_szPresetDir);
-    g_engine.AddError(buf, g_engine.m_ErrorDuration, ERR_MISC, true);
+    // no presets OR directories found
+    // Only show error if no preset is currently loaded
+    bool bHasPreset = wcscmp(g_engine.m_pState->m_szDesc, INVALID_PRESET_DESC) != 0;
+    if (!bHasPreset) {
+      wchar_t buf[1024];
+      swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILES_OR_DIRS_FOUND_IN_X), g_engine.m_szPresetDir);
+      g_engine.AddError(buf, g_engine.m_ErrorDuration, ERR_MISC, true);
+    }
 
     if (bRetrying) {
       LeaveCriticalSection(&g_cs);
