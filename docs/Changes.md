@@ -1,5 +1,43 @@
 # MDropDX12 Changelog
 
+## v1.7.1 (2026-03-09)
+
+### FFT Accuracy
+
+- Added separate clean FFT (`m_fftShader`) with Hann³ window and no equalization for shader audio texture — fixes high frequencies being over-accentuated in EQ visualization presets
+- FFT for shader `get_fft()` / `get_fft_hz()` now matches Milkwave's scaling (0.00035f, noise gate 5e-5, visible floor 2.5e-4)
+- Beat detection FFT (`myfft`) unchanged — still uses equalization for accurate bass/mid/treb analysis
+
+### Shader Features
+
+- Added `iDate` support (`_c19`): `float4(year, month 0-11, day, seconds_since_midnight)` for wall clock time in shaders
+- Added `tex3Dlod` macro for 3D texture LOD sampling
+- GLSL converter now maps `iDate` to `_c19` instead of commenting it out as unsupported
+
+### Preset Name Display
+
+- Added "(Simple)" mode for preset name display — uses decorative font settings (adjustable size and color only, no animation effects)
+- Simple mode is now the default (`PresetNameAnimProfile=-3`)
+- Combo box in Text Animations window shows (Disabled) / (Simple) / (Random) / named profiles
+
+### Shadertoy Rendering
+
+- Supertexts (preset name, song title) and user sprites now render in Shadertoy (.milk3) render path
+
+### Preset Browser
+
+- Single-click on directory entries now navigates into/out of directories (previously required double-click)
+- `sampler_rand` stripping now only matches actual `Texture2D` declarations (prevents false positives when presets reference sampler by name only)
+
+### HUD Overlay
+
+- Song title on overlay auto-shrinks font when text exceeds available width
+
+### Stability
+
+- Suppressed "no presets found" error when a preset is already playing — fixes nag during preset list rebuild race
+- Animation profiles now persist to disk when Text Animations window is closed
+
 ## v1.7.0 (2026-03-08)
 
 ### FFT EQ Smoothing & Peak Hold
