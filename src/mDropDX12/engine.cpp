@@ -1517,10 +1517,10 @@ void Engine::MyReadConfig() {
       WritePrivateProfileStringW(L"Settings", L"szPresetDir", m_szPresetDir, pIni);
     }
     else {
-      // Self-bootstrap: create the default preset directory
-      CreateDirectoryW(szDefault, NULL);
+      // No preset directory found — use the default path but don't create it.
+      // Directory will be created when needed (user saves/drops a preset).
       lstrcpyW(m_szPresetDir, szDefault);
-      DebugLogA("Created default preset directory (self-bootstrap)");
+      DebugLogA("Preset directory not found; using default path (no auto-create)");
     }
   }
 

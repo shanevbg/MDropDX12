@@ -3069,14 +3069,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
         }
       }
 
-      // Self-bootstrap: use exe directory and create the directory structure.
-      // Shaders are served from embedded memory; disk .fx files are optional overrides.
+      // Self-bootstrap: use exe directory. Shaders are served from embedded memory;
+      // no directory structure is created — directories are only made when explicitly
+      // needed (e.g. user saves a preset, drops a texture, etc.).
       dir = exeDir;
-      CreateDirectoryW((dir / L"resources").c_str(), NULL);
-      CreateDirectoryW((dir / L"resources" / L"data").c_str(), NULL);
-      CreateDirectoryW((dir / L"resources" / L"presets").c_str(), NULL);
-      CreateDirectoryW((dir / L"resources" / L"textures").c_str(), NULL);
-      CreateDirectoryW((dir / L"resources" / L"sprites").c_str(), NULL);
       g_engine.m_bSelfBootstrapped = true;
       g_engine.m_LogLevel = 4; // verbose logging for first-run diagnostics
     }
