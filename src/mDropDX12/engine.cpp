@@ -779,55 +779,200 @@ static void CopyEmbeddedToBuffer(const char* src, char* szDestText, int nMaxByte
   szDestText[len++] = ' ';  // trailing whitespace (matches original behavior)
 }
 
+// Helper: read a disk file into a buffer, returning the length.
+static int ReadDiskFile(const wchar_t* szFile, char* buf, int nMaxBytes, bool bConvertLFs) {
+  FILE* f = _wfopen(szFile, L"rb");
+  if (!f) return -1;
+  int len = 0;
+  int x;
+  char prev_ch = 0;
+  while ((x = fgetc(f)) >= 0 && len < nMaxBytes - 4) {
+    char orig_ch = (char)x;
+    char ch = orig_ch;
+    bool bSkipChar = false;
+    if (bConvertLFs) {
+      if (ch == 10) {
+        if (prev_ch == 13)
+          bSkipChar = true;
+        else
+          ch = LINEFEED_CONTROL_CHAR;
+      }
+      else if (ch == 13)
+        ch = LINEFEED_CONTROL_CHAR;
+    }
+    if (!bSkipChar)
+      buf[len++] = ch;
+    prev_ch = orig_ch;
+  }
+  buf[len] = 0;
+  fclose(f);
+  return len;
+}
+
+// Helper: merge user overrides from a disk .fx file into the compiled (embedded) buffer.
+// Strategy: scan the disk file for #define directives and function definitions that
+// either don't exist in the compiled version or should override it.
+// - #define: append #undef + #define (user overrides compiled)
+// - Functions: append if not already in compiled
+// - Variable/sampler/texture declarations: SKIP (compiled has DX12-correct versions)
+static void MergeDiskOverrides(const char* diskBuf, char* szDestText, int nMaxBytes) {
+  int destLen = lstrlenA(szDestText);
+  const char* p = diskBuf;
+
+  // Helper lambda-like: check if a C identifier at pos is a known HLSL return type
+  auto isReturnType = [](const char* s, int* outLen) -> bool {
+    struct { const char* name; int len; } types[] = {
+      {"float4", 6}, {"float3", 6}, {"float2", 6}, {"float", 5},
+      {"half4", 5}, {"half3", 5}, {"half2", 5}, {"half", 4},
+      {"int", 3}, {"void", 4}, {"bool", 4},
+    };
+    for (auto& t : types) {
+      if (strncmp(s, t.name, t.len) == 0 && !isalnum((unsigned char)s[t.len]) && s[t.len] != '_') {
+        *outLen = t.len;
+        return true;
+      }
+    }
+    return false;
+  };
+
+  while (*p) {
+    // Skip whitespace/newlines
+    while (*p && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n'))
+      p++;
+    if (!*p) break;
+
+    // --- Handle #define lines ---
+    if (strncmp(p, "#define", 7) == 0 && (p[7] == ' ' || p[7] == '\t')) {
+      const char* lineStart = p;
+      // Find end of #define (may span lines with backslash continuation)
+      while (*p) {
+        if (*p == '\n' || *p == '\r') {
+          if (p > lineStart && *(p - 1) == '\\') {
+            p++;
+            continue;  // continuation
+          }
+          break;
+        }
+        p++;
+      }
+      int lineLen = (int)(p - lineStart);
+
+      // Extract the macro name: skip "#define" + whitespace, then read identifier
+      const char* nameStart = lineStart + 7;
+      while (*nameStart == ' ' || *nameStart == '\t') nameStart++;
+      const char* nameEnd = nameStart;
+      while (isalnum((unsigned char)*nameEnd) || *nameEnd == '_') nameEnd++;
+      int nameLen = (int)(nameEnd - nameStart);
+
+      if (nameLen > 0 && destLen + lineLen + 20 < nMaxBytes) {
+        // Emit #undef + #define to override compiled version
+        char undefLine[256];
+        int uLen = sprintf(undefLine, "\n#undef ");
+        memcpy(undefLine + uLen, nameStart, nameLen);
+        uLen += nameLen;
+        undefLine[uLen++] = '\n';
+        undefLine[uLen] = 0;
+        memcpy(szDestText + destLen, undefLine, uLen);
+        destLen += uLen;
+        memcpy(szDestText + destLen, lineStart, lineLen);
+        destLen += lineLen;
+        szDestText[destLen++] = '\n';
+        szDestText[destLen] = 0;
+      }
+      continue;
+    }
+
+    // --- Handle function definitions ---
+    int typeLen = 0;
+    if (isReturnType(p, &typeLen)) {
+      const char* afterType = p + typeLen;
+      // Skip whitespace after type
+      while (*afterType == ' ' || *afterType == '\t') afterType++;
+      // Read function name
+      const char* funcNameStart = afterType;
+      while (isalnum((unsigned char)*afterType) || *afterType == '_') afterType++;
+      int funcNameLen = (int)(afterType - funcNameStart);
+      // Skip whitespace
+      while (*afterType == ' ' || *afterType == '\t') afterType++;
+
+      if (funcNameLen > 0 && *afterType == '(') {
+        // This looks like a function definition — find the body { ... }
+        const char* funcStart = p;
+        const char* brace = strchr(afterType, '{');
+        if (brace) {
+          // Count braces to find matching close
+          int depth = 1;
+          const char* q = brace + 1;
+          while (*q && depth > 0) {
+            if (*q == '{') depth++;
+            else if (*q == '}') depth--;
+            q++;
+          }
+          int funcLen = (int)(q - funcStart);
+
+          // Check if this function already exists in compiled version
+          // by searching for the function name followed by '('
+          char searchBuf[256];
+          if (funcNameLen < 250) {
+            memcpy(searchBuf, funcNameStart, funcNameLen);
+            searchBuf[funcNameLen] = '(';
+            searchBuf[funcNameLen + 1] = 0;
+
+            if (!strstr(szDestText, searchBuf)) {
+              // Function not in compiled — append it
+              if (destLen + funcLen + 4 < nMaxBytes) {
+                szDestText[destLen++] = '\n';
+                memcpy(szDestText + destLen, funcStart, funcLen);
+                destLen += funcLen;
+                szDestText[destLen++] = '\n';
+                szDestText[destLen] = 0;
+              }
+            }
+          }
+          p = q;
+          continue;
+        }
+      }
+    }
+
+    // --- Skip everything else (variable decls, sampler blocks, comments, etc.) ---
+    // Advance to end of line
+    while (*p && *p != '\n' && *p != '\r')
+      p++;
+  }
+}
+
 bool ReadFileToString(const wchar_t* szBaseFilename, char* szDestText, int nMaxBytes, bool bConvertLFsToSpecialChar) {
   wchar_t szFile[MAX_PATH];
   swprintf(szFile, L"%s%s", g_engine.m_szMilkdrop2Path, szBaseFilename);
 
-  // Embedded shaders are the primary source. Disk .fx files serve as user overrides.
+  // Compiled (embedded) shaders are the primary source.
+  // If a disk .fx file also exists, its #defines and functions are merged in
+  // as overrides (user customizations replace compiled defaults).
   const char* embedded = FindEmbeddedShader(szBaseFilename);
 
-  // If a disk file exists, use it (user override). Otherwise use embedded.
-  FILE* f = _wfopen(szFile, L"rb");
-  if (f) {
-    if (embedded) {
-      wchar_t dbg[512];
-      swprintf(dbg, L"Using disk override for: %s", szBaseFilename);
-      g_engine.dumpmsg(dbg);
-    }
-
-    // Read from disk. Replace { 13; 13+10; 10 } with LINEFEED_CONTROL_CHAR if requested.
-    int len = 0;
-    int x;
-    char prev_ch = 0;
-    while ((x = fgetc(f)) >= 0 && len < nMaxBytes - 4) {
-      char orig_ch = (char)x;
-      char ch = orig_ch;
-      bool bSkipChar = false;
-      if (bConvertLFsToSpecialChar) {
-        if (ch == 10) {
-          if (prev_ch == 13)
-            bSkipChar = true;
-          else
-            ch = LINEFEED_CONTROL_CHAR;
-        }
-        else if (ch == 13)
-          ch = LINEFEED_CONTROL_CHAR;
-      }
-      if (!bSkipChar)
-        szDestText[len++] = ch;
-      prev_ch = orig_ch;
-    }
-    szDestText[len] = 0;
-    szDestText[len++] = ' ';   // make sure there is some whitespace after
-    fclose(f);
-    return true;
-  }
-
-  // No disk file — use embedded if available
   if (embedded) {
     CopyEmbeddedToBuffer(embedded, szDestText, nMaxBytes, bConvertLFsToSpecialChar);
+
+    // If a disk file also exists, merge user overrides (#defines, functions)
+    char* diskBuf = (char*)malloc(nMaxBytes);
+    if (diskBuf) {
+      int diskLen = ReadDiskFile(szFile, diskBuf, nMaxBytes, false); // read raw (no LF conversion for scanning)
+      if (diskLen > 0) {
+        wchar_t dbg[512];
+        swprintf(dbg, L"Merging user overrides from disk: %s", szBaseFilename);
+        g_engine.dumpmsg(dbg);
+        MergeDiskOverrides(diskBuf, szDestText, nMaxBytes);
+      }
+      free(diskBuf);
+    }
     return true;
   }
+
+  // No embedded version — fall back to disk file entirely
+  int len = ReadDiskFile(szFile, szDestText, nMaxBytes, bConvertLFsToSpecialChar);
+  if (len >= 0)
+    return true;
 
   // Neither embedded nor on disk
   wchar_t buf[1024], title[64];

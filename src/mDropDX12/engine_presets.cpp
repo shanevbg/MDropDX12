@@ -136,6 +136,47 @@ static LONG WriteSEHCrashDiag(EXCEPTION_POINTERS* ep, const wchar_t* presetPath)
     // Also log to debug.log that a diag was written
     DLOG_ERROR("SEH crash diagnostics written to diag_seh_crash.txt");
 
+    // --- Write EEL-specific diagnostics to diag_eel_error.txt ---
+    if (g_eelCompileCtx.phase) {
+        wchar_t eelPath[MAX_PATH];
+        swprintf_s(eelPath, L"%sdiag_eel_error.txt", g_engine.m_szBaseDir);
+
+        FILE* ef = nullptr;
+        _wfopen_s(&ef, eelPath, L"a"); // append — accumulates across crashes
+        if (ef) {
+            fwprintf(ef, L"\n========== EEL CRASH %04d-%02d-%02d %02d:%02d:%02d ==========\n",
+                     st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+            fwprintf(ef, L"Preset: %s\n", presetPath ? presetPath : L"<unknown>");
+            fwprintf(ef, L"Phase:  %hs\n", g_eelCompileCtx.phase);
+            fwprintf(ef, L"Exception: 0x%08X at 0x%016llX\n",
+                     er->ExceptionCode, (DWORD64)er->ExceptionAddress);
+
+            // Check if crash address is in JIT memory (no module owns it)
+            HMODULE hCrashMod = NULL;
+            GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                               (LPCWSTR)er->ExceptionAddress, &hCrashMod);
+            fwprintf(ef, L"JIT crash: %s\n", hCrashMod ? L"NO (in loaded module)" : L"YES (address not in any loaded module)");
+
+            // Dump the EEL source text (truncated to 4KB)
+            if (g_eelCompileCtx.sourceText) {
+                fwprintf(ef, L"\nEEL Source:\n-----------\n");
+                // Write up to 4096 chars of source
+                const char* src = g_eelCompileCtx.sourceText;
+                int len = 0;
+                while (src[len] && len < 4096) len++;
+                fwrite(src, 1, len, ef);
+                if (src[len]) fprintf(ef, "\n... (truncated at 4KB)");
+                fprintf(ef, "\n-----------\n\n");
+            }
+
+            fclose(ef);
+        }
+
+        DLOG_ERROR("EEL crash in phase '%s' — diagnostics written to diag_eel_error.txt",
+                   g_eelCompileCtx.phase);
+    }
+
     return EXCEPTION_EXECUTE_HANDLER;
 }
 extern int NumTotalPresetsLoaded;
