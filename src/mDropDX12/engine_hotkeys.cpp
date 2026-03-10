@@ -109,6 +109,8 @@ void Engine::ResetHotkeyDefaults()
     // ── Window ──
     HK_DEF(i++, HK_TOGGLE_FULLSCREEN, 0,                     0,            HKSCOPE_LOCAL, HKCAT_WINDOW, L"Toggle Fullscreen",     L"ToggleFullscreen");
     HK_DEF(i++, HK_TOGGLE_STRETCH,    0,                     0,            HKSCOPE_LOCAL, HKCAT_WINDOW, L"Toggle Stretch/Mirror", L"ToggleStretch");
+    HK_DEF(i++, HK_MIRROR_ONLY,      0,                     0,            HKSCOPE_LOCAL, HKCAT_WINDOW, L"Toggle Mirror",         L"ToggleMirror");
+    HK_DEF(i++, HK_STRETCH_ONLY,     0,                     0,            HKSCOPE_LOCAL, HKCAT_WINDOW, L"Toggle Stretch",        L"ToggleStretchOnly");
     HK_DEF(i++, HK_ALWAYS_ON_TOP,     0,                     VK_F7,        HKSCOPE_LOCAL, HKCAT_WINDOW, L"Always On Top",         L"AlwaysOnTop");
     HK_DEF(i++, HK_TRANSPARENCY_MODE, 0,                     VK_F12,       HKSCOPE_LOCAL, HKCAT_WINDOW, L"Transparency Mode",     L"TransparencyMode");
     HK_DEF(i++, HK_BLACK_MODE,        MOD_CONTROL,           VK_F12,       HKSCOPE_LOCAL, HKCAT_WINDOW, L"Black Mode",            L"BlackMode");
@@ -722,6 +724,8 @@ bool Engine::DispatchHotkeyAction(int actionId)
     // ── Window (need App.cpp or render-window-local state) ──
     case HK_TOGGLE_FULLSCREEN:
     case HK_TOGGLE_STRETCH:
+    case HK_MIRROR_ONLY:
+    case HK_STRETCH_ONLY:
     case HK_ALWAYS_ON_TOP:
     case HK_TRANSPARENCY_MODE:
     case HK_BLACK_MODE:

@@ -85,7 +85,9 @@ enum HotkeyAction : int {
 
     // ── Window ──
     HK_TOGGLE_FULLSCREEN,        // (configurable, was F9/Alt+Enter in App)
-    HK_TOGGLE_STRETCH,           // (configurable)
+    HK_TOGGLE_STRETCH,           // (configurable) — stretch or mirror depending on toggle
+    HK_MIRROR_ONLY,              // (unbound) — always mirror
+    HK_STRETCH_ONLY,             // (unbound) — always stretch
     HK_ALWAYS_ON_TOP,            // F7
     HK_TRANSPARENCY_MODE,        // F12
     HK_BLACK_MODE,               // Ctrl+F12

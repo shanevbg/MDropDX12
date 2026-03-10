@@ -1317,8 +1317,10 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       SetForegroundWindow(hWnd);
       break;
     }
-    if (id == HK_TOGGLE_STRETCH) {
-      if (g_engine.m_bMirrorModeForAltS) {
+    if (id == HK_TOGGLE_STRETCH || id == HK_MIRROR_ONLY || id == HK_STRETCH_ONLY) {
+      bool doMirror = (id == HK_MIRROR_ONLY) || (id == HK_TOGGLE_STRETCH && g_engine.m_bMirrorModeForAltS);
+      bool doStretch = (id == HK_STRETCH_ONLY) || (id == HK_TOGGLE_STRETCH && !g_engine.m_bMirrorModeForAltS);
+      if (doMirror) {
         if (!g_engine.m_bMirrorsActive) {
           auto result = g_engine.TryActivateMirrors(hWnd);
           if (result != Engine::MirrorCancelled) {
@@ -1335,7 +1337,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
           if (fullscreen) ToggleFullScreen(hWnd);
           g_engine.AddNotification(L"Mirror outputs disabled");
         }
-      } else {
+      } else if (doStretch) {
         ToggleStretch(hWnd);
       }
       SetForegroundWindow(hWnd);
@@ -1363,7 +1365,12 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       SetForegroundWindow(hWnd);
       break;
     case HK_TOGGLE_STRETCH:
-      if (g_engine.m_bMirrorModeForAltS) {
+    case HK_MIRROR_ONLY:
+    case HK_STRETCH_ONLY:
+    {
+      bool doMirror = (id == HK_MIRROR_ONLY) || (id == HK_TOGGLE_STRETCH && g_engine.m_bMirrorModeForAltS);
+      bool doStretch = (id == HK_STRETCH_ONLY) || (id == HK_TOGGLE_STRETCH && !g_engine.m_bMirrorModeForAltS);
+      if (doMirror) {
         if (!g_engine.m_bMirrorsActive) {
           auto result = g_engine.TryActivateMirrors(hWnd);
           if (result != Engine::MirrorCancelled) {
@@ -1380,11 +1387,12 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
           if (fullscreen) ToggleFullScreen(hWnd);
           g_engine.AddNotification(L"Mirror outputs disabled");
         }
-      } else {
+      } else if (doStretch) {
         ToggleStretch(hWnd);
       }
       SetForegroundWindow(hWnd);
       break;
+    }
     case HK_ALWAYS_ON_TOP:
       g_engine.m_bAlwaysOnTop = !g_engine.m_bAlwaysOnTop;
       g_engine.ToggleAlwaysOnTop(hWnd);
