@@ -688,49 +688,7 @@ void mdrop::Engine::RunPerFrameEquations(int code) {
 // execute once-per-frame expressions:
 #ifndef _NO_EXPR_
     if (pState->m_pf_codehandle) {
-      if (pState->m_pf_codehandle) {
-        // DIAG: dump reg20-28 before/after per_frame execution to file
-        static int diagPfCount = 0;
-        static bool diagPfReset = true;
-        if (m_bPresetDiagLogged) { diagPfReset = true; }
-        if (!m_bPresetDiagLogged && diagPfReset) {
-          diagPfCount = 0; diagPfReset = false;
-          // Open/create diag file at preset start
-          wchar_t dp[MAX_PATH];
-          swprintf(dp, MAX_PATH, L"%sdiag_regs.txt", m_szBaseDir);
-          FILE* dfp = nullptr;
-          _wfopen_s(&dfp, dp, L"w");
-          if (dfp) { fprintf(dfp, "--- preset load ---\n"); fclose(dfp); }
-        }
-        if (diagPfCount < 30) {
-          double* regs = NSEEL_getglobalregs();
-          wchar_t dp[MAX_PATH];
-          swprintf(dp, MAX_PATH, L"%sdiag_regs.txt", m_szBaseDir);
-          FILE* dfp = nullptr;
-          _wfopen_s(&dfp, dp, L"a");
-          if (dfp) {
-            fprintf(dfp, "#%d rep=%d/%d BEF reg20-28: %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f\n",
-                    diagPfCount, rep, num_reps,
-                    regs[20], regs[21], regs[22], regs[23], regs[24], regs[25], regs[26], regs[27], regs[28]);
-            fclose(dfp);
-          }
-        }
         NSEEL_code_execute(pState->m_pf_codehandle);
-        if (diagPfCount < 30) {
-          double* regs = NSEEL_getglobalregs();
-          wchar_t dp[MAX_PATH];
-          swprintf(dp, MAX_PATH, L"%sdiag_regs.txt", m_szBaseDir);
-          FILE* dfp = nullptr;
-          _wfopen_s(&dfp, dp, L"a");
-          if (dfp) {
-            fprintf(dfp, "#%d rep=%d/%d AFT reg20-28: %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f\n",
-                    diagPfCount, rep, num_reps,
-                    regs[20], regs[21], regs[22], regs[23], regs[24], regs[25], regs[26], regs[27], regs[28]);
-            fclose(dfp);
-          }
-          diagPfCount++;
-        }
-      }
     }
 #endif
 

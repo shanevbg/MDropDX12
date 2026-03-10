@@ -1438,6 +1438,10 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
     if (!m_szCompShadersText[0]) {
       DebugLogA("DIAG Import comp: EMPTY - falling back to GenCompPShaderText", LOG_VERBOSE);
       g_engine.GenCompPShaderText(m_szCompShadersText, m_fGammaAdj.eval(-1), m_fVideoEchoAlpha.eval(-1), m_fVideoEchoZoom.eval(-1), m_nVideoEchoOrientation, m_fShader.eval(-1), m_bBrighten, m_bDarken, m_bSolarize, m_bInvert);
+      // DX12: non-shader presets need a compiled comp PSO for video echo, gamma, and hue shader.
+      // DX9 handled these via multi-pass blend states in ShowToUser_NoShaders(), which doesn't
+      // exist in the DX12 path. Set PS version so the generated shader text gets compiled.
+      nCompPSVersionInFile = MD2_PS_2_0;
     }
     m_nCompPSVersion = nCompPSVersionInFile;
   }
