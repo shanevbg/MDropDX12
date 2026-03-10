@@ -317,6 +317,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SONG_WINDOW_TITLE   2161  // Edit: window title to scrape
 #define IDC_MW_SONG_OVERLAY        2162  // Checkbox: overlay notifications
 #define IDC_MW_SONG_COVER          2163  // Checkbox: show cover art sprite
+#define IDC_MW_SONG_COVER_NOW      2174  // Button: show cover art now
 #define IDC_MW_SONG_CORNER         2164  // ComboBox: display corner
 #define IDC_MW_SONG_DISPLAY_SEC    2165  // Edit: display seconds
 #define IDC_MW_CURRENT_PRESET      2166  // Edit: current/startup preset
@@ -914,6 +915,7 @@ extern bool g_bSettingsWndClassRegistered;
 #define WM_MW_ENABLEVIDEOMIX    (WM_APP + 107)
 #define WM_MW_SETSPOUTSENDER    (WM_APP + 108)
 #define WM_MW_ENABLESPOUTMIX    (WM_APP + 109)
+#define WM_MW_SHOW_COVER        (WM_APP + 110)
 #define WM_MW_SET_INPUTMIX_OPACITY  (WM_APP + 150)
 #define WM_MW_SET_INPUTMIX_LUMAKEY  (WM_APP + 151)
 #define WM_MW_SET_INPUTMIX_ONTOP    (WM_APP + 152)

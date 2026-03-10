@@ -97,7 +97,7 @@ See `docs/dx12-migration-status.md` for detailed migration state.
 ## Workflow Preferences
 
 - After code changes, always attempt a build: `powershell -ExecutionPolicy Bypass -File build.ps1 Release x64`
-- If a build is blocked by permissions (exe locked), ask the user to close the running visualizer
+- Building closes any running visualizer instance (the linker overwrites the exe)
 - INI section is `[Milkwave]` for backward compatibility (not renamed)
 - Reference visualizer for comparison: MilkDrop 3PRO (MilkDrop3)
 - User has custom texture files that presets reference (clipboard textures, etc.)

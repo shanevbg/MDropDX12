@@ -321,6 +321,109 @@ int texmgr::LoadTex(wchar_t* szFilename, int iSlot, char* szInitCode, char* szCo
   return ret;
 }
 
+int texmgr::LoadTexFromPixels(const void* pixels, UINT imgW, UINT imgH, int iSlot,
+                              char* szInitCode, char* szCode, float time, int frame)
+{
+  if (iSlot < 0 || iSlot >= NUM_TEX) return TEXMGR_ERR_BAD_INDEX;
+  if (!m_lpDX12 || !m_lpDX12->m_device) return TEXMGR_ERR_BADFILE;
+
+  KillTex(iSlot);
+  wcscpy(m_tex[iSlot].szFileName, L"<procedural>");
+
+  auto* dev = m_lpDX12->m_device.Get();
+
+  D3D12_RESOURCE_DESC texDesc = {};
+  texDesc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+  texDesc.Width            = imgW;
+  texDesc.Height           = imgH;
+  texDesc.DepthOrArraySize = 1;
+  texDesc.MipLevels        = 1;
+  texDesc.Format           = DXGI_FORMAT_B8G8R8A8_UNORM;
+  texDesc.SampleDesc.Count = 1;
+
+  D3D12_HEAP_PROPERTIES heapProps = {};
+  heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+  HRESULT hr = dev->CreateCommittedResource(
+      &heapProps, D3D12_HEAP_FLAG_NONE, &texDesc,
+      D3D12_RESOURCE_STATE_COPY_DEST,
+      nullptr, IID_PPV_ARGS(&m_tex[iSlot].dx12Surface.resource));
+  if (FAILED(hr)) return TEXMGR_ERR_OUTOFMEM;
+
+  m_tex[iSlot].dx12Surface.width  = imgW;
+  m_tex[iSlot].dx12Surface.height = imgH;
+  m_tex[iSlot].dx12Surface.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+  m_tex[iSlot].dx12Surface.currentState = D3D12_RESOURCE_STATE_COPY_DEST;
+
+  UINT srcRowPitch = imgW * 4;
+  UINT rowPitch = (srcRowPitch + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1)
+                  & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
+  UINT64 uploadSize = (UINT64)rowPitch * imgH;
+
+  D3D12_HEAP_PROPERTIES uploadHeap = {};
+  uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+  D3D12_RESOURCE_DESC bufDesc = {};
+  bufDesc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+  bufDesc.Width            = uploadSize;
+  bufDesc.Height           = 1;
+  bufDesc.DepthOrArraySize = 1;
+  bufDesc.MipLevels        = 1;
+  bufDesc.SampleDesc.Count = 1;
+  bufDesc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+  hr = dev->CreateCommittedResource(
+      &uploadHeap, D3D12_HEAP_FLAG_NONE, &bufDesc,
+      D3D12_RESOURCE_STATE_GENERIC_READ,
+      nullptr, IID_PPV_ARGS(&m_tex[iSlot].dx12UploadBuf));
+  if (FAILED(hr)) { m_tex[iSlot].dx12Surface.Reset(); return TEXMGR_ERR_OUTOFMEM; }
+
+  BYTE* mapped = nullptr;
+  m_tex[iSlot].dx12UploadBuf->Map(0, nullptr, (void**)&mapped);
+  const BYTE* src = (const BYTE*)pixels;
+  for (UINT row = 0; row < imgH; row++)
+    memcpy(mapped + row * rowPitch, src + row * srcRowPitch, srcRowPitch);
+  m_tex[iSlot].dx12UploadBuf->Unmap(0, nullptr);
+
+  D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+  srcLoc.pResource = m_tex[iSlot].dx12UploadBuf.Get();
+  srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  srcLoc.PlacedFootprint.Footprint.Format   = DXGI_FORMAT_B8G8R8A8_UNORM;
+  srcLoc.PlacedFootprint.Footprint.Width    = imgW;
+  srcLoc.PlacedFootprint.Footprint.Height   = imgH;
+  srcLoc.PlacedFootprint.Footprint.Depth    = 1;
+  srcLoc.PlacedFootprint.Footprint.RowPitch = rowPitch;
+
+  D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+  dstLoc.pResource = m_tex[iSlot].dx12Surface.resource.Get();
+  dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+
+  m_lpDX12->m_commandList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+  m_lpDX12->TransitionResource(m_tex[iSlot].dx12Surface, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+  CreateSRV2D(dev, m_tex[iSlot].dx12Surface.resource.Get(), DXGI_FORMAT_B8G8R8A8_UNORM,
+      m_lpDX12->GetSrvCpuHandleAt(m_tex[iSlot].dx12Surface.srvIndex));
+  m_lpDX12->UpdateBindingBlockTexture(
+      m_tex[iSlot].dx12Surface.bindingBlockStart,
+      m_tex[iSlot].dx12Surface.srvIndex);
+
+  m_tex[iSlot].pSurface = (LPDIRECT3DTEXTURE9)(intptr_t)1;
+  m_tex[iSlot].img_w = imgW;
+  m_tex[iSlot].img_h = imgH;
+  m_tex[iSlot].fStartTime = time;
+  m_tex[iSlot].nStartFrame = frame;
+
+  int ret = TEXMGR_ERR_SUCCESS;
+  if (!RunInitCode(iSlot, szInitCode))
+    ret |= TEXMGR_WARN_ERROR_IN_INIT_CODE;
+  strcpy(m_tex[iSlot].m_szExpr, szCode);
+  FreeCode(iSlot);
+  if (!RecompileExpressions(iSlot))
+    ret |= TEXMGR_WARN_ERROR_IN_REG_CODE;
+
+  return ret;
+}
+
 void texmgr::KillTex(int iSlot) {
   if (iSlot < 0) return;
   if (iSlot >= NUM_TEX) return;

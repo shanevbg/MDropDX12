@@ -382,6 +382,10 @@ bool PipeServer::DispatchSignal(const wchar_t* signal) {
         PostMessageW(m_hTargetWindow, m_wmSignalBase + 103, 0, 0);
         return true;
     }
+    if (wcscmp(signal, L"SHOW_COVER") == 0) {
+        PostMessageW(m_hTargetWindow, m_wmSignalBase + 110, 0, 0);
+        return true;
+    }
     if (wcscmp(signal, L"MESSAGE_MODE") == 0) {
         PostMessageW(m_hTargetWindow, m_wmSignalBase + 104, 0, 0);
         return true;

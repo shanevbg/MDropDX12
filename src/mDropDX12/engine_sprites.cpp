@@ -458,8 +458,109 @@ bool Engine::LaunchSprite(int nSpriteNum, int nSlot) {
   }
 
   // 1. read in image filename
+  bool bBuiltinCover = false;
   GetPrivateProfileStringW(section, L"img", L"", img, sizeof(img) - 1, m_szImgIniFile);
-  if (img[0] == 0) {
+  if (img[0] == 0 && nSpriteNum == 0) {
+    // Cover art sprite: use built-in defaults when [img00] is not defined in sprites.ini.
+    // Try cover.png first (saved by SaveThumbnailToFile on song change).
+    // If missing, generate a procedural vinyl disc texture.
+    bBuiltinCover = true;
+    swprintf(img, L"%ssprites\\cover.png", m_szMilkdrop2Path);
+    bool bHasCoverFile = (GetFileAttributesW(img) != INVALID_FILE_ATTRIBUTES);
+
+    // Animation code shared by both file-based and procedural cover
+    strcpy(initcode,
+      "blendmode = 0;\n"
+      "x = 0.5;\n"
+      "y = 0.5;\n"
+      "sx = 0.35;\n"
+      "sy = 0.35;\n"
+      "t_fade = 1.5;\n"
+      "t_hold = 4.0;\n"
+      "t_out = 2.0;\n"
+    );
+    strcpy(code,
+      "sx = 0.35 + 0.10 * (1.0 - pow(0.5, time * 1.5));\n"
+      "sy = sx;\n"
+      "rot = if(below(time, 0.01), 0, rot + 0.015);\n"    // gentle spin
+      "t_total = t_fade + t_hold + t_out;\n"
+      "a = if(below(time, t_fade),"
+        " time / t_fade,"
+        " if(below(time, t_fade + t_hold),"
+          " 1.0,"
+          " max(0, 1.0 - (time - t_fade - t_hold) / t_out)"
+        ")"
+      ") * 0.85;\n"
+      "done = above(time, t_total);\n"
+    );
+
+    if (!bHasCoverFile) {
+      // Generate procedural vinyl disc texture (64x64 BGRA)
+      const UINT texW = 64, texH = 64;
+      UINT8 pixels[texW * texH * 4];
+      float cx = (texW - 1) * 0.5f, cy = (texH - 1) * 0.5f;
+      float outerR = cx - 1.0f;     // outer edge
+      float labelR = outerR * 0.38f; // label area
+      float holeR  = outerR * 0.08f; // center hole
+
+      for (UINT y = 0; y < texH; y++) {
+        for (UINT x = 0; x < texW; x++) {
+          float dx = (float)x - cx, dy = (float)y - cy;
+          float dist = sqrtf(dx * dx + dy * dy);
+          UINT idx = (y * texW + x) * 4;
+
+          if (dist > outerR + 0.5f) {
+            // Outside disc: transparent
+            pixels[idx + 0] = pixels[idx + 1] = pixels[idx + 2] = 0;
+            pixels[idx + 3] = 0;
+          } else if (dist > outerR - 0.5f) {
+            // Anti-aliased edge
+            float aa = outerR + 0.5f - dist;
+            pixels[idx + 0] = pixels[idx + 1] = pixels[idx + 2] = 30;
+            pixels[idx + 3] = (UINT8)(aa * 255);
+          } else if (dist < holeR) {
+            // Center hole: transparent
+            pixels[idx + 0] = pixels[idx + 1] = pixels[idx + 2] = 0;
+            pixels[idx + 3] = 0;
+          } else if (dist < labelR) {
+            // Label area: warm color with subtle radial gradient
+            float t = (dist - holeR) / (labelR - holeR);
+            pixels[idx + 0] = (UINT8)(180 + 30 * t); // B
+            pixels[idx + 1] = (UINT8)(120 + 20 * t); // G
+            pixels[idx + 2] = (UINT8)(80 + 40 * t);  // R
+            pixels[idx + 3] = 255;
+          } else {
+            // Vinyl grooves: concentric rings via sine wave on distance
+            float groove = 0.5f + 0.5f * sinf(dist * 3.14159f * 1.2f);
+            UINT8 v = (UINT8)(25 + 20 * groove);
+            pixels[idx + 0] = v;     // B
+            pixels[idx + 1] = v;     // G
+            pixels[idx + 2] = v + 5; // R (slight warmth)
+            pixels[idx + 3] = 255;
+          }
+        }
+      }
+
+      // Find a slot
+      if (nSlot == -1) {
+        int oldest_index = 0;
+        int oldest_frame = m_texmgr.m_tex[0].nStartFrame;
+        for (int x = 0; x < NUM_TEX; x++) {
+          if (!m_texmgr.m_tex[x].pSurface) { nSlot = x; break; }
+          else if (m_texmgr.m_tex[x].nStartFrame < oldest_frame) {
+            oldest_index = x; oldest_frame = m_texmgr.m_tex[x].nStartFrame;
+          }
+        }
+        if (nSlot == -1) { nSlot = oldest_index; m_texmgr.KillTex(nSlot); }
+      }
+
+      int ret = m_texmgr.LoadTexFromPixels(pixels, texW, texH, nSlot,
+                                            initcode, code, GetTime(), GetFrame());
+      m_texmgr.m_tex[nSlot].nUserData = nSpriteNum;
+      return (ret & TEXMGR_ERROR_MASK) ? false : true;
+    }
+  }
+  else if (img[0] == 0) {
     wchar_t buf[1024];
     swprintf(buf, wasabiApiLangString(IDS_SPRITE_X_ERROR_COULD_NOT_FIND_IMG_OR_NOT_DEFINED), nSpriteNum);
     AddError(buf, 7.0f, ERR_MISC, false);
@@ -485,6 +586,90 @@ bool Engine::LaunchSprite(int nSpriteNum, int nSlot) {
   { wchar_t dbg[1024]; swprintf(dbg, 1024, L"LaunchSprite(%d): resolved=%s exists=%d", nSpriteNum, img,
             GetFileAttributesW(img) != INVALID_FILE_ATTRIBUTES); DebugLogW(dbg, LOG_VERBOSE); }
 
+  // For sprite 0 (cover art): if the resolved image file doesn't exist, fall back to procedural vinyl disc
+  if (nSpriteNum == 0 && GetFileAttributesW(img) == INVALID_FILE_ATTRIBUTES) {
+    const UINT texW = 64, texH = 64;
+    UINT8 pixels[texW * texH * 4];
+    float cx = (texW - 1) * 0.5f, cy = (texH - 1) * 0.5f;
+    float outerR = cx - 1.0f;
+    float labelR = outerR * 0.38f;
+    float holeR  = outerR * 0.08f;
+
+    for (UINT py = 0; py < texH; py++) {
+      for (UINT px = 0; px < texW; px++) {
+        float dx = (float)px - cx, dy = (float)py - cy;
+        float dist = sqrtf(dx * dx + dy * dy);
+        UINT idx = (py * texW + px) * 4;
+
+        if (dist > outerR + 0.5f) {
+          pixels[idx + 0] = pixels[idx + 1] = pixels[idx + 2] = 0;
+          pixels[idx + 3] = 0;
+        } else if (dist > outerR - 0.5f) {
+          float aa = outerR + 0.5f - dist;
+          pixels[idx + 0] = pixels[idx + 1] = pixels[idx + 2] = 30;
+          pixels[idx + 3] = (UINT8)(aa * 255);
+        } else if (dist < holeR) {
+          pixels[idx + 0] = pixels[idx + 1] = pixels[idx + 2] = 0;
+          pixels[idx + 3] = 0;
+        } else if (dist < labelR) {
+          float t = (dist - holeR) / (labelR - holeR);
+          pixels[idx + 0] = (UINT8)(180 + 30 * t);
+          pixels[idx + 1] = (UINT8)(120 + 20 * t);
+          pixels[idx + 2] = (UINT8)(80 + 40 * t);
+          pixels[idx + 3] = 255;
+        } else {
+          float groove = 0.5f + 0.5f * sinf(dist * 3.14159f * 1.2f);
+          UINT8 v = (UINT8)(25 + 20 * groove);
+          pixels[idx + 0] = v;
+          pixels[idx + 1] = v;
+          pixels[idx + 2] = v + 5;
+          pixels[idx + 3] = 255;
+        }
+      }
+    }
+
+    // Use built-in animation if no INI code was read, or if built-in cover path
+    if (bBuiltinCover || (initcode[0] == 0 && code[0] == 0)) {
+      strcpy(initcode,
+        "blendmode = 0;\n"
+        "x = 0.5;\ny = 0.5;\n"
+        "sx = 0.35;\nsy = 0.35;\n"
+        "t_fade = 1.5;\nt_hold = 4.0;\nt_out = 2.0;\n"
+      );
+      strcpy(code,
+        "sx = 0.35 + 0.10 * (1.0 - pow(0.5, time * 1.5));\n"
+        "sy = sx;\n"
+        "rot = if(below(time, 0.01), 0, rot + 0.015);\n"
+        "t_total = t_fade + t_hold + t_out;\n"
+        "a = if(below(time, t_fade),"
+          " time / t_fade,"
+          " if(below(time, t_fade + t_hold),"
+            " 1.0,"
+            " max(0, 1.0 - (time - t_fade - t_hold) / t_out)"
+          ")"
+        ") * 0.85;\n"
+        "done = above(time, t_total);\n"
+      );
+    }
+
+    if (nSlot == -1) {
+      int oldest_index = 0;
+      int oldest_frame = m_texmgr.m_tex[0].nStartFrame;
+      for (int x = 0; x < NUM_TEX; x++) {
+        if (!m_texmgr.m_tex[x].pSurface) { nSlot = x; break; }
+        else if (m_texmgr.m_tex[x].nStartFrame < oldest_frame) {
+          oldest_index = x; oldest_frame = m_texmgr.m_tex[x].nStartFrame;
+        }
+      }
+      if (nSlot == -1) { nSlot = oldest_index; m_texmgr.KillTex(nSlot); }
+    }
+
+    int ret = m_texmgr.LoadTexFromPixels(pixels, texW, texH, nSlot,
+                                          initcode, code, GetTime(), GetFrame());
+    m_texmgr.m_tex[nSlot].nUserData = nSpriteNum;
+    return (ret & TEXMGR_ERROR_MASK) ? false : true;
+  }
+
   // 2. get color key
   //unsigned int ck_lo = (unsigned int)GetPrivateProfileInt(section, "colorkey_lo", 0x00000000, m_szImgIniFile);
   //unsigned int ck_hi = (unsigned int)GetPrivateProfileInt(section, "colorkey_hi", 0x00202020, m_szImgIniFile);
@@ -492,7 +677,8 @@ bool Engine::LaunchSprite(int nSpriteNum, int nSlot) {
   unsigned int ck = (unsigned int)GetPrivateProfileIntW(section, L"colorkey_lo", 0x00000000, m_szImgIniFile/*GetConfigIniFile()*/);
   ck = (unsigned int)GetPrivateProfileIntW(section, L"colorkey", ck, m_szImgIniFile/*GetConfigIniFile()*/);
 
-  // 3. read in init code & per-frame code
+  // 3. read in init code & per-frame code (skip if using built-in cover defaults)
+  if (bBuiltinCover) goto SKIP_INI_CODE;
   for (int n = 0; n < 2; n++) {
     char* pStr = (n == 0) ? initcode : code;
     char szLineName[32];
@@ -526,6 +712,7 @@ bool Engine::LaunchSprite(int nSpriteNum, int nSlot) {
     pStr[char_pos++] = 0;	// null-terminate
   }
 
+  SKIP_INI_CODE:
   if (nSlot == -1) {
     // find first empty slot; if none, chuck the oldest sprite & take its slot.
     int oldest_index = 0;

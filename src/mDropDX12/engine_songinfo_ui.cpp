@@ -256,9 +256,16 @@ void SongInfoWindow::DoBuildControls() {
 LRESULT SongInfoWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
   Engine* p = m_pEngine;
 
-  // Show Now button
+  // Show Now button (track info + cover art)
   if (id == IDC_MW_SONG_SHOW_NOW && code == BN_CLICKED) {
     mdropdx12.doPollExplicit = true;
+    if (p->m_DisplayCover) {
+      RenderCommand cmd;
+      cmd.cmd = RenderCmd::PushSprite;
+      cmd.iParam1 = 0;  // sprite 0 = cover art
+      cmd.iParam2 = -1;  // auto-pick slot
+      p->EnqueueRenderCmd(std::move(cmd));
+    }
     return 0;
   }
 

@@ -104,6 +104,7 @@ public:
   void Init(LPDIRECT3DDEVICE9 lpDD);           // DirectDraw object
   void InitDX12(DXContext* lpDX);
   int  LoadTex(wchar_t* szFilename, int iSlot, char* szInitCode, char* szCode, float time, int frame, unsigned int ck);
+  int  LoadTexFromPixels(const void* pixels, UINT w, UINT h, int iSlot, char* szInitCode, char* szCode, float time, int frame);
   void KillTex(int iSlot);
   void Finish();
 

@@ -644,6 +644,16 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
     // Not yet implemented — absorb to prevent DefWindowProc handling
     return 0;
 
+  case WM_MW_SHOW_COVER:
+  {
+    RenderCommand cmd;
+    cmd.cmd = RenderCmd::PushSprite;
+    cmd.iParam1 = 0;  // sprite 0 = cover art
+    cmd.iParam2 = -1;  // auto-pick slot
+    EnqueueRenderCmd(std::move(cmd));
+    return 0;
+  }
+
   case WM_SIZE:
     // If render window went fullscreen, move settings window to another monitor
     if (wParam == SIZE_MAXIMIZED || wParam == SIZE_RESTORED) {
