@@ -399,6 +399,156 @@ STOP
 - **Use RESET** after changing BPM or BEATS to avoid timing drift.
 - **Blank lines are delays**, not no-ops. Each blank line consumes one beat interval.
 - **Relative paths** in `FILE=` and `PRESET=` are relative to the current script's directory (for FILE) or the MDropDX12 base directory (for PRESET).
-- **The Script tab** in Settings shows the current line, BPM, and beats. You can also adjust BPM/beats from the UI while a script is running.
-- **Loop mode**: Enable looping in the Script tab to have the script restart from the beginning after the last line.
+- **The Script window** shows the current line, BPM, and beats. You can also adjust BPM/beats from the UI while a script is running.
+- **Loop mode**: Enable looping in the Script window to have the script restart from the beginning after the last line.
 - Scripts loaded via Milkwave Remote use the same command format.
+
+## IPC Commands (Named Pipe)
+
+MDropDX12 listens for commands on a Named Pipe at `\\.\pipe\Milkwave_<PID>` where `<PID>` is the visualizer's process ID. All script commands listed above also work over IPC. The commands below are additional IPC-only commands not available in script files.
+
+### Protocol
+
+- **Pipe name**: `\\.\pipe\Milkwave_<PID>` (discover via `CreateToolhelp32Snapshot` or the MCP server)
+- **Message encoding**: UTF-16LE null-terminated wide strings
+- **Field delimiter**: `|` separates fields within a command
+- **Duplex**: The pipe supports bidirectional communication (e.g., `STATE` returns data)
+
+### Signal Commands
+
+Signal commands use the `SIGNAL|` prefix and are processed directly by the pipe server. They trigger immediate actions without going through the message queue.
+
+| Command | Description |
+|---------|-------------|
+| `SIGNAL\|NEXT_PRESET` | Switch to next preset (soft cut) |
+| `SIGNAL\|PREV_PRESET` | Switch to previous preset |
+| `SIGNAL\|CAPTURE` | Capture screenshot |
+| `SIGNAL\|SHOW_COVER` | Display album cover art sprite |
+| `SIGNAL\|COVER_CHANGED` | Notify that album cover image has changed |
+| `SIGNAL\|SPRITE_MODE` | Switch to sprite input mode |
+| `SIGNAL\|MESSAGE_MODE` | Switch to message input mode |
+| `SIGNAL\|SETVIDEODEVICE=N` | Set video input device (N = device index) |
+| `SIGNAL\|ENABLEVIDEOMIX=0\|1` | Enable (1) or disable (0) video input mixing |
+| `SIGNAL\|ENABLESPOUTMIX=0\|1` | Enable (1) or disable (0) Spout input mixing |
+| `SIGNAL\|SET_INPUTMIX_OPACITY=N` | Set input mix opacity (0-100) |
+| `SIGNAL\|SET_INPUTMIX_LUMAKEY=threshold\|softness` | Set luma key (0-255 each, or -1 to disable) |
+| `SIGNAL\|SET_INPUTMIX_ONTOP=0\|1` | Set input mix layer order (1 = overlay, 0 = background) |
+
+### Audio
+
+| Command | Description |
+|---------|-------------|
+| `AMP\|l=N\|r=N` | Set audio amplification for left and right channels (float) |
+| `DEVICE=name` | Switch audio device (loopback output) |
+| `DEVICE=IN\|name` | Switch to input device (microphone) |
+| `DEVICE=OUT\|name` | Switch to output device (loopback) |
+| `FFT_ATTACK=N` | FFT attack smoothing (0.0-1.0) |
+| `FFT_DECAY=N` | FFT decay smoothing (0.0-1.0) |
+
+### Visual Parameters
+
+| Command | Description | Range |
+|---------|-------------|-------|
+| `VAR_TIME=N` | Time speed factor | 0.0+ |
+| `VAR_FRAME=N` | Frame factor | 0.0+ |
+| `VAR_FPS=N` | FPS factor | 0.0+ |
+| `VAR_INTENSITY=N` | Visual intensity multiplier | 0.0+ |
+| `VAR_SHIFT=N` | Visual shift value | any float |
+| `VAR_VERSION=N` | Vis version override | integer |
+| `VAR_QUALITY=N` | Render quality scale | 0.01-1.0 |
+| `VAR_AUTO=0\|1` | Auto quality adjustment | 0 or 1 |
+
+### Color
+
+| Command | Description | Range |
+|---------|-------------|-------|
+| `COL_HUE=N` | Hue shift | -1.0 to 1.0 |
+| `COL_SATURATION=N` | Saturation adjustment | -1.0 to 1.0 |
+| `COL_BRIGHTNESS=N` | Brightness adjustment | -1.0 to 1.0 |
+| `HUE_AUTO=0\|1` | Enable auto hue cycling | 0 or 1 |
+| `HUE_AUTO_SECONDS=N` | Auto hue cycle period (seconds) | float |
+
+### Spout Output
+
+| Command | Description |
+|---------|-------------|
+| `SPOUT_ACTIVE=0\|1` | Enable (1) or disable (0) Spout output |
+| `SPOUT_FIXEDSIZE=0\|1` | Toggle fixed Spout output resolution |
+| `SPOUT_RESOLUTION=WxH` | Set Spout output resolution (e.g., `1920x1080`) |
+
+### Spout Input
+
+| Command | Description |
+|---------|-------------|
+| `SPOUTINPUT=0\|1\|senderName` | Enable/disable Spout input from a specific sender |
+| `SPOUT_SENDER=name` | Set Spout input sender name |
+
+### Wave Parameters
+
+`WAVE|` sets live wave rendering parameters. All fields are optional and pipe-delimited:
+
+```
+WAVE|COLORR=255|COLORG=128|COLORB=0|ALPHA=0.8|MODE=2|PUSHX=0.1|PUSHY=-0.1|ZOOM=1.5|WARP=0.5|ROTATION=0.3|DECAY=0.98|SCALE=1.2|ECHO=1.0|BRIGHTEN=1|DARKEN=0|SOLARIZE=0|INVERT=0|ADDITIVE=1|DOTTED=0|THICK=1|VOLALPHA=0
+```
+
+| Field | Description | Type |
+|-------|-------------|------|
+| `COLORR`, `COLORG`, `COLORB` | Wave color (0-255) | int |
+| `ALPHA` | Wave alpha | float |
+| `MODE` | Wave mode index | int |
+| `PUSHX`, `PUSHY` | X/Y push offset | float |
+| `ZOOM` | Zoom level | float |
+| `WARP` | Warp amount | float |
+| `ROTATION` | Rotation amount | float |
+| `DECAY` | Decay factor | float |
+| `SCALE` | Wave scale | float |
+| `ECHO` | Video echo zoom | float |
+| `BRIGHTEN` | Brighten effect | 0 or 1 |
+| `DARKEN` | Darken effect | 0 or 1 |
+| `SOLARIZE` | Solarize effect | 0 or 1 |
+| `INVERT` | Invert effect | 0 or 1 |
+| `ADDITIVE` | Additive wave blending | 0 or 1 |
+| `DOTTED` | Dotted wave style | 0 or 1 |
+| `THICK` | Thick wave lines | 0 or 1 |
+| `VOLALPHA` | Modulate alpha by volume | 0 or 1 |
+
+### Track Info (IPC)
+
+| Command | Description |
+|---------|-------------|
+| `TRACK\|artist=X\|title=Y\|album=Z` | Update displayed track info (from Milkwave Remote) |
+
+### Window (IPC)
+
+| Command | Description |
+|---------|-------------|
+| `OPACITY=N` | Set window opacity (0.0-1.0) |
+
+### Messages (IPC)
+
+The `MSG|` command sends a styled text overlay. Fields are pipe-delimited key=value pairs:
+
+```
+MSG|text=Hello World|font=Segoe UI|size=30|r=255|g=255|b=255|time=5|x=0.5|y=0.5
+```
+
+See the [Messages](#messages) section above for the full list of MSG parameters (text, font, size, r, g, b, time, growth, x, y, startx, starty, movetime, easemode, easefactor, shadowoffset, burntime, fade, fadeout, bold, ital, randx, randy, randr, randg, randb, box_alpha, box_col, box_left, box_right, box_top, box_bottom, profile).
+
+### State and Configuration
+
+| Command | Description |
+|---------|-------------|
+| `STATE` | Query current state (returns opacity, preset info, settings via pipe response) |
+| `CONFIG` | Reload configuration and rebuild fonts |
+| `SETTINGS` | Reload timing settings from INI |
+| `TESTFONTS` | Display font/animation test messages (debug) |
+| `QUICKSAVE` | Save current preset to Quicksave folder |
+| `CAPTURE` | Capture screenshot to file |
+| `CLEARPRESET` | Clear current preset state |
+| `CLEARSPRITES` | Remove all active sprites |
+| `CLEARTEXTS` | Remove all active text overlays |
+| `LINK=N` | Link Remote to preset index N |
+
+### Fallback
+
+Any command not recognized by the IPC handler is passed to the script engine (`ExecuteScriptLine`). This means all script commands (NEXT, PREV, LOCK, RAND, ACTION=, LAUNCH=, etc.) work seamlessly over IPC.

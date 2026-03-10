@@ -1,5 +1,30 @@
 # MDropDX12 Changelog
 
+## v1.7.6 (2026-03-10)
+
+### Display Mode Stability
+
+- Fixed render hang when switching between mirroring and fullscreen — Present `E_FAIL` (0x80004005) now triggers automatic swap chain recovery after consecutive failures
+- Fixed `DXGI_PRESENT_ALLOW_TEARING` causing persistent `E_FAIL` during window state transitions — Present now retries without the tearing flag on failure
+- Fixed device recovery (TDR) never triggering after `DXGI_ERROR_DEVICE_REMOVED` — `m_lastErr` check was blocked by `m_ready` check running first
+- Fixed render window losing focus when switching between fullscreen, spanning, and mirroring display modes
+- Fixed mirror window deadlock — render thread now pumps messages for render-thread-owned windows (mirror windows) to prevent cross-thread `SendMessage` deadlock during `SetWindowPos` z-order changes
+- Fixed Alt+Enter while mirroring now disables mirrors and stays in single-monitor fullscreen instead of exiting to windowed mode
+
+### ToolWindows
+
+- ToolWindows opened via hotkey now appear above fullscreen/topmost render window using `AttachThreadInput` for reliable cross-thread `SetForegroundWindow`
+- ToolWindows created while render is topmost now inherit `WS_EX_TOPMOST` so they aren't hidden behind fullscreen render
+
+### Documentation
+
+- Restructured Manual.md: Settings window now documents 5 tabs (General, Tools, System, Files, About) with ToolWindows as a separate section
+- Added documentation for all ToolWindows including Controller, Error Display, Annotations, Workspace Layout, Video Effects, VFX Profiles, Button Board
+- Updated IPC protocol references from WM_COPYDATA to Named Pipes throughout docs
+- Added IPC commands reference section to Scripts.md
+- Fixed blur level count in Textures.md (6 → 3)
+- Added presets.json to Install.md configuration files list
+
 ## v1.7.5 (2026-03-10)
 
 ### Preset Annotations

@@ -90,6 +90,7 @@ MDropDX12 stores all configuration in plain text files in its directory:
 | `precompile.txt` | List of presets to compile shaders for at startup (reduces stutter) |
 | `controller.json` | Game controller button mappings (auto-created when controller connected) |
 | `midi.json` | MIDI controller mapping definitions (auto-created from MIDI window) |
+| `presets.json` | Preset annotations: ratings, flags (favorite/error/skip/broken), notes, and auto-captured shader errors |
 
 All files are human-readable and can be edited with any text editor. The Settings window (F8) provides a GUI for most options.
 

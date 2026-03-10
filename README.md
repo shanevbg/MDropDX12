@@ -2,14 +2,14 @@
 
 MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geisswerks.com/milkdrop/) visualizer engine, with GPU-accelerated text rendering, an in-app settings UI, and broad preset compatibility improvements. Works with [Milkwave](https://github.com/IkeC/Milkwave) Remote via Named Pipe IPC for extended control (messaging, wave manipulation, screenshots, and more).
 
-**Current version: 1.7.5** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
+**Current version: 1.7.6** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
 
 [**Click here**](https://github.com/shanevbg/MDropDX12/releases/latest) to get the latest version.
 
 ## Visualizer Features
 
 * DirectX 12 rendering backend with GPU-accelerated Direct2D text overlay
-* In-app Settings window (F8) with tri-mode theme (Dark / Light / Follow System), 11-tab UI (General, Visual, Colors, System, Files, Messages, Sprites, Remote, Script, Displays, About)
+* In-app Settings window (F8) with tri-mode theme (Dark / Light / Follow System), 5-tab UI (General, Tools, System, Files, About)
 * Double-click .milk/.milk2/.milk3 files in Explorer to load them (forwards to running instance via Named Pipe IPC)
 * One-click file association registration for .milk and .milk2 (Settings > About, no admin required)
 * Named Pipe IPC — PID-based discovery, duplex message-mode communication, no hidden windows required
@@ -36,7 +36,7 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geiss
 * Video Effects window with transform, color, and audio-reactive controls; VFX JSON profiles
 * Workspace Layout window for tiling tool windows across the screen with render preview in a corner or on a separate display
 * Text Animations window with DX12 warped text, color/font pickers, animation profile export/import, and custom preview
-* ToolWindow system — Settings, Displays, Song Info, Hotkeys, MIDI, Presets, Sprites, Messages, Shader Import, Video Effects, Text Animations, and Workspace Layout windows run on their own threads with sticky positions and tab memory
+* ToolWindow system — Visual, Colors, Controller, Displays, Song Info, Hotkeys, MIDI, Presets, Sprites, Messages, Remote, Script, Shader Import, Video Effects, VFX Profiles, Text Animations, Button Board, Workspace Layout, Error Display, and Annotations windows run on their own threads with sticky positions, always-on-top pin, and tab memory
 * FFT EQ smoothing with attack/decay and peak hold — `get_fft()` / `get_fft_peak()` shader functions for EQ visualization presets
 * Error Display Settings window for configuring shader error notification appearance
 * Preset annotation system — persistent per-preset ratings, flags (favorite/error/skip/broken), notes, and auto-captured shader errors

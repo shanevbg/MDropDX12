@@ -823,10 +823,13 @@ void EngineShell::OnUserResizeWindow() {
         }
       }
       //if (m_lpDX->m_REAL_client_width != new_REAL_client_w || m_lpDX->m_REAL_client_height != new_REAL_client_h) {
+      DebugLogA("OnUserResizeWindow: calling AllocateDX9Stuff...", LOG_ERROR);
       if (!AllocateDX9Stuff()) {
+        DebugLogA("OnUserResizeWindow: AllocateDX9Stuff FAILED — setting m_ready=false", LOG_ERROR);
         m_lpDX->m_ready = false;   // flag to exit
         return;
       }
+      DebugLogA("OnUserResizeWindow: AllocateDX9Stuff succeeded, resize complete", LOG_ERROR);
       //}
       /*if (!InitVJStuff())
       {
@@ -1351,9 +1354,26 @@ int EngineShell::PluginRender(unsigned char* pWaveL, unsigned char* pWaveR)//, u
 {
   // return FALSE here to tell Winamp to terminate the plugin
 
-  if (!m_lpDX || !m_lpDX->m_ready) {
-    // note: 'm_ready' will go false when a device reset fatally fails
-    //       (for example, when user resizes window, or toggles fullscreen.)
+  if (!m_lpDX) {
+    m_exiting = 1;
+    return false;
+  }
+
+  // Check for device-lost FIRST — m_ready may also be false after device removal,
+  // but we need to trigger recovery rather than just exiting.
+  if (m_lpDX->m_lastErr != S_OK) {
+    DLOG_ERROR("TDR Recovery: Device lost detected (hr=0x%08X) — signaling recovery",
+            (unsigned)m_lpDX->m_lastErr);
+    m_bDeviceRecoveryPending = true;
+    return false;  // signal caller to attempt recovery
+  }
+
+  if (!m_lpDX->m_ready) {
+    static bool s_loggedNotReady = false;
+    if (!s_loggedNotReady) {
+      DLOG_ERROR("PluginRender: m_ready is false — setting m_exiting=1");
+      s_loggedNotReady = true;
+    }
     m_exiting = 1;
     return false;   // EXIT THE PLUGIN
   }
@@ -1367,18 +1387,13 @@ int EngineShell::PluginRender(unsigned char* pWaveL, unsigned char* pWaveR)//, u
   // Allow render when minimized
   // if (m_hidden || m_resizing)
   if (m_resizing) {
+    static int s_resizingLogCount = 0;
+    if (s_resizingLogCount < 3 || (s_resizingLogCount % 100 == 0)) {
+      DLOG_ERROR("PluginRender: m_resizing=%d — skipping frame (count=%d)", m_resizing.load(), s_resizingLogCount);
+    }
+    s_resizingLogCount++;
     Sleep(30);
     return true;
-  }
-
-  // DX12 does not have TestCooperativeLevel() or device-lost in the DX9 sense.
-  // DXGI Present returns DXGI_ERROR_DEVICE_REMOVED/RESET in catastrophic cases,
-  // which are handled inside DXContext::EndFrame() and surfaced via m_lastErr.
-  if (m_lpDX->m_lastErr != S_OK) {
-    DLOG_ERROR("TDR Recovery: Device lost detected (hr=0x%08X) — signaling recovery",
-            (unsigned)m_lpDX->m_lastErr);
-    m_bDeviceRecoveryPending = true;
-    return false;  // signal caller to attempt recovery
   }
 
   DoTime();

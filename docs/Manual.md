@@ -31,7 +31,7 @@ Press **F8** or **Ctrl+L** to open the Settings window.
 | Black mode | CTRL+F12 | No preset rendering (black screen) |
 | Always on top | F7 | Window stays above other windows |
 | Multi-monitor stretch | ALT+S | Stretches across all monitors (default) |
-| Mirror mode | ALT+S | Fullscreens primary + activates mirrors (when enabled in Displays tab) |
+| Mirror mode | ALT+S | Fullscreens primary + activates mirrors (when enabled in Displays window) |
 
 **Opacity**: SHIFT+UP/DOWN or SHIFT+Mousewheel adjusts window opacity.
 
@@ -162,36 +162,62 @@ Use the **+** button in the Hotkeys window to add any number of Script Command o
 
 ## Settings Window (F8)
 
-Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab interface with tri-mode theme support (Dark / Light / Follow System). The pin icon in the top-right corner toggles always-on-top for the Settings window (on by default). Settings, Displays, Song Info, and Hotkeys windows are standalone ToolWindows that run on their own threads and remember their positions and active tabs between sessions.
+Press **F8** or **Ctrl+L** to open the Settings window. It has 5 tabs (General, Tools, System, Files, About) with tri-mode theme support (Dark / Light / Follow System). The pin icon in the top-right corner toggles always-on-top (on by default).
+
+Most features that were previously Settings tabs are now standalone **ToolWindows** — see the ToolWindows section below. ToolWindows can be opened from the **Tools tab** in Settings or via hotkeys.
 
 ### General Tab
 
-- **Preset Directory**: Set the folder containing .milk and .milk2 presets
-- **Preset Browser**: Navigate and load presets from the list with forward/back navigation buttons
-- **Preset Filter**: Click the filter button (right side of nav row) to cycle through All / .milk / .milk2. Random and sequential preset selection respects the active filter
-- **Audio Sensitivity**: -1 for auto-adaptive, or manual value (0.5-256)
-- **Blend Time**: Duration of soft transitions between presets (seconds)
-- **Time Between Presets**: Auto-advance interval (seconds)
-- **Hard Cuts Disabled**: Prevent audio-triggered hard cuts
-- **Lock Preset on Startup**: Start with preset locked
-- **Sequential Preset Order**: Play presets in order instead of random
-- **Messages/Sprites Mode**: Off / Messages / Sprites / Messages and Sprites
-- **Song Info Source**: Select how track info is obtained — SMTC (Windows media sessions), IPC (from Milkwave Remote), or Window Title (regex-based parsing)
-- **Profile / Edit**: When source is Window Title, select a named profile and open the Artist-Title Match Editor to configure window matching and parsing regex patterns (see Track Info section below)
-- **Song Title Animations**: Animated display when track changes
-- **Overlay Notifications**: Show track info as an overlay notification on track change
-- **Show Cover Art**: Display album artwork on track change
-- **Always Show Track Info**: Keep track info visible permanently instead of fading out
-- **Display Corner**: Choose which screen corner shows track info (Top-Left, Top-Right, Bottom-Left, Bottom-Right)
-- **Display Seconds**: How long track info remains visible (0.5-60 seconds)
-- **Show Now**: Force-display current track info immediately
-- **Change Preset with Song**: Auto-advance when a new track starts
-- **Show FPS / Always on Top / Borderless**: Toggle checkboxes
+- **Current Preset**: Shows the currently loaded preset file path, with a **Browse** button to open a file picker
+- **Messages/Sprites**: Dropdown to set mode — Off / Messages / Sprites / Messages & Sprites
+- **Show FPS / Always on Top / Borderless Window**: Toggle checkboxes
 - **Theme**: Select Dark, Light, or Follow System. Follow System auto-detects your Windows theme and switches when you change it in Windows Settings > Personalization > Colors
+- **Resources...**: Opens the Resource Viewer showing all textures loaded by the current preset with their load status, type, dimensions, and file paths
+- **Reset**: Reset all settings to defaults
+- **Save Safe / Safe Reset**: Save current settings as a safe baseline, or reset to the saved safe baseline
+- **Reset Window**: Reset the visualizer window size and position
 - **Font +/- buttons**: Adjust HUD overlay font size
-- **Resources button**: Opens the Resource Viewer showing all textures loaded by the current preset with their load status, type, dimensions, and file paths
 
-### Visual Tab
+### Tools Tab
+
+A sortable ListView of all standalone ToolWindows with two columns: **Tool** (name) and **Hotkey** (assigned shortcut). Double-click a row or press Enter to open that ToolWindow. Available tools include: Visual, Colors, Controller, Displays, Song Info, Hotkeys, MIDI, Presets, Sprites, Messages, Remote, Script, Shader Import, Video Effects, VFX Profiles, Text Animations, Button Board, Workspace Layout, Error Display, and Annotations.
+
+### System Tab
+
+- **Audio Device**: Select from system output and input devices. Input devices appear with `[Input]` suffix.
+- **Hotkeys...**: Opens the Hotkeys window (also available via Ctrl+F7). See the Configurable Hotkeys section below.
+- **Idle Timer**: Screensaver mode that activates after a configurable idle timeout (1-60 minutes). Action can be Fullscreen or Stretch/Mirror. Auto-restore returns to previous state when input is detected.
+
+### Files Tab
+
+- **Content Base Path**: Root directory for textures and sprites referenced by presets, with Browse and Clear buttons
+- **Fallback Search Paths**: Additional directories to search when textures are missing. When a preset references a texture that is not found in the built-in directory, these paths are searched in order. Add/Remove buttons to manage the list.
+- **Random Textures Directory**: Separate directory specifically for random texture selection (rand00-rand13), which takes priority over fallback paths
+- **Fallback Texture**: What to substitute when a preset references a missing texture — Hue Gradient, White, Black, Random (from Random Tex Dir or Textures Dir), or Custom File with Browse/Clear
+
+### About Tab
+
+- Version and build information
+- **Paths**: Base Dir, Settings INI, and Presets directory
+- **Debug Log Level**: Off / Error / Warn / Info / Verbose (radio buttons)
+- **Log Output**: Checkboxes for File (debug.log) and Debug Messages (OutputDebugString)
+- **Register .milk / .milk2 / .milk3**: Associate preset files with this exe so double-clicking them in Explorer opens the preset in MDropDX12 (writes to HKCU, no admin required)
+- **Setup Workspace Layout...**: Opens the Workspace Layout window to tile tool windows across the screen
+- **Error Duration**: Configure how long shader error notifications are displayed (seconds)
+
+## ToolWindows
+
+MDropDX12 uses a **ToolWindow system** where most feature panels are standalone windows that run on their own threads. Each ToolWindow has:
+
+- **Always-on-top pin** (top-right corner)
+- **Sticky position** (remembers its location between sessions)
+- **Tab memory** (remembers the last active tab)
+- **Dark/Light theme** matching the Settings theme
+- **Font synchronization** with the main Settings font size
+
+ToolWindows can be opened from the **Tools tab** in Settings, via hotkeys, or from context menus.
+
+### Visual Window
 
 - **Opacity**: Window transparency (0-100%)
 - **Render Quality**: Internal render buffer scale (0-100%). A low quality yields a pixellated retro look. Quality setting is ignored when fixed Spout resolution is used.
@@ -202,7 +228,7 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 - **VSync / FPS Cap**: Control frame rate
 - **Reload Preset / Restart Render**: Utility buttons
 
-### Colors Tab
+### Colors Window
 
 - **Hue**: Shift output hue (-1.0 to +1.0)
 - **Saturation / Brightness**: Adjust output color
@@ -210,56 +236,21 @@ Press **F8** or **Ctrl+L** to open the Settings window. It provides an 11-tab in
 - **Auto Hue**: Automatically cycle hue over a configurable period
 - **Reset**: Restore color defaults
 
-### System Tab
+### Controller Window
 
-- **Audio Device**: Select from system output and input devices. Input devices appear with `[Input]` suffix.
-- **Hotkeys...**: Opens the Hotkeys window (also available via Ctrl+F7). See the Configurable Hotkeys section below.
-- **Idle Timer**: Screensaver mode that activates after a configurable idle timeout (1-60 minutes). Action can be Fullscreen or Stretch/Mirror. Auto-restore returns to previous state when input is detected.
-- **Game Controller**: Map game controller buttons to visualizer commands. Check **Enable** to start polling. Select a controller from the **Device** dropdown, click **Scan** to re-enumerate connected controllers. The **Button Mapping** text editor shows the JSON configuration mapping button numbers to commands. Click **Defaults** for the default DualSense mapping, **Save** to write to `controller.json`, **Load** to read it back. The **?** button shows an Xbox controller button reference. See Game Controller section below for details.
+- **Enable**: Start polling the game controller
+- **Device**: Select a connected controller from the dropdown
+- **Scan**: Re-enumerate connected controllers
+- **Button Mapping**: JSON configuration mapping button numbers to commands
+- **Defaults**: Load default DualSense mapping
+- **Save / Load**: Persist to/from `controller.json`
+- **?**: Xbox controller button reference
 
-### Files Tab
+See Game Controller section below for details.
 
-- **Content Base Path**: Root directory for textures and sprites referenced by presets
-- **Fallback Search Paths**: Additional directories to search when textures are missing. When a preset references a texture that is not found in the built-in directory, these paths are searched in order.
-- **Random Textures Directory**: Separate directory specifically for random texture selection (rand00-rand13), which takes priority over fallback paths
+### Displays Window (Ctrl+F8)
 
-### Messages Tab
-
-- **Messages list**: Up to 100 custom message slots
-- **Push Now / Add / Edit / Delete**: Manage messages
-- **Reload from File / Paste / Open INI**: Utility functions
-- **Overrides**: Global randomization and display overrides
-- **Autoplay**: Timer-based automatic message cycling with interval and jitter
-- **Sequential Order / Auto-Size**: Display options
-- **Show Messages / Show Sprites**: Independent visibility toggles
-
-### Sprites Tab
-
-- **Sprites list**: Up to 100 sprite slots with image preview
-- **Blend Mode**: Blend / Decal / Additive / SrcColor / ColorKey
-- **Layer**: Behind Text / On Top
-- **Position / Scale / Rotation**: Transform controls
-- **Color (RGBA) / Colorkey**: Tint and transparency
-- **Flip / Burn / Repeat**: Display flags
-- **Init Code / Per-Frame Code**: EEL expression editors for animation
-
-### Remote Tab
-
-- **Pipe Name**: Shows the Named Pipe endpoint (`\\.\pipe\Milkwave_<PID>`) used for IPC
-- **Connection Status**: Shows whether Milkwave Remote is connected
-- **Save Screenshot**: Save current frame with file dialog
-- **Last Message**: Most recent IPC message received
-
-### Script Tab
-
-- **Script File**: Browse for a BPM-timed preset sequence file
-- **Play / Stop / Loop**: Playback controls
-- **BPM / Beats**: Timing configuration
-- **Script Lines**: List of script entries; double-click to jump to a line
-
-### Displays Tab
-
-The Displays tab is split into two sub-tabs: **Display Outputs** and **Video Input**.
+The Displays window has two sub-tabs: **Display Outputs** and **Video Input**.
 
 #### Display Outputs Sub-Tab
 
@@ -290,18 +281,112 @@ The Displays tab is split into two sub-tabs: **Display Outputs** and **Video Inp
 
 See the Display Outputs and Video Input sections below for details.
 
-### About Tab
+### Messages Window
 
-- Version and build information
-- **Paths**: Base Dir, Settings INI, and Presets directory
-- **Log Level**: Off / Error / Warn / Info / Verbose (writes to debug.log)
-- **Register .milk / .milk2**: Associate .milk and .milk2 files with this exe so double-clicking them in Explorer opens the preset in MDropDX12 (writes to HKCU, no admin required)
+- **Messages list**: Up to 100 custom message slots
+- **Push Now / Add / Edit / Delete**: Manage messages
+- **Reload from File / Paste / Open INI**: Utility functions
+- **Overrides**: Global randomization and display overrides
+- **Autoplay**: Timer-based automatic message cycling with interval and jitter
+- **Sequential Order / Auto-Size**: Display options
+- **Show Messages / Show Sprites**: Independent visibility toggles
+
+### Sprites Window
+
+- **Sprites list**: Up to 100 sprite slots with image preview
+- **Blend Mode**: Blend / Decal / Additive / SrcColor / ColorKey
+- **Layer**: Behind Text / On Top
+- **Position / Scale / Rotation**: Transform controls
+- **Color (RGBA) / Colorkey**: Tint and transparency
+- **Flip / Burn / Repeat**: Display flags
+- **Init Code / Per-Frame Code**: EEL expression editors for animation
+
+### Remote Window
+
+- **Pipe Name**: Shows the Named Pipe endpoint (`\\.\pipe\Milkwave_<PID>`) used for IPC
+- **Connection Status**: Shows whether Milkwave Remote is connected
+- **Save Screenshot**: Save current frame with file dialog
+- **Last Message**: Most recent IPC message received
+
+### Script Window
+
+- **Script File**: Browse for a BPM-timed preset sequence file
+- **Play / Stop / Loop**: Playback controls
+- **BPM / Beats**: Timing configuration
+- **Script Lines**: List of script entries; double-click to jump to a line
+
+### Presets Window
+
+Standalone preset browser and configuration panel.
+
+- **Current Preset**: Shows the currently loaded preset, with a **Browse** button
+- **Preset Dir**: Shows the current preset directory, with a **Browse...** button to change it
+- **Preset List**: Browsable list of presets with annotation indicators (star for favorite, warning for errors, circled dash for skip). Navigate into subdirectories; `*..` to go up.
+- **Navigation**: Prev/Next buttons, Up (parent directory), Into (subdirectory), Copy (preset path to clipboard)
+- **Filter**: Cycle through All / .milk / .milk2 / .milk3. Random and sequential selection respects the active filter.
+- **Audio Gain (-1=Auto)**: Audio sensitivity (-1 for auto-adaptive, 0.5-256 manual)
+- **Blend Time (s)**: Duration of soft transitions between presets
+- **Time Between (s)**: Auto-advance interval
+- **Hard Cuts Disabled**: Prevent audio-triggered hard cuts
+- **Preset Lock on Startup**: Start with preset locked
+- **Sequential Preset Order**: Play presets in order instead of random
+- **Startup**: Choose startup behavior — Random, Current Preset, or Last Used
+- **Right-click context menu**: Toggle Favorite, Toggle Skip, Flag as Broken, Add Note, View Error, Clear Flags, Rating submenu (0-5 stars), Open Annotations
+
+### Video Effects Window
+
+- **Transform**: Scale, rotation, X/Y offset with real-time sliders
+- **Color**: Brightness, contrast, saturation, hue shift
+- **Audio-Reactive**: Link visual parameters to bass/mid/treb audio bands
+
+### VFX Profiles Window
+
+Save and load Video Effects settings as named JSON profiles. Select which profile loads on startup.
+
+### Button Board Window
+
+Configurable grid of action buttons. Each slot can have:
+
+- **Custom image** (Set Image / Clear Image, or drag-drop)
+- **Hotkey binding** (modifiers + key, local/global scope)
+- **Action type**: Built-in action, Script command, Launch App, or IPC command
+- **JSON layout** export/import (Save Layout / Load Layout)
+- **Right-click "Assign Action..."** cascading submenu with all built-in actions organized by category
+
+### Workspace Layout Window
+
+Tile tool windows across the screen with a render preview.
+
+- **Corner mode**: Render in a screen corner (TL/TR/BL/BR) with size slider (5-50%)
+- **Fullscreen mode**: Render fullscreen on a separate display
+- **Window grid**: Checkboxes for which ToolWindows to open and tile
+- **Apply Layout**: Opens and arranges selected windows
+
+### Error Display Settings Window
+
+Configure shader error notification appearance:
+
+- **Normal** and **LOUD** display modes with separate settings
+- **Font size**, **duration**, and **color** for each mode
+
+### Annotations Window
+
+Manage preset annotations (ratings, flags, notes):
+
+- **Filterable ListView** of all annotated presets
+- **Import** annotations from another `presets.json` file (side-by-side comparison)
+- **Scan** loaded presets for `.milk` `fRatingThis` values
+- **Detail dialogs** for editing individual annotations
+
+### Shader Import Window
+
+Two-panel editor for Shadertoy GLSL-to-HLSL conversion. See the GLSL-to-HLSL Shader Conversion section below.
 
 ## Audio
 
 MDropDX12 captures audio via **WASAPI loopback**, which mirrors whatever is playing through the selected audio output device. No audio routing or virtual cable is needed. Play music through any application and the visualizer responds.
 
-**Input devices** (microphones) are also supported. In Settings > Sound, input devices appear with an `[Input]` suffix.
+**Input devices** (microphones) are also supported. In Settings > System, input devices appear with an `[Input]` suffix.
 
 **Audio Sensitivity** controls how strongly the visualizer reacts to audio levels. Set to **-1** for auto-adaptive mode, which automatically adjusts based on signal level. Manual values range from 0.5 (low sensitivity) to 256 (high sensitivity).
 
@@ -320,11 +405,11 @@ Presets are `.milk` or `.milk2` files that define visual behavior through per-fr
 - Navigate into subdirectories; BACKSPACE to go up one level
 - **Drag and drop** a .milk or .milk2 file from Explorer onto the window
 - **Double-click** a .milk or .milk2 file in Explorer to load it directly (if MDropDX12 is already running, the preset is forwarded to the existing instance via Named Pipe)
-- **File association**: Use Settings → About → "Register .milk / .milk2" to enable double-click loading (no admin required)
+- **File association**: Use Settings → About → "Register .milk / .milk2 / .milk3" to enable double-click loading (no admin required)
 
 ### Preset Transitions
 
-- **SPACE**: Soft blend to next preset (uses the blend time set in General tab)
+- **SPACE**: Soft blend to next preset (uses the blend time set in the Presets window)
 - **H**: Hard cut to next preset (instant switch)
 - **BACKSPACE**: Return to previously loaded preset
 - Beat-driven hard cuts trigger automatically based on audio energy (configurable via SHIFT+F11)
@@ -342,7 +427,7 @@ Press **`` ` ``** or **`~`** (or SCROLL LOCK) to lock the current preset, preven
 
 ## Track Info
 
-MDropDX12 can display current track information (artist, title, album) and album artwork as an overlay. Track info is obtained from one of three sources, configured in Settings > General > Song Info Source.
+MDropDX12 can display current track information (artist, title, album) and album artwork as an overlay. Track info is obtained from one of three sources, configured in the Song Info window (Shift+Ctrl+F8).
 
 ### Sources
 
@@ -359,7 +444,7 @@ When the source is set to Window Title, MDropDX12 uses named profiles to match w
 - **Parse Regex**: A regex with named capture groups `(?<artist>...)`, `(?<title>...)`, and `(?<album>...)` to extract fields from the matched window title
 - **Poll Interval**: How often to check the window title (1-10 seconds)
 
-Multiple profiles can be created for different media players. Select the active profile from the dropdown on the General tab.
+Multiple profiles can be created for different media players. Select the active profile from the dropdown in the Song Info window.
 
 ### Artist-Title Match Editor
 
@@ -459,13 +544,13 @@ The message system displays user-defined text overlays on screen. Messages are s
 
 ### Using Messages
 
-1. Set mode to Messages (Settings > General > Messages/Sprites Mode, or press **K**)
+1. Set mode to Messages (Settings > General > Messages/Sprites, or press **K**)
 2. Type a two-digit number (00-99) to display that message
 3. Press ***** to reload messages.ini from disk
 
 ### Managing Messages
 
-Use Settings > Messages tab to add, edit, and delete messages. Each message has:
+Use the Messages window to add, edit, and delete messages. Each message has:
 
 - **Text**: The message content
 - **Font / Size**: Font face and point size
@@ -507,25 +592,25 @@ The **Overrides** dialog applies global randomization rules to all messages:
 
 ## Sprites
 
-Sprites are image overlays managed via Settings > Sprites tab. Each sprite has an image file, blend mode, layer order, position, scale, rotation, colorkey, RGBA tint, and animation code.
+Sprites are image overlays managed via the Sprites window. Each sprite has an image file, blend mode, layer order, position, scale, rotation, colorkey, RGBA tint, and animation code.
 
 Sprites support **EEL expressions** in Init Code (runs once on load) and Per-Frame Code (runs every frame) for animation.
 
 ## Display Outputs
 
-The Displays tab in Settings (F8) provides a unified interface for managing all render outputs: monitor mirrors and Spout senders.
+The Displays window (Ctrl+F8) provides a unified interface for managing all render outputs: monitor mirrors and Spout senders.
 
 ### Monitor Mirroring
 
-MDropDX12 can mirror its visualization output to additional monitors connected to your system. The Displays tab lists all detected monitors (excluding the one running the main visualizer window). Enable a monitor and press **Activate Mirrors** to create borderless fullscreen mirror windows on those displays.
+MDropDX12 can mirror its visualization output to additional monitors connected to your system. The Displays window lists all detected monitors (excluding the one running the main visualizer window). Enable a monitor and press **Activate Mirrors** to create borderless fullscreen mirror windows on those displays.
 
-**Safety**: Mirror windows are always inactive at startup. You must explicitly press the **Activate Mirrors** button on the Displays tab to create them. This prevents accidental full-screen coverage of monitors.
+**Safety**: Mirror windows are always inactive at startup. You must explicitly press the **Activate Mirrors** button on the Displays window to create them. This prevents accidental full-screen coverage of monitors.
 
-**ALT+S failsafe**: When "Use mirrors for ALT-S" is enabled and you press ALT+S with no monitors enabled, MDropDX12 detects available displays and prompts: "No mirrors enabled. Found N display(s). Mirror to all?" Choose **Yes** to enable all detected monitors and activate mirrors, **No** to go fullscreen without mirrors, or **Cancel** to abort. Check "Don't ask when no mirrors are enabled" on the Displays tab to skip the prompt and automatically enable all monitors.
+**ALT+S failsafe**: When "Use mirrors for ALT-S" is enabled and you press ALT+S with no monitors enabled, MDropDX12 detects available displays and prompts: "No mirrors enabled. Found N display(s). Mirror to all?" Choose **Yes** to enable all detected monitors and activate mirrors, **No** to go fullscreen without mirrors, or **Cancel** to abort. Check "Don't ask when no mirrors are enabled" on the Displays window to skip the prompt and automatically enable all monitors.
 
 **Z-order**: Mirror windows are always topmost so they stay above normal desktop windows. The Settings window (also topmost) sits above mirrors naturally when focused.
 
-**Click-through**: By default, mirror windows are opaque and block mouse input. Check **Click-through** on the Displays tab to allow mouse events to pass through to applications behind the mirror. Click-through state is not persisted — it resets to off each launch.
+**Click-through**: By default, mirror windows are opaque and block mouse input. Check **Click-through** on the Displays window to allow mouse events to pass through to applications behind the mirror. Click-through state is not persisted — it resets to off each launch.
 
 **Opacity**: Use the **Opacity** spin box (1-100%) to control mirror window transparency. This is useful in combination with click-through to see and interact with windows behind the visualization. Opacity is persisted to settings.ini.
 
@@ -533,7 +618,7 @@ Monitors are enumerated automatically at startup and when displays are connected
 
 ### Multiple Spout Senders
 
-You can configure multiple Spout senders from the Displays tab, each with its own name and optional fixed resolution. Use "Add Spout" to create additional senders beyond the default one. Each sender appears in Spout-compatible receivers (OBS, Resolume, etc.) as a separate source.
+You can configure multiple Spout senders from the Displays window, each with its own name and optional fixed resolution. Use "Add Spout" to create additional senders beyond the default one. Each sender appears in Spout-compatible receivers (OBS, Resolume, etc.) as a separate source.
 
 For each Spout output you can configure:
 
@@ -572,7 +657,7 @@ The flow for each frame is:
 There are three ways to toggle Spout output:
 
 - **Keyboard**: Press **F10** or **CTRL+Z**
-- **Settings UI**: Check **Spout Output** in Settings > System tab
+- **Settings UI**: Check **Spout Output** in the Displays window
 - **IPC command**: Send `SPOUT_ACTIVE=1` or `SPOUT_ACTIVE=0` via Named Pipe
 
 A notification appears on screen confirming the state change.
@@ -588,7 +673,7 @@ For example, you can send a full 1920x1080 stream to OBS while keeping the visua
 To enable fixed resolution:
 
 - **Keyboard**: Press **SHIFT+F10** or **SHIFT+CTRL+Z** to toggle
-- **Settings UI**: Check **Fixed Size** in Settings > System tab, then enter Width and Height
+- **Settings UI**: Check **Fixed Size** in the Displays window, then enter Width and Height
 - **IPC command**: Send `SPOUT_FIXEDSIZE=1` and `SPOUT_RESOLUTION=1920x1080`
 
 The supported resolution range is **64x64 to 7680x4320**.
@@ -599,10 +684,10 @@ When fixed resolution is active, the entire rendering pipeline operates at the f
 
 | Setting | Location | Default | Description |
 |---------|----------|---------|-------------|
-| Spout Output | System tab / F10 / CTRL+Z | Enabled | Master on/off toggle |
-| Fixed Size | System tab / SHIFT+F10 | Disabled | Decouple output from window size |
-| Width | System tab | 1280 | Fixed output width (64-7680) |
-| Height | System tab | 720 | Fixed output height (64-4320) |
+| Spout Output | Displays window / F10 / CTRL+Z | Enabled | Master on/off toggle |
+| Fixed Size | Displays window / SHIFT+F10 | Disabled | Decouple output from window size |
+| Width | Displays window | 1280 | Fixed output width (64-7680) |
+| Height | Displays window | 720 | Fixed output height (64-4320) |
 
 ### INI Configuration
 
@@ -655,7 +740,7 @@ Any application that supports Spout receiving can capture the MDropDX12 output:
 
 ## Video Input
 
-MDropDX12 can composite a video source onto the visualization as a background or overlay layer. This is configured on the **Displays** tab in Settings (F8).
+MDropDX12 can composite a video source onto the visualization as a background or overlay layer. This is configured in the **Displays** window (Ctrl+F8) on the Video Input tab.
 
 ### Source Types
 
@@ -698,7 +783,7 @@ Video input settings are saved to the `[SpoutInput]` section of `settings.ini`. 
 
 ### Hue / Saturation / Brightness
 
-Adjust the overall color of the visualizer output via Settings > Colors tab. The hue shift rotates all colors around the color wheel. These can also be controlled via Milkwave Remote.
+Adjust the overall color of the visualizer output via the Colors window. The hue shift rotates all colors around the color wheel. These can also be controlled via Milkwave Remote.
 
 ### Auto Hue Cycling
 
@@ -717,7 +802,7 @@ Cycle through post-processing effects applied after the comp shader:
 ## Screenshots
 
 - **CTRL+X**: Auto-saves a PNG screenshot to the `capture/` subdirectory with filename format `YYYYMMDD-HHMMSS-presetname.png`
-- **Settings > Remote tab > Save Screenshot**: Opens a file dialog to choose save location
+- **Remote window > Save Screenshot**: Opens a file dialog to choose save location
 - **IPC**: The `CAPTURE` command triggers a screenshot via Milkwave Remote
 
 ## Preset Variables
@@ -748,7 +833,7 @@ float3 myColor = float3(sin(bass_smooth)+1, 0, 0);
 
 `vis_intensity` (float, default 1.0), `vis_shift` (float, default 0.0), `vis_version` (int, default 1)
 
-Presets can use these variables to modify appearance aspects. Users can adjust these values live from Settings > Visual tab while the preset is running. They can also be assigned to MIDI controls via Milkwave Remote.
+Presets can use these variables to modify appearance aspects. Users can adjust these values live from the Visual window while the preset is running. They can also be assigned to MIDI controls via Milkwave Remote.
 
 For backward compatibility:
 
@@ -764,7 +849,7 @@ See the Shader presets included with MDropDX12 for examples that make use of the
 
 `colshift_hue`, `colshift_saturation`, `colshift_brightness`
 
-These all default to 0 and can be changed in Settings > Colors tab or via Milkwave Remote. The values are used in the `shiftHSV()` function which is included in MDropDX12's `include.fx` file.
+These all default to 0 and can be changed in the Colors window or via Milkwave Remote. The values are used in the `shiftHSV()` function which is included in MDropDX12's `include.fx` file.
 
 To save a color shift value to a preset, add something like this at the end of your comp shader definition:
 
@@ -778,7 +863,7 @@ Note that this is an MDropDX12-specific change that does not port to other MilkD
 
 ## GLSL-to-HLSL Shader Conversion
 
-MDropDX12 has a built-in Shader Import window that converts GLSL shader code (e.g., from Shadertoy) to HLSL for live preview and saving as `.milk3` presets. Open it from **Settings → About tab → Open Shader Import**, or from the Welcome window on first run.
+MDropDX12 has a built-in Shader Import window that converts GLSL shader code (e.g., from Shadertoy) to HLSL for live preview and saving as `.milk3` presets. Open it from **Settings → Tools tab**, or from the Welcome window on first run.
 
 ### Shadertoy Examples
 
@@ -848,7 +933,7 @@ Not yet handled: `VIDEOINPUT=`
 
 The script system plays timed preset sequences synchronized to a BPM (beats per minute). Script files define which presets to load and when, enabling choreographed visual shows.
 
-Manage scripts via Settings > Script tab: browse for a script file, set BPM, and use Play/Stop/Loop controls. See `script-default.txt` for a detailed description of available commands.
+Manage scripts via the Script window: browse for a script file, set BPM, and use Play/Stop/Loop controls. See `script-default.txt` for a detailed description of available commands.
 
 ## Game Controller
 
@@ -856,13 +941,13 @@ MDropDX12 supports game controllers (gamepads) for hands-free control of the vis
 
 ### Setup
 
-1. Open Settings (F8) > System tab
-2. Check **Enable** under Game Controller
+1. Open the Controller window (from Settings > Tools tab)
+2. Check **Enable** to start polling
 3. Click **Scan** to detect connected controllers
 4. Select your controller from the **Device** dropdown
 5. Click **Defaults** to load the default button mapping, then **Save**
 
-The **?** button next to the Game Controller label opens a reference popup showing Xbox Wireless Controller button numbers.
+The **?** button opens a reference popup showing Xbox Wireless Controller button numbers.
 
 ### Button Mapping (controller.json)
 
@@ -935,7 +1020,7 @@ The Windows Multimedia API (winmm) exposes up to 32 buttons per controller. For 
 
 ### Managing Mappings
 
-Use the **Button Mapping** text editor on the System tab to edit mappings directly:
+Use the **Button Mapping** text editor in the Controller window to edit mappings directly:
 
 - **Defaults**: Fills the editor with the default DualSense/Xbox mapping
 - **Save**: Writes the editor contents to `controller.json` and reloads the config
@@ -1013,15 +1098,14 @@ There is no limit to the number of Launch App entries. To remove an entry, selec
 
 ## MIDI Input
 
-MDropDX12 has native MIDI input support with 50 configurable mapping slots. Open the MIDI window via Settings > System > **MIDI...** button.
+MDropDX12 has native MIDI input support with 50 configurable mapping slots. Open the MIDI window from the Tools tab in Settings or via hotkey.
 
 ### MIDI Setup
 
-1. Open Settings (F8) > System tab
-2. Click **MIDI...**
-3. Click **Scan** to detect connected MIDI devices
-4. Select your device from the **Device** dropdown
-5. Check **Enable** to start receiving MIDI data
+1. Open the MIDI window (from Settings > Tools tab, or System tab > **MIDI...** button)
+2. Click **Scan** to detect connected MIDI devices
+3. Select your device from the **Device** dropdown
+4. Check **Enable** to start receiving MIDI data
 
 ### Mapping Slots
 
@@ -1096,13 +1180,22 @@ Each knob can have an **Increment** value for relative control (set to 0 for abs
 
 ## Song Info Window
 
-Press **Shift+Ctrl+F8** to open a standalone Song Info window showing the current track information (artist, title, album). This is a ToolWindow that runs on its own thread with independent always-on-top, theme support, and sticky position.
+Press **Shift+Ctrl+F8** to open the Song Info window showing the current track information (artist, title, album). This is a ToolWindow that runs on its own thread with independent always-on-top, theme support, and sticky position.
 
-The Song Info window provides the same track info source selector and display options as the General tab in Settings, allowing quick access to track info configuration without opening the full Settings window.
+- **Source**: Select how track info is obtained — SMTC (Windows media sessions), IPC (from Milkwave Remote), or Window Title (regex-based parsing)
+- **Profile / Edit**: When source is Window Title, select a named profile and open the Artist-Title Match Editor to configure window matching and parsing regex patterns (see Track Info section below)
+- **Song Title Animations**: Animated display when track changes
+- **Overlay Notifications**: Show track info as an overlay notification on track change
+- **Change Preset w/ Song**: Auto-advance when a new track starts
+- **Show Cover Art**: Display album artwork on track change
+- **Always Show Track Info**: Keep track info visible permanently instead of fading out
+- **Display Corner**: Choose which screen corner shows track info (Top-Left, Top-Right, Bottom-Left, Bottom-Right)
+- **Display Seconds**: How long track info remains visible (0.5-60 seconds)
+- **Show Now**: Force-display current track info immediately
 
 ## Text Animations
 
-Press **T** to trigger a song title animation, or open the Text Animations window from Settings > System > **Text Animations...** button.
+Press **T** to trigger a song title animation, or open the Text Animations window from the Tools tab in Settings or via hotkey.
 
 The Text Animations window provides controls for animated text rendering:
 
@@ -1122,9 +1215,9 @@ MDropDX12 includes safeguards against GPU overload:
 - **TDR Recovery**: Automatic recovery from GPU timeout detection and recovery events, with window focus restoration
 - **Async Shader Compilation**: Shaders compile on a background thread to prevent GPU stalls during preset transitions
 - **Shader Compile Timeout**: Shaders that take too long to compile are automatically skipped
-- **Max Shape Instances**: Limit the number of custom shape instances per frame (Settings > Visual)
+- **Max Shape Instances**: Limit the number of custom shape instances per frame (Visual window)
 - **Skip Heavy Presets**: Automatically skip presets that exceed a configurable GPU load threshold
-- **Device Restart**: Restart the render device from Settings > Visual tab if needed
+- **Device Restart**: Restart the render device from the Visual window if needed
 
 ## Files and Directories
 
@@ -1144,13 +1237,13 @@ MDropDX12 includes safeguards against GPU overload:
 
 ## Troubleshooting
 
-**No audio response**: Check Settings > System tab to ensure the correct audio device is selected. Press CTRL+D to reset to default. Verify music is playing through that device.
+**No audio response**: Check Settings > System to ensure the correct audio device is selected. Press CTRL+D to reset to default. Verify music is playing through that device.
 
-**Presets render black**: This may be caused by missing textures. Check Settings > Files tab to configure fallback search paths. Missing textures fall back to a 1x1 white texture to prevent black-screen artifacts.
+**Presets render black**: This may be caused by missing textures. Check Settings > Files to configure fallback search paths. Missing textures fall back to a 1x1 white texture to prevent black-screen artifacts.
 
 **Shader compilation errors**: Some presets may fail to compile on certain GPUs. MDropDX12 auto-skips failed shaders and moves to the next preset. Enable verbose logging (About tab > Log Level: Verbose) and check `debug.log` for details.
 
-**High GPU usage**: Reduce render quality in Settings > Visual tab, enable Auto Quality, or lower the FPS cap. If using Spout fixed size, reduce the output resolution.
+**High GPU usage**: Reduce render quality in the Visual window, enable Auto Quality, or lower the FPS cap. If using Spout fixed size, reduce the output resolution.
 
 **Window appears frozen**: The visualizer may be in black mode (CTRL+F12) or the preset may be locked on a static visual. Press SPACE to advance to the next preset.
 

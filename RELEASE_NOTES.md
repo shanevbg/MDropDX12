@@ -1,19 +1,20 @@
-# MDropDX12 v1.7.5
-
-Special thanks to [IkeC](https://github.com/IkeC) and [_Incubo](https://github.com/OfficialIncubo) for testing and reporting issues.
+# MDropDX12 v1.7.6
 
 ## What's New
 
-- **Preset annotation system** — Persistent per-preset ratings (0-5), flags (favorite/error/skip/broken), notes, and auto-captured shader error text stored in `presets.json`. Right-click context menu on the Presets window for quick access.
-- **Annotations ToolWindow** — Filterable ListView with detail dialogs, import from file, and scan loaded presets for `.milk` ratings. Import dialog shows side-by-side comparison with selective import.
-- **Dark-themed popup menus** — Context menus follow the app's dark theme.
-- **Cover art sprite system** — Show Now button and IPC signal for cover art display.
-- **Two-pass shader blending** — DX12 preset transitions use two-pass shader blending for smoother crossfades.
+- **Display mode stability** — Fixed render hangs when switching between mirroring and fullscreen. Present `E_FAIL` now triggers automatic swap chain recovery. Device recovery (TDR) now properly triggers after GPU timeout.
+- **Focus and z-order fixes** — Render window maintains focus during display mode transitions. ToolWindows opened via hotkey appear above fullscreen render.
+- **Mirror deadlock fix** — Render thread now pumps messages for mirror windows, preventing cross-thread `SendMessage` deadlock.
+- **Alt+Enter in mirroring** — Disables mirrors and stays fullscreen instead of exiting to windowed mode.
+- **Documentation overhaul** — Settings/ToolWindows restructured, IPC commands reference added, all docs updated to match current UI.
 
 ## Bug Fixes
 
-- Random preset selection now skips presets flagged as skip/broken
-- Auto-flag presets with shader compilation errors
+- Fixed persistent `E_FAIL` from `DXGI_PRESENT_ALLOW_TEARING` during window state transitions
+- Fixed device recovery never firing after `DXGI_ERROR_DEVICE_REMOVED` (check order bug)
+- Fixed render window losing focus on fullscreen/spanning/mirroring transitions
+- Fixed mirror window deadlock on z-order changes
+- Fixed Alt+Enter while mirroring going to windowed instead of single fullscreen
 
 ## Installation
 

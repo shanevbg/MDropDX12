@@ -83,7 +83,7 @@ Volume textures are sampled with `tex3D()` in shader code and are useful for smo
 | `blur2` | Second blur level |
 | `blur3` | Third blur level (heaviest blur) |
 
-Up to 6 blur levels may be available (`blur1`–`blur6`) depending on build configuration. These provide Gaussian-blurred versions of the current frame at decreasing resolutions.
+3 blur levels are available (`blur1`–`blur3`). These provide Gaussian-blurred versions of the current frame at decreasing resolutions.
 
 ### Frame Textures
 

@@ -174,7 +174,7 @@ MDropDX12/
       engine.cpp/h       -- Core engine, render loop, state management
       dxcontext.cpp/h    -- DX12 device, swap chain, descriptor heaps
       milkdropfs.cpp     -- Preset shader generation (warp/comp/blur)
-      engine_settings_ui.cpp -- Settings window (11-tab dark theme UI)
+      engine_settings_ui.cpp -- Settings window (5-tab UI: General, Tools, System, Files, About)
       engine_input.cpp   -- Keyboard/mouse/hotkey handlers
       engine_presets.cpp  -- Preset loading, parsing, cross-fading
       state.cpp/h        -- Preset state and parameter storage
@@ -387,9 +387,9 @@ Font atlas SRV slots must be allocated **before** `m_srvSlotBaseline` is set. `R
 
 Use **`m_bLoadingShadertoyMode`** (not `m_bShadertoyMode`) in `LoadShaderFromMemory`. The latter isn't set until after shader compilation — too late for shader text generation. `m_bLoadingShadertoyMode` is set in `LoadPreset` before the async thread starts.
 
-### IPC Window Titles
+### Named Pipe IPC
 
-The render window and IPC window must have **different titles**. Milkwave Remote uses `EnumWindows` + title match and stops at the first hit. If both windows share the same title, Remote may find the render window (which doesn't handle `WM_COPYDATA`).
+MDropDX12 uses Named Pipe IPC (`\\.\pipe\Milkwave_<PID>`) for communication with Milkwave Remote and other clients. The pipe server (`pipe_server.cpp`) runs on a dedicated thread with duplex message-mode communication. PID-based discovery eliminates the need for window title matching. The old WM_COPYDATA / hidden IPC window approach was removed in v1.5.0.
 
 ## DX12 Rendering Pipeline
 

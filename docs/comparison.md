@@ -4,7 +4,7 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 
 | Project | Description | Graphics API | Status |
 | ------- | ----------- | ------------ | ------ |
-| **MDropDX12** | Ground-up DX12 rebuild of MilkDrop2 engine | DirectX 12 | Active (v1.7.5) |
+| **MDropDX12** | Ground-up DX12 rebuild of MilkDrop2 engine | DirectX 12 | Active (v1.7.6) |
 | **Milkwave** | Remote control app + bundled MilkDrop2 visualizer | DirectX 9Ex | Active (v3.5) |
 | **MilkDrop3** | Enhanced MilkDrop2 fork (reference visualizer) | DirectX 9Ex | Active (v3.31) |
 | **projectM** | Open-source MilkDrop reimplementation (SDL standalone) | OpenGL | Pre-release (lib v4.1.6) |
@@ -195,10 +195,11 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 
 | Feature | MDropDX12 | Milkwave | MilkDrop3 | projectM |
 | ------- | --------- | -------- | --------- | -------- |
-| Milkwave Remote compatibility | ♻️ | ✅ (built-in) | ❌ | ❌ |
-| WM_COPYDATA IPC protocol | ♻️ | ✅ | ❌ | ❌ |
+| Milkwave Remote compatibility | ✅ | ✅ (built-in) | ❌ | ❌ |
+| Named Pipe IPC | ✅ (`\\.\pipe\Milkwave_<PID>`) | ❌ | ❌ | ❌ |
+| WM_COPYDATA IPC protocol | ❌ (replaced by Named Pipes) | ✅ | ❌ | ❌ |
 | Tabbed Remote UI | 🤝 | ✅ | ❌ | ❌ |
-| Button panel (Remote buttons) | ♻️ | ✅ | ❌ | ❌ |
+| Button panel (Remote buttons) | ✅ (Button Board) | ✅ | ❌ | ❌ |
 
 ## Display Outputs
 
@@ -230,7 +231,7 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 | ------- | --------- | -------- | --------- | -------- |
 | In-app settings window (F8) | ✅ | ✅ | ✅ | ✅ (WIP) |
 | Tri-mode theme (Dark / Light / Follow System) | ✅ | ❌ | ❌ | ❌ |
-| Multi-tab settings (11 tabs) | ✅ | ✅ | ✅ | ❌ |
+| Multi-tab settings + ToolWindows | ✅ (5 tabs + 20+ ToolWindows) | ✅ | ✅ | ❌ |
 | Per-display opacity and click-through | ✅ | ❌ | ❌ | ❌ |
 | Configurable hotkeys (local + global scope) | ✅ | ❌ | ❌ | ❌ |
 | Idle timer / screensaver mode | ✅ | ❌ | ❌ | ❌ |
@@ -256,7 +257,7 @@ Comparison of four MilkDrop-based music visualizer projects on Windows 11 x64.
 
 ### Milkwave Remote Compatibility
 
-Milkwave Remote finds the Visualizer window using `EnumWindows()` + `GetWindowText()` to match the window title. It communicates via `WM_COPYDATA` with Unicode pipe-delimited `key=value` messages. MDropDX12 runs a dedicated hidden IPC window that receives these commands, supporting 32 of 34 Milkwave commands. The window title is configurable in Settings > Remote tab.
+Milkwave Remote communicates with the Visualizer via `WM_COPYDATA` messages, finding the window using `EnumWindows()` + `GetWindowText()`. MDropDX12 uses a different IPC mechanism: Named Pipes (`\\.\pipe\Milkwave_<PID>`) with PID-based discovery and duplex message-mode communication. MDropDX12 handles 32 of 34 Milkwave command formats. The pipe name and connection status are shown in the Remote window.
 
 ### .milk2 Double-Preset Format
 
@@ -272,22 +273,22 @@ The projectM standalone visualizer ([frontend-sdl-cpp](https://github.com/projec
 
 ### Architectural Differences
 
-- **MDropDX12 v1.7.5**: DirectX 12, x64, native ns-eel2 (x64 JIT with SEH crash protection), GDI overlay for text, no DX9 half-texel offset, no projection matrix (clip-space passthrough); ToolWindow system (Settings, Displays, Song Info, Hotkeys, MIDI, Error Display, Annotations run on own threads), configurable hotkeys with local/global scope and dynamic Script/Launch entries, native MIDI input (50 mapping slots with learn mode), tri-mode theme (Dark/Light/Follow System with WM_SETTINGCHANGE auto-detection), native webcam/video file capture via Media Foundation, Spout input mixing via D3D11On12, monitor mirroring, game controller support, idle timer, window title regex parsing, Shadertoy import with GLSL→HLSL converter and .milk3 JSON format (SM5.0, FLOAT32 ping-pong feedback buffers, Buffer A/B multi-pass), FFT EQ smoothing with attack/decay and peak hold, SEH crash diagnostics for EEL JIT and preset loading, self-bootstrapping exe with embedded shaders, preset annotation system with persistent ratings/flags/notes and auto-captured shader errors, two-pass shader blending for preset transitions
+- **MDropDX12 v1.7.6**: DirectX 12, x64, native ns-eel2 (x64 JIT with SEH crash protection), GDI overlay for text, no DX9 half-texel offset, no projection matrix (clip-space passthrough); Named Pipe IPC (`\\.\pipe\Milkwave_<PID>`); ToolWindow system (20+ standalone windows: Visual, Colors, Controller, Displays, Song Info, Hotkeys, MIDI, Presets, Sprites, Messages, Remote, Script, Shader Import, Video Effects, VFX Profiles, Text Animations, Button Board, Workspace Layout, Error Display, Annotations — all run on own threads), configurable hotkeys with local/global scope and dynamic Script/Launch entries, native MIDI input (50 mapping slots with learn mode), tri-mode theme (Dark/Light/Follow System with WM_SETTINGCHANGE auto-detection), native webcam/video file capture via Media Foundation, Spout input mixing via D3D11On12, monitor mirroring, game controller support, idle timer, window title regex parsing, Shadertoy import with GLSL→HLSL converter and .milk3 JSON format (SM5.0, FLOAT32 ping-pong feedback buffers, Buffer A/B multi-pass), FFT EQ smoothing with attack/decay and peak hold, SEH crash diagnostics for EEL JIT and preset loading, self-bootstrapping exe with embedded shaders, preset annotation system with persistent ratings/flags/notes and auto-captured shader errors, two-pass shader blending for preset transitions
 - **Milkwave v3.5**: Bundles a modified MilkDrop2 (DX9Ex) visualizer with a separate .NET 8 Remote control app; adds input mixing, game controller support, MIDI automation, projectM-eval expression engine, GLSL→HLSL Shadertoy converter (Remote Shader Tab), FFT EQ smoothing with attack/decay and peak hold, HLSL variable shadowing fix, fallback texture search paths, async shader compilation
 - **MilkDrop3 v3.31**: DirectX 9Ex, x86, native ns-eel2 (x86), adds .milk2 format, MilkPanel shader editor, deep mashup system, expanded variable ranges, shader caching (v3.31), hi-res audio (v3.31), 5 sprite layers with blend modes
 - **projectM v4.1.6**: OpenGL, x64, cross-platform (Windows/macOS/Linux), projectM-eval expression engine, GLSL shader pipeline, SDL2 audio; reimplements MilkDrop2 rendering from scratch without using original MilkDrop2 code
 
 ### Feature Overlap
 
-Many features listed under Milkwave (text messages, MIDI, media integration, wave manipulation, scripts) are **Remote-side features** that send commands to the Visualizer via IPC. Once MDropDX12 supports the WM_COPYDATA protocol, these features would become available through Milkwave Remote without needing to be reimplemented in MDropDX12 itself.
+Many features listed under Milkwave (text messages, MIDI, media integration, wave manipulation, scripts) are **Remote-side features** that send commands to the Visualizer via IPC. MDropDX12 handles these commands natively via its Named Pipe IPC server, making them available through any pipe client (including Milkwave Remote when configured for Named Pipe communication).
 
 ### 🤝 Features Available via Milkwave Remote 3.5+
 
-Features marked 🤝 are not built into MDropDX12 directly but will work when used with Milkwave Remote 3.5 or later. The Remote provides its own UI for these features and sends commands to MDropDX12 via the WM_COPYDATA IPC protocol.
+Features marked 🤝 are not built into MDropDX12 directly but will work when used with Milkwave Remote 3.5 or later. The Remote provides its own UI for these features and sends commands to MDropDX12 via IPC.
 
 ### ♻️ Features Implemented via IPC (Milkwave Remote)
 
-Features marked ♻️ are implemented through the WM_COPYDATA IPC protocol and believed to be working with Milkwave Remote. MDropDX12 runs a dedicated hidden IPC window on a separate thread that receives commands non-blockingly from Milkwave Remote (or any WM_COPYDATA sender). The window title is configurable in Settings → Remote tab.
+Features marked ♻️ are implemented through MDropDX12's Named Pipe IPC server (`\\.\pipe\Milkwave_<PID>`). The pipe server runs on a dedicated thread and receives commands non-blockingly from Milkwave Remote or any pipe client. Connection status is shown in the Remote window.
 
 **Supported IPC commands** (32 of 34 Milkwave commands handled):
 

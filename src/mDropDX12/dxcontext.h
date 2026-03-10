@@ -113,6 +113,7 @@ public:
   // ----- Public data (read-only from outside) -----
   int m_ready;
   HRESULT m_lastErr;
+  int m_nPresentFailCount;
   int m_window_width;
   int m_window_height;
   int m_backbuffer_width;

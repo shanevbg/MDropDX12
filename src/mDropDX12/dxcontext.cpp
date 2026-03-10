@@ -57,6 +57,7 @@ DXContext::DXContext(
     m_frame_delay        = 0;
     m_ready              = FALSE;
     m_lastErr            = S_OK;
+    m_nPresentFailCount  = 0;
     m_frameIndex         = 0;
     m_fenceEvent         = nullptr;
     m_rtvDescriptorSize     = 0;
@@ -344,10 +345,20 @@ bool DXContext::BeginFrame()
 
     // Reset command allocator and command list for this frame
     HRESULT hr = m_commandAllocators[m_frameIndex]->Reset();
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        char buf[256];
+        sprintf(buf, "DX12: BeginFrame: CommandAllocator[%u]->Reset() FAILED hr=0x%08X", m_frameIndex, (unsigned)hr);
+        DebugLogA(buf, LOG_ERROR);
+        return false;
+    }
 
     hr = m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), nullptr);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        char buf[256];
+        sprintf(buf, "DX12: BeginFrame: CommandList->Reset() FAILED hr=0x%08X", (unsigned)hr);
+        DebugLogA(buf, LOG_ERROR);
+        return false;
+    }
 
     // Transition back buffer: PRESENT → RENDER_TARGET
     D3D12_RESOURCE_BARRIER barrier = {};
@@ -406,20 +417,92 @@ void DXContext::EndFrame()
     UINT syncInterval = vsync ? 1 : 0;
     UINT presentFlags = (!vsync && m_tearingSupported) ? DXGI_PRESENT_ALLOW_TEARING : 0;
     HRESULT hrPresent = m_swapChain->Present(syncInterval, presentFlags);
-    if (FAILED(hrPresent)) {
-        char buf[256];
-        sprintf(buf, "DX12: Present FAILED hr=0x%08X", (unsigned)hrPresent);
-        DebugLogA(buf, LOG_ERROR);
-        if (hrPresent == DXGI_ERROR_DEVICE_REMOVED || hrPresent == DXGI_ERROR_DEVICE_RESET) {
-            HRESULT reason = m_device->GetDeviceRemovedReason();
-            sprintf(buf, "DX12: Device removed reason: 0x%08X (TDR — GPU timeout or driver crash)", (unsigned)reason);
-            DebugLogA(buf, LOG_ERROR);
-            m_lastErr = hrPresent;
-            m_ready = 0;
+
+    // If Present failed with ALLOW_TEARING, retry without it — the flag can
+    // return E_FAIL when the window is in certain states after mode switches.
+    if (FAILED(hrPresent) && presentFlags != 0) {
+        hrPresent = m_swapChain->Present(syncInterval, 0);
+        if (SUCCEEDED(hrPresent)) {
+            if (m_nPresentFailCount > 0) {
+                DebugLogA("DX12: Present recovered after dropping ALLOW_TEARING flag", LOG_ERROR);
+            }
+            m_nPresentFailCount = 0;
+            MoveToNextFrame();
             return;
         }
     }
 
+    if (FAILED(hrPresent)) {
+        m_nPresentFailCount++;
+        if (m_nPresentFailCount <= 3 || (m_nPresentFailCount % 100 == 0)) {
+            char buf[256];
+            sprintf(buf, "DX12: Present FAILED hr=0x%08X (consecutive=%d)", (unsigned)hrPresent, m_nPresentFailCount);
+            DebugLogA(buf, LOG_ERROR);
+        }
+        if (hrPresent == DXGI_ERROR_DEVICE_REMOVED || hrPresent == DXGI_ERROR_DEVICE_RESET) {
+            HRESULT reason = m_device->GetDeviceRemovedReason();
+            char buf[256];
+            sprintf(buf, "DX12: Device removed reason: 0x%08X (TDR — GPU timeout or driver crash)", (unsigned)reason);
+            DebugLogA(buf, LOG_ERROR);
+            m_lastErr = hrPresent;
+            m_ready = 0;
+            m_nPresentFailCount = 0;
+            return;
+        }
+
+        // After many consecutive failures, the swap chain is stuck.
+        // Force a resize to the current client rect to reset it.
+        if (m_nPresentFailCount >= 10 && m_hwnd) {
+            DebugLogA("DX12: Present stuck — forcing swap chain resize to recover", LOG_ERROR);
+            RECT rc;
+            GetClientRect(m_hwnd, &rc);
+            int w = rc.right - rc.left;
+            int h = rc.bottom - rc.top;
+            if (w > 0 && h > 0) {
+                // Force resize even if dimensions match by going through the full path
+                WaitForGpu();
+                ReleaseSwapChainRtvs();
+                m_commandList.Reset();
+                for (UINT i = 0; i < DXC_FRAME_COUNT; i++) {
+                    m_commandAllocators[i].Reset();
+                    m_fenceValues[i] = m_fenceValues[m_frameIndex];
+                }
+                UINT swapFlags = m_tearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+                HRESULT hr = m_swapChain->ResizeBuffers(DXC_FRAME_COUNT, (UINT)w, (UINT)h, k_BackBufferFormat, swapFlags);
+                if (SUCCEEDED(hr)) {
+                    m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+                    m_client_width = m_REAL_client_width = w;
+                    m_client_height = m_REAL_client_height = h;
+                    m_window_width = w;
+                    m_window_height = h;
+                    CreateRtvsForSwapChain();
+                    for (UINT i = 0; i < DXC_FRAME_COUNT; i++) {
+                        m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[i]));
+                    }
+                    m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                        m_commandAllocators[m_frameIndex].Get(), nullptr, IID_PPV_ARGS(&m_commandList));
+                    m_commandList->Close();
+                    SetViewport(w, h);
+                    DebugLogA("DX12: Swap chain reset succeeded — resuming", LOG_ERROR);
+                    m_nPresentFailCount = 0;
+                } else {
+                    char buf[256];
+                    sprintf(buf, "DX12: Recovery ResizeBuffers FAILED hr=0x%08X", (unsigned)hr);
+                    DebugLogA(buf, LOG_ERROR);
+                    m_lastErr = hr;
+                    m_ready = 0;
+                    m_nPresentFailCount = 0;
+                }
+            }
+            return;
+        }
+
+        // For the first few failures, just skip MoveToNextFrame and retry next frame.
+        // Don't call WaitForGpu every frame — it's expensive.
+        return;
+    }
+
+    m_nPresentFailCount = 0;
     MoveToNextFrame();
 }
 
