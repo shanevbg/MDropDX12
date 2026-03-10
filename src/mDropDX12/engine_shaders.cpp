@@ -386,9 +386,14 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
                     }
                   }
                   if (!siblingFound) {
-                    // Search content base path first
+                    // Search dedicated random textures directory
                     bool fbFound = false;
-                    if (g_engine.m_szContentBasePath[0]) {
+                    if (!fbFound && g_engine.m_szRandomTexDir[0]) {
+                      swprintf(szFilename, L"%s%s.%s", g_engine.m_szRandomTexDir, szRootName, texture_exts[z].c_str());
+                      if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) fbFound = true;
+                    }
+                    // Search content base path
+                    if (!fbFound && g_engine.m_szContentBasePath[0]) {
                       swprintf(szFilename, L"%s%s.%s", g_engine.m_szContentBasePath, szRootName, texture_exts[z].c_str());
                       if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) fbFound = true;
                     }
