@@ -145,19 +145,27 @@ Make sure you've run `Developer-Setup.cmd` first so the `Release/` folder has th
 
 ### Release
 
-After a Release build, the executable is in the build output directory (see table below). To test a release build with the full runtime environment, run:
+After a Release build, the executable is in the build output directory (see table below). To create a portable release zip:
 
 ```powershell
-config\release.cmd
+powershell -ExecutionPolicy Bypass -File release.ps1
 ```
 
-This copies the built exe and default configs into the `Release/` folder. Then run `Release/MDropDX12.exe`.
+This builds Release x64, stages the exe + docs into a zip (`MDropDX12-v{VERSION}-Portable.zip`), validates the zip contents, and updates `Release/MDropDX12.exe`. The version is read automatically from `version.h`.
+
+Options:
+- `-SkipBuild` — package from an existing build without rebuilding
+- `-DryRun` — show what would be packaged without creating the zip
+- `-GitHubRelease` — also create a GitHub release with the zip attached (requires `gh` CLI)
+
+To test a release build manually, run `Release/MDropDX12.exe` after the release script updates it.
 
 ## Project Structure
 
 ```
 MDropDX12/
   build.ps1              -- Build script (locates MSBuild, fetches Spout2, builds)
+  release.ps1            -- Release script (build + package + validate + optional GitHub release)
   MDropDX12.sln          -- Visual Studio solution file
   CLAUDE.md              -- AI assistant project context and critical warnings
   src/
