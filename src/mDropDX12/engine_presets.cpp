@@ -1733,9 +1733,11 @@ void Engine::LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime) 
 // ---------------------------------------------------------------------------
 
 void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
-  // clear old error msg...
-  if (m_nFramesSinceResize > 4)
+  // clear old error/notification msgs...
+  if (m_nFramesSinceResize > 4) {
     ClearErrors(ERR_PRESET);
+    ClearErrors(ERR_NOTIFY);
+  }
 
   // make sure preset still exists.  (might not if they are using the "back"/fwd buttons
   //  in RANDOM preset order and a file was renamed or deleted!)
