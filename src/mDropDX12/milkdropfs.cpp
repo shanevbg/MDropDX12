@@ -880,6 +880,11 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
         m_pState->m_fBlendProgress = (GetTime() - m_pState->m_fBlendStartTime) / m_pState->m_fBlendDuration;
         if (m_pState->m_fBlendProgress > 1.0f) {
           m_pState->m_bBlending = false;
+          // Release blend-only PSOs (no longer needed after blend completes)
+          m_dx12OldWarpPSO.Reset();
+          m_dx12WarpBlendPSO.Reset();
+          m_dx12OldCompPSO.Reset();
+          m_dx12CompBlendPSO.Reset();
         }
       }
 
@@ -2002,7 +2007,13 @@ void mdrop::Engine::RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList)
                         &m_dx12Feedback[fbRead], imgFbRead, &m_dx12FeedbackB[fbRead]);
     }
   }
-  m_lpDX->UpdatePerFrameBindings(warpSlots, bufferASlots, bufferBSlots, compSlots);
+  {
+    UINT oldWarpSlots[32], oldCompSlots[32];
+    memset(oldWarpSlots, 0xFF, sizeof(oldWarpSlots));
+    memset(oldCompSlots, 0xFF, sizeof(oldCompSlots));
+    m_lpDX->UpdatePerFrameBindings(warpSlots, bufferASlots, bufferBSlots, compSlots,
+                                   oldWarpSlots, oldCompSlots);
+  }
 
   // ── Buffer A pass: render to feedback[fbWrite] ──
   if (m_bHasBufferA && m_dx12BufferAPSO && m_dx12Feedback[fbWrite].IsValid()) {
@@ -2331,7 +2342,10 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     // warp+shapes output = VS[1].
 
     UINT warpSlots[32], bufferASlots[32], bufferBSlots[32], compSlots[32];
+    UINT oldWarpSlots[32], oldCompSlots[32];
     memset(bufferBSlots, 0xFF, sizeof(bufferBSlots));  // Buffer B unused in non-Shadertoy mode
+    memset(oldWarpSlots, 0xFF, sizeof(oldWarpSlots));
+    memset(oldCompSlots, 0xFF, sizeof(oldCompSlots));
     BuildBindingSlots(&m_shaders.warp.params, m_dx12VS[0], warpSlots);
 
     // Buffer A reads feedback[read] (own previous output), comp reads feedback[write] (Buffer A's current output)
@@ -2343,7 +2357,15 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       memset(bufferASlots, 0xFF, sizeof(bufferASlots));  // all UINT_MAX (unused)
       BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots, &m_dx12Feedback[fbRead]);
     }
-    m_lpDX->UpdatePerFrameBindings(warpSlots, bufferASlots, bufferBSlots, compSlots);
+
+    // Build old shader bindings during blend transitions
+    if (m_pState->m_bBlending && m_OldShaders.warp.bytecodeBlob)
+      BuildBindingSlots(&m_OldShaders.warp.params, m_dx12VS[0], oldWarpSlots);
+    if (m_pState->m_bBlending && m_OldShaders.comp.bytecodeBlob)
+      BuildBindingSlots(&m_OldShaders.comp.params, m_dx12VS[1], oldCompSlots);
+
+    m_lpDX->UpdatePerFrameBindings(warpSlots, bufferASlots, bufferBSlots, compSlots,
+                                   oldWarpSlots, oldCompSlots);
 
     // Diagnostic: log binding slots once per preset load
     if (!m_bPresetDiagLogged && GetTime() - m_fPresetStartTime >= 0.0f) {
@@ -2379,15 +2401,6 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       }
     }
 
-    // Use preset warp PSO if available, else Phase 4 passthrough.
-    // MD1 presets (nWarpPSVersion=0) have no custom shader — the simple
-    // passthrough (sample tex * vertex color) is the correct behavior.
-    if (m_dx12WarpPSO) {
-      cmdList->SetPipelineState(m_dx12WarpPSO.Get());
-    } else {
-      cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
-    }
-
     // Diagnostic: log rotation matrix evolution over multiple frames
     {
       static int diagFrameCount = 0;
@@ -2412,7 +2425,6 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
                 (float)regs[20], (float)regs[21], (float)regs[22],
                 (float)regs[23], (float)regs[24], (float)regs[25],
                 (float)regs[26], (float)regs[27], (float)regs[28]);
-        // Log q4-6 (camera pos) and q10 (movement compensation)
         DLOG_VERBOSE("DIAG frame=%d q4-6(pos): %.4f %.4f %.4f q10=%.6f",
                 presetFrame,
                 (float)*m_pState->var_pf_q[3], (float)*m_pState->var_pf_q[4], (float)*m_pState->var_pf_q[5],
@@ -2420,66 +2432,145 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       }
     }
 
-    // Bind warp shader constant buffer
-    PShaderInfo* warpSI = &m_shaders.warp;
-    if (warpSI->CT) {
-      ApplyShaderParams(&warpSI->params, warpSI->CT, m_pState);
-      DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(warpSI->CT);
-      if (ct->GetShadowSize() > 0) {
-        D3D12_GPU_VIRTUAL_ADDRESS cbAddr =
-            m_lpDX->UploadConstantBuffer(ct->GetShadowData(), ct->GetShadowSize());
-        if (cbAddr)
-          cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
-      }
-    } else {
-      // MD1 preset (no shader CT) — bind a zeroed CBV so the fallback PSO
-      // doesn't read from an uninitialized root descriptor (GPU hang).
-      BYTE zeros[256] = {};
-      D3D12_GPU_VIRTUAL_ADDRESS cbAddr = m_lpDX->UploadConstantBuffer(zeros, 256);
-      if (cbAddr)
-        cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
-    }
-
-    // Bind VS0 via per-frame binding block (main tex at correct t-register, null elsewhere)
-    cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetWarpBindingGpuHandle());
-
-    // Vertex decay: In DX9's WarpedBlit_Shaders (shader warp path), vertex colors
-    // are NOT modulated by decay — the custom warp pixel shader handles decay itself.
-    // Only WarpedBlit_NoShaders (non-shader path) applies decay via vertex color, where
-    // the fixed-function pipeline multiplies texture color by vertex diffuse.
-    // In DX12, custom shaders ignore vertex color RGB (only _vDiffuse.w/alpha is used
-    // in the output wrapper), so applying decay to vertices would be harmless but wrong.
-    // For the fallback PSO (PSO_TEXTURED_MYVERTEX), vertex color IS used as a texture
-    // modulator, so decay must be applied there.
-    D3DCOLOR cDecay;
-    if (!m_dx12WarpPSO) {
-      // Non-shader path: apply decay via vertex color (matches DX9 WarpedBlit_NoShaders)
-      float fDecay = (float)(*m_pState->var_pf_decay);
-      cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
-    } else {
-      // Shader path: keep vertex color white (matches DX9 WarpedBlit_Shaders)
-      cDecay = 0xFFFFFFFF;
-    }
-
-    // Expand warp mesh to triangle list
+    // Helper: bind shader constant buffer and descriptor table, then draw warp mesh.
+    // bCullTiles: skip fully-transparent or fully-opaque tiles during blend.
+    // bFlipCulling: true = draw tiles where alpha<255 (old preset), false = draw tiles where alpha>0 (new preset).
     int primCount = m_nGridX * m_nGridY * 2;
     int totalVerts = primCount * 3;
     MYVERTEX tempv[1024 * 3];
     int max_per_batch = (sizeof(tempv) / sizeof(tempv[0])) / 3 - 4;
 
-    int src_idx = 0;
-    while (src_idx < totalVerts) {
-      int prims_queued = 0;
-      int i = 0;
-      while (prims_queued < max_per_batch && src_idx < totalVerts) {
-        for (int j = 0; j < 3; j++) {
-          tempv[i++] = m_verts[m_indices_list[src_idx++]];
-          tempv[i - 1].Diffuse = (cDecay & 0x00FFFFFF) | (tempv[i - 1].Diffuse & 0xFF000000);
+    auto drawWarpMesh = [&](D3DCOLOR cDecay, bool bCullTiles, bool bFlipCulling) {
+      int src_idx = 0;
+      while (src_idx < totalVerts) {
+        int prims_queued = 0;
+        int i = 0;
+        while (prims_queued < max_per_batch && src_idx < totalVerts) {
+          MYVERTEX v0 = m_verts[m_indices_list[src_idx]];
+          MYVERTEX v1 = m_verts[m_indices_list[src_idx + 1]];
+          MYVERTEX v2 = m_verts[m_indices_list[src_idx + 2]];
+          src_idx += 3;
+
+          if (bCullTiles) {
+            BYTE a0 = (BYTE)(v0.Diffuse >> 24);
+            BYTE a1 = (BYTE)(v1.Diffuse >> 24);
+            BYTE a2 = (BYTE)(v2.Diffuse >> 24);
+            if (bFlipCulling) {
+              // Pass 0 (old preset): skip if all verts fully blended to new (alpha==0xFF)
+              if (a0 == 0xFF && a1 == 0xFF && a2 == 0xFF) continue;
+            } else {
+              // Pass 1 (new preset): skip if all verts fully old (alpha==0x00)
+              if (a0 == 0x00 && a1 == 0x00 && a2 == 0x00) continue;
+            }
+          }
+
+          tempv[i] = v0;
+          tempv[i].Diffuse = (cDecay & 0x00FFFFFF) | (v0.Diffuse & 0xFF000000);
+          i++;
+          tempv[i] = v1;
+          tempv[i].Diffuse = (cDecay & 0x00FFFFFF) | (v1.Diffuse & 0xFF000000);
+          i++;
+          tempv[i] = v2;
+          tempv[i].Diffuse = (cDecay & 0x00FFFFFF) | (v2.Diffuse & 0xFF000000);
+          i++;
+          prims_queued++;
         }
-        prims_queued++;
+        if (prims_queued > 0)
+          m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, tempv, prims_queued * 3, sizeof(MYVERTEX));
       }
-      if (prims_queued > 0)
-        m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, tempv, prims_queued * 3, sizeof(MYVERTEX));
+    };
+
+    auto bindWarpShader = [&](PShaderInfo* si, CState* pState, D3D12_GPU_DESCRIPTOR_HANDLE bindingHandle) {
+      if (si->CT) {
+        ApplyShaderParams(&si->params, si->CT, pState);
+        DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(si->CT);
+        if (ct->GetShadowSize() > 0) {
+          D3D12_GPU_VIRTUAL_ADDRESS cbAddr =
+              m_lpDX->UploadConstantBuffer(ct->GetShadowData(), ct->GetShadowSize());
+          if (cbAddr)
+            cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+        }
+      } else {
+        BYTE zeros[256] = {};
+        D3D12_GPU_VIRTUAL_ADDRESS cbAddr = m_lpDX->UploadConstantBuffer(zeros, 256);
+        if (cbAddr)
+          cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+      }
+      cmdList->SetGraphicsRootDescriptorTable(1, bindingHandle);
+    };
+
+    bool bBlending = m_pState->m_bBlending;
+    bool bOldUsesWarpShader = bBlending && (m_pOldState->m_nWarpPSVersion > 0);
+    bool bNewUsesWarpShader = (m_pState->m_nWarpPSVersion > 0);
+
+    if (bBlending && (bOldUsesWarpShader || bNewUsesWarpShader)) {
+      // ── Two-pass warp blending (matches DX9 WarpedBlit logic) ──
+      // Pass 0: old preset (opaque), cull tiles fully blended to new
+      if (bOldUsesWarpShader && m_dx12OldWarpPSO) {
+        cmdList->SetPipelineState(m_dx12OldWarpPSO.Get());
+        D3DCOLOR cDecayOld = 0xFFFFFFFF; // shader handles decay
+        bindWarpShader(&m_OldShaders.warp, m_pOldState, m_lpDX->GetOldWarpBindingGpuHandle());
+        drawWarpMesh(cDecayOld, true, true);
+      } else if (!bOldUsesWarpShader) {
+        // Old preset has no warp shader — use fallback PSO (texture * vertex color)
+        cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+        float fDecay = (float)(*m_pOldState->var_pf_decay);
+        D3DCOLOR cDecayOld = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
+        BYTE zeros[256] = {};
+        D3D12_GPU_VIRTUAL_ADDRESS cbAddr = m_lpDX->UploadConstantBuffer(zeros, 256);
+        if (cbAddr) cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+        cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetOldWarpBindingGpuHandle());
+        drawWarpMesh(cDecayOld, true, true);
+      }
+
+      // Pass 1: new preset (alpha blend), cull tiles fully old
+      if (bNewUsesWarpShader && m_dx12WarpBlendPSO) {
+        cmdList->SetPipelineState(m_dx12WarpBlendPSO.Get());
+        D3DCOLOR cDecayNew = 0xFFFFFFFF; // shader handles decay
+        bindWarpShader(&m_shaders.warp, m_pState, m_lpDX->GetWarpBindingGpuHandle());
+        drawWarpMesh(cDecayNew, true, false);
+      } else if (!bNewUsesWarpShader) {
+        // New preset has no warp shader — use fallback PSO with alpha blend
+        // Note: PSO_TEXTURED_MYVERTEX doesn't have alpha blend, but for the non-shader
+        // case the UV blending is sufficient (DX9 line 1107 uses single pass).
+        cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+        float fDecay = (float)(*m_pState->var_pf_decay);
+        D3DCOLOR cDecayNew = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
+        BYTE zeros[256] = {};
+        D3D12_GPU_VIRTUAL_ADDRESS cbAddr = m_lpDX->UploadConstantBuffer(zeros, 256);
+        if (cbAddr) cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+        cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetWarpBindingGpuHandle());
+        drawWarpMesh(cDecayNew, true, false);
+      }
+    } else if (bBlending && !bOldUsesWarpShader && !bNewUsesWarpShader) {
+      // Special case: neither uses shader — UV blending is sufficient, single pass (DX9 line 1107)
+      cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+      float fDecay = (float)(*m_pState->var_pf_decay);
+      D3DCOLOR cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
+      BYTE zeros[256] = {};
+      D3D12_GPU_VIRTUAL_ADDRESS cbAddr = m_lpDX->UploadConstantBuffer(zeros, 256);
+      if (cbAddr) cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+      cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetWarpBindingGpuHandle());
+      drawWarpMesh(cDecay, false, false);
+    } else {
+      // ── No blend: single-pass warp (existing path) ──
+      if (m_dx12WarpPSO) {
+        cmdList->SetPipelineState(m_dx12WarpPSO.Get());
+      } else {
+        cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+      }
+
+      bindWarpShader(&m_shaders.warp, m_pState, m_lpDX->GetWarpBindingGpuHandle());
+
+      D3DCOLOR cDecay;
+      if (!m_dx12WarpPSO) {
+        float fDecay = (float)(*m_pState->var_pf_decay);
+        cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
+      } else {
+        cDecay = 0xFFFFFFFF;
+      }
+
+      drawWarpMesh(cDecay, false, false);
     }
 
   }
@@ -2492,6 +2583,17 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
   // Some presets use GetBlur1() in the warp shader (e.g. organic12-3d-2.milk).
   {
     CShaderParams* shaderParams[] = { &m_shaders.warp.params, &m_shaders.comp.params };
+    // During blend, also scan old shaders so blur textures they need are generated
+    if (m_pState->m_bBlending) {
+      CShaderParams* oldParams[] = { &m_OldShaders.warp.params, &m_OldShaders.comp.params };
+      for (auto* sp : oldParams) {
+        for (int i = 0; i < 32; i++) {
+          if (sp->m_texcode[i] >= TEX_BLUR1 && sp->m_texcode[i] <= TEX_BLUR_LAST)
+            m_nHighestBlurTexUsedThisFrame = max(m_nHighestBlurTexUsedThisFrame,
+                ((int)sp->m_texcode[i] - (int)TEX_BLUR1) + 1);
+        }
+      }
+    }
     for (auto* sp : shaderParams) {
       for (int i = 0; i < 32; i++) {
         if (sp->m_texcode[i] >= TEX_BLUR1 && sp->m_texcode[i] <= TEX_BLUR_LAST)
@@ -2608,38 +2710,6 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     else
       SetViewportAndScissor(cmdList, m_lpDX->m_client_width, m_lpDX->m_client_height);
 
-    // Use preset comp PSO if available, else Phase 4 passthrough.
-    // The comp quad uses MYVERTEX data, so PSO_TEXTURED_MYVERTEX is correct.
-    if (m_dx12CompPSO) {
-      cmdList->SetPipelineState(m_dx12CompPSO.Get());
-    } else {
-      cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
-    }
-
-    // Bind composite shader constant buffer
-    PShaderInfo* compSI = &m_shaders.comp;
-    if (compSI->CT) {
-      ApplyShaderParams(&compSI->params, compSI->CT, m_pState);
-
-      DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(compSI->CT);
-      if (ct->GetShadowSize() > 0) {
-        D3D12_GPU_VIRTUAL_ADDRESS cbAddr =
-            m_lpDX->UploadConstantBuffer(ct->GetShadowData(), ct->GetShadowSize());
-        if (cbAddr)
-          cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
-      }
-    } else {
-      // MD1 preset (no shader CT) — bind a zeroed CBV so the fallback PSO
-      // doesn't read from an uninitialized root descriptor (GPU hang).
-      BYTE zeros[256] = {};
-      D3D12_GPU_VIRTUAL_ADDRESS cbAddr = m_lpDX->UploadConstantBuffer(zeros, 256);
-      if (cbAddr)
-        cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
-    }
-
-    // Bind VS1 via per-frame binding block (main tex at correct t-register, null elsewhere)
-    cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetCompBindingGpuHandle());
-
     // Compute hue_shader corner colors (matches ShowToUser_Shaders comp grid logic).
     // DX9 ShowToUser_Shaders hardcodes fShaderAmount=1 for shader comp presets,
     // so animated shade colors are always applied at full strength.
@@ -2655,9 +2725,6 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
         shade[i][k] = 0.5f + 0.5f * shade[i][k];
       }
     }
-    // Bilinear mapping: shade[0]=x*y, shade[1]=(1-x)*y, shade[2]=x*(1-y), shade[3]=(1-x)*(1-y)
-    // quad[0]=(-1,1) → uv(0,0) → shade[1]; quad[1]=(1,1) → uv(1,0) → shade[0]
-    // quad[2]=(-1,-1)→ uv(0,1) → shade[3]; quad[3]=(1,-1)→ uv(1,1) → shade[2]
     DWORD cShade[4] = {
       D3DCOLOR_RGBA_01(shade[1][0], shade[1][1], shade[1][2], 1),  // top-left
       D3DCOLOR_RGBA_01(shade[0][0], shade[0][1], shade[0][2], 1),  // top-right
@@ -2665,18 +2732,90 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       D3DCOLOR_RGBA_01(shade[2][0], shade[2][1], shade[2][2], 1),  // bottom-right
     };
 
-    // Fullscreen quad using MYVERTEX for proper UV/rad/ang passthrough
-    MYVERTEX quad[4];
-    ZeroMemory(quad, sizeof(quad));
-    quad[0].x = -1.f; quad[0].y =  1.f; quad[0].z = 0.f; quad[0].Diffuse = cShade[0];
-    quad[0].tu = 0.f; quad[0].tv = 0.f; quad[0].tu_orig = 0.f; quad[0].tv_orig = 0.f; quad[0].rad = 1.f; quad[0].ang = 3.14159f;
-    quad[1].x =  1.f; quad[1].y =  1.f; quad[1].z = 0.f; quad[1].Diffuse = cShade[1];
-    quad[1].tu = 1.f; quad[1].tv = 0.f; quad[1].tu_orig = 1.f; quad[1].tv_orig = 0.f; quad[1].rad = 1.f; quad[1].ang = 0.f;
-    quad[2].x = -1.f; quad[2].y = -1.f; quad[2].z = 0.f; quad[2].Diffuse = cShade[2];
-    quad[2].tu = 0.f; quad[2].tv = 1.f; quad[2].tu_orig = 0.f; quad[2].tv_orig = 1.f; quad[2].rad = 1.f; quad[2].ang = 3.14159f;
-    quad[3].x =  1.f; quad[3].y = -1.f; quad[3].z = 0.f; quad[3].Diffuse = cShade[3];
-    quad[3].tu = 1.f; quad[3].tv = 1.f; quad[3].tu_orig = 1.f; quad[3].tv_orig = 1.f; quad[3].rad = 1.f; quad[3].ang = 0.f;
-    m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, quad, 4, sizeof(MYVERTEX));
+    // Helper: build and draw a fullscreen comp quad with given alpha
+    auto drawCompQuad = [&](BYTE alpha) {
+      auto applyAlpha = [](DWORD color, BYTE a) -> DWORD {
+        return (color & 0x00FFFFFF) | ((DWORD)a << 24);
+      };
+      MYVERTEX quad[4];
+      ZeroMemory(quad, sizeof(quad));
+      quad[0].x = -1.f; quad[0].y =  1.f; quad[0].z = 0.f; quad[0].Diffuse = applyAlpha(cShade[0], alpha);
+      quad[0].tu = 0.f; quad[0].tv = 0.f; quad[0].tu_orig = 0.f; quad[0].tv_orig = 0.f; quad[0].rad = 1.f; quad[0].ang = 3.14159f;
+      quad[1].x =  1.f; quad[1].y =  1.f; quad[1].z = 0.f; quad[1].Diffuse = applyAlpha(cShade[1], alpha);
+      quad[1].tu = 1.f; quad[1].tv = 0.f; quad[1].tu_orig = 1.f; quad[1].tv_orig = 0.f; quad[1].rad = 1.f; quad[1].ang = 0.f;
+      quad[2].x = -1.f; quad[2].y = -1.f; quad[2].z = 0.f; quad[2].Diffuse = applyAlpha(cShade[2], alpha);
+      quad[2].tu = 0.f; quad[2].tv = 1.f; quad[2].tu_orig = 0.f; quad[2].tv_orig = 1.f; quad[2].rad = 1.f; quad[2].ang = 3.14159f;
+      quad[3].x =  1.f; quad[3].y = -1.f; quad[3].z = 0.f; quad[3].Diffuse = applyAlpha(cShade[3], alpha);
+      quad[3].tu = 1.f; quad[3].tv = 1.f; quad[3].tu_orig = 1.f; quad[3].tv_orig = 1.f; quad[3].rad = 1.f; quad[3].ang = 0.f;
+      m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, quad, 4, sizeof(MYVERTEX));
+    };
+
+    auto bindCompShader = [&](PShaderInfo* si, CState* pState, D3D12_GPU_DESCRIPTOR_HANDLE bindingHandle) {
+      if (si->CT) {
+        ApplyShaderParams(&si->params, si->CT, pState);
+        DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(si->CT);
+        if (ct->GetShadowSize() > 0) {
+          D3D12_GPU_VIRTUAL_ADDRESS cbAddr =
+              m_lpDX->UploadConstantBuffer(ct->GetShadowData(), ct->GetShadowSize());
+          if (cbAddr)
+            cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+        }
+      } else {
+        BYTE zeros[256] = {};
+        D3D12_GPU_VIRTUAL_ADDRESS cbAddr = m_lpDX->UploadConstantBuffer(zeros, 256);
+        if (cbAddr)
+          cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+      }
+      cmdList->SetGraphicsRootDescriptorTable(1, bindingHandle);
+    };
+
+    bool bCompBlending = m_pState->m_bBlending;
+    bool bOldUsesCompShader = bCompBlending && (m_pOldState->m_nCompPSVersion > 0);
+    bool bNewUsesCompShader = (m_pState->m_nCompPSVersion > 0);
+
+    if (bCompBlending && (bOldUsesCompShader || bNewUsesCompShader)) {
+      // ── Two-pass comp blending: uniform crossfade ──
+      float fBlend = m_pState->m_fBlendProgress;
+      BYTE blendAlpha = (BYTE)(min(max(fBlend, 0.0f), 1.0f) * 255.0f);
+
+      // Pass 0: old comp shader (opaque)
+      if (bOldUsesCompShader && m_dx12OldCompPSO) {
+        cmdList->SetPipelineState(m_dx12OldCompPSO.Get());
+        bindCompShader(&m_OldShaders.comp, m_pOldState, m_lpDX->GetOldCompBindingGpuHandle());
+        drawCompQuad(0xFF);
+      } else if (!bOldUsesCompShader) {
+        cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+        BYTE zeros[256] = {};
+        D3D12_GPU_VIRTUAL_ADDRESS cbAddr = m_lpDX->UploadConstantBuffer(zeros, 256);
+        if (cbAddr) cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+        cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetOldCompBindingGpuHandle());
+        drawCompQuad(0xFF);
+      }
+
+      // Pass 1: new comp shader (alpha blend)
+      if (bNewUsesCompShader && m_dx12CompBlendPSO) {
+        cmdList->SetPipelineState(m_dx12CompBlendPSO.Get());
+        bindCompShader(&m_shaders.comp, m_pState, m_lpDX->GetCompBindingGpuHandle());
+        drawCompQuad(blendAlpha);
+      } else if (!bNewUsesCompShader) {
+        // No new comp shader — fallback with alpha
+        cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+        BYTE zeros[256] = {};
+        D3D12_GPU_VIRTUAL_ADDRESS cbAddr = m_lpDX->UploadConstantBuffer(zeros, 256);
+        if (cbAddr) cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+        cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetCompBindingGpuHandle());
+        drawCompQuad(blendAlpha);
+      }
+    } else {
+      // ── No blend: single-pass comp (existing path) ──
+      if (m_dx12CompPSO) {
+        cmdList->SetPipelineState(m_dx12CompPSO.Get());
+      } else {
+        cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+      }
+      bindCompShader(&m_shaders.comp, m_pState, m_lpDX->GetCompBindingGpuHandle());
+      drawCompQuad(0xFF);
+    }
   }
 
   // ── Feedback blit: copy FLOAT feedback[write] → UNORM backbuffer for display ──

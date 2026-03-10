@@ -1239,6 +1239,7 @@ void Engine::MyPreInitialize() {
   m_pState = &m_state_DO_NOT_USE[0];
   m_pOldState = &m_state_DO_NOT_USE[1];
   m_pNewState = &m_state_DO_NOT_USE[2];
+  m_pMilk2OldState = &m_state_DO_NOT_USE[3];
   m_UI_mode = UI_REGULAR;
   m_bShowShaderHelp = false;
 
@@ -3423,6 +3424,10 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
   m_dx12BlurPSO[0].Reset();
   m_dx12BlurPSO[1].Reset();
   m_dx12BufferAPSO.Reset();
+  m_dx12OldWarpPSO.Reset();
+  m_dx12WarpBlendPSO.Reset();
+  m_dx12OldCompPSO.Reset();
+  m_dx12CompBlendPSO.Reset();
   /*
   SafeRelease( m_shaders.comp.ptr );
   SafeRelease( m_shaders.warp.ptr );

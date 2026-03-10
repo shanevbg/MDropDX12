@@ -1613,105 +1613,8 @@ bool Engine::ParseMilk2File(const wchar_t* szPath,
 extern void GetFast_CLEAR();
 namespace mdrop {
 
-// Loads a .milk2 double-preset: imports both preset blocks, sets up the blend pattern
-// from the file's metadata, and starts the animated crossfade.
-void Engine::LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime) {
-  wchar_t temp1[MAX_PATH] = {}, temp2[MAX_PATH] = {};
-  int mixType = -1;
-  float progress = 0.5f;
-  int direction = 1;
-
-  if (!ParseMilk2File(szPresetFilename, temp1, temp2, mixType, progress, direction)) {
-    // Malformed .milk2 — log and bail
-    {
-      wchar_t dbgBuf[MAX_PATH + 64];
-      swprintf_s(dbgBuf, L"LoadMilk2Preset: failed to parse %s", szPresetFilename);
-      DebugLogW(dbgBuf, LOG_VERBOSE);
-    }
-    return;
-  }
-
-  // Update current preset path
-  lstrcpyW(m_szCurrentPresetFile, szPresetFilename);
-
-  // Log which preset is now actively rendering (helps diagnose GPU TDR crashes)
-  {
-    const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
-    if (!name) name = wcsrchr(m_szCurrentPresetFile, L'/');
-    name = name ? name + 1 : m_szCurrentPresetFile;
-    DLOG_INFO("Render: Active preset: %ls", name);
-  }
-
-  // SEH protection: Import + EEL compilation + shader compile can crash on
-  // malformed presets or JIT issues.  Catch and skip instead of hard-crashing.
-  __try {
-
-  // Import preset 1 into m_pOldState (the "from" state)
-  m_pOldState->Import(temp1, GetTime(), nullptr, STATE_ALL);
-
-  // IMPORTANT: _GetLineByName in state.cpp caches the last FILE* it saw. If the OS reuses
-  // the same FILE* address for the second temp file, it would return stale data from preset 1.
-  // GetFast_CLEAR() forces a re-scan on the next Import() call.
-  GetFast_CLEAR();
-
-  // Import preset 2 into m_pState (the "to" state), using m_pOldState for CBlendableFloat init
-  m_pState->Import(temp2, GetTime(), m_pOldState, STATE_ALL);
-
-  // Fix descriptions: Import() derives m_szDesc from the temp file path, which would show
-  // something like "mk2XXXX". Override with the .milk2 filename (without path or extension).
-  {
-    const wchar_t* p = wcsrchr(szPresetFilename, L'\\');
-    if (!p) p = szPresetFilename; else p++;
-    // m_pState shows the .milk2 name in the UI overlay
-    wcsncpy_s(m_pState->m_szDesc, p, MAX_PATH - 1);
-    // Strip .milk2 extension
-    wchar_t* dot = wcsrchr(m_pState->m_szDesc, L'.');
-    if (dot) *dot = L'\0';
-    // m_pOldState (blend source) can share the same display name
-    wcscpy_s(m_pOldState->m_szDesc, m_pState->m_szDesc);
-  }
-
-  // Apply the blend pattern from the .milk2 metadata, then restore user's mixtype preference
-  int savedMixType = m_nMixType;
-  m_nMixType = mixType;
-  RandomizeBlendPattern();
-  m_nMixType = savedMixType;
-
-  // Start animated crossfade
-  if (fBlendTime >= 0.001f)
-    m_pState->StartBlendFrom(m_pOldState, GetTime(), fBlendTime);
-
-  // Compile shaders for m_pOldState -> m_OldShaders
-  m_OldShaders.warp.Clear();
-  m_OldShaders.comp.Clear();
-  LoadShaders(&m_OldShaders, m_pOldState, false, false);
-
-  // Compile shaders for m_pState -> m_shaders
-  m_shaders.warp.Clear();
-  m_shaders.comp.Clear();
-  LoadShaders(&m_shaders, m_pState, false, false);
-  CreateDX12PresetPSOs();
-
-  m_bShadertoyMode = false;  // .milk2 presets are never Shadertoy mode
-  m_fPresetStartTime = GetTime();
-  m_bPresetDiagLogged = false;
-  m_fNextPresetTime  = -1.0f;
-  m_nLoadingPreset = 0;  // synchronous load complete — clear async flag
-  OnFinishedLoadingPreset();
-
-  } __except (WriteSEHCrashDiag(GetExceptionInformation(), szPresetFilename)) {
-    DLOG_ERROR("LoadMilk2Preset: CRASH during import/compile of %ls (code 0x%08X)",
-               szPresetFilename, GetExceptionCode());
-    wchar_t buf[512];
-    swprintf_s(buf, L"Preset crashed during load — skipped");
-    AddError(buf, 6.0f, ERR_PRESET, true);
-    m_nLoadingPreset = 0;
-  }
-
-  // Clean up temp files
-  DeleteFileW(temp1);
-  DeleteFileW(temp2);
-}
+// NOTE: LoadMilk2Preset has been replaced by async loading in LoadPreset's bIsMilk2 branch.
+// ParseMilk2File is still used — it extracts temp files from the .milk2 format.
 
 // Loads a .milk3 Shadertoy preset from JSON: { bufferA: "hlsl...", image: "hlsl..." }
 // Async: parses JSON on the calling thread (fast), then launches a background thread
@@ -1901,9 +1804,51 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
   }
 
   if (bIsMilk2) {
-    // .milk2 double-preset: parse + compile async
+    // .milk2 double-preset: parse on calling thread, compile async
     m_bLoadingShadertoyMode = false;
-    LoadMilk2Preset(szPresetFilename, fBlendTime);
+    m_bLoadingMilk2 = true;
+
+    // Parse .milk2 structure (fast — just file I/O)
+    int mixType = -1;
+    float progress = 0.5f;
+    int direction = 1;
+    if (!ParseMilk2File(szPresetFilename, m_szMilk2Temp1, m_szMilk2Temp2,
+                        mixType, progress, direction)) {
+      DLOG_ERROR("LoadPreset: failed to parse .milk2 %ls", szPresetFilename);
+      m_nLoadingPreset = 0;
+      m_bLoadingMilk2 = false;
+      return;
+    }
+    m_nMilk2MixType = mixType;
+
+    float loadTime = GetTime();
+    uint64_t myGeneration = ++m_nLoadGeneration;
+    m_presetLoadThread = std::thread([this, loadTime, myGeneration]() {
+      __try {
+        // Import preset 1 (blend-from) into m_pMilk2OldState
+        m_pMilk2OldState->Import(m_szMilk2Temp1, loadTime, nullptr, STATE_ALL);
+        GetFast_CLEAR();
+        // Import preset 2 (blend-to) into m_pNewState
+        m_pNewState->Import(m_szMilk2Temp2, loadTime, m_pMilk2OldState, STATE_ALL);
+
+        // Compile shaders for both presets
+        m_Milk2OldShaders.warp.Clear();
+        m_Milk2OldShaders.comp.Clear();
+        m_Milk2OldShaders.bufferA.Clear();
+        m_Milk2OldShaders.bufferB.Clear();
+        LoadShaders(&m_Milk2OldShaders, m_pMilk2OldState, false, false);
+        LoadShaders(&m_NewShaders, m_pNewState, false, false);
+
+        if (m_nLoadGeneration.load() == myGeneration)
+          m_bPresetLoadReady.store(true);
+      } __except (WriteSEHCrashDiag(GetExceptionInformation(), m_szLoadingPreset)) {
+        DLOG_ERROR("LoadPreset: CRASH during async .milk2 import/compile of %ls (code 0x%08X)",
+                   m_szLoadingPreset, GetExceptionCode());
+      }
+      // Clean up temp files regardless of success/failure
+      DeleteFileW(m_szMilk2Temp1);
+      DeleteFileW(m_szMilk2Temp2);
+    });
     return;
   }
 
@@ -2109,8 +2054,35 @@ void Engine::LoadPresetTick() {
     m_pState = m_pNewState;
     m_pNewState = temp;
 
+    // .milk2: swap in preset 1 as the blend-from state
+    if (m_bLoadingMilk2) {
+      // m_pOldState currently has the previously-rendering state (stale).
+      // Swap it with m_pMilk2OldState which has preset 1 from the .milk2 file.
+      temp = m_pOldState;
+      m_pOldState = m_pMilk2OldState;
+      m_pMilk2OldState = temp;  // recycled — will be reused on next milk2 load
+
+      // Fix descriptions: Import() derived m_szDesc from temp file paths.
+      // Override with the .milk2 filename (without path or extension).
+      {
+        const wchar_t* p = wcsrchr(m_szCurrentPresetFile, L'\\');
+        if (!p) p = m_szCurrentPresetFile; else p++;
+        wcsncpy_s(m_pState->m_szDesc, p, MAX_PATH - 1);
+        wchar_t* dot = wcsrchr(m_pState->m_szDesc, L'.');
+        if (dot) *dot = L'\0';
+        wcscpy_s(m_pOldState->m_szDesc, m_pState->m_szDesc);
+      }
+    }
+
     // Apply blend or hard-cut based on the requested blend time
-    if (m_fLoadingPresetBlendTime >= 0.001f) {
+    if (m_bLoadingMilk2) {
+      // .milk2 uses its own blend pattern from metadata
+      int savedMixType = m_nMixType;
+      m_nMixType = m_nMilk2MixType;
+      RandomizeBlendPattern();
+      m_nMixType = savedMixType;
+      m_pState->StartBlendFrom(m_pOldState, GetTime(), m_fLoadingPresetBlendTime);
+    } else if (m_fLoadingPresetBlendTime >= 0.001f) {
       RandomizeBlendPattern();
       m_pState->StartBlendFrom(m_pOldState, GetTime(), m_fLoadingPresetBlendTime);
     } else {
@@ -2137,7 +2109,17 @@ void Engine::LoadPresetTick() {
     m_OldShaders.comp.Clear();
     m_OldShaders.bufferA.Clear();
     m_OldShaders.bufferB.Clear();
-    m_OldShaders = m_shaders;
+    if (m_bLoadingMilk2) {
+      // .milk2: use preset 1's shaders as old, preset 2's as new
+      m_OldShaders = m_Milk2OldShaders;
+      // Null out transferred pointers
+      m_Milk2OldShaders.warp.ptr = NULL; m_Milk2OldShaders.warp.CT = NULL; m_Milk2OldShaders.warp.bytecodeBlob = NULL;
+      m_Milk2OldShaders.comp.ptr = NULL; m_Milk2OldShaders.comp.CT = NULL; m_Milk2OldShaders.comp.bytecodeBlob = NULL;
+      m_Milk2OldShaders.bufferA.ptr = NULL; m_Milk2OldShaders.bufferA.CT = NULL; m_Milk2OldShaders.bufferA.bytecodeBlob = NULL;
+      m_Milk2OldShaders.bufferB.ptr = NULL; m_Milk2OldShaders.bufferB.CT = NULL; m_Milk2OldShaders.bufferB.bytecodeBlob = NULL;
+    } else {
+      m_OldShaders = m_shaders;
+    }
     m_shaders = m_NewShaders;
     // Null out m_NewShaders' COM pointers WITHOUT releasing — ownership transferred to m_shaders.
     // But DO properly clear the params (vectors were deep-copied by the assignment above).
@@ -2174,6 +2156,7 @@ void Engine::LoadPresetTick() {
 
     // end loading mode
     m_nLoadingPreset = 0;
+    m_bLoadingMilk2 = false;
 
     // Defer PSO creation to next frame's render pass — releasing old PSOs here
     // would destroy them while the current frame's command list still references them.
@@ -2207,6 +2190,13 @@ void Engine::LoadPresetTick() {
     m_bPresetLoadReady = false;
     m_NewShaders.warp.Clear();
     m_NewShaders.comp.Clear();
+    if (m_bLoadingMilk2) {
+      m_Milk2OldShaders.warp.Clear();
+      m_Milk2OldShaders.comp.Clear();
+      m_Milk2OldShaders.bufferA.Clear();
+      m_Milk2OldShaders.bufferB.Clear();
+      m_bLoadingMilk2 = false;
+    }
 
     ClearErrors(ERR_NOTIFY);
     AddError(L"Shader compile timed out \u2014 skipping preset", m_ErrorDuration, ERR_NOTIFY, true);

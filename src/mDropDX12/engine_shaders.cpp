@@ -855,8 +855,61 @@ void Engine::CreateDX12PresetPSOs() {
       false, &dummy);
   }
 
+  // Create blend transition PSOs (old shader pass 0 + new shader alpha-blend pass 1)
+  m_dx12OldWarpPSO.Reset();
+  m_oldWarpMainTexSlot = 0;
+  if (m_OldShaders.warp.bytecodeBlob && g_pWarpVSBlob) {
+    m_dx12OldWarpPSO = DX12CreatePresetPSO(
+      device, rootSig, rtvFormat,
+      g_pWarpVSBlob,
+      m_OldShaders.warp.bytecodeBlob->GetBufferPointer(),
+      (UINT)m_OldShaders.warp.bytecodeBlob->GetBufferSize(),
+      g_MyVertexLayout, _countof(g_MyVertexLayout),
+      false, &m_oldWarpMainTexSlot);
+    if (m_oldWarpMainTexSlot == UINT_MAX) m_oldWarpMainTexSlot = 0;
+  }
+
+  m_dx12WarpBlendPSO.Reset();
+  if (m_shaders.warp.bytecodeBlob && g_pWarpVSBlob) {
+    m_dx12WarpBlendPSO = DX12CreatePresetPSO(
+      device, rootSig, rtvFormat,
+      g_pWarpVSBlob,
+      m_shaders.warp.bytecodeBlob->GetBufferPointer(),
+      (UINT)m_shaders.warp.bytecodeBlob->GetBufferSize(),
+      g_MyVertexLayout, _countof(g_MyVertexLayout),
+      true, nullptr);  // alphaBlend=true
+  }
+
+  m_dx12OldCompPSO.Reset();
+  m_oldCompMainTexSlot = 0;
+  if (m_OldShaders.comp.bytecodeBlob && g_pCompVSBlob) {
+    m_dx12OldCompPSO = DX12CreatePresetPSO(
+      device, rootSig, compRtvFormat,
+      g_pCompVSBlob,
+      m_OldShaders.comp.bytecodeBlob->GetBufferPointer(),
+      (UINT)m_OldShaders.comp.bytecodeBlob->GetBufferSize(),
+      g_MyVertexLayout, _countof(g_MyVertexLayout),
+      false, &m_oldCompMainTexSlot);
+    if (m_oldCompMainTexSlot == UINT_MAX) m_oldCompMainTexSlot = 0;
+  }
+
+  m_dx12CompBlendPSO.Reset();
+  if (m_shaders.comp.bytecodeBlob && g_pCompVSBlob) {
+    m_dx12CompBlendPSO = DX12CreatePresetPSO(
+      device, rootSig, compRtvFormat,
+      g_pCompVSBlob,
+      m_shaders.comp.bytecodeBlob->GetBufferPointer(),
+      (UINT)m_shaders.comp.bytecodeBlob->GetBufferSize(),
+      g_MyVertexLayout, _countof(g_MyVertexLayout),
+      true, nullptr);  // alphaBlend=true
+  }
+
   DLOG_VERBOSE("DX12: Preset warp PSO: %s (mainTexSlot=%u)", m_dx12WarpPSO ? "OK" : "FALLBACK", m_warpMainTexSlot);
   DLOG_VERBOSE("DX12: Preset comp PSO: %s (mainTexSlot=%u)", m_dx12CompPSO ? "OK" : "FALLBACK", m_compMainTexSlot);
+  if (m_dx12OldWarpPSO) DLOG_VERBOSE("DX12: Old warp PSO: OK (blend transition)");
+  if (m_dx12WarpBlendPSO) DLOG_VERBOSE("DX12: Warp blend PSO: OK (alpha blend)");
+  if (m_dx12OldCompPSO) DLOG_VERBOSE("DX12: Old comp PSO: OK (blend transition)");
+  if (m_dx12CompBlendPSO) DLOG_VERBOSE("DX12: Comp blend PSO: OK (alpha blend)");
   if (m_dx12BufferAPSO)
     DebugLogA("DX12: Preset bufferA PSO: OK");
   if (m_dx12BufferBPSO)
@@ -1245,6 +1298,20 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // strip out all comments - but cheat a little - start at the shader test.
   // (the include file was already stripped of comments)
   StripComments(&szShaderText[shaderStartPos]);
+
+  // Strip DX9-style "sampler sampler_randNN;" declarations from preset text.
+  // The include already declares "Texture2D sampler_randNN;" — having both
+  // causes a redefinition error (sampler = SamplerState in SM5.0).
+  for (int ri = 0; ri <= 3; ri++) {
+    char dx9Decl[48];
+    sprintf(dx9Decl, "sampler sampler_rand%02d", ri);
+    char* pos = strstr(&szShaderText[shaderStartPos], dx9Decl);
+    if (pos) {
+      // Blank the declaration up to and including the semicolon
+      char* end = strchr(pos, ';');
+      if (end) memset(pos, ' ', end - pos + 1);
+    }
+  }
 
   // Shader inputs/outputs (injected automatically, not visible in preset code):
   //

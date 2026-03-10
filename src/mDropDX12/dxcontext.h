@@ -246,16 +246,19 @@ public:
   D3D12_GPU_DESCRIPTOR_HANDLE GetBindingBlockGpuHandleByIndex(UINT blockStart);
 
   // Per-frame binding blocks: avoids GPU race by using separate descriptor ranges per frame.
-  // 2 frames × 4 passes (warp + bufferA + bufferB + comp) × 16 SRV descriptors = 128 total.
-  static const UINT PASSES_PER_FRAME = 4; // warp, bufferA, bufferB, comp
+  // 2 frames × 6 passes (warp + bufferA + bufferB + comp + oldWarp + oldComp) × 32 SRV descriptors.
+  static const UINT PASSES_PER_FRAME = 6; // warp, bufferA, bufferB, comp, oldWarp, oldComp
   UINT m_perFrameBindingBase = UINT_MAX;
   bool AllocatePerFrameBindings(); // call once at init, after CreateNullTexture
-  void UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT bufferASrvSlots[16],
-                              const UINT bufferBSrvSlots[16], const UINT compSrvSlots[16]);
+  void UpdatePerFrameBindings(const UINT warpSrvSlots[32], const UINT bufferASrvSlots[32],
+                              const UINT bufferBSrvSlots[32], const UINT compSrvSlots[32],
+                              const UINT oldWarpSrvSlots[32], const UINT oldCompSrvSlots[32]);
   D3D12_GPU_DESCRIPTOR_HANDLE GetWarpBindingGpuHandle();
   D3D12_GPU_DESCRIPTOR_HANDLE GetBufferABindingGpuHandle();
   D3D12_GPU_DESCRIPTOR_HANDLE GetBufferBBindingGpuHandle();
   D3D12_GPU_DESCRIPTOR_HANDLE GetCompBindingGpuHandle();
+  D3D12_GPU_DESCRIPTOR_HANDLE GetOldWarpBindingGpuHandle();
+  D3D12_GPU_DESCRIPTOR_HANDLE GetOldCompBindingGpuHandle();
 
   // Per-frame blur binding blocks: 2 frames × 6 blur passes × 16 SRV descriptors = 192 total.
   static const UINT MAX_BLUR_PASSES = 6; // NUM_BLUR_TEX

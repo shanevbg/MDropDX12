@@ -1662,12 +1662,14 @@ bool DXContext::AllocatePerFrameBindings()
     return true;
 }
 
-void DXContext::UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT bufferASrvSlots[16],
-                                      const UINT bufferBSrvSlots[16], const UINT compSrvSlots[16])
+void DXContext::UpdatePerFrameBindings(const UINT warpSrvSlots[32], const UINT bufferASrvSlots[32],
+                                      const UINT bufferBSrvSlots[32], const UINT compSrvSlots[32],
+                                      const UINT oldWarpSrvSlots[32], const UINT oldCompSrvSlots[32])
 {
     if (m_perFrameBindingBase == UINT_MAX) return;
 
-    // Each frame gets 64 slots: [0..15] = warp, [16..31] = bufferA, [32..47] = bufferB, [48..63] = comp
+    // Each frame gets 192 slots: [0..31] = warp, [32..63] = bufferA, [64..95] = bufferB,
+    // [96..127] = comp, [128..159] = oldWarp, [160..191] = oldComp
     UINT frameBase = m_perFrameBindingBase + m_frameIndex * PASSES_PER_FRAME * BINDING_BLOCK_SIZE;
 
     D3D12_CPU_DESCRIPTOR_HANDLE nullSrc;
@@ -1694,6 +1696,8 @@ void DXContext::UpdatePerFrameBindings(const UINT warpSrvSlots[16], const UINT b
     fillBlock(frameBase + BINDING_BLOCK_SIZE, bufferASrvSlots);      // pass 1: bufferA
     fillBlock(frameBase + 2 * BINDING_BLOCK_SIZE, bufferBSrvSlots);  // pass 2: bufferB
     fillBlock(frameBase + 3 * BINDING_BLOCK_SIZE, compSrvSlots);     // pass 3: comp
+    fillBlock(frameBase + 4 * BINDING_BLOCK_SIZE, oldWarpSrvSlots);  // pass 4: oldWarp
+    fillBlock(frameBase + 5 * BINDING_BLOCK_SIZE, oldCompSrvSlots);  // pass 5: oldComp
 }
 
 D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetWarpBindingGpuHandle()
@@ -1726,6 +1730,24 @@ D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetBufferBBindingGpuHandle()
 D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetCompBindingGpuHandle()
 {
     UINT slot = m_perFrameBindingBase + m_frameIndex * PASSES_PER_FRAME * BINDING_BLOCK_SIZE + 3 * BINDING_BLOCK_SIZE;
+    D3D12_GPU_DESCRIPTOR_HANDLE h;
+    h.ptr = m_srvHeap->GetGPUDescriptorHandleForHeapStart().ptr +
+            (SIZE_T)slot * m_srvDescriptorSize;
+    return h;
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetOldWarpBindingGpuHandle()
+{
+    UINT slot = m_perFrameBindingBase + m_frameIndex * PASSES_PER_FRAME * BINDING_BLOCK_SIZE + 4 * BINDING_BLOCK_SIZE;
+    D3D12_GPU_DESCRIPTOR_HANDLE h;
+    h.ptr = m_srvHeap->GetGPUDescriptorHandleForHeapStart().ptr +
+            (SIZE_T)slot * m_srvDescriptorSize;
+    return h;
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetOldCompBindingGpuHandle()
+{
+    UINT slot = m_perFrameBindingBase + m_frameIndex * PASSES_PER_FRAME * BINDING_BLOCK_SIZE + 5 * BINDING_BLOCK_SIZE;
     D3D12_GPU_DESCRIPTOR_HANDLE h;
     h.ptr = m_srvHeap->GetGPUDescriptorHandleForHeapStart().ptr +
             (SIZE_T)slot * m_srvDescriptorSize;

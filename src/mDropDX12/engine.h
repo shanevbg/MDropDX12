@@ -627,7 +627,7 @@ public:
 
   int m_MinPSVersionConfig = 4; // MD2_PS_3_0: DX12 requires ps_3_0 minimum (ps_2_a silently drops texture bindings)
   int m_MaxPSVersionConfig = 6;
-  bool m_ShowUpArrowInDescriptionIfPSMinVersionForced = true;
+  bool m_ShowUpArrowInDescriptionIfPSMinVersionForced = false;
 
   // GPU Protection Settings
   int  m_nMaxShapeInstances = 0;         // Cap per-shape instance count (0=unlimited, e.g. 512)
@@ -719,8 +719,14 @@ public:
   float   m_fLoadStartTime = 0;              // GetTime() when async load began (for timeout)
   float   m_fShaderCompileTimeout = 8.0f;    // seconds before auto-skipping a stuck compilation
   bool    m_bLoadingShadertoyMode = false;    // true when async load is for a .milk3 Shadertoy preset
+  bool    m_bLoadingMilk2 = false;            // true when async load is a .milk2 double-preset
   int     m_nPresetsLoadedTotal; //important for texture eviction age-tracking...
-  CState	m_state_DO_NOT_USE[3];	// do not use; use pState and pOldState instead.
+  CState	m_state_DO_NOT_USE[4];	// do not use; use pState and pOldState instead.
+  CState* m_pMilk2OldState;      // 4th CState for .milk2 preset 1 (old/blend-from state)
+  PShaderSet m_Milk2OldShaders;   // preset 1's shaders during .milk2 async load
+  int     m_nMilk2MixType = -1;   // blend pattern from .milk2 metadata
+  wchar_t m_szMilk2Temp1[MAX_PATH] = {};  // temp file for preset 1 (deleted after load)
+  wchar_t m_szMilk2Temp2[MAX_PATH] = {};  // temp file for preset 2 (deleted after load)
   ui_mode	m_UI_mode;				// can be UI_REGULAR, UI_LOAD, UI_SAVEHOW, or UI_SAVEAS
 
 #define MASH_SLOTS 5
@@ -898,6 +904,10 @@ public:
   ComPtr<ID3D12PipelineState> m_dx12CompPSO;         // current preset comp
   ComPtr<ID3D12PipelineState> m_dx12FallbackWarpPSO; // default warp_ps.fx
   ComPtr<ID3D12PipelineState> m_dx12FallbackCompPSO; // default comp_ps.fx
+  ComPtr<ID3D12PipelineState> m_dx12OldWarpPSO;      // previous preset warp (blend pass 0, no alpha)
+  ComPtr<ID3D12PipelineState> m_dx12WarpBlendPSO;    // current preset warp (blend pass 1, alpha blend)
+  ComPtr<ID3D12PipelineState> m_dx12OldCompPSO;      // previous preset comp (blend pass 0, no alpha)
+  ComPtr<ID3D12PipelineState> m_dx12CompBlendPSO;    // current preset comp (blend pass 1, alpha blend)
   ComPtr<ID3D12PipelineState> m_dx12BlurPSO[2];      // [0] = horiz (blur1), [1] = vert (blur2)
   DX12Texture m_injectEffectTex;                     // back-buffer-sized copy for F11 inject post-process
   ComPtr<ID3D12PipelineState> m_pInjectEffectPSO;    // inject effect pixel shader PSO
@@ -930,6 +940,8 @@ public:
   void RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList);  // Shadertoy pipeline (skip warp/blur/shapes)
   UINT m_warpMainTexSlot = 0;                         // t-register for sampler_main in warp PS
   UINT m_compMainTexSlot = 0;                         // t-register for sampler_main in comp PS
+  UINT m_oldWarpMainTexSlot = 0;                      // t-register for sampler_main in old warp PS
+  UINT m_oldCompMainTexSlot = 0;                      // t-register for sampler_main in old comp PS
   bool m_bDX12PSOsDirty = false;                      // deferred PSO creation flag
   void CreateDX12PresetPSOs();                        // creates PSOs from m_shaders bytecodes
   void DX12_BlurPasses();                             // DX12 implementation of BlurPasses()
@@ -1172,7 +1184,6 @@ public:
   void        LoadRandomPreset(float fBlendTime);
   void        LoadPreset(const wchar_t* szPresetFilename, float fBlendTime);
   bool        ParseMilk2File(const wchar_t* szPath, wchar_t* outTemp1, wchar_t* outTemp2, int& outMixType, float& outProgress, int& outDirection);
-  void        LoadMilk2Preset(const wchar_t* szPresetFilename, float fBlendTime);
   void        LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime);
   void        LoadPresetTick();
   bool        WaitForPendingLoad(DWORD timeoutMs = 3000); // waits for bg thread, applies via LoadPresetTick

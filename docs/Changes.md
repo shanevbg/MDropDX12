@@ -1,5 +1,40 @@
 # MDropDX12 Changelog
 
+## v1.7.4 (2026-03-10)
+
+Special thanks to [IkeC](https://github.com/IkeC) and [_Incubo](https://github.com/OfficialIncubo) for testing and reporting issues.
+
+### Rendering
+
+- Fixed `sampler_rand` textures causing black screen — random texture was not bound when preset references `sampler_rand` without a corresponding texture file
+- Fixed random texture directory not searched when loading `sampler_rand` textures (only the preset's own directory was checked)
+- Fixed `tex2D` sampler mismatch when a space follows the opening parenthesis (e.g. `tex2D( sampler, uv)`) — sampler name was not extracted correctly
+- Fixed non-shader preset rendering: video echo, gamma adjustment, and hue rotation now work correctly for presets without comp shaders
+- Fixed `hue_shader` corner colors not applied to DX12 comp fullscreen quad (colors were black instead of interpolated)
+- Fixed warp mesh decay and blur texture scan (warp feedback was too aggressive, blur levels miscalculated)
+
+### Shader Infrastructure
+
+- Raised minimum pixel shader version to `ps_3_0` — fixes `ps_2_a` silently dropping texture bindings on complex shaders (e.g. Organic12-3d-2)
+- Normalized `tex2D` whitespace handling in shader text processing
+
+### Expression Evaluation
+
+- Fixed ns-eel2 `regNN * regNN` multiply bug — optimizer incorrectly treated `reg10*reg20` as `sqr(reg10)` due to cleared symbol names (bug exists in upstream WDL)
+
+### Preset Loading
+
+- `.milk2` preset loading is now asynchronous (non-blocking, same as `.milk` presets)
+
+### Diagnostics
+
+- Added EEL crash diagnostics with thread-local compile context tracking (`diag_eel_error.txt`)
+- Added shader text dump diagnostics (`diag_comp_shader.txt`, `diag_warp_shader.txt`)
+
+### Bootstrap
+
+- Removed automatic directory creation during bootstrap (prevents creating empty directories in unexpected locations)
+
 ## v1.7.3 (2026-03-09)
 
 ### Rendering
