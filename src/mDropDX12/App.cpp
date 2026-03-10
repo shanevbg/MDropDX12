@@ -361,6 +361,7 @@ void ToggleStretch(HWND hwnd) {
     DragAcceptFiles(hwnd, TRUE);
 
     stretch = true;
+    SetForegroundWindow(hwnd);
   }
   else {
     ShowCursor(TRUE);
@@ -383,6 +384,7 @@ void ToggleStretch(HWND hwnd) {
       SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
       SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, SWP_DRAWFRAME | SWP_FRAMECHANGED);
     }
+    SetForegroundWindow(hwnd);
   }
   fullscreen = false;
 }
@@ -489,6 +491,7 @@ static void ToggleBorderlessFullscreen(HWND hWnd) {
 
         borderless = g_engine.m_WindowBorderless; // Restore the borderless state
         fullscreen = false;
+        SetForegroundWindow(hWnd);
       }
       else {
         // not in borderless fullscreen mode, so toggle to it
@@ -533,6 +536,7 @@ static void ToggleBorderlessFullscreen(HWND hWnd) {
 
         g_engine.m_bAlwaysOnTop = isShiftPressed; // Set always on top based on Shift key state
         borderless = true;
+        SetForegroundWindow(hWnd);
       }
     }
   } catch (const std::exception& e) {
@@ -562,6 +566,7 @@ static void ToggleFullScreen(HWND hwnd) {
       SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
       SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, SWP_DRAWFRAME | SWP_FRAMECHANGED);
     }
+    SetForegroundWindow(hwnd);
   }
   else if (g_engine.IsBorderlessFullscreen(hwnd)) {
     ToggleBorderlessFullscreen(hwnd);
@@ -596,6 +601,7 @@ static void ToggleFullScreen(HWND hwnd) {
     SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
     DragAcceptFiles(hwnd, TRUE);
     fullscreen = true;
+    SetForegroundWindow(hwnd);
   }
   stretch = false;
 }
@@ -2111,6 +2117,14 @@ unsigned __stdcall RenderThreadProc(void* data) {
     unsigned int frame = 0;
 
     while (!g_bQuitRequested.load()) {
+      // Pump messages for windows owned by the render thread (mirror windows).
+      // Without this, cross-thread SendMessage from the message pump thread
+      // (e.g., during SetWindowPos z-order changes) deadlocks because
+      // SendMessage blocks until the target thread processes the message.
+      MSG msg;
+      while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+        DispatchMessage(&msg);
+
       try {
         GetAudioBuf(pcmLeftIn, pcmRightIn, SAMPLE_SIZE);
         RenderFrame();

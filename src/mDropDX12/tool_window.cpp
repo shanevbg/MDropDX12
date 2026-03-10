@@ -203,8 +203,14 @@ void ToolWindow::CreateOnThread() {
     posY = (screenH - m_nWndH) / 2;
   }
 
+  // If the render window is TOPMOST (fullscreen/borderless/spanning), create the
+  // tool window TOPMOST too so it appears above the render surface.
+  HWND hRender = m_pEngine->GetPluginWindow();
+  bool renderIsTopmost = hRender &&
+      (GetWindowLongW(hRender, GWL_EXSTYLE) & WS_EX_TOPMOST);
+
   DWORD exStyle = WS_EX_TOOLWINDOW;
-  if (m_bOnTop) exStyle |= WS_EX_TOPMOST;
+  if (m_bOnTop || renderIsTopmost) exStyle |= WS_EX_TOPMOST;
 
   m_hWnd = CreateWindowExW(
     exStyle,
@@ -226,6 +232,10 @@ void ToolWindow::CreateOnThread() {
   ApplyDarkTheme();
 
   ShowWindow(m_hWnd, SW_SHOW);
+  // Ensure we come to front even over topmost render window
+  SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  if (!m_bOnTop && !renderIsTopmost)
+    SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   SetForegroundWindow(m_hWnd);
   UpdateWindow(m_hWnd);
 
@@ -1143,10 +1153,18 @@ LRESULT CALLBACK ToolWindow::BaseWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     HWND hRender = tw->m_pEngine->GetPluginWindow();
     bool renderIsTopmost = hRender &&
         (GetWindowLongW(hRender, GWL_EXSTYLE) & WS_EX_TOPMOST);
-    SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
     if (!tw->m_bOnTop && !renderIsTopmost)
       SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    // Attach input to foreground thread so SetForegroundWindow succeeds
+    // from this non-foreground ToolWindow thread
+    DWORD fgThread = GetWindowThreadProcessId(GetForegroundWindow(), NULL);
+    DWORD myThread = GetCurrentThreadId();
+    if (fgThread != myThread)
+      AttachThreadInput(myThread, fgThread, TRUE);
     SetForegroundWindow(hWnd);
+    if (fgThread != myThread)
+      AttachThreadInput(myThread, fgThread, FALSE);
     return 0;
   }
 
