@@ -26,21 +26,6 @@ MidiWindow::MidiWindow(Engine* pEngine)
   : ToolWindow(pEngine, 600, 700) {}
 
 //----------------------------------------------------------------------
-// Engine bridge: Open/Close
-//----------------------------------------------------------------------
-
-void Engine::OpenMidiWindow() {
-  if (!m_midiWindow)
-    m_midiWindow = std::make_unique<MidiWindow>(this);
-  m_midiWindow->Open();
-}
-
-void Engine::CloseMidiWindow() {
-  if (m_midiWindow)
-    m_midiWindow->Close();
-}
-
-//----------------------------------------------------------------------
 // Common control flags
 //----------------------------------------------------------------------
 

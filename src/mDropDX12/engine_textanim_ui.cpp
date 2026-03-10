@@ -23,14 +23,8 @@ TextAnimWindow::TextAnimWindow(Engine* pEngine)
   : ToolWindow(pEngine, 560, 840) {}
 
 //----------------------------------------------------------------------
-// Engine bridge: Open / Close
+// Engine bridge: Close (non-standard — resets unique_ptr)
 //----------------------------------------------------------------------
-
-void Engine::OpenTextAnimWindow() {
-  if (!m_textAnimWindow)
-    m_textAnimWindow = std::make_unique<TextAnimWindow>(this);
-  m_textAnimWindow->Open();
-}
 
 void Engine::CloseTextAnimWindow() {
   if (m_textAnimWindow) {

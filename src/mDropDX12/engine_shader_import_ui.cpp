@@ -61,32 +61,6 @@ static const wchar_t* kChannelNames[] = {
 };
 static const int kChannelTexDim[] = { 256, 256, 256, 0, 32, 32, 0, 0, 0, 0, 0 }; // 0 = use texsize
 
-// ─── Open / Close (Engine methods) ──────────────────────────────────────
-
-void Engine::OpenShaderImportWindow() {
-    if (!m_shaderImportWindow)
-        m_shaderImportWindow = std::make_unique<ShaderImportWindow>(this);
-    m_shaderImportWindow->Open();
-}
-
-void Engine::CloseShaderImportWindow() {
-    if (m_shaderImportWindow)
-        m_shaderImportWindow->Close();
-}
-
-// ─── Welcome Window (no-presets prompt) ──────────────────────────────────
-
-void Engine::OpenWelcomeWindow() {
-    if (!m_welcomeWindow)
-        m_welcomeWindow = std::make_unique<WelcomeWindow>(this);
-    m_welcomeWindow->Open();
-}
-
-void Engine::CloseWelcomeWindow() {
-    if (m_welcomeWindow)
-        m_welcomeWindow->Close();
-}
-
 WelcomeWindow::WelcomeWindow(Engine* pEngine) : ToolWindow(pEngine, 420, 500) {
 }
 
@@ -255,9 +229,6 @@ ShaderEditorWindow::ShaderEditorWindow(Engine* pEngine, ShaderImportWindow* pImp
 
 void ShaderEditorWindow::SetPassName(const std::wstring& name) {
     m_passName = name;
-    m_title = L"Shader Editor - " + m_passName;
-    if (m_hWnd)
-        SetWindowTextW(m_hWnd, m_title.c_str());
 }
 
 // Convert narrow text to wide with proper \r\n line breaks for edit controls

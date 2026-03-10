@@ -1276,101 +1276,81 @@ public:
   void        AdjustSetting(int id, int direction);
   void        SaveSettingToINI(int id);
   void        OpenFolderPickerForPresetDir(HWND hOwnerOverride = NULL);
-  // Settings window (ToolWindow subclass, own thread)
-  std::unique_ptr<SettingsWindow> m_settingsWindow;
+  // Registry of all live ToolWindows (for iteration — self-register in ctor, deregister in dtor)
+  std::vector<ToolWindow*> m_toolWindows;
+
+  // Template helpers for standard Open/Close pattern
+  template<typename T>
+  void OpenToolWindow(std::unique_ptr<T>& ptr) {
+    if (!ptr) ptr = std::make_unique<T>(this);
+    ptr->Open();
+  }
+  template<typename T>
+  void CloseToolWindow(std::unique_ptr<T>& ptr) {
+    if (ptr) ptr->Close();
+  }
+
+  // ToolWindow subclass instances (each runs on its own thread)
+  std::unique_ptr<SettingsWindow>       m_settingsWindow;
   int         m_nSettingsFontSize = -16;     // Shared font size for all tool windows (negative = pixel height)
-  void        OpenSettingsWindow();
-  void        CloseSettingsWindow();
-
-  // Spout / Displays window (ToolWindow subclass, own thread)
-  std::unique_ptr<DisplaysWindow> m_displaysWindow;
-  void OpenDisplaysWindow();
-  void CloseDisplaysWindow();
-
-  // Song Info window (ToolWindow subclass, own thread)
-  std::unique_ptr<SongInfoWindow> m_songInfoWindow;
-  void OpenSongInfoWindow();
-  void CloseSongInfoWindow();
-
-  // Hotkeys window (ToolWindow subclass, own thread)
-  std::unique_ptr<HotkeysWindow> m_hotkeysWindow;
-  void OpenHotkeysWindow();
-  void CloseHotkeysWindow();
-
-  // MIDI window (ToolWindow subclass, own thread)
-  std::unique_ptr<MidiWindow> m_midiWindow;
-  void OpenMidiWindow();
-  void CloseMidiWindow();
-
-  // Presets window (ToolWindow subclass, own thread)
-  std::unique_ptr<PresetsWindow> m_presetsWindow;
-  void OpenPresetsWindow();
-  void ClosePresetsWindow();
-
-  // Annotations window (ToolWindow subclass, own thread)
-  std::unique_ptr<AnnotationsWindow> m_annotationsWindow;
-  void OpenAnnotationsWindow();
-  void CloseAnnotationsWindow();
-
-  // Sprites window (ToolWindow subclass, own thread)
-  std::unique_ptr<SpritesWindow> m_spritesWindow;
-  void OpenSpritesWindow();
-  void CloseSpritesWindow();
-
-  // Messages window (ToolWindow subclass, own thread)
-  std::unique_ptr<MessagesWindow> m_messagesWindow;
-  void OpenMessagesWindow();
-  void CloseMessagesWindow();
-
-  // Button Board window (ToolWindow subclass, own thread)
-  std::unique_ptr<ButtonBoardWindow> m_boardWindow;
-  void OpenBoardWindow();
-  void CloseBoardWindow();
-
-  // Shader Import window (ToolWindow subclass, own thread)
-  std::unique_ptr<ShaderImportWindow> m_shaderImportWindow;
-  void OpenShaderImportWindow();
-  void CloseShaderImportWindow();
-
-  // Script window (ToolWindow subclass, own thread)
-  std::unique_ptr<ScriptWindow> m_scriptWindow;
-  void OpenScriptWindow();
-  void CloseScriptWindow();
-
-  // Remote window (ToolWindow subclass, own thread)
-  std::unique_ptr<RemoteWindow> m_remoteWindow;
-  void OpenRemoteWindow();
-  void CloseRemoteWindow();
-
-  // Visual window (ToolWindow subclass, own thread)
-  std::unique_ptr<VisualWindow> m_visualWindow;
-  void OpenVisualWindow();
-  void CloseVisualWindow();
-
-  // Colors window (ToolWindow subclass, own thread)
-  std::unique_ptr<ColorsWindow> m_colorsWindow;
-  void OpenColorsWindow();
-  void CloseColorsWindow();
-
-  // Controller window (ToolWindow subclass, own thread)
-  std::unique_ptr<ControllerWindow> m_controllerWindow;
-  void OpenControllerWindow();
-  void CloseControllerWindow();
-
-  // Welcome window (no-presets prompt)
-  std::unique_ptr<WelcomeWindow> m_welcomeWindow;
-  void OpenWelcomeWindow();
-  void CloseWelcomeWindow();
-
-  // Text Animation Editor window (ToolWindow subclass, own thread)
-  std::unique_ptr<TextAnimWindow> m_textAnimWindow;
-  void OpenTextAnimWindow();
-  void CloseTextAnimWindow();
-
-  // Workspace Layout window
+  std::unique_ptr<DisplaysWindow>       m_displaysWindow;
+  std::unique_ptr<SongInfoWindow>       m_songInfoWindow;
+  std::unique_ptr<HotkeysWindow>        m_hotkeysWindow;
+  std::unique_ptr<MidiWindow>           m_midiWindow;
+  std::unique_ptr<PresetsWindow>        m_presetsWindow;
+  std::unique_ptr<AnnotationsWindow>    m_annotationsWindow;
+  std::unique_ptr<SpritesWindow>        m_spritesWindow;
+  std::unique_ptr<MessagesWindow>       m_messagesWindow;
+  std::unique_ptr<ButtonBoardWindow>    m_boardWindow;
+  std::unique_ptr<ShaderImportWindow>   m_shaderImportWindow;
+  std::unique_ptr<ScriptWindow>         m_scriptWindow;
+  std::unique_ptr<RemoteWindow>         m_remoteWindow;
+  std::unique_ptr<VisualWindow>         m_visualWindow;
+  std::unique_ptr<ColorsWindow>         m_colorsWindow;
+  std::unique_ptr<ControllerWindow>     m_controllerWindow;
+  std::unique_ptr<WelcomeWindow>        m_welcomeWindow;
+  std::unique_ptr<TextAnimWindow>       m_textAnimWindow;
   std::unique_ptr<WorkspaceLayoutWindow> m_workspaceLayoutWindow;
-  void OpenWorkspaceLayoutWindow();
-  void CloseWorkspaceLayoutWindow();
+
+  // Open/Close — standard pattern uses template; non-standard kept as declarations
+  void OpenSettingsWindow()      { OpenToolWindow(m_settingsWindow); }
+  void CloseSettingsWindow()     { CloseToolWindow(m_settingsWindow); }
+  void OpenDisplaysWindow()      { OpenToolWindow(m_displaysWindow); }
+  void CloseDisplaysWindow()     { CloseToolWindow(m_displaysWindow); }
+  void OpenSongInfoWindow()      { OpenToolWindow(m_songInfoWindow); }
+  void CloseSongInfoWindow()     { CloseToolWindow(m_songInfoWindow); }
+  void OpenHotkeysWindow()       { OpenToolWindow(m_hotkeysWindow); }
+  void CloseHotkeysWindow()      { CloseToolWindow(m_hotkeysWindow); }
+  void OpenMidiWindow()          { OpenToolWindow(m_midiWindow); }
+  void CloseMidiWindow()         { CloseToolWindow(m_midiWindow); }
+  void OpenPresetsWindow()       { OpenToolWindow(m_presetsWindow); }
+  void ClosePresetsWindow()      { CloseToolWindow(m_presetsWindow); }
+  void OpenAnnotationsWindow()   { OpenToolWindow(m_annotationsWindow); }
+  void CloseAnnotationsWindow()  { CloseToolWindow(m_annotationsWindow); }
+  void OpenSpritesWindow()       { OpenToolWindow(m_spritesWindow); }
+  void CloseSpritesWindow()      { CloseToolWindow(m_spritesWindow); }
+  void OpenBoardWindow()         { OpenToolWindow(m_boardWindow); }
+  void CloseBoardWindow()        { CloseToolWindow(m_boardWindow); }
+  void OpenShaderImportWindow()  { OpenToolWindow(m_shaderImportWindow); }
+  void CloseShaderImportWindow() { CloseToolWindow(m_shaderImportWindow); }
+  void OpenScriptWindow()        { OpenToolWindow(m_scriptWindow); }
+  void CloseScriptWindow()       { CloseToolWindow(m_scriptWindow); }
+  void OpenRemoteWindow()        { OpenToolWindow(m_remoteWindow); }
+  void CloseRemoteWindow()       { CloseToolWindow(m_remoteWindow); }
+  void OpenVisualWindow()        { OpenToolWindow(m_visualWindow); }
+  void CloseVisualWindow()       { CloseToolWindow(m_visualWindow); }
+  void OpenColorsWindow()        { OpenToolWindow(m_colorsWindow); }
+  void CloseColorsWindow()       { CloseToolWindow(m_colorsWindow); }
+  void OpenControllerWindow()    { OpenToolWindow(m_controllerWindow); }
+  void CloseControllerWindow()   { CloseToolWindow(m_controllerWindow); }
+  void OpenWelcomeWindow()       { OpenToolWindow(m_welcomeWindow); }
+  void CloseWelcomeWindow()      { CloseToolWindow(m_welcomeWindow); }
+  void OpenTextAnimWindow()      { OpenToolWindow(m_textAnimWindow); }
+  void CloseTextAnimWindow();    // non-standard: resets after close
+  void OpenMessagesWindow()      { OpenToolWindow(m_messagesWindow); }
+  void CloseMessagesWindow();    // non-standard: resets after close
+  void OpenWorkspaceLayoutWindow() { OpenToolWindow(m_workspaceLayoutWindow); }
+  void CloseWorkspaceLayoutWindow() { CloseToolWindow(m_workspaceLayoutWindow); }
 
 
   // Broadcast WM_MW_REBUILD_FONTS to all windows except the sender

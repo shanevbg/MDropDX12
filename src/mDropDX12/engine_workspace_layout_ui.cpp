@@ -64,19 +64,6 @@ static BOOL CALLBACK EnumMonCB(HMONITOR hMon, HDC, LPRECT lprc, LPARAM lParam) {
     return TRUE;
 }
 
-// ── Open / Close ──
-
-void Engine::OpenWorkspaceLayoutWindow() {
-    if (!m_workspaceLayoutWindow)
-        m_workspaceLayoutWindow = std::make_unique<WorkspaceLayoutWindow>(this);
-    m_workspaceLayoutWindow->Open();
-}
-
-void Engine::CloseWorkspaceLayoutWindow() {
-    if (m_workspaceLayoutWindow)
-        m_workspaceLayoutWindow->Close();
-}
-
 // ── Constructor ──
 
 WorkspaceLayoutWindow::WorkspaceLayoutWindow(Engine* pEngine)

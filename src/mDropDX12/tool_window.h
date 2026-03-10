@@ -182,6 +182,19 @@ private:
   static LRESULT CALLBACK TabSubclassProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
 };
 
+// ── Macro to eliminate boilerplate overrides in ToolWindow subclasses ──
+// Each subclass needs: title, window class, INI section, 3 control IDs, min size.
+// Usage: place inside the `protected:` section of the subclass declaration.
+#define TOOLWINDOW_META(title, cls, ini, pinID, fpID, fmID, minW, minH) \
+  const wchar_t* GetWindowTitle() const override { return title; }     \
+  const wchar_t* GetWindowClass() const override { return cls; }       \
+  const wchar_t* GetINISection() const override  { return ini; }       \
+  int GetPinControlID() const override       { return pinID; }         \
+  int GetFontPlusControlID() const override  { return fpID; }          \
+  int GetFontMinusControlID() const override { return fmID; }          \
+  int GetMinWidth() const override  { return minW; }                   \
+  int GetMinHeight() const override { return minH; }
+
 // ── Concrete subclass: Spout / Displays window ──
 
 class DisplaysWindow : public ToolWindow {
@@ -189,14 +202,8 @@ public:
   DisplaysWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Spout / Displays"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12DisplaysWnd"; }
-  const wchar_t* GetINISection() const override  { return L"Displays"; }
-  int GetPinControlID() const override       { return IDC_MW_DISPLAYS_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_DISP_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_DISP_FONT_MINUS; }
-  int GetMinWidth() const override  { return 400; }
-  int GetMinHeight() const override { return 350; }
+  TOOLWINDOW_META(L"Spout / Displays", L"MDropDX12DisplaysWnd", L"Displays",
+                  IDC_MW_DISPLAYS_PIN, IDC_MW_DISP_FONT_PLUS, IDC_MW_DISP_FONT_MINUS, 400, 350)
 
   void DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
@@ -215,14 +222,8 @@ public:
   SongInfoWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Song Info"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12SongInfoWnd"; }
-  const wchar_t* GetINISection() const override  { return L"SongInfo"; }
-  int GetPinControlID() const override       { return IDC_MW_SONGINFO_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_SONGINFO_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_SONGINFO_FONT_MINUS; }
-  int GetMinWidth() const override  { return 380; }
-  int GetMinHeight() const override { return 400; }
+  TOOLWINDOW_META(L"Song Info", L"MDropDX12SongInfoWnd", L"SongInfo",
+                  IDC_MW_SONGINFO_PIN, IDC_MW_SONGINFO_FONT_PLUS, IDC_MW_SONGINFO_FONT_MINUS, 380, 400)
 
   void DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
@@ -236,14 +237,8 @@ public:
   void EnsureVisible();  // called from Engine on WM_SIZE
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"MDropDX12 Settings"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12SettingsWnd"; }
-  const wchar_t* GetINISection() const override  { return L"SettingsWnd"; }
-  int GetPinControlID() const override       { return IDC_MW_SETTINGS_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_FONT_MINUS; }
-  int GetMinWidth() const override  { return 750; }
-  int GetMinHeight() const override { return 675; }
+  TOOLWINDOW_META(L"MDropDX12 Settings", L"MDropDX12SettingsWnd", L"SettingsWnd",
+                  IDC_MW_SETTINGS_PIN, IDC_MW_FONT_PLUS, IDC_MW_FONT_MINUS, 750, 675)
 
   DWORD GetCommonControlFlags() const override;
   bool  AcceptsDragDrop() const override { return true; }
@@ -270,14 +265,8 @@ public:
   HotkeysWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Hotkeys"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12HotkeysWnd"; }
-  const wchar_t* GetINISection() const override  { return L"HotkeysWnd"; }
-  int GetPinControlID() const override       { return IDC_MW_HOTKEYS_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_HOTKEYS_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_HOTKEYS_FONT_MINUS; }
-  int GetMinWidth() const override  { return 560; }
-  int GetMinHeight() const override { return 480; }
+  TOOLWINDOW_META(L"Hotkeys", L"MDropDX12HotkeysWnd", L"HotkeysWnd",
+                  IDC_MW_HOTKEYS_PIN, IDC_MW_HOTKEYS_FONT_PLUS, IDC_MW_HOTKEYS_FONT_MINUS, 560, 480)
 
   void    OnResize() override;
   DWORD   GetCommonControlFlags() const override;
@@ -313,14 +302,8 @@ public:
   MidiWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"MIDI"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12MidiWnd"; }
-  const wchar_t* GetINISection() const override  { return L"MidiWnd"; }
-  int GetPinControlID() const override       { return IDC_MW_MIDI_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_MIDI_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_MIDI_FONT_MINUS; }
-  int GetMinWidth() const override  { return 580; }
-  int GetMinHeight() const override { return 550; }
+  TOOLWINDOW_META(L"MIDI", L"MDropDX12MidiWnd", L"MidiWnd",
+                  IDC_MW_MIDI_PIN, IDC_MW_MIDI_FONT_PLUS, IDC_MW_MIDI_FONT_MINUS, 580, 550)
 
   DWORD   GetCommonControlFlags() const override;
   void    DoBuildControls() override;
@@ -359,14 +342,8 @@ public:
   SpritesWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Sprites"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12SpritesWnd"; }
-  const wchar_t* GetINISection() const override  { return L"SpritesWnd"; }
-  int GetPinControlID() const override       { return IDC_MW_SPRITES_WIN_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_SPRITES_WIN_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_SPRITES_WIN_FONT_MINUS; }
-  int GetMinWidth() const override  { return 500; }
-  int GetMinHeight() const override { return 700; }
+  TOOLWINDOW_META(L"Sprites", L"MDropDX12SpritesWnd", L"SpritesWnd",
+                  IDC_MW_SPRITES_WIN_PIN, IDC_MW_SPRITES_WIN_FONT_PLUS, IDC_MW_SPRITES_WIN_FONT_MINUS, 500, 700)
 
   void    DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
@@ -385,14 +362,8 @@ public:
   MessagesWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Messages"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12MessagesWnd"; }
-  const wchar_t* GetINISection() const override  { return L"MessagesWnd"; }
-  int GetPinControlID() const override       { return IDC_MW_MESSAGES_WIN_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_MESSAGES_WIN_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_MESSAGES_WIN_FONT_MINUS; }
-  int GetMinWidth() const override  { return 420; }
-  int GetMinHeight() const override { return 480; }
+  TOOLWINDOW_META(L"Messages", L"MDropDX12MessagesWnd", L"MessagesWnd",
+                  IDC_MW_MESSAGES_WIN_PIN, IDC_MW_MESSAGES_WIN_FONT_PLUS, IDC_MW_MESSAGES_WIN_FONT_MINUS, 420, 480)
 
   void    OnResize() override;
   void    DoBuildControls() override;
@@ -410,14 +381,8 @@ public:
   PresetsWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Presets"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12PresetsWnd"; }
-  const wchar_t* GetINISection() const override  { return L"PresetsWnd"; }
-  int GetPinControlID() const override       { return IDC_MW_PRESETS_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_PRESETS_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_PRESETS_FONT_MINUS; }
-  int GetMinWidth() const override  { return 420; }
-  int GetMinHeight() const override { return 400; }
+  TOOLWINDOW_META(L"Presets", L"MDropDX12PresetsWnd", L"PresetsWnd",
+                  IDC_MW_PRESETS_PIN, IDC_MW_PRESETS_FONT_PLUS, IDC_MW_PRESETS_FONT_MINUS, 420, 400)
 
   void    OnResize() override;
   void    DoBuildControls() override;
@@ -457,14 +422,8 @@ public:
   AnnotationsWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Annotations"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12AnnotationsWnd"; }
-  const wchar_t* GetINISection() const override  { return L"AnnotationsWnd"; }
-  int GetPinControlID() const override       { return IDC_MW_ANNOTWIN_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_ANNOTWIN_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_ANNOTWIN_FONT_MINUS; }
-  int GetMinWidth() const override  { return 500; }
-  int GetMinHeight() const override { return 400; }
+  TOOLWINDOW_META(L"Annotations", L"MDropDX12AnnotationsWnd", L"AnnotationsWnd",
+                  IDC_MW_ANNOTWIN_PIN, IDC_MW_ANNOTWIN_FONT_PLUS, IDC_MW_ANNOTWIN_FONT_MINUS, 500, 400)
 
   void    OnResize() override;
   void    DoBuildControls() override;
@@ -497,14 +456,8 @@ public:
   ButtonBoardWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Button Board"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12BoardWnd"; }
-  const wchar_t* GetINISection() const override  { return L"BoardWnd"; }
-  int GetPinControlID() const override       { return IDC_MW_BOARD_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_BOARD_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_BOARD_FONT_MINUS; }
-  int GetMinWidth() const override  { return 300; }
-  int GetMinHeight() const override { return 250; }
+  TOOLWINDOW_META(L"Button Board", L"MDropDX12BoardWnd", L"BoardWnd",
+                  IDC_MW_BOARD_PIN, IDC_MW_BOARD_FONT_PLUS, IDC_MW_BOARD_FONT_MINUS, 300, 250)
   bool ForwardAllKeys() const override { return true; }
   bool AcceptsDragDrop() const override { return true; }
 
@@ -541,14 +494,8 @@ public:
   VideoEffectsWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Video Effects"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12VideoFXWnd"; }
-  const wchar_t* GetINISection() const override  { return L"VideoFX"; }
-  int GetPinControlID() const override       { return IDC_MW_VFX_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_VFX_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_VFX_FONT_MINUS; }
-  int GetMinWidth() const override  { return 380; }
-  int GetMinHeight() const override { return 550; }
+  TOOLWINDOW_META(L"Video Effects", L"MDropDX12VideoFXWnd", L"VideoFX",
+                  IDC_MW_VFX_PIN, IDC_MW_VFX_FONT_PLUS, IDC_MW_VFX_FONT_MINUS, 380, 550)
 
   void    DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
@@ -569,14 +516,8 @@ public:
   VFXProfileWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"VFX Profiles"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12VFXProfileWnd"; }
-  const wchar_t* GetINISection() const override  { return L"VFXProfiles"; }
-  int GetPinControlID() const override       { return IDC_MW_VFXP_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_VFXP_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_VFXP_FONT_MINUS; }
-  int GetMinWidth() const override  { return 280; }
-  int GetMinHeight() const override { return 350; }
+  TOOLWINDOW_META(L"VFX Profiles", L"MDropDX12VFXProfileWnd", L"VFXProfiles",
+                  IDC_MW_VFXP_PIN, IDC_MW_VFXP_FONT_PLUS, IDC_MW_VFXP_FONT_MINUS, 280, 350)
 
   void    DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
@@ -595,14 +536,8 @@ public:
   TextAnimWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Text Animations"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12TextAnimWnd"; }
-  const wchar_t* GetINISection() const override  { return L"TextAnimWnd"; }
-  int GetPinControlID() const override       { return IDC_MW_TEXTANIM_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_TEXTANIM_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_TEXTANIM_FONT_MINUS; }
-  int GetMinWidth() const override  { return 520; }
-  int GetMinHeight() const override { return 750; }
+  TOOLWINDOW_META(L"Text Animations", L"MDropDX12TextAnimWnd", L"TextAnimWnd",
+                  IDC_MW_TEXTANIM_PIN, IDC_MW_TEXTANIM_FONT_PLUS, IDC_MW_TEXTANIM_FONT_MINUS, 520, 750)
 
   DWORD   GetCommonControlFlags() const override;
   void    OnResize() override;
@@ -633,14 +568,8 @@ public:
   ScriptWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Script"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12ScriptWnd"; }
-  const wchar_t* GetINISection() const override  { return L"ScriptWnd"; }
-  int GetPinControlID() const override       { return IDC_MW_SCRIPTWIN_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_SCRIPTWIN_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_SCRIPTWIN_FONT_MINUS; }
-  int GetMinWidth() const override  { return 380; }
-  int GetMinHeight() const override { return 500; }
+  TOOLWINDOW_META(L"Script", L"MDropDX12ScriptWnd", L"ScriptWnd",
+                  IDC_MW_SCRIPTWIN_PIN, IDC_MW_SCRIPTWIN_FONT_PLUS, IDC_MW_SCRIPTWIN_FONT_MINUS, 380, 500)
 
   void    DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
@@ -653,14 +582,8 @@ public:
   RemoteWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Remote"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12RemoteWnd"; }
-  const wchar_t* GetINISection() const override  { return L"RemoteWnd"; }
-  int GetPinControlID() const override       { return IDC_MW_REMOTEWIN_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_REMOTEWIN_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_REMOTEWIN_FONT_MINUS; }
-  int GetMinWidth() const override  { return 380; }
-  int GetMinHeight() const override { return 500; }
+  TOOLWINDOW_META(L"Remote", L"MDropDX12RemoteWnd", L"RemoteWnd",
+                  IDC_MW_REMOTEWIN_PIN, IDC_MW_REMOTEWIN_FONT_PLUS, IDC_MW_REMOTEWIN_FONT_MINUS, 380, 500)
 
   void    DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
@@ -679,14 +602,8 @@ public:
   VisualWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Visual"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12VisualWnd"; }
-  const wchar_t* GetINISection() const override  { return L"VisualWnd"; }
-  int GetPinControlID() const override       { return IDC_MW_VISUALWIN_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_VISUALWIN_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_VISUALWIN_FONT_MINUS; }
-  int GetMinWidth() const override  { return 400; }
-  int GetMinHeight() const override { return 600; }
+  TOOLWINDOW_META(L"Visual", L"MDropDX12VisualWnd", L"VisualWnd",
+                  IDC_MW_VISUALWIN_PIN, IDC_MW_VISUALWIN_FONT_PLUS, IDC_MW_VISUALWIN_FONT_MINUS, 400, 600)
 
   DWORD GetCommonControlFlags() const override;
 
@@ -702,14 +619,8 @@ public:
   ColorsWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Colors"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12ColorsWnd"; }
-  const wchar_t* GetINISection() const override  { return L"ColorsWnd"; }
-  int GetPinControlID() const override       { return IDC_MW_COLORSWIN_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_COLORSWIN_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_COLORSWIN_FONT_MINUS; }
-  int GetMinWidth() const override  { return 380; }
-  int GetMinHeight() const override { return 400; }
+  TOOLWINDOW_META(L"Colors", L"MDropDX12ColorsWnd", L"ColorsWnd",
+                  IDC_MW_COLORSWIN_PIN, IDC_MW_COLORSWIN_FONT_PLUS, IDC_MW_COLORSWIN_FONT_MINUS, 380, 400)
 
   DWORD GetCommonControlFlags() const override;
 
@@ -725,14 +636,8 @@ public:
   ControllerWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Controller"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12ControllerWnd"; }
-  const wchar_t* GetINISection() const override  { return L"ControllerWnd"; }
-  int GetPinControlID() const override       { return IDC_MW_CONTROLLERWIN_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_CONTROLLERWIN_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_CONTROLLERWIN_FONT_MINUS; }
-  int GetMinWidth() const override  { return 400; }
-  int GetMinHeight() const override { return 500; }
+  TOOLWINDOW_META(L"Controller", L"MDropDX12ControllerWnd", L"ControllerWnd",
+                  IDC_MW_CONTROLLERWIN_PIN, IDC_MW_CONTROLLERWIN_FONT_PLUS, IDC_MW_CONTROLLERWIN_FONT_MINUS, 400, 500)
 
   void    DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
@@ -785,14 +690,8 @@ public:
   void SetPendingData(const ShaderPass& pass);  // Store data for DoBuildControls to load
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return m_title.c_str(); }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12ShaderEditorWnd"; }
-  const wchar_t* GetINISection() const override  { return L"ShaderEditor"; }
-  int GetPinControlID() const override       { return IDC_MW_SHEDITOR_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_SHEDITOR_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_SHEDITOR_FONT_MINUS; }
-  int GetMinWidth() const override  { return 500; }
-  int GetMinHeight() const override { return 400; }
+  TOOLWINDOW_META(L"Shader Editor", L"MDropDX12ShaderEditorWnd", L"ShaderEditor",
+                  IDC_MW_SHEDITOR_PIN, IDC_MW_SHEDITOR_FONT_PLUS, IDC_MW_SHEDITOR_FONT_MINUS, 500, 400)
 
   void    OnResize() override;
   void    DoBuildControls() override;
@@ -802,7 +701,6 @@ protected:
 private:
   int m_nTopY = 0;
   std::wstring m_passName = L"Image";
-  mutable std::wstring m_title = L"Shader Editor - Image";
   ShaderImportWindow* m_pImportWindow = nullptr;
   // Pending data — set before Open(), loaded by DoBuildControls when controls are ready
   std::string m_pendingGlsl, m_pendingHlsl, m_pendingNotes;
@@ -823,14 +721,8 @@ public:
   void OnPasteGLSL(const std::string& glsl);  // Paste intelligence: detect pass type + channels
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Shader Import"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12ShaderImportWnd"; }
-  const wchar_t* GetINISection() const override  { return L"ShaderImport"; }
-  int GetPinControlID() const override       { return IDC_MW_SHIMPORT_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_SHIMPORT_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_SHIMPORT_FONT_MINUS; }
-  int GetMinWidth() const override  { return 350; }
-  int GetMinHeight() const override { return 450; }
+  TOOLWINDOW_META(L"Shader Import", L"MDropDX12ShaderImportWnd", L"ShaderImport",
+                  IDC_MW_SHIMPORT_PIN, IDC_MW_SHIMPORT_FONT_PLUS, IDC_MW_SHIMPORT_FONT_MINUS, 350, 450)
 
   void    OnResize() override;
   void    DoBuildControls() override;
@@ -877,14 +769,8 @@ public:
   void SetAutoApply() { m_bAutoApply = true; } // apply layout after window builds
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Workspace Layout"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12WorkspaceLayoutWnd"; }
-  const wchar_t* GetINISection() const override  { return L"WorkspaceLayout"; }
-  int GetPinControlID() const override       { return IDC_MW_WSLAYOUT_PIN; }
-  int GetFontPlusControlID() const override  { return IDC_MW_WSLAYOUT_FONT_PLUS; }
-  int GetFontMinusControlID() const override { return IDC_MW_WSLAYOUT_FONT_MINUS; }
-  int GetMinWidth() const override  { return 380; }
-  int GetMinHeight() const override { return 700; }
+  TOOLWINDOW_META(L"Workspace Layout", L"MDropDX12WorkspaceLayoutWnd", L"WorkspaceLayout",
+                  IDC_MW_WSLAYOUT_PIN, IDC_MW_WSLAYOUT_FONT_PLUS, IDC_MW_WSLAYOUT_FONT_MINUS, 380, 700)
 
   void    DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
@@ -906,14 +792,7 @@ public:
   WelcomeWindow(Engine* pEngine);
 
 protected:
-  const wchar_t* GetWindowTitle() const override { return L"Welcome"; }
-  const wchar_t* GetWindowClass() const override { return L"MDropDX12WelcomeWnd"; }
-  const wchar_t* GetINISection() const override  { return L"Welcome"; }
-  int GetPinControlID() const override       { return 0; }
-  int GetFontPlusControlID() const override  { return 0; }
-  int GetFontMinusControlID() const override { return 0; }
-  int GetMinWidth() const override  { return 300; }
-  int GetMinHeight() const override { return 400; }
+  TOOLWINDOW_META(L"Welcome", L"MDropDX12WelcomeWnd", L"Welcome", 0, 0, 0, 300, 400)
 
   void    DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;

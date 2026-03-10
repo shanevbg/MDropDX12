@@ -26,21 +26,6 @@ SongInfoWindow::SongInfoWindow(Engine* pEngine)
   : ToolWindow(pEngine, 500, 600) {}
 
 //----------------------------------------------------------------------
-// Engine bridge: Open/Close via Engine members
-//----------------------------------------------------------------------
-
-void Engine::OpenSongInfoWindow() {
-  if (!m_songInfoWindow)
-    m_songInfoWindow = std::make_unique<SongInfoWindow>(this);
-  m_songInfoWindow->Open();
-}
-
-void Engine::CloseSongInfoWindow() {
-  if (m_songInfoWindow)
-    m_songInfoWindow->Close();
-}
-
-//----------------------------------------------------------------------
 // Window title preview helpers (same logic as in engine_settings_ui.cpp)
 //----------------------------------------------------------------------
 

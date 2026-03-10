@@ -360,78 +360,65 @@ void PipeServer::DispatchMessage(const wchar_t* message, size_t len) {
     }
 }
 
+// ─── Signal dispatch table ─────────────────────────────────────────────────────
+struct SignalEntry {
+    const wchar_t* name;
+    int offset;       // added to m_wmSignalBase
+    bool hasValue;    // true = uses KEY=VALUE format (wcsncmp + send parsed value)
+};
+
+static const SignalEntry s_signalTable[] = {
+    // Simple signals (exact match, no value)
+    { L"NEXT_PRESET",          100, false },
+    { L"PREV_PRESET",          101, false },
+    { L"COVER_CHANGED",        102, false },
+    { L"SPRITE_MODE",          103, false },
+    { L"MESSAGE_MODE",         104, false },
+    { L"CAPTURE",              105, false },
+    { L"SHOW_COVER",           110, false },
+    // KEY=VALUE signals (prefix match, value parsed as int into WPARAM)
+    { L"SETVIDEODEVICE",       106, true  },
+    { L"ENABLEVIDEOMIX",       107, true  },
+    { L"ENABLESPOUTMIX",       109, true  },
+    { L"SET_INPUTMIX_OPACITY", 150, true  },
+    { L"SET_INPUTMIX_ONTOP",   152, true  },
+};
+
 bool PipeServer::DispatchSignal(const wchar_t* signal) {
     if (!signal || !m_hTargetWindow)
         return false;
 
     // Parse: NEXT_PRESET, PREV_PRESET, etc.
     // Uses m_wmSignalBase (WM_APP for MDropDX12, WM_USER for Milkwave)
-    if (wcscmp(signal, L"NEXT_PRESET") == 0) {
-        PostMessageW(m_hTargetWindow, m_wmSignalBase + 100, 0, 0);
-        return true;
-    }
-    if (wcscmp(signal, L"PREV_PRESET") == 0) {
-        PostMessageW(m_hTargetWindow, m_wmSignalBase + 101, 0, 0);
-        return true;
-    }
-    if (wcscmp(signal, L"COVER_CHANGED") == 0) {
-        PostMessageW(m_hTargetWindow, m_wmSignalBase + 102, 0, 0);
-        return true;
-    }
-    if (wcscmp(signal, L"SPRITE_MODE") == 0) {
-        PostMessageW(m_hTargetWindow, m_wmSignalBase + 103, 0, 0);
-        return true;
-    }
-    if (wcscmp(signal, L"SHOW_COVER") == 0) {
-        PostMessageW(m_hTargetWindow, m_wmSignalBase + 110, 0, 0);
-        return true;
-    }
-    if (wcscmp(signal, L"MESSAGE_MODE") == 0) {
-        PostMessageW(m_hTargetWindow, m_wmSignalBase + 104, 0, 0);
-        return true;
-    }
-    if (wcscmp(signal, L"CAPTURE") == 0) {
-        PostMessageW(m_hTargetWindow, m_wmSignalBase + 105, 0, 0);
-        return true;
+    for (const auto& entry : s_signalTable) {
+        if (!entry.hasValue) {
+            // Exact match for simple signals
+            if (wcscmp(signal, entry.name) == 0) {
+                PostMessageW(m_hTargetWindow, m_wmSignalBase + entry.offset, 0, 0);
+                return true;
+            }
+        } else {
+            // Prefix match for KEY=VALUE signals
+            size_t nameLen = wcslen(entry.name);
+            if (wcsncmp(signal, entry.name, nameLen) == 0 && signal[nameLen] == L'=') {
+                const wchar_t* value = signal + nameLen + 1;
+                PostMessageW(m_hTargetWindow, m_wmSignalBase + entry.offset, (WPARAM)_wtoi(value), 0);
+                return true;
+            }
+        }
     }
 
-    // Signals with values: KEY=VALUE
-    const wchar_t* eq = wcschr(signal, L'=');
-    if (!eq)
-        return false;
-
-    // Extract key and value
-    size_t keyLen = eq - signal;
-    const wchar_t* value = eq + 1;
-
-    if (wcsncmp(signal, L"ENABLESPOUTMIX", keyLen) == 0 && keyLen == 14) {
-        PostMessageW(m_hTargetWindow, m_wmSignalBase + 109, (WPARAM)_wtoi(value), 0);
-        return true;
-    }
-    if (wcsncmp(signal, L"SET_INPUTMIX_OPACITY", keyLen) == 0 && keyLen == 20) {
-        PostMessageW(m_hTargetWindow, m_wmSignalBase + 150, (WPARAM)_wtoi(value), 0);
-        return true;
-    }
-    if (wcsncmp(signal, L"SET_INPUTMIX_ONTOP", keyLen) == 0 && keyLen == 18) {
-        PostMessageW(m_hTargetWindow, m_wmSignalBase + 152, (WPARAM)_wtoi(value), 0);
-        return true;
-    }
-    if (wcsncmp(signal, L"SET_INPUTMIX_LUMAKEY", keyLen) == 0 && keyLen == 20) {
-        // Value format: threshold|softness
+    // Special case: SET_INPUTMIX_LUMAKEY parses threshold|softness into WPARAM and LPARAM
+    const wchar_t kLumaKey[] = L"SET_INPUTMIX_LUMAKEY";
+    const size_t kLumaKeyLen = _countof(kLumaKey) - 1;
+    if (wcsncmp(signal, kLumaKey, kLumaKeyLen) == 0 && signal[kLumaKeyLen] == L'=') {
+        const wchar_t* value = signal + kLumaKeyLen + 1;
         int threshold = _wtoi(value);
         int softness = 0;
         const wchar_t* pipe = wcschr(value, L'|');
         if (pipe)
             softness = _wtoi(pipe + 1);
         PostMessageW(m_hTargetWindow, m_wmSignalBase + 151, (WPARAM)threshold, (LPARAM)softness);
-        return true;
-    }
-    if (wcsncmp(signal, L"ENABLEVIDEOMIX", keyLen) == 0 && keyLen == 14) {
-        PostMessageW(m_hTargetWindow, m_wmSignalBase + 107, (WPARAM)_wtoi(value), 0);
-        return true;
-    }
-    if (wcsncmp(signal, L"SETVIDEODEVICE", keyLen) == 0 && keyLen == 14) {
-        PostMessageW(m_hTargetWindow, m_wmSignalBase + 106, (WPARAM)_wtoi(value), 0);
         return true;
     }
 

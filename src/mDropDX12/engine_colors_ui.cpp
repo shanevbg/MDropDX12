@@ -24,21 +24,6 @@ ColorsWindow::ColorsWindow(Engine* pEngine)
 DWORD ColorsWindow::GetCommonControlFlags() const { return ICC_BAR_CLASSES; }
 
 //----------------------------------------------------------------------
-// Engine bridge: Open/Close
-//----------------------------------------------------------------------
-
-void Engine::OpenColorsWindow() {
-  if (!m_colorsWindow)
-    m_colorsWindow = std::make_unique<ColorsWindow>(this);
-  m_colorsWindow->Open();
-}
-
-void Engine::CloseColorsWindow() {
-  if (m_colorsWindow)
-    m_colorsWindow->Close();
-}
-
-//----------------------------------------------------------------------
 // Build Controls
 //----------------------------------------------------------------------
 

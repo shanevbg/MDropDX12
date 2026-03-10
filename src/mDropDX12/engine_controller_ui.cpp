@@ -22,21 +22,6 @@ ControllerWindow::ControllerWindow(Engine* pEngine)
   : ToolWindow(pEngine, 400, 500) {}
 
 //----------------------------------------------------------------------
-// Engine bridge: Open/Close
-//----------------------------------------------------------------------
-
-void Engine::OpenControllerWindow() {
-  if (!m_controllerWindow)
-    m_controllerWindow = std::make_unique<ControllerWindow>(this);
-  m_controllerWindow->Open();
-}
-
-void Engine::CloseControllerWindow() {
-  if (m_controllerWindow)
-    m_controllerWindow->Close();
-}
-
-//----------------------------------------------------------------------
 // Build Controls
 //----------------------------------------------------------------------
 

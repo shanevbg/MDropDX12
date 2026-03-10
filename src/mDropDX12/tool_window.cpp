@@ -6,6 +6,7 @@
 
 #include "tool_window.h"
 #include "engine.h"
+#include <algorithm>
 #include "engine_helpers.h"
 #include "utility.h"
 #include <commctrl.h>
@@ -50,10 +51,18 @@ extern Engine g_engine;
 
 ToolWindow::ToolWindow(Engine* pEngine, int defaultW, int defaultH)
   : m_pEngine(pEngine), m_nDefaultW(defaultW), m_nDefaultH(defaultH),
-    m_nWndW(defaultW), m_nWndH(defaultH) {}
+    m_nWndW(defaultW), m_nWndH(defaultH)
+{
+  if (m_pEngine)
+    m_pEngine->m_toolWindows.push_back(this);
+}
 
 ToolWindow::~ToolWindow() {
   Close();
+  if (m_pEngine) {
+    auto& v = m_pEngine->m_toolWindows;
+    v.erase(std::remove(v.begin(), v.end(), this), v.end());
+  }
 }
 
 //----------------------------------------------------------------------
@@ -107,28 +116,10 @@ bool ToolWindow::IsOpen() const {
 //----------------------------------------------------------------------
 
 void Engine::BroadcastFontSync(HWND hSender) {
-  if (m_settingsWindow && m_settingsWindow->IsOpen() && m_settingsWindow->GetHWND() != hSender)
-    PostMessage(m_settingsWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
-  if (m_displaysWindow && m_displaysWindow->IsOpen() && m_displaysWindow->GetHWND() != hSender)
-    PostMessage(m_displaysWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
-  if (m_songInfoWindow && m_songInfoWindow->IsOpen() && m_songInfoWindow->GetHWND() != hSender)
-    PostMessage(m_songInfoWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
-  if (m_hotkeysWindow && m_hotkeysWindow->IsOpen() && m_hotkeysWindow->GetHWND() != hSender)
-    PostMessage(m_hotkeysWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
-  if (m_midiWindow && m_midiWindow->IsOpen() && m_midiWindow->GetHWND() != hSender)
-    PostMessage(m_midiWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
-  if (m_boardWindow && m_boardWindow->IsOpen() && m_boardWindow->GetHWND() != hSender)
-    PostMessage(m_boardWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
-  if (m_presetsWindow && m_presetsWindow->IsOpen() && m_presetsWindow->GetHWND() != hSender)
-    PostMessage(m_presetsWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
-  if (m_spritesWindow && m_spritesWindow->IsOpen() && m_spritesWindow->GetHWND() != hSender)
-    PostMessage(m_spritesWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
-  if (m_messagesWindow && m_messagesWindow->IsOpen() && m_messagesWindow->GetHWND() != hSender)
-    PostMessage(m_messagesWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
-  if (m_shaderImportWindow && m_shaderImportWindow->IsOpen() && m_shaderImportWindow->GetHWND() != hSender)
-    PostMessage(m_shaderImportWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
-  if (m_workspaceLayoutWindow && m_workspaceLayoutWindow->IsOpen() && m_workspaceLayoutWindow->GetHWND() != hSender)
-    PostMessage(m_workspaceLayoutWindow->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
+  for (auto* tw : m_toolWindows) {
+    if (tw->IsOpen() && tw->GetHWND() != hSender)
+      PostMessage(tw->GetHWND(), WM_MW_REBUILD_FONTS, 0, 0);
+  }
 }
 
 //----------------------------------------------------------------------

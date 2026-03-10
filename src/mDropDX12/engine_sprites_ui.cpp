@@ -14,19 +14,6 @@
 
 namespace mdrop {
 
-// ─── Open / Close ───────────────────────────────────────────────────────
-
-void Engine::OpenSpritesWindow() {
-    if (!m_spritesWindow)
-        m_spritesWindow = std::make_unique<SpritesWindow>(this);
-    m_spritesWindow->Open();
-}
-
-void Engine::CloseSpritesWindow() {
-    if (m_spritesWindow)
-        m_spritesWindow->Close();
-}
-
 // ─── Constructor ────────────────────────────────────────────────────────
 
 SpritesWindow::SpritesWindow(Engine* pEngine)

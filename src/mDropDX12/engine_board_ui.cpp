@@ -13,19 +13,6 @@
 
 namespace mdrop {
 
-// ─── Open / Close (Engine methods) ──────────────────────────────────────
-
-void Engine::OpenBoardWindow() {
-    if (!m_boardWindow)
-        m_boardWindow = std::make_unique<ButtonBoardWindow>(this);
-    m_boardWindow->Open();
-}
-
-void Engine::CloseBoardWindow() {
-    if (m_boardWindow)
-        m_boardWindow->Close();
-}
-
 // ─── Constructor ────────────────────────────────────────────────────────
 
 ButtonBoardWindow::ButtonBoardWindow(Engine* pEngine)

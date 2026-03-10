@@ -25,21 +25,6 @@ HotkeysWindow::HotkeysWindow(Engine* pEngine)
   : ToolWindow(pEngine, 680, 580) {}
 
 //----------------------------------------------------------------------
-// Engine bridge: Open/Close via Engine members
-//----------------------------------------------------------------------
-
-void Engine::OpenHotkeysWindow() {
-  if (!m_hotkeysWindow)
-    m_hotkeysWindow = std::make_unique<HotkeysWindow>(this);
-  m_hotkeysWindow->Open();
-}
-
-void Engine::CloseHotkeysWindow() {
-  if (m_hotkeysWindow)
-    m_hotkeysWindow->Close();
-}
-
-//----------------------------------------------------------------------
 // Common control flags
 //----------------------------------------------------------------------
 

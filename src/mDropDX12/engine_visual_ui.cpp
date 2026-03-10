@@ -25,21 +25,6 @@ VisualWindow::VisualWindow(Engine* pEngine)
 DWORD VisualWindow::GetCommonControlFlags() const { return ICC_BAR_CLASSES; }
 
 //----------------------------------------------------------------------
-// Engine bridge: Open/Close
-//----------------------------------------------------------------------
-
-void Engine::OpenVisualWindow() {
-  if (!m_visualWindow)
-    m_visualWindow = std::make_unique<VisualWindow>(this);
-  m_visualWindow->Open();
-}
-
-void Engine::CloseVisualWindow() {
-  if (m_visualWindow)
-    m_visualWindow->Close();
-}
-
-//----------------------------------------------------------------------
 // Build Controls
 //----------------------------------------------------------------------
 

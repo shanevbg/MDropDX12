@@ -2043,40 +2043,12 @@ void Engine::CleanUpMyNonDx9Stuff() {
   //   created/initialized in AllocateMyNonDx9Stuff.
 
   // Phase 1: Signal all tool windows to close (non-blocking PostMessage)
-  if (m_settingsWindow)       m_settingsWindow->SignalClose();
-  if (m_displaysWindow)       m_displaysWindow->SignalClose();
-  if (m_songInfoWindow)       m_songInfoWindow->SignalClose();
-  if (m_hotkeysWindow)        m_hotkeysWindow->SignalClose();
-  if (m_midiWindow)           m_midiWindow->SignalClose();
-  if (m_boardWindow)          m_boardWindow->SignalClose();
-  if (m_presetsWindow)        m_presetsWindow->SignalClose();
-  if (m_spritesWindow)        m_spritesWindow->SignalClose();
-  if (m_messagesWindow)       m_messagesWindow->SignalClose();
-  if (m_textAnimWindow)       m_textAnimWindow->SignalClose();
-  if (m_scriptWindow)          m_scriptWindow->SignalClose();
-  if (m_remoteWindow)          m_remoteWindow->SignalClose();
-  if (m_visualWindow)          m_visualWindow->SignalClose();
-  if (m_colorsWindow)          m_colorsWindow->SignalClose();
-  if (m_controllerWindow)      m_controllerWindow->SignalClose();
-  if (m_workspaceLayoutWindow) m_workspaceLayoutWindow->SignalClose();
+  for (auto* tw : m_toolWindows)
+    tw->SignalClose();
 
   // Phase 2: Wait for all to finish (they're shutting down in parallel)
-  if (m_settingsWindow)       m_settingsWindow->WaitClose();
-  if (m_displaysWindow)       m_displaysWindow->WaitClose();
-  if (m_songInfoWindow)       m_songInfoWindow->WaitClose();
-  if (m_hotkeysWindow)        m_hotkeysWindow->WaitClose();
-  if (m_midiWindow)           m_midiWindow->WaitClose();
-  if (m_boardWindow)          m_boardWindow->WaitClose();
-  if (m_presetsWindow)        m_presetsWindow->WaitClose();
-  if (m_spritesWindow)        m_spritesWindow->WaitClose();
-  if (m_messagesWindow)       m_messagesWindow->WaitClose();
-  if (m_textAnimWindow)       m_textAnimWindow->WaitClose();
-  if (m_scriptWindow)          m_scriptWindow->WaitClose();
-  if (m_remoteWindow)          m_remoteWindow->WaitClose();
-  if (m_visualWindow)          m_visualWindow->WaitClose();
-  if (m_colorsWindow)          m_colorsWindow->WaitClose();
-  if (m_controllerWindow)      m_controllerWindow->WaitClose();
-  if (m_workspaceLayoutWindow) m_workspaceLayoutWindow->WaitClose();
+  for (auto* tw : m_toolWindows)
+    tw->WaitClose();
   CloseMidiDevice();
 
   // Join any in-flight preset load thread

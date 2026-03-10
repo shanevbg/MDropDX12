@@ -24,21 +24,6 @@ DisplaysWindow::DisplaysWindow(Engine* pEngine)
   : ToolWindow(pEngine, 580, 800) {}
 
 //----------------------------------------------------------------------
-// Engine bridge: Open/Close via Engine members
-//----------------------------------------------------------------------
-
-void Engine::OpenDisplaysWindow() {
-  if (!m_displaysWindow)
-    m_displaysWindow = std::make_unique<DisplaysWindow>(this);
-  m_displaysWindow->Open();
-}
-
-void Engine::CloseDisplaysWindow() {
-  if (m_displaysWindow)
-    m_displaysWindow->Close();
-}
-
-//----------------------------------------------------------------------
 // Build Controls — creates tab control, then delegates to page builders
 //----------------------------------------------------------------------
 

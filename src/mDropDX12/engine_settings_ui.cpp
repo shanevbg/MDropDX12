@@ -1177,16 +1177,6 @@ static int EnumAudioDevicesIntoCombo(HWND hCombo, const wchar_t* szCurrentDevice
   return curIdx;
 }
 
-// Thin wrappers so existing callers (engine.cpp, engine_input.cpp) still compile
-void Engine::OpenSettingsWindow() {
-  if (!m_settingsWindow) m_settingsWindow = std::make_unique<SettingsWindow>(this);
-  m_settingsWindow->Open();
-}
-
-void Engine::CloseSettingsWindow() {
-  if (m_settingsWindow) m_settingsWindow->Close();
-}
-
 // (Engine::ApplySettingsDarkTheme deleted — handled by ToolWindow::ApplyDarkTheme)
 
 void SettingsWindow::DoBuildControls() {

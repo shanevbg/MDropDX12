@@ -28,19 +28,6 @@ static void ShortenDirectoryPath(const wchar_t* szFullPath, wchar_t* szOut, int 
 
 namespace mdrop {
 
-// ─── Open / Close (Engine methods) ──────────────────────────────────────
-
-void Engine::OpenPresetsWindow() {
-    if (!m_presetsWindow)
-        m_presetsWindow = std::make_unique<PresetsWindow>(this);
-    m_presetsWindow->Open();
-}
-
-void Engine::ClosePresetsWindow() {
-    if (m_presetsWindow)
-        m_presetsWindow->Close();
-}
-
 // ─── Constructor ────────────────────────────────────────────────────────
 
 PresetsWindow::PresetsWindow(Engine* pEngine)

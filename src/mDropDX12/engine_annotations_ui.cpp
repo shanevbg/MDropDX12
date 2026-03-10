@@ -14,19 +14,6 @@
 
 namespace mdrop {
 
-// ─── Open / Close (Engine methods) ──────────────────────────────────────
-
-void Engine::OpenAnnotationsWindow() {
-    if (!m_annotationsWindow)
-        m_annotationsWindow = std::make_unique<AnnotationsWindow>(this);
-    m_annotationsWindow->Open();
-}
-
-void Engine::CloseAnnotationsWindow() {
-    if (m_annotationsWindow)
-        m_annotationsWindow->Close();
-}
-
 // ─── Constructor ────────────────────────────────────────────────────────
 
 AnnotationsWindow::AnnotationsWindow(Engine* pEngine)

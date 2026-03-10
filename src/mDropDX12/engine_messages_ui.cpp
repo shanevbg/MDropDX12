@@ -15,14 +15,8 @@ MessagesWindow::MessagesWindow(Engine* pEngine)
     : ToolWindow(pEngine, 540, 620) {}
 
 // ─────────────────────────────────────────────────────
-// Engine bridge: Open / Close
+// Engine bridge: Close (non-standard — resets unique_ptr)
 // ─────────────────────────────────────────────────────
-
-void Engine::OpenMessagesWindow() {
-    if (!m_messagesWindow)
-        m_messagesWindow = std::make_unique<MessagesWindow>(this);
-    m_messagesWindow->Open();
-}
 
 void Engine::CloseMessagesWindow() {
     if (m_messagesWindow) {
