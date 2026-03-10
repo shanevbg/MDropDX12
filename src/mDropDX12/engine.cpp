@@ -2050,6 +2050,11 @@ void Engine::CleanUpMyNonDx9Stuff() {
   if (m_spritesWindow)        m_spritesWindow->SignalClose();
   if (m_messagesWindow)       m_messagesWindow->SignalClose();
   if (m_textAnimWindow)       m_textAnimWindow->SignalClose();
+  if (m_scriptWindow)          m_scriptWindow->SignalClose();
+  if (m_remoteWindow)          m_remoteWindow->SignalClose();
+  if (m_visualWindow)          m_visualWindow->SignalClose();
+  if (m_colorsWindow)          m_colorsWindow->SignalClose();
+  if (m_controllerWindow)      m_controllerWindow->SignalClose();
   if (m_workspaceLayoutWindow) m_workspaceLayoutWindow->SignalClose();
 
   // Phase 2: Wait for all to finish (they're shutting down in parallel)
@@ -2063,6 +2068,11 @@ void Engine::CleanUpMyNonDx9Stuff() {
   if (m_spritesWindow)        m_spritesWindow->WaitClose();
   if (m_messagesWindow)       m_messagesWindow->WaitClose();
   if (m_textAnimWindow)       m_textAnimWindow->WaitClose();
+  if (m_scriptWindow)          m_scriptWindow->WaitClose();
+  if (m_remoteWindow)          m_remoteWindow->WaitClose();
+  if (m_visualWindow)          m_visualWindow->WaitClose();
+  if (m_colorsWindow)          m_colorsWindow->WaitClose();
+  if (m_controllerWindow)      m_controllerWindow->WaitClose();
   if (m_workspaceLayoutWindow) m_workspaceLayoutWindow->WaitClose();
   CloseMidiDevice();
 

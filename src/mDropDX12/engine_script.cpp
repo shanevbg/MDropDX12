@@ -356,8 +356,11 @@ void Engine::ExecuteScriptCommand(const std::wstring& cmd) {
 }
 
 void Engine::SyncScriptUI() {
-  HWND hw = m_settingsWindow ? m_settingsWindow->GetHWND() : NULL;
+  // Try ScriptWindow first, fall back to Settings window
+  HWND hw = m_scriptWindow ? m_scriptWindow->GetHWND() : NULL;
   if (!hw || !IsWindow(hw))
+    hw = NULL;
+  if (!hw)
     return;
 
   // Update listbox selection

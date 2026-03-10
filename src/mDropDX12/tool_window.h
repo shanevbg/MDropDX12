@@ -235,12 +235,12 @@ public:
 protected:
   const wchar_t* GetWindowTitle() const override { return L"MDropDX12 Settings"; }
   const wchar_t* GetWindowClass() const override { return L"MDropDX12SettingsWnd"; }
-  const wchar_t* GetINISection() const override  { return L"Settings"; }
+  const wchar_t* GetINISection() const override  { return L"SettingsWnd"; }
   int GetPinControlID() const override       { return IDC_MW_SETTINGS_PIN; }
   int GetFontPlusControlID() const override  { return IDC_MW_FONT_PLUS; }
   int GetFontMinusControlID() const override { return IDC_MW_FONT_MINUS; }
-  int GetMinWidth() const override  { return 500; }
-  int GetMinHeight() const override { return 450; }
+  int GetMinWidth() const override  { return 750; }
+  int GetMinHeight() const override { return 675; }
 
   DWORD GetCommonControlFlags() const override;
   bool  AcceptsDragDrop() const override { return true; }
@@ -250,18 +250,12 @@ protected:
 
   void    DoBuildControls() override;
   LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
-  LRESULT DoHScroll(HWND hWnd, int id, int pos) override;
   LRESULT DoNotify(HWND hWnd, NMHDR* pnm) override;
   LRESULT DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) override;
   void    DoDestroy() override;
 
 private:
-  int  m_lastSeenIPCSeq = 0;
-
   void LayoutControls();
-  void RefreshIPCList();
-  void UpdateVisualUI();
-  void UpdateColorsUI();
   void ResetToFactory();
   void ResetToUserDefaults();
 };
@@ -584,6 +578,118 @@ private:
   void SelectProfile(int idx);
   void UpdateColorSwatch(int ctrlID, int r, int g, int b);
   void UpdateFontPreview();
+};
+
+// ── Concrete subclass: Script window ──
+
+class ScriptWindow : public ToolWindow {
+public:
+  ScriptWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Script"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12ScriptWnd"; }
+  const wchar_t* GetINISection() const override  { return L"ScriptWnd"; }
+  int GetPinControlID() const override       { return IDC_MW_SCRIPTWIN_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_SCRIPTWIN_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_SCRIPTWIN_FONT_MINUS; }
+  int GetMinWidth() const override  { return 380; }
+  int GetMinHeight() const override { return 500; }
+
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+};
+
+// ── Concrete subclass: Remote window ──
+
+class RemoteWindow : public ToolWindow {
+public:
+  RemoteWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Remote"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12RemoteWnd"; }
+  const wchar_t* GetINISection() const override  { return L"RemoteWnd"; }
+  int GetPinControlID() const override       { return IDC_MW_REMOTEWIN_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_REMOTEWIN_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_REMOTEWIN_FONT_MINUS; }
+  int GetMinWidth() const override  { return 380; }
+  int GetMinHeight() const override { return 500; }
+
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  LRESULT DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) override;
+  void    DoDestroy() override;
+
+private:
+  int m_lastSeenIPCSeq = 0;
+  void RefreshIPCList();
+};
+
+// ── Concrete subclass: Visual window ──
+
+class VisualWindow : public ToolWindow {
+public:
+  VisualWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Visual"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12VisualWnd"; }
+  const wchar_t* GetINISection() const override  { return L"VisualWnd"; }
+  int GetPinControlID() const override       { return IDC_MW_VISUALWIN_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_VISUALWIN_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_VISUALWIN_FONT_MINUS; }
+  int GetMinWidth() const override  { return 400; }
+  int GetMinHeight() const override { return 600; }
+
+  DWORD GetCommonControlFlags() const override;
+
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  LRESULT DoHScroll(HWND hWnd, int id, int pos) override;
+};
+
+// ── Concrete subclass: Colors window ──
+
+class ColorsWindow : public ToolWindow {
+public:
+  ColorsWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Colors"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12ColorsWnd"; }
+  const wchar_t* GetINISection() const override  { return L"ColorsWnd"; }
+  int GetPinControlID() const override       { return IDC_MW_COLORSWIN_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_COLORSWIN_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_COLORSWIN_FONT_MINUS; }
+  int GetMinWidth() const override  { return 380; }
+  int GetMinHeight() const override { return 400; }
+
+  DWORD GetCommonControlFlags() const override;
+
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
+  LRESULT DoHScroll(HWND hWnd, int id, int pos) override;
+};
+
+// ── Concrete subclass: Controller window ──
+
+class ControllerWindow : public ToolWindow {
+public:
+  ControllerWindow(Engine* pEngine);
+
+protected:
+  const wchar_t* GetWindowTitle() const override { return L"Controller"; }
+  const wchar_t* GetWindowClass() const override { return L"MDropDX12ControllerWnd"; }
+  const wchar_t* GetINISection() const override  { return L"ControllerWnd"; }
+  int GetPinControlID() const override       { return IDC_MW_CONTROLLERWIN_PIN; }
+  int GetFontPlusControlID() const override  { return IDC_MW_CONTROLLERWIN_FONT_PLUS; }
+  int GetFontMinusControlID() const override { return IDC_MW_CONTROLLERWIN_FONT_MINUS; }
+  int GetMinWidth() const override  { return 400; }
+  int GetMinHeight() const override { return 500; }
+
+  void    DoBuildControls() override;
+  LRESULT DoCommand(HWND hWnd, int id, int code, LPARAM lParam) override;
 };
 
 // ── Channel input sources for Shadertoy passes ──

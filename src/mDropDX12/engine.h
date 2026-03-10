@@ -1297,6 +1297,31 @@ public:
   void OpenShaderImportWindow();
   void CloseShaderImportWindow();
 
+  // Script window (ToolWindow subclass, own thread)
+  std::unique_ptr<ScriptWindow> m_scriptWindow;
+  void OpenScriptWindow();
+  void CloseScriptWindow();
+
+  // Remote window (ToolWindow subclass, own thread)
+  std::unique_ptr<RemoteWindow> m_remoteWindow;
+  void OpenRemoteWindow();
+  void CloseRemoteWindow();
+
+  // Visual window (ToolWindow subclass, own thread)
+  std::unique_ptr<VisualWindow> m_visualWindow;
+  void OpenVisualWindow();
+  void CloseVisualWindow();
+
+  // Colors window (ToolWindow subclass, own thread)
+  std::unique_ptr<ColorsWindow> m_colorsWindow;
+  void OpenColorsWindow();
+  void CloseColorsWindow();
+
+  // Controller window (ToolWindow subclass, own thread)
+  std::unique_ptr<ControllerWindow> m_controllerWindow;
+  void OpenControllerWindow();
+  void CloseControllerWindow();
+
   // Welcome window (no-presets prompt)
   std::unique_ptr<WelcomeWindow> m_welcomeWindow;
   void OpenWelcomeWindow();

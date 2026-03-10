@@ -857,6 +857,37 @@ extern bool g_bSettingsWndClassRegistered;
 // Settings About tab — error display settings button
 #define IDC_MW_ERROR_DISPLAY_SETTINGS 9137  // Error Duration edit on About tab
 
+// Script window controls (9500-9519)
+#define IDC_MW_SCRIPTWIN_PIN          9500
+#define IDC_MW_SCRIPTWIN_FONT_PLUS    9501
+#define IDC_MW_SCRIPTWIN_FONT_MINUS   9502
+
+// Remote window controls (9520-9539)
+#define IDC_MW_REMOTEWIN_PIN          9520
+#define IDC_MW_REMOTEWIN_FONT_PLUS    9521
+#define IDC_MW_REMOTEWIN_FONT_MINUS   9522
+
+// Visual window controls (9540-9559)
+#define IDC_MW_VISUALWIN_PIN          9540
+#define IDC_MW_VISUALWIN_FONT_PLUS    9541
+#define IDC_MW_VISUALWIN_FONT_MINUS   9542
+
+// Colors window controls (9560-9579)
+#define IDC_MW_COLORSWIN_PIN          9560
+#define IDC_MW_COLORSWIN_FONT_PLUS    9561
+#define IDC_MW_COLORSWIN_FONT_MINUS   9562
+
+// Controller window controls (9580-9599)
+#define IDC_MW_CONTROLLERWIN_PIN       9580
+#define IDC_MW_CONTROLLERWIN_FONT_PLUS 9581
+#define IDC_MW_CONTROLLERWIN_FONT_MINUS 9582
+
+// Launcher buttons on Settings Tools tab (for Script / Remote / Visual / Colors windows)
+#define IDC_MW_OPEN_SCRIPT            9085
+#define IDC_MW_OPEN_REMOTE            9086
+#define IDC_MW_OPEN_VISUAL            9087
+#define IDC_MW_OPEN_COLORS            9088
+
 // Launcher buttons on Settings General tab
 #define IDC_MW_OPEN_PRESETS       9080
 #define IDC_MW_OPEN_SPRITES       9081
@@ -868,14 +899,10 @@ extern bool g_bSettingsWndClassRegistered;
 // Settings tab page indices
 #define SP_GENERAL  0
 #define SP_TOOLS    1
-#define SP_VISUAL   2
-#define SP_COLORS   3
-#define SP_SYSTEM   4
-#define SP_FILES    5
-#define SP_REMOTE   6
-#define SP_SCRIPT   7
-#define SP_ABOUT    8
-#define SETTINGS_NUM_PAGES  9
+#define SP_SYSTEM   2
+#define SP_FILES    3
+#define SP_ABOUT    4
+#define SETTINGS_NUM_PAGES  5
 
 // Custom messages for thread-safe side effects (settings thread → render thread)
 #define WM_MW_SET_OPACITY       (WM_APP + 1)

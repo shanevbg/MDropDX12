@@ -43,7 +43,7 @@ extern Engine g_engine;
 extern int ToggleFPSNumPressed;
 
 // SettingsWindow constructor (ToolWindow subclass)
-SettingsWindow::SettingsWindow(Engine* pEngine) : ToolWindow(pEngine, 620, 850) {}
+SettingsWindow::SettingsWindow(Engine* pEngine) : ToolWindow(pEngine, 930, 880) {}
 
 DWORD SettingsWindow::GetCommonControlFlags() const {
   return ICC_BAR_CLASSES | ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES | ICC_HOTKEY_CLASS;
@@ -415,7 +415,6 @@ static bool ShowSpriteImportDialog(HWND hParent, Engine* plugin, SpriteImportDia
 }
 
 void SettingsWindow::DoDestroy() {
-  KillTimer(m_hWnd, IDT_IPC_MONITOR);
   m_pEngine->CleanupSettingsThemeBrushes();
 }
 
@@ -493,55 +492,6 @@ LRESULT SettingsWindow::DoNotify(HWND hWnd, NMHDR* pnm) {
   return 0;
 }
 
-LRESULT SettingsWindow::DoHScroll(HWND hWnd, int id, int pos) {
-  switch (id) {
-  case IDC_MW_OPACITY: {
-    m_pEngine->fOpacity = pos / 100.0f;
-    wchar_t buf[32]; swprintf(buf, 32, L"%d%%", pos);
-    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_OPACITY_LABEL), buf);
-    HWND hw = m_pEngine->GetPluginWindow();
-    if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
-    break;
-  }
-  case IDC_MW_RENDER_QUALITY: {
-    m_pEngine->m_fRenderQuality = pos / 100.0f;
-    wchar_t buf[32]; swprintf(buf, 32, L"%.2f", m_pEngine->m_fRenderQuality);
-    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_QUALITY_LABEL), buf);
-    HWND hw = m_pEngine->GetPluginWindow();
-    if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
-    break;
-  }
-  case IDC_MW_COL_HUE: {
-    m_pEngine->m_ColShiftHue = (pos - 100) / 100.0f;
-    wchar_t buf[32]; swprintf(buf, 32, L"%.2f", m_pEngine->m_ColShiftHue);
-    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_HUE_LABEL), buf);
-    break;
-  }
-  case IDC_MW_COL_SAT: {
-    m_pEngine->m_ColShiftSaturation = (pos - 100) / 100.0f;
-    wchar_t buf[32]; swprintf(buf, 32, L"%.2f", m_pEngine->m_ColShiftSaturation);
-    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_SAT_LABEL), buf);
-    break;
-  }
-  case IDC_MW_COL_BRIGHT: {
-    m_pEngine->m_ColShiftBrightness = (pos - 100) / 100.0f;
-    wchar_t buf[32]; swprintf(buf, 32, L"%.2f", m_pEngine->m_ColShiftBrightness);
-    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_BRIGHT_LABEL), buf);
-    break;
-  }
-  case IDC_MW_COL_GAMMA: {
-    float gamma = pos / 10.0f;
-    m_pEngine->m_pState->m_fGammaAdj = gamma;
-    wchar_t buf[32]; swprintf(buf, 32, L"%.1f", gamma);
-    SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_GAMMA_LABEL), buf);
-    break;
-  }
-  default:
-    return -1;
-  }
-  return 0;
-}
-
 LRESULT SettingsWindow::DoMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
   switch (uMsg) {
   case WM_MW_PRESET_CHANGED: {
@@ -555,22 +505,6 @@ LRESULT SettingsWindow::DoMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lP
     if (wParam == 9999) {
       KillTimer(hWnd, 9999);
       SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-      return 0;
-    }
-    if (wParam == IDT_IPC_MONITOR) {
-      int seq = g_lastIPCMessageSeq.load();
-      if (seq != m_lastSeenIPCSeq) {
-        m_lastSeenIPCSeq = seq;
-        // Only update display if an IPC window is selected in list
-        HWND hList = GetDlgItem(hWnd, IDC_MW_IPC_LIST);
-        int sel = (int)SendMessage(hList, LB_GETCURSEL, 0, 0);
-        if (sel != LB_ERR) {
-          wchar_t header[64];
-          swprintf_s(header, L"Last message: %s", g_szLastIPCTime);
-          SetWindowTextW(GetDlgItem(hWnd, IDC_MW_IPC_MSG_GROUP), header);
-          SetWindowTextW(GetDlgItem(hWnd, IDC_MW_IPC_MSG_TEXT), g_szLastIPCMessage);
-        }
-      }
       return 0;
     }
     break;
@@ -619,84 +553,6 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
 
     if (id == IDC_MW_RESOURCES && code == BN_CLICKED) {
       p->OpenResourceViewer();
-      return 0;
-    }
-
-    if (id == IDC_MW_GPU_RELOAD_PRESET && code == BN_CLICKED) {
-      // Re-render the current preset with updated GPU protection settings
-      p->NextPreset(0.0f);
-      return 0;
-    }
-
-    if (id == IDC_MW_RESTART_RENDER && code == BN_CLICKED) {
-      HWND hw = p->GetPluginWindow();
-      if (hw) PostMessage(hw, WM_MW_RESTART_DEVICE, 0, 0);
-      return 0;
-    }
-
-    if (id == IDC_MW_RESET_VISUAL && code == BN_CLICKED) {
-      p->fOpacity = 1.0f;
-      p->m_fRenderQuality = 1.0f;
-      p->bQualityAuto = false;
-      p->m_timeFactor = 1.0f;
-      p->m_frameFactor = 1.0f;
-      p->m_fpsFactor = 1.0f;
-      p->m_VisIntensity = 1.0f;
-      p->m_VisShift = 0.0f;
-      p->m_VisVersion = 1.0f;
-      // Update sliders
-      SendMessage(GetDlgItem(hWnd, IDC_MW_OPACITY), TBM_SETPOS, TRUE, 100);
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_OPACITY_LABEL), L"100%");
-      SendMessage(GetDlgItem(hWnd, IDC_MW_RENDER_QUALITY), TBM_SETPOS, TRUE, 100);
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_QUALITY_LABEL), L"1.00");
-      // Update checkbox
-      SendMessage(GetDlgItem(hWnd, IDC_MW_QUALITY_AUTO), BM_SETCHECK, BST_UNCHECKED, 0);
-      // Update edit boxes
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_TIME_FACTOR), L"1.00");
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_FRAME_FACTOR), L"1.00");
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_FPS_FACTOR), L"1.00");
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_INTENSITY), L"1.00");
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_SHIFT), L"0.00");
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_VERSION), L"1");
-      // Reset GPU protection
-      p->m_nMaxShapeInstances = 0;
-      p->m_bScaleInstancesByResolution = false;
-      p->m_nInstanceScaleBaseWidth = 1920;
-      p->m_bSkipHeavyPresets = false;
-      p->m_nHeavyPresetMaxInstances = 4096;
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_MAX_INST), L"0");
-      SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SCALE_BY_RES), BM_SETCHECK, BST_UNCHECKED, 0);
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_SCALE_BASE), L"1920");
-      SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SKIP_HEAVY), BM_SETCHECK, BST_UNCHECKED, 0);
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_HEAVY_THRESHOLD), L"4096");
-      p->m_bEnableVSync = true;
-      SendMessage(GetDlgItem(hWnd, IDC_MW_VSYNC_ENABLED), BM_SETCHECK, BST_CHECKED, 0);
-      // Apply side-effects
-      HWND hw = p->GetPluginWindow();
-      if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
-      if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
-      return 0;
-    }
-
-    if (id == IDC_MW_RESET_COLORS && code == BN_CLICKED) {
-      p->m_ColShiftHue = 0.0f;
-      p->m_ColShiftSaturation = 0.0f;
-      p->m_ColShiftBrightness = 0.0f;
-      if (p->m_pState) p->m_pState->m_fGammaAdj = 2.0f;
-      p->m_AutoHue = false;
-      p->m_AutoHueSeconds = 0.02f;
-      // Update sliders (H/S/B center=100, gamma 2.0 = pos 20)
-      SendMessage(GetDlgItem(hWnd, IDC_MW_COL_HUE), TBM_SETPOS, TRUE, 100);
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_HUE_LABEL), L"0.00");
-      SendMessage(GetDlgItem(hWnd, IDC_MW_COL_SAT), TBM_SETPOS, TRUE, 100);
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_SAT_LABEL), L"0.00");
-      SendMessage(GetDlgItem(hWnd, IDC_MW_COL_BRIGHT), TBM_SETPOS, TRUE, 100);
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_BRIGHT_LABEL), L"0.00");
-      SendMessage(GetDlgItem(hWnd, IDC_MW_COL_GAMMA), TBM_SETPOS, TRUE, 20);
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_GAMMA_LABEL), L"2.0");
-      // Update checkbox and edit
-      SendMessage(GetDlgItem(hWnd, IDC_MW_AUTO_HUE), BM_SETCHECK, BST_UNCHECKED, 0);
-      SetWindowTextW(GetDlgItem(hWnd, IDC_MW_AUTO_HUE_SEC), L"0.020");
       return 0;
     }
 
@@ -982,15 +838,6 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       return 0;
     }
 
-    // FPS Cap combo box selection
-    if (id == IDC_MW_FPS_CAP && code == CBN_SELCHANGE) {
-      int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
-      const int fpsValues[] = { 30, 60, 90, 120, 144, 240, 360, 720, 0 };
-      if (sel >= 0 && sel < 9)
-        p->SetFPSCap(fpsValues[sel]);
-      return 0;
-    }
-
     // Audio device combo box selection
     if (id == IDC_MW_AUDIO_DEVICE && code == CBN_SELCHANGE) {
       HWND hCombo = (HWND)lParam;
@@ -1123,22 +970,6 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         p->m_WindowBorderless = bChecked;
         p->SaveSettingToINI(SET_BORDERLESS);
         return 0;
-      case IDC_MW_QUALITY_AUTO:
-        p->bQualityAuto = bChecked;
-        if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
-        return 0;
-      case IDC_MW_GPU_SCALE_BY_RES:
-        p->m_bScaleInstancesByResolution = bChecked;
-        return 0;
-      case IDC_MW_GPU_SKIP_HEAVY:
-        p->m_bSkipHeavyPresets = bChecked;
-        return 0;
-      case IDC_MW_VSYNC_ENABLED:
-        p->m_bEnableVSync = bChecked;
-        return 0;
-      case IDC_MW_AUTO_HUE:
-        p->m_AutoHue = bChecked;
-        return 0;
       case IDC_MW_IDLE_ENABLE: {
         p->m_bIdleTimerEnabled = bChecked;
         if (!bChecked) p->m_bIdleActivated = false;  // Reset activation state
@@ -1153,104 +984,8 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         p->m_bIdleAutoRestore = bChecked;
         p->SaveIdleTimerSettings();
         return 0;
-      case IDC_MW_CTRL_ENABLE: {
-        p->m_bControllerEnabled = bChecked;
-        p->m_dwLastControllerButtons = 0;
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_CTRL_DEVICE), bChecked);
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_CTRL_SCAN), bChecked);
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_CTRL_JSON_EDIT), bChecked);
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_CTRL_DEFAULTS), bChecked);
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_CTRL_SAVE), bChecked);
-        EnableWindow(GetDlgItem(hWnd, IDC_MW_CTRL_LOAD), bChecked);
-        if (bChecked) {
-          // Parse JSON from the edit control when enabling
-          HWND hEdit = GetDlgItem(hWnd, IDC_MW_CTRL_JSON_EDIT);
-          if (hEdit) {
-            int len = GetWindowTextLengthW(hEdit);
-            std::wstring wText(len + 1, L'\0');
-            GetWindowTextW(hEdit, &wText[0], len + 1);
-            int cbNeeded = WideCharToMultiByte(CP_ACP, 0, wText.c_str(), len, NULL, 0, NULL, NULL);
-            p->m_szControllerJSONText.resize(cbNeeded);
-            WideCharToMultiByte(CP_ACP, 0, wText.c_str(), len, &p->m_szControllerJSONText[0], cbNeeded, NULL, NULL);
-            p->ParseControllerJSON(p->m_szControllerJSONText);
-          }
-        }
-        p->SaveControllerSettings();
-        return 0;
-      }
       // IDC_MW_DARK_THEME handled as CBN_SELCHANGE combo above
       }
-    }
-
-    // Remote tab: Apply & Restart IPC
-    if (id == IDC_MW_IPC_APPLY && code == BN_CLICKED) {
-      // Read current edit field values
-      wchar_t buf[256];
-      HWND hEdit = GetDlgItem(hWnd, IDC_MW_IPC_TITLE);
-      if (hEdit) {
-        GetWindowTextW(hEdit, buf, 256);
-        lstrcpyW(p->m_szWindowTitle, buf);
-      }
-      // Save to INI
-      const wchar_t* pIni = p->GetConfigIniFile();
-      WritePrivateProfileStringW(L"Milkwave", L"WindowTitle", p->m_szWindowTitle, pIni);
-      // Pipe server uses PID-based naming — no restart needed
-      RefreshIPCList();
-      return 0;
-    }
-
-    // Remote tab: Save Screenshot
-    if (id == IDC_MW_IPC_CAPTURE && code == BN_CLICKED) {
-      // Build a suggested filename from current preset + timestamp
-      wchar_t presetName[MAX_PATH] = L"screenshot";
-      if (p->m_szCurrentPresetFile[0]) {
-        wchar_t* fn = wcsrchr(p->m_szCurrentPresetFile, L'\\');
-        fn = fn ? fn + 1 : p->m_szCurrentPresetFile;
-        wcsncpy_s(presetName, fn, _TRUNCATE);
-        wchar_t* ext = wcsrchr(presetName, L'.');
-        if (ext) *ext = L'\0';
-        for (wchar_t* c = presetName; *c; c++)
-          if (*c == L'/' || *c == L':' || *c == L'*' || *c == L'?' || *c == L'"' || *c == L'<' || *c == L'>' || *c == L'|')
-            *c = L'_';
-      }
-      SYSTEMTIME st; GetLocalTime(&st);
-      wchar_t suggestedName[MAX_PATH];
-      swprintf_s(suggestedName, L"%04d%02d%02d-%02d%02d%02d-%s.png",
-        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, presetName);
-
-      // Remember last directory (static persists across calls)
-      static wchar_t sLastDir[MAX_PATH] = {};
-      if (sLastDir[0] == L'\0') {
-        // Default to capture\ subdirectory
-        swprintf_s(sLastDir, L"%scapture\\", p->m_szBaseDir);
-        CreateDirectoryW(sLastDir, NULL);
-      }
-
-      wchar_t filePath[MAX_PATH];
-      wcsncpy_s(filePath, suggestedName, _TRUNCATE);
-
-      OPENFILENAMEW ofn = {};
-      ofn.lStructSize = sizeof(ofn);
-      ofn.hwndOwner = hWnd;
-      ofn.lpstrFilter = L"PNG Image (*.png)\0*.png\0All Files (*.*)\0*.*\0";
-      ofn.lpstrFile = filePath;
-      ofn.nMaxFile = MAX_PATH;
-      ofn.lpstrInitialDir = sLastDir;
-      ofn.lpstrDefExt = L"png";
-      ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-      ofn.lpstrTitle = L"Save Screenshot";
-
-      if (GetSaveFileNameW(&ofn)) {
-        // Remember directory for next time
-        wcsncpy_s(sLastDir, filePath, _TRUNCATE);
-        wchar_t* lastSlash = wcsrchr(sLastDir, L'\\');
-        if (lastSlash) lastSlash[1] = L'\0';
-
-        // Set screenshot path and request capture on render thread
-        wcsncpy_s(p->m_screenshotPath, filePath, _TRUNCATE);
-        p->m_bScreenshotRequested = true;
-      }
-      return 0;
     }
 
     // About tab: Workspace Layout
@@ -1330,68 +1065,6 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       return 0;
     }
 
-    // Script tab: Browse
-    if (id == IDC_MW_SCRIPT_BROWSE && code == BN_CLICKED) {
-      wchar_t filePath[MAX_PATH] = L"";
-      OPENFILENAMEW ofn = {};
-      ofn.lStructSize = sizeof(ofn);
-      ofn.hwndOwner = hWnd;
-      ofn.lpstrFilter = L"Script Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
-      ofn.lpstrFile = filePath;
-      ofn.nMaxFile = MAX_PATH;
-      ofn.lpstrInitialDir = p->m_szBaseDir;
-      ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-      ofn.lpstrTitle = L"Open Script File";
-      if (GetOpenFileNameW(&ofn)) {
-        p->LoadScript(filePath);
-        SetWindowTextW(GetDlgItem(hWnd, IDC_MW_SCRIPT_FILE), filePath);
-        // Populate listbox
-        HWND hList = GetDlgItem(hWnd, IDC_MW_SCRIPT_LIST);
-        if (hList) {
-          SendMessage(hList, LB_RESETCONTENT, 0, 0);
-          for (int i = 0; i < (int)p->m_script.lines.size(); i++)
-            SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p->m_script.lines[i].c_str());
-        }
-      }
-      return 0;
-    }
-
-    // Script tab: Play
-    if (id == IDC_MW_SCRIPT_PLAY && code == BN_CLICKED) {
-      // Read BPM/Beats from UI before starting
-      wchar_t buf[64];
-      HWND hBpm = GetDlgItem(hWnd, IDC_MW_SCRIPT_BPM);
-      if (hBpm) { GetWindowTextW(hBpm, buf, 64); double v = _wtof(buf); if (v > 0) p->m_script.bpm = v; }
-      HWND hBeats = GetDlgItem(hWnd, IDC_MW_SCRIPT_BEATS);
-      if (hBeats) { GetWindowTextW(hBeats, buf, 64); int v = _wtoi(buf); if (v > 0) p->m_script.beats = v; }
-      p->StartScript();
-      return 0;
-    }
-
-    // Script tab: Stop
-    if (id == IDC_MW_SCRIPT_STOP && code == BN_CLICKED) {
-      p->StopScript();
-      return 0;
-    }
-
-    // Script tab: Loop checkbox
-    if (id == IDC_MW_SCRIPT_LOOP && code == BN_CLICKED) {
-      p->m_script.loop = IsChecked(id);
-      return 0;
-    }
-
-    // Script tab: Listbox double-click to jump
-    if (id == IDC_MW_SCRIPT_LIST && code == LBN_DBLCLK) {
-      int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
-      if (sel >= 0 && sel < (int)p->m_script.lines.size()) {
-        p->m_script.currentLine = sel;
-        p->m_script.lastLineTime = p->GetTime();
-        p->ExecuteScriptLine(sel);
-        p->SyncScriptUI();
-      }
-      return 0;
-    }
-
     // Edit control changes (apply on focus lost)
     if (code == EN_KILLFOCUS) {
       wchar_t buf[64];
@@ -1423,118 +1096,7 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         if (p->m_fTimeBetweenPresets > 300) p->m_fTimeBetweenPresets = 300;
         p->SaveSettingToINI(SET_TIME_BETWEEN);
         return 0;
-      case IDC_MW_TIME_FACTOR:
-        p->m_timeFactor = (float)_wtof(buf);
-        return 0;
-      case IDC_MW_FRAME_FACTOR:
-        p->m_frameFactor = (float)_wtof(buf);
-        return 0;
-      case IDC_MW_FPS_FACTOR:
-        p->m_fpsFactor = (float)_wtof(buf);
-        return 0;
-      case IDC_MW_VIS_INTENSITY:
-        p->m_VisIntensity = (float)_wtof(buf);
-        return 0;
-      case IDC_MW_VIS_SHIFT:
-        p->m_VisShift = (float)_wtof(buf);
-        return 0;
-      case IDC_MW_VIS_VERSION:
-        p->m_VisVersion = (float)_wtof(buf);
-        return 0;
-      case IDC_MW_GPU_MAX_INST:
-        p->m_nMaxShapeInstances = _wtoi(buf);
-        if (p->m_nMaxShapeInstances < 0) p->m_nMaxShapeInstances = 0;
-        return 0;
-      case IDC_MW_GPU_SCALE_BASE:
-        p->m_nInstanceScaleBaseWidth = _wtoi(buf);
-        if (p->m_nInstanceScaleBaseWidth < 320) p->m_nInstanceScaleBaseWidth = 320;
-        if (p->m_nInstanceScaleBaseWidth > 7680) p->m_nInstanceScaleBaseWidth = 7680;
-        return 0;
-      case IDC_MW_GPU_HEAVY_THRESHOLD:
-        p->m_nHeavyPresetMaxInstances = _wtoi(buf);
-        if (p->m_nHeavyPresetMaxInstances < 16) p->m_nHeavyPresetMaxInstances = 16;
-        return 0;
-      case IDC_MW_AUTO_HUE_SEC:
-        p->m_AutoHueSeconds = (float)_wtof(buf);
-        if (p->m_AutoHueSeconds < 0.001f) p->m_AutoHueSeconds = 0.001f;
-        return 0;
-      case IDC_MW_IPC_TITLE: {
-        wchar_t tbuf[256];
-        GetWindowTextW((HWND)lParam, tbuf, 256);
-        lstrcpyW(p->m_szWindowTitle, tbuf);
-        return 0;
       }
-      // IDC_MW_IPC_REMOTE_TITLE removed — pipe server uses PID-based naming
-      case IDC_MW_SCRIPT_BPM: {
-        double v = _wtof(buf);
-        if (v > 0) p->m_script.bpm = v;
-        return 0;
-      }
-      case IDC_MW_SCRIPT_BEATS: {
-        int v = _wtoi(buf);
-        if (v > 0) p->m_script.beats = v;
-        return 0;
-      }
-      }
-    }
-
-    // ===== Game Controller handlers =====
-    if (code == BN_CLICKED && id == IDC_MW_CTRL_HELP) {
-      p->ShowControllerHelpPopup(hWnd);
-      return 0;
-    }
-    if (code == BN_CLICKED && id == IDC_MW_CTRL_SCAN) {
-      HWND hCombo = GetDlgItem(hWnd, IDC_MW_CTRL_DEVICE);
-      if (hCombo) p->EnumerateControllers(hCombo);
-      return 0;
-    }
-    if (code == BN_CLICKED && id == IDC_MW_CTRL_DEFAULTS) {
-      HWND hEdit = GetDlgItem(hWnd, IDC_MW_CTRL_JSON_EDIT);
-      if (hEdit) {
-        std::string def = p->GetDefaultControllerJSON();
-        int wLen = MultiByteToWideChar(CP_ACP, 0, def.c_str(), (int)def.size(), NULL, 0);
-        std::wstring wDef(wLen, L'\0');
-        MultiByteToWideChar(CP_ACP, 0, def.c_str(), (int)def.size(), &wDef[0], wLen);
-        SetWindowTextW(hEdit, wDef.c_str());
-      }
-      return 0;
-    }
-    if (code == BN_CLICKED && id == IDC_MW_CTRL_SAVE) {
-      HWND hEdit = GetDlgItem(hWnd, IDC_MW_CTRL_JSON_EDIT);
-      if (hEdit) {
-        int len = GetWindowTextLengthW(hEdit);
-        std::wstring wText(len + 1, L'\0');
-        GetWindowTextW(hEdit, &wText[0], len + 1);
-        int cbNeeded = WideCharToMultiByte(CP_ACP, 0, wText.c_str(), len, NULL, 0, NULL, NULL);
-        std::string text(cbNeeded, '\0');
-        WideCharToMultiByte(CP_ACP, 0, wText.c_str(), len, &text[0], cbNeeded, NULL, NULL);
-        p->SaveControllerJSON(text);
-      }
-      return 0;
-    }
-    if (code == BN_CLICKED && id == IDC_MW_CTRL_LOAD) {
-      p->LoadControllerJSON();
-      HWND hEdit = GetDlgItem(hWnd, IDC_MW_CTRL_JSON_EDIT);
-      if (hEdit) {
-        const std::string& s = p->m_szControllerJSONText;
-        int wLen = MultiByteToWideChar(CP_ACP, 0, s.c_str(), (int)s.size(), NULL, 0);
-        std::wstring wJson(wLen, L'\0');
-        MultiByteToWideChar(CP_ACP, 0, s.c_str(), (int)s.size(), &wJson[0], wLen);
-        SetWindowTextW(hEdit, wJson.c_str());
-      }
-      return 0;
-    }
-    if (code == CBN_SELCHANGE && id == IDC_MW_CTRL_DEVICE) {
-      HWND hCombo = (HWND)lParam;
-      int sel = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
-      if (sel >= 0) {
-        int joyID = (int)SendMessage(hCombo, CB_GETITEMDATA, sel, 0);
-        p->m_nControllerDeviceID = joyID;
-        p->m_dwLastControllerButtons = 0;
-        SendMessageW(hCombo, CB_GETLBTEXT, sel, (LPARAM)p->m_szControllerName);
-        p->SaveControllerSettings();
-      }
-      return 0;
     }
 
     return -1;  // not handled
@@ -1651,7 +1213,7 @@ void SettingsWindow::DoBuildControls() {
   HFONT hFontBold = m_hFontBold;
 
   // Tab control (base handles creation, subclass, dark theme)
-  const wchar_t* tabNames[] = { L"General", L"Tools", L"Visual", L"Colors", L"System", L"Files", L"Remote", L"Script", L"About" };
+  const wchar_t* tabNames[] = { L"General", L"Tools", L"System", L"Files", L"About" };
   RECT rcDisplay = BuildTabControl(IDC_MW_TAB, tabNames, SETTINGS_NUM_PAGES,
                                     0, 0, clientW, clientH);
   int tabTop = rcDisplay.top;
@@ -1692,8 +1254,6 @@ void SettingsWindow::DoBuildControls() {
   int gap = 6, x = 16;
   int lw = MulDiv(160, lineH, 26);
   int rw = clientW - 36;
-  int sliderW = rw - lw - 60;
-  wchar_t buf[64];
   int y;
 
   // Helper: track control for a page. All controls are children of hw (main window).
@@ -1721,37 +1281,11 @@ void SettingsWindow::DoBuildControls() {
   #define IsDarkTheme _e->IsDarkTheme
   #define m_nThemeMode _e->m_nThemeMode
   #define m_nPresetFilter _e->m_nPresetFilter
-  #define fOpacity _e->fOpacity
-  #define m_fRenderQuality _e->m_fRenderQuality
-  #define bQualityAuto _e->bQualityAuto
-  #define m_timeFactor _e->m_timeFactor
-  #define m_frameFactor _e->m_frameFactor
-  #define m_fpsFactor _e->m_fpsFactor
-  #define m_VisIntensity _e->m_VisIntensity
-  #define m_VisShift _e->m_VisShift
-  #define m_VisVersion _e->m_VisVersion
-  #define m_nMaxShapeInstances _e->m_nMaxShapeInstances
-  #define m_bScaleInstancesByResolution _e->m_bScaleInstancesByResolution
-  #define m_nInstanceScaleBaseWidth _e->m_nInstanceScaleBaseWidth
-  #define m_bSkipHeavyPresets _e->m_bSkipHeavyPresets
-  #define m_nHeavyPresetMaxInstances _e->m_nHeavyPresetMaxInstances
-  #define m_bEnableVSync _e->m_bEnableVSync
-  #define m_max_fps_fs _e->m_max_fps_fs
-  #define m_ColShiftHue _e->m_ColShiftHue
-  #define m_ColShiftSaturation _e->m_ColShiftSaturation
-  #define m_ColShiftBrightness _e->m_ColShiftBrightness
-  #define m_pState _e->m_pState
-  #define m_AutoHue _e->m_AutoHue
-  #define m_AutoHueSeconds _e->m_AutoHueSeconds
   #define m_szAudioDevice _e->m_szAudioDevice
   #define m_bIdleTimerEnabled _e->m_bIdleTimerEnabled
   #define m_nIdleTimeoutMinutes _e->m_nIdleTimeoutMinutes
   #define m_nIdleAction _e->m_nIdleAction
   #define m_bIdleAutoRestore _e->m_bIdleAutoRestore
-  #define m_bControllerEnabled _e->m_bControllerEnabled
-  #define m_szControllerJSONText _e->m_szControllerJSONText
-  #define m_szWindowTitle _e->m_szWindowTitle
-  #define m_szRemoteWindowTitle _e->m_szRemoteWindowTitle
   #define m_szBaseDir _e->m_szBaseDir
   #define m_LogLevel _e->m_LogLevel
   #define m_LogOutput _e->m_LogOutput
@@ -1762,9 +1296,7 @@ void SettingsWindow::DoBuildControls() {
   #define m_szFallbackTexFile _e->m_szFallbackTexFile
   #define m_colSettingsCtrlBg _e->m_colSettingsCtrlBg
   #define m_colSettingsText _e->m_colSettingsText
-  #define m_script _e->m_script
   #define GetConfigIniFile _e->GetConfigIniFile
-  #define EnumerateControllers _e->EnumerateControllers
 
   // ====== PAGE 0: General ======
   y = tabTop + 10;
@@ -1826,172 +1358,7 @@ void SettingsWindow::DoBuildControls() {
     PAGE_CTRL(SP_GENERAL, CreateBtn(hw, L"Font \x2013", IDC_MW_FONT_MINUS, bx, y, bw2, lineH, hFont));
   }
 
-  // ====== PAGE 1: Visual (created hidden) ======
-  y = tabTop + 10;
-
-  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Opacity:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(SP_VISUAL, CreateSlider(hw, IDC_MW_OPACITY, x + lw + 4, y, sliderW, lineH, 0, 100, (int)(fOpacity * 100), false));
-  swprintf(buf, 64, L"%d%%", (int)(fOpacity * 100));
-  {
-    HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
-      x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_OPACITY_LABEL, GetModuleHandle(NULL), NULL);
-    if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(SP_VISUAL, hLbl);
-  }
-  y += lineH + gap;
-
-  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Render Quality:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(SP_VISUAL, CreateSlider(hw, IDC_MW_RENDER_QUALITY, x + lw + 4, y, sliderW, lineH, 0, 100, (int)(m_fRenderQuality * 100), false));
-  swprintf(buf, 64, L"%.2f", m_fRenderQuality);
-  {
-    HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
-      x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_QUALITY_LABEL, GetModuleHandle(NULL), NULL);
-    if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(SP_VISUAL, hLbl);
-  }
-  y += lineH + gap;
-
-  PAGE_CTRL(SP_VISUAL, CreateCheck(hw, L"Auto Quality", IDC_MW_QUALITY_AUTO, x, y, rw, lineH, hFont, bQualityAuto, false));
-  y += lineH + gap + 4;
-
-  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Time Factor:", x, y, lw, lineH, hFont, false));
-  swprintf(buf, 64, L"%.2f", m_timeFactor);
-  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_TIME_FACTOR, x + lw + 4, y, 60, lineH, hFont, 0, false));
-  y += lineH + gap;
-
-  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Frame Factor:", x, y, lw, lineH, hFont, false));
-  swprintf(buf, 64, L"%.2f", m_frameFactor);
-  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_FRAME_FACTOR, x + lw + 4, y, 60, lineH, hFont, 0, false));
-  y += lineH + gap;
-
-  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"FPS Factor:", x, y, lw, lineH, hFont, false));
-  swprintf(buf, 64, L"%.2f", m_fpsFactor);
-  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_FPS_FACTOR, x + lw + 4, y, 60, lineH, hFont, 0, false));
-  y += lineH + gap;
-
-  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Vis Intensity:", x, y, lw, lineH, hFont, false));
-  swprintf(buf, 64, L"%.2f", m_VisIntensity);
-  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_VIS_INTENSITY, x + lw + 4, y, 60, lineH, hFont, 0, false));
-  y += lineH + gap;
-
-  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Vis Shift:", x, y, lw, lineH, hFont, false));
-  swprintf(buf, 64, L"%.2f", m_VisShift);
-  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_VIS_SHIFT, x + lw + 4, y, 60, lineH, hFont, 0, false));
-  y += lineH + gap;
-
-  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Vis Version:", x, y, lw, lineH, hFont, false));
-  swprintf(buf, 64, L"%.0f", m_VisVersion);
-  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_VIS_VERSION, x + lw + 4, y, 60, lineH, hFont, 0, false));
-  y += lineH + gap + 4;
-  PAGE_CTRL(SP_VISUAL, CreateBtn(hw, L"Reset", IDC_MW_RESET_VISUAL, x, y, MulDiv(80, lineH, 26), lineH, hFont));
-  y += lineH + gap + 8;
-
-  // -- GPU Protection section --
-  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"GPU Protection", x, y, rw, lineH, hFont, false));
-  y += lineH + 2;
-
-  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Max Instances:", x, y, lw, lineH, hFont, false));
-  swprintf(buf, 64, L"%d", m_nMaxShapeInstances);
-  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_GPU_MAX_INST, x + lw + 4, y, 60, lineH, hFont, 0, false));
-  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"(0=unlimited)", x + lw + 70, y, 100, lineH, hFont, false));
-  y += lineH + gap;
-
-  PAGE_CTRL(SP_VISUAL, CreateCheck(hw, L"Scale Instances by Resolution", IDC_MW_GPU_SCALE_BY_RES, x, y, rw, lineH, hFont, m_bScaleInstancesByResolution, false));
-  y += lineH + 2;
-
-  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Scale Base Width:", x, y, lw, lineH, hFont, false));
-  swprintf(buf, 64, L"%d", m_nInstanceScaleBaseWidth);
-  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_GPU_SCALE_BASE, x + lw + 4, y, 60, lineH, hFont, 0, false));
-  y += lineH + gap;
-
-  PAGE_CTRL(SP_VISUAL, CreateCheck(hw, L"Skip Heavy Presets", IDC_MW_GPU_SKIP_HEAVY, x, y, rw, lineH, hFont, m_bSkipHeavyPresets, false));
-  y += lineH + 2;
-
-  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"Heavy Threshold:", x, y, lw, lineH, hFont, false));
-  swprintf(buf, 64, L"%d", m_nHeavyPresetMaxInstances);
-  PAGE_CTRL(SP_VISUAL, CreateEdit(hw, buf, IDC_MW_GPU_HEAVY_THRESHOLD, x + lw + 4, y, 60, lineH, hFont, 0, false));
-  y += lineH + gap + 4;
-
-  PAGE_CTRL(SP_VISUAL, CreateCheck(hw, L"Enable VSync", IDC_MW_VSYNC_ENABLED, x, y, rw, lineH, hFont, m_bEnableVSync, false));
-  y += lineH + gap;
-
-  PAGE_CTRL(SP_VISUAL, CreateLabel(hw, L"FPS Cap:", x, y, lw, lineH, hFont, false));
-  {
-    HWND hCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
-      WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL,
-      x + lw + 4, y, 120, lineH * 8, hw,
-      (HMENU)(INT_PTR)IDC_MW_FPS_CAP, GetModuleHandle(NULL), NULL);
-    if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
-    const wchar_t* fpsLabels[] = { L"30", L"60", L"90", L"120", L"144", L"240", L"360", L"720", L"Unlimited" };
-    const int fpsValues[] = { 30, 60, 90, 120, 144, 240, 360, 720, 0 };
-    int selIdx = 8; // default to Unlimited
-    for (int i = 0; i < 9; i++) {
-      SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)fpsLabels[i]);
-      if (fpsValues[i] == m_max_fps_fs) selIdx = i;
-    }
-    SendMessage(hCombo, CB_SETCURSEL, selIdx, 0);
-    PAGE_CTRL(SP_VISUAL, hCombo);
-  }
-  y += lineH + gap + 4;
-
-  PAGE_CTRL(SP_VISUAL, CreateBtn(hw, L"Reload Preset", IDC_MW_GPU_RELOAD_PRESET, x, y, MulDiv(110, lineH, 26), lineH, hFont));
-  PAGE_CTRL(SP_VISUAL, CreateBtn(hw, L"Restart Render", IDC_MW_RESTART_RENDER, x + MulDiv(120, lineH, 26), y, MulDiv(120, lineH, 26), lineH, hFont));
-
-  // ====== PAGE 2: Colors (created hidden) ======
-  y = tabTop + 10;
-
-  PAGE_CTRL(SP_COLORS, CreateLabel(hw, L"Hue:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(SP_COLORS, CreateSlider(hw, IDC_MW_COL_HUE, x + lw + 4, y, sliderW, lineH, 0, 200, (int)(m_ColShiftHue * 100) + 100, false));
-  swprintf(buf, 64, L"%.2f", m_ColShiftHue);
-  {
-    HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
-      x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_COL_HUE_LABEL, GetModuleHandle(NULL), NULL);
-    if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(SP_COLORS, hLbl);
-  }
-  y += lineH + gap;
-
-  PAGE_CTRL(SP_COLORS, CreateLabel(hw, L"Saturation:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(SP_COLORS, CreateSlider(hw, IDC_MW_COL_SAT, x + lw + 4, y, sliderW, lineH, 0, 200, (int)(m_ColShiftSaturation * 100) + 100, false));
-  swprintf(buf, 64, L"%.2f", m_ColShiftSaturation);
-  {
-    HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
-      x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_COL_SAT_LABEL, GetModuleHandle(NULL), NULL);
-    if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(SP_COLORS, hLbl);
-  }
-  y += lineH + gap;
-
-  PAGE_CTRL(SP_COLORS, CreateLabel(hw, L"Brightness:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(SP_COLORS, CreateSlider(hw, IDC_MW_COL_BRIGHT, x + lw + 4, y, sliderW, lineH, 0, 200, (int)(m_ColShiftBrightness * 100) + 100, false));
-  swprintf(buf, 64, L"%.2f", m_ColShiftBrightness);
-  {
-    HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
-      x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_COL_BRIGHT_LABEL, GetModuleHandle(NULL), NULL);
-    if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(SP_COLORS, hLbl);
-  }
-  y += lineH + gap;
-
-  PAGE_CTRL(SP_COLORS, CreateLabel(hw, L"Gamma:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(SP_COLORS, CreateSlider(hw, IDC_MW_COL_GAMMA, x + lw + 4, y, sliderW, lineH, 0, 80, (int)(m_pState->m_fGammaAdj.eval(-1) * 10), false));
-  swprintf(buf, 64, L"%.1f", m_pState->m_fGammaAdj.eval(-1));
-  {
-    HWND hLbl = CreateWindowExW(0, L"STATIC", buf, WS_CHILD | SS_LEFT,
-      x + lw + sliderW + 8, y, 50, lineH, hw, (HMENU)(INT_PTR)IDC_MW_COL_GAMMA_LABEL, GetModuleHandle(NULL), NULL);
-    if (hLbl && hFont) SendMessage(hLbl, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(SP_COLORS, hLbl);
-  }
-  y += lineH + gap + 4;
-
-  PAGE_CTRL(SP_COLORS, CreateCheck(hw, L"Auto Hue", IDC_MW_AUTO_HUE, x, y, rw / 2, lineH, hFont, m_AutoHue, false));
-  PAGE_CTRL(SP_COLORS, CreateLabel(hw, L"Seconds:", x + rw / 2, y, 60, lineH, hFont, false));
-  swprintf(buf, 64, L"%.3f", m_AutoHueSeconds);
-  PAGE_CTRL(SP_COLORS, CreateEdit(hw, buf, IDC_MW_AUTO_HUE_SEC, x + rw / 2 + 64, y, 70, lineH, hFont, 0, false));
-  y += lineH + gap + 4;
-  PAGE_CTRL(SP_COLORS, CreateBtn(hw, L"Reset", IDC_MW_RESET_COLORS, x, y, MulDiv(80, lineH, 26), lineH, hFont));
-
-  // ====== PAGE 3: System (created hidden) ======
+  // ====== PAGE 2: System (created hidden) ======
   y = tabTop + 10;
 
   // Audio Device
@@ -2072,77 +1439,6 @@ void SettingsWindow::DoBuildControls() {
       EnableWindow(GetDlgItem(hw, IDC_MW_IDLE_AUTO_RESTORE), FALSE);
     }
   }
-  y += lineH + gap + 8;
-
-  // Game Controller
-  {
-    int titleW = MulDiv(130, lineH, 26);
-    int helpW = lineH;  // square button
-    PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Game Controller", x, y, titleW, lineH, hFontBold, false));
-    PAGE_CTRL(SP_SYSTEM, CreateBtn(hw, L"\u2753", IDC_MW_CTRL_HELP, x + titleW + 4, y, helpW, lineH, hFont));
-  }
-  PAGE_CTRL(SP_SYSTEM, CreateCheck(hw, L"Enable", IDC_MW_CTRL_ENABLE, x + rw / 2, y, rw / 2, lineH, hFont, false, m_bControllerEnabled));
-  y += lineH + gap;
-
-  {
-    int indent = MulDiv(16, lineH, 26);
-    int lblW = MulDiv(55, lineH, 26);
-    int scanW = MulDiv(60, lineH, 26);
-    int comboW = rw - lblW - scanW - 8;
-
-    // Device combo + Scan button
-    PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Device:", x, y, lblW, lineH, hFont, false));
-    HWND hCtrlCombo = CreateWindowExW(WS_EX_CLIENTEDGE, L"COMBOBOX", NULL,
-      WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
-      x + lblW, y, comboW, lineH * 8, hw,
-      (HMENU)(INT_PTR)IDC_MW_CTRL_DEVICE, GetModuleHandle(NULL), NULL);
-    if (hCtrlCombo && hFont) SendMessage(hCtrlCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(SP_SYSTEM, hCtrlCombo);
-    EnumerateControllers(hCtrlCombo);
-
-    PAGE_CTRL(SP_SYSTEM, CreateBtn(hw, L"Scan", IDC_MW_CTRL_SCAN, x + lblW + comboW + 4, y, scanW, lineH, hFont));
-    y += lineH + gap;
-
-    // Button Mapping label
-    PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Button Mapping:", x, y, rw, lineH, hFont, false));
-    y += lineH;
-
-    // Multiline JSON edit control
-    int editH = lineH * 8;
-    HWND hJsonEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL,
-      WS_CHILD | WS_TABSTOP | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL | ES_WANTRETURN,
-      x, y, rw, editH, hw,
-      (HMENU)(INT_PTR)IDC_MW_CTRL_JSON_EDIT, GetModuleHandle(NULL), NULL);
-    if (hJsonEdit && hFont) SendMessage(hJsonEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(SP_SYSTEM, hJsonEdit);
-
-    // Populate with current JSON text
-    {
-      int wLen = MultiByteToWideChar(CP_ACP, 0, m_szControllerJSONText.c_str(), (int)m_szControllerJSONText.size(), NULL, 0);
-      std::wstring wJson(wLen, L'\0');
-      MultiByteToWideChar(CP_ACP, 0, m_szControllerJSONText.c_str(), (int)m_szControllerJSONText.size(), &wJson[0], wLen);
-      SetWindowTextW(hJsonEdit, wJson.c_str());
-    }
-    y += editH + gap;
-
-    // Defaults / Save / Load buttons
-    int btnW = MulDiv(70, lineH, 26);
-    int btnGap = 6;
-    PAGE_CTRL(SP_SYSTEM, CreateBtn(hw, L"Defaults", IDC_MW_CTRL_DEFAULTS, x, y, btnW, lineH, hFont));
-    PAGE_CTRL(SP_SYSTEM, CreateBtn(hw, L"Save", IDC_MW_CTRL_SAVE, x + btnW + btnGap, y, btnW, lineH, hFont));
-    PAGE_CTRL(SP_SYSTEM, CreateBtn(hw, L"Load", IDC_MW_CTRL_LOAD, x + 2 * (btnW + btnGap), y, btnW, lineH, hFont));
-
-    // Disable sub-controls if not enabled
-    if (!m_bControllerEnabled) {
-      EnableWindow(hCtrlCombo, FALSE);
-      EnableWindow(GetDlgItem(hw, IDC_MW_CTRL_SCAN), FALSE);
-      EnableWindow(hJsonEdit, FALSE);
-      EnableWindow(GetDlgItem(hw, IDC_MW_CTRL_DEFAULTS), FALSE);
-      EnableWindow(GetDlgItem(hw, IDC_MW_CTRL_SAVE), FALSE);
-      EnableWindow(GetDlgItem(hw, IDC_MW_CTRL_LOAD), FALSE);
-    }
-  }
-
   // ====== PAGE 4: Files (created hidden) ======
   y = tabTop + 10;
 
@@ -2280,57 +1576,13 @@ void SettingsWindow::DoBuildControls() {
     }
   }
 
-  // ===== Script tab (page 6) =====
-  y = tabTop + 10;
-
-  // Script file path + Browse
-  PAGE_CTRL(SP_SCRIPT, CreateLabel(hw, L"Script File:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(SP_SCRIPT, CreateEdit(hw, L"", IDC_MW_SCRIPT_FILE, x + lw + 4, y, rw - lw - 4 - 80 - 4, lineH, hFont, ES_READONLY, false));
-  PAGE_CTRL(SP_SCRIPT, CreateBtn(hw, L"Browse...", IDC_MW_SCRIPT_BROWSE, x + rw - 80, y, 80, lineH, hFont, false));
-  y += lineH + gap;
-
-  // Play / Stop / Loop
-  {
-    int btnW = MulDiv(80, lineH, 26);
-    PAGE_CTRL(SP_SCRIPT, CreateBtn(hw, L"Play", IDC_MW_SCRIPT_PLAY, x, y, btnW, lineH, hFont, false));
-    PAGE_CTRL(SP_SCRIPT, CreateBtn(hw, L"Stop", IDC_MW_SCRIPT_STOP, x + btnW + 4, y, btnW, lineH, hFont, false));
-    PAGE_CTRL(SP_SCRIPT, CreateCheck(hw, L"Loop", IDC_MW_SCRIPT_LOOP, x + btnW * 2 + 12, y, 80, lineH, hFont, false, false));
-    y += lineH + gap;
-  }
-
-  // BPM + Beats
-  PAGE_CTRL(SP_SCRIPT, CreateLabel(hw, L"BPM:", x, y, 40, lineH, hFont, false));
-  PAGE_CTRL(SP_SCRIPT, CreateEdit(hw, L"120.0", IDC_MW_SCRIPT_BPM, x + 44, y, 70, lineH, hFont, 0, false));
-  PAGE_CTRL(SP_SCRIPT, CreateLabel(hw, L"Beats:", x + 130, y, 50, lineH, hFont, false));
-  PAGE_CTRL(SP_SCRIPT, CreateEdit(hw, L"4", IDC_MW_SCRIPT_BEATS, x + 184, y, 50, lineH, hFont, 0, false));
-  y += lineH + gap;
-
-  // Line status label (with ID for dynamic updates)
-  {
-    HWND hLineLabel = CreateWindowExW(0, L"STATIC", L"No script loaded",
-      WS_CHILD | SS_LEFT, x, y, rw, lineH, hw,
-      (HMENU)(INT_PTR)IDC_MW_SCRIPT_LINE, GetModuleHandle(NULL), NULL);
-    if (hLineLabel && hFont) SendMessage(hLineLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(SP_SCRIPT, hLineLabel);
-  }
-  y += lineH + gap;
-
-  // Script lines listbox
-  {
-    int listH = lineH * 14;
-    HWND hScriptList = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", NULL,
-      WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
-      x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_SCRIPT_LIST, GetModuleHandle(NULL), NULL);
-    if (hScriptList && hFont) SendMessage(hScriptList, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(SP_SCRIPT, hScriptList);
-  }
-
   // ====== PAGE 1: Tools ======
   y = tabTop + 10;
   {
     RECT rc;
     GetClientRect(hw, &rc);
-    int listH = rc.bottom - y - 16;
+    int btnRowH = lineH + gap + lineH + 16; // two button rows below list
+    int listH = rc.bottom - y - btnRowH - 16;
     if (listH < lineH * 5) listH = lineH * 5;
 
     HWND hList = CreateThemedListView(IDC_MW_TOOLS_LIST, x, y, rw, listH,
@@ -2373,12 +1625,12 @@ void SettingsWindow::DoBuildControls() {
         row++;
       }
 
-
       ListView_SetItemState(hList, 0, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
     }
+
   }
 
-  // ===== About tab (page 8) =====
+  // ===== About tab (page 6) =====
   y = tabTop + 10;
 
   PAGE_CTRL(SP_ABOUT, CreateLabel(hw, L"MDropDX12", x, y, rw, 24, hFontBold, false));
@@ -2477,76 +1729,6 @@ void SettingsWindow::DoBuildControls() {
     SetDlgItemTextW(hw, IDC_MW_ERROR_DISPLAY_SETTINGS, buf);
   }
 
-  // ===== Remote tab (page 5) =====
-  y = tabTop + 10;
-
-  // Section header
-  PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"Milkwave Remote Compatibility", x, y, rw, lineH, hFontBold, false));
-  y += lineH + gap;
-
-  // Info line
-  PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"Configure window titles so Milkwave Remote (or other controllers) can discover this instance.", x, y, rw, lineH * 2, hFont, false));
-  y += lineH * 2 + gap;
-
-  // Window Title
-  PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"Window Title:", x, y, lw, lineH, hFont, false));
-  PAGE_CTRL(SP_REMOTE, CreateEdit(hw, m_szWindowTitle, IDC_MW_IPC_TITLE, x + lw + 4, y, rw - lw - 4, lineH, hFont, 0, false));
-  y += lineH + 2;
-
-  // Hint
-  PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"(empty = \"MDropDX12 Visualizer\"  |  e.g. \"Milkwave Visualizer\")", x + lw + 4, y, rw - lw - 4, lineH, hFont, false));
-  y += lineH + gap;
-
-  // Apply button + Capture Screenshot button
-  {
-    int applyW = MulDiv(100, lineH, 26);
-    PAGE_CTRL(SP_REMOTE, CreateBtn(hw, L"Apply", IDC_MW_IPC_APPLY, x, y, applyW, lineH, hFont, false));
-    int captureW = MulDiv(130, lineH, 26);
-    PAGE_CTRL(SP_REMOTE, CreateBtn(hw, L"Save Screenshot...", IDC_MW_IPC_CAPTURE, x + applyW + 8, y, captureW, lineH, hFont, false));
-    y += lineH + gap + 8;
-  }
-
-  // Named Pipe IPC status
-  PAGE_CTRL(SP_REMOTE, CreateLabel(hw, L"Named Pipe IPC", x, y, rw, lineH, hFontBold, false));
-  y += lineH + gap;
-
-  // IPC list box
-  {
-    int listH = lineH * 6;
-    HWND hIPCList = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", NULL,
-      WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
-      x, y, rw, listH, hw, (HMENU)(INT_PTR)IDC_MW_IPC_LIST, GetModuleHandle(NULL), NULL);
-    if (hIPCList && hFont) SendMessage(hIPCList, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(SP_REMOTE, hIPCList);
-    y += listH + gap;
-  }
-
-  // Last Message group box
-  {
-    int groupH = lineH * 5;
-    HWND hGroup = CreateWindowExW(0, L"BUTTON", L"Last message:",
-      WS_CHILD | BS_GROUPBOX,
-      x, y, rw, groupH, hw, (HMENU)(INT_PTR)IDC_MW_IPC_MSG_GROUP,
-      GetModuleHandle(NULL), NULL);
-    if (hGroup && hFont) SendMessage(hGroup, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(SP_REMOTE, hGroup);
-
-    int pad = 8;
-    HWND hMsgText = CreateWindowExW(0, L"EDIT", L"",
-      WS_CHILD | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
-      x + pad, y + lineH + 2, rw - pad * 2, groupH - lineH - pad - 2,
-      hw, (HMENU)(INT_PTR)IDC_MW_IPC_MSG_TEXT,
-      GetModuleHandle(NULL), NULL);
-    if (hMsgText && hFont) SendMessage(hMsgText, WM_SETFONT, (WPARAM)hFont, TRUE);
-    PAGE_CTRL(SP_REMOTE, hMsgText);
-  }
-
-  // Populate IPC list with current state
-  RefreshIPCList();
-
-  // Start IPC message monitor timer (500ms polling)
-  SetTimer(hw, IDT_IPC_MONITOR, 500, NULL);
-
   #undef PAGE_CTRL
 
   // Undef all engine-member macros
@@ -2568,37 +1750,11 @@ void SettingsWindow::DoBuildControls() {
   #undef IsDarkTheme
   #undef m_nThemeMode
   #undef m_nPresetFilter
-  #undef fOpacity
-  #undef m_fRenderQuality
-  #undef bQualityAuto
-  #undef m_timeFactor
-  #undef m_frameFactor
-  #undef m_fpsFactor
-  #undef m_VisIntensity
-  #undef m_VisShift
-  #undef m_VisVersion
-  #undef m_nMaxShapeInstances
-  #undef m_bScaleInstancesByResolution
-  #undef m_nInstanceScaleBaseWidth
-  #undef m_bSkipHeavyPresets
-  #undef m_nHeavyPresetMaxInstances
-  #undef m_bEnableVSync
-  #undef m_max_fps_fs
-  #undef m_ColShiftHue
-  #undef m_ColShiftSaturation
-  #undef m_ColShiftBrightness
-  #undef m_pState
-  #undef m_AutoHue
-  #undef m_AutoHueSeconds
   #undef m_szAudioDevice
   #undef m_bIdleTimerEnabled
   #undef m_nIdleTimeoutMinutes
   #undef m_nIdleAction
   #undef m_bIdleAutoRestore
-  #undef m_bControllerEnabled
-  #undef m_szControllerJSONText
-  #undef m_szWindowTitle
-  #undef m_szRemoteWindowTitle
   #undef m_szBaseDir
   #undef m_LogLevel
   #undef m_LogOutput
@@ -2609,30 +1765,9 @@ void SettingsWindow::DoBuildControls() {
   #undef m_szFallbackTexFile
   #undef m_colSettingsCtrlBg
   #undef m_colSettingsText
-  #undef m_script
   #undef GetConfigIniFile
-  #undef EnumerateControllers
 
   SelectInitialTab();
-}
-
-void SettingsWindow::RefreshIPCList() {
-  HWND hList = GetDlgItem(m_hWnd, IDC_MW_IPC_LIST);
-  if (!hList) return;
-
-  SendMessage(hList, LB_RESETCONTENT, 0, 0);
-
-  extern PipeServer g_pipeServer;
-  if (g_pipeServer.IsRunning()) {
-    wchar_t entry[512];
-    if (g_pipeServer.IsConnected())
-      swprintf_s(entry, L"%s  \u2014  Connected", g_pipeServer.GetPipeName());
-    else
-      swprintf_s(entry, L"%s  \u2014  Listening", g_pipeServer.GetPipeName());
-    SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)entry);
-  } else {
-    SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)L"(pipe server not running)");
-  }
 }
 
 void SettingsWindow::LayoutControls() {
@@ -2655,10 +1790,6 @@ void SettingsWindow::LayoutControls() {
 
   int lineH = GetLineHeight();
   int rw = rc.right - 36;  // 16px left + 20px right margin
-  int lw = MulDiv(160, lineH, 26);
-  int newSliderW = rw - lw - 60;
-  if (newSliderW < 80) newSliderW = 80;
-
   // Stretch edit + reposition Browse buttons for Current Preset and Preset Dir rows.
   // Note: r.left is the edit's x, not the window margin. Button must be positioned
   // relative to the content area (xMargin + rw), not relative to the edit.
@@ -2677,45 +1808,6 @@ void SettingsWindow::LayoutControls() {
     RECT r; GetWindowRect(hAudio, &r);
     MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
     MoveWindow(hAudio, r.left, r.top, rw, 200, TRUE);
-  }
-
-  // Stretch controller device combo + reposition Scan button
-  {
-    HWND hCtrlCombo = GetDlgItem(m_hWnd, IDC_MW_CTRL_DEVICE);
-    HWND hScan = GetDlgItem(m_hWnd, IDC_MW_CTRL_SCAN);
-    if (hCtrlCombo && hScan) {
-      RECT rc; GetWindowRect(hCtrlCombo, &rc);
-      MapWindowPoints(NULL, m_hWnd, (POINT*)&rc, 2);
-      RECT rs; GetWindowRect(hScan, &rs);
-      MapWindowPoints(NULL, m_hWnd, (POINT*)&rs, 2);
-      int scanW = rs.right - rs.left;
-      int rightEdge = rcDisplay.left + 16 + rw;
-      int comboW = rightEdge - rc.left - scanW - 4;
-      MoveWindow(hCtrlCombo, rc.left, rc.top, comboW, lineH * 8, TRUE);
-      MoveWindow(hScan, rc.left + comboW + 4, rs.top, scanW, rs.bottom - rs.top, TRUE);
-    }
-  }
-
-  // Stretch controller JSON edit
-  HWND hJsonEdit = GetDlgItem(m_hWnd, IDC_MW_CTRL_JSON_EDIT);
-  if (hJsonEdit) {
-    RECT r; GetWindowRect(hJsonEdit, &r);
-    MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
-    MoveWindow(hJsonEdit, r.left, r.top, rw, r.bottom - r.top, TRUE);
-  }
-
-  // Stretch sliders + reposition value labels
-  int sliderIDs[] = { IDC_MW_OPACITY, IDC_MW_RENDER_QUALITY, IDC_MW_COL_HUE, IDC_MW_COL_SAT, IDC_MW_COL_BRIGHT };
-  int labelIDs[] = { IDC_MW_OPACITY_LABEL, IDC_MW_QUALITY_LABEL, IDC_MW_COL_HUE_LABEL, IDC_MW_COL_SAT_LABEL, IDC_MW_COL_BRIGHT_LABEL };
-  for (int i = 0; i < 5; i++) {
-    HWND hSlider = GetDlgItem(m_hWnd, sliderIDs[i]);
-    HWND hLabel = GetDlgItem(m_hWnd, labelIDs[i]);
-    if (hSlider) {
-      RECT r; GetWindowRect(hSlider, &r);
-      MapWindowPoints(NULL, m_hWnd, (POINT*)&r, 2);
-      MoveWindow(hSlider, r.left, r.top, newSliderW, r.bottom - r.top, TRUE);
-      if (hLabel) MoveWindow(hLabel, r.left + newSliderW + 4, r.top, 50, r.bottom - r.top, TRUE);
-    }
   }
 
   // Stretch Files tab ListBox and reposition buttons + description below it
@@ -2807,66 +1899,6 @@ void SettingsWindow::LayoutControls() {
 
 // ====== User Defaults & Fallback Paths ======
 
-void SettingsWindow::UpdateVisualUI() {
-  Engine* p = m_pEngine;
-  HWND hWnd = m_hWnd;
-  wchar_t buf[32];
-  SendMessage(GetDlgItem(hWnd, IDC_MW_OPACITY), TBM_SETPOS, TRUE, (int)(p->fOpacity * 100));
-  swprintf(buf, 32, L"%d%%", (int)(p->fOpacity * 100));
-  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_OPACITY_LABEL), buf);
-  SendMessage(GetDlgItem(hWnd, IDC_MW_RENDER_QUALITY), TBM_SETPOS, TRUE, (int)(p->m_fRenderQuality * 100));
-  swprintf(buf, 32, L"%.2f", p->m_fRenderQuality);
-  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_QUALITY_LABEL), buf);
-  SendMessage(GetDlgItem(hWnd, IDC_MW_QUALITY_AUTO), BM_SETCHECK, p->bQualityAuto ? BST_CHECKED : BST_UNCHECKED, 0);
-  swprintf(buf, 32, L"%.2f", p->m_timeFactor);
-  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_TIME_FACTOR), buf);
-  swprintf(buf, 32, L"%.2f", p->m_frameFactor);
-  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_FRAME_FACTOR), buf);
-  swprintf(buf, 32, L"%.2f", p->m_fpsFactor);
-  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_FPS_FACTOR), buf);
-  swprintf(buf, 32, L"%.2f", p->m_VisIntensity);
-  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_INTENSITY), buf);
-  swprintf(buf, 32, L"%.2f", p->m_VisShift);
-  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_SHIFT), buf);
-  swprintf(buf, 32, L"%.0f", p->m_VisVersion);
-  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIS_VERSION), buf);
-  // GPU Protection controls
-  swprintf(buf, 32, L"%d", p->m_nMaxShapeInstances);
-  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_MAX_INST), buf);
-  SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SCALE_BY_RES), BM_SETCHECK, p->m_bScaleInstancesByResolution ? BST_CHECKED : BST_UNCHECKED, 0);
-  swprintf(buf, 32, L"%d", p->m_nInstanceScaleBaseWidth);
-  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_SCALE_BASE), buf);
-  SendMessage(GetDlgItem(hWnd, IDC_MW_GPU_SKIP_HEAVY), BM_SETCHECK, p->m_bSkipHeavyPresets ? BST_CHECKED : BST_UNCHECKED, 0);
-  swprintf(buf, 32, L"%d", p->m_nHeavyPresetMaxInstances);
-  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_GPU_HEAVY_THRESHOLD), buf);
-  SendMessage(GetDlgItem(hWnd, IDC_MW_VSYNC_ENABLED), BM_SETCHECK, p->m_bEnableVSync ? BST_CHECKED : BST_UNCHECKED, 0);
-  HWND hw = p->GetPluginWindow();
-  if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
-  if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
-}
-
-void SettingsWindow::UpdateColorsUI() {
-  Engine* p = m_pEngine;
-  HWND hWnd = m_hWnd;
-  wchar_t buf[32];
-  SendMessage(GetDlgItem(hWnd, IDC_MW_COL_HUE), TBM_SETPOS, TRUE, (int)(p->m_ColShiftHue * 100) + 100);
-  swprintf(buf, 32, L"%.2f", p->m_ColShiftHue);
-  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_HUE_LABEL), buf);
-  SendMessage(GetDlgItem(hWnd, IDC_MW_COL_SAT), TBM_SETPOS, TRUE, (int)(p->m_ColShiftSaturation * 100) + 100);
-  swprintf(buf, 32, L"%.2f", p->m_ColShiftSaturation);
-  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_SAT_LABEL), buf);
-  SendMessage(GetDlgItem(hWnd, IDC_MW_COL_BRIGHT), TBM_SETPOS, TRUE, (int)(p->m_ColShiftBrightness * 100) + 100);
-  swprintf(buf, 32, L"%.2f", p->m_ColShiftBrightness);
-  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_BRIGHT_LABEL), buf);
-  float gamma = p->m_pState ? p->m_pState->m_fGammaAdj.eval(-1) : 2.0f;
-  SendMessage(GetDlgItem(hWnd, IDC_MW_COL_GAMMA), TBM_SETPOS, TRUE, (int)(gamma * 10));
-  swprintf(buf, 32, L"%.1f", gamma);
-  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_COL_GAMMA_LABEL), buf);
-  SendMessage(GetDlgItem(hWnd, IDC_MW_AUTO_HUE), BM_SETCHECK, p->m_AutoHue ? BST_CHECKED : BST_UNCHECKED, 0);
-  swprintf(buf, 32, L"%.3f", p->m_AutoHueSeconds);
-  SetWindowTextW(GetDlgItem(hWnd, IDC_MW_AUTO_HUE_SEC), buf);
-}
-
 void SettingsWindow::ResetToFactory() {
   Engine* p = m_pEngine;
   // Visual defaults
@@ -2886,9 +1918,10 @@ void SettingsWindow::ResetToFactory() {
   if (p->m_pState) p->m_pState->m_fGammaAdj = 2.0f;
   p->m_AutoHue = false;
   p->m_AutoHueSeconds = 0.02f;
-  // Update UI
-  UpdateVisualUI();
-  UpdateColorsUI();
+  // Apply side-effects
+  HWND hw = p->GetPluginWindow();
+  if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
+  if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
 }
 
 void SettingsWindow::ResetToUserDefaults() {
@@ -2914,9 +1947,10 @@ void SettingsWindow::ResetToUserDefaults() {
   if (p->m_pState) p->m_pState->m_fGammaAdj = p->m_udGamma;
   p->m_AutoHue = false;
   p->m_AutoHueSeconds = 0.02f;
-  // Update UI
-  UpdateVisualUI();
-  UpdateColorsUI();
+  // Apply side-effects
+  HWND hw = p->GetPluginWindow();
+  if (hw) PostMessage(hw, WM_MW_SET_OPACITY, 0, 0);
+  if (hw) PostMessage(hw, WM_MW_RESET_BUFFERS, 0, 0);
 }
 
 // ====== Settings Fullscreen Awareness ======

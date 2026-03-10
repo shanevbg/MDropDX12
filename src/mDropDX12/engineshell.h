@@ -74,6 +74,9 @@ typedef struct {
 
 class EngineShell {
   friend class SettingsWindow;   // SettingsWindow methods access protected Engine state
+  friend class VisualWindow;     // VisualWindow methods access protected Engine state
+  friend class ColorsWindow;     // ColorsWindow methods access protected Engine state
+  friend class ControllerWindow; // ControllerWindow methods access protected Engine state
 public:
   // GET METHODS
   // ------------------------------------------------------------

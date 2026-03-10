@@ -135,6 +135,9 @@ void Engine::ResetHotkeyDefaults()
     HK_DEF(i++, HK_APPLY_WORKSPACE_LAYOUT,0,              0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Apply Workspace Layout", L"ApplyWorkspaceLayout");
     HK_DEF(i++, HK_OPEN_TEXT_ANIM,   0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Text Animations",  L"OpenTextAnim");
     HK_DEF(i++, HK_OPEN_REMOTE,     0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Remote",           L"OpenRemote");
+    HK_DEF(i++, HK_OPEN_VISUAL,     0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Visual",           L"OpenVisual");
+    HK_DEF(i++, HK_OPEN_COLORS,     0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Colors",           L"OpenColors");
+    HK_DEF(i++, HK_OPEN_CONTROLLER, 0,                    0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Controller",       L"OpenController");
     HK_DEF(i++, HK_POLL_TRACK_INFO, 0,                     0,            HKSCOPE_LOCAL, HKCAT_MEDIA, L"Poll Track Info",       L"PollTrackInfo");
 
     // ── Shader/Effects ──
@@ -792,6 +795,15 @@ bool Engine::DispatchHotkeyAction(int actionId)
         return true;
     case HK_OPEN_REMOTE:
         OpenMDropDX12Remote();
+        return true;
+    case HK_OPEN_VISUAL:
+        OpenVisualWindow();
+        return true;
+    case HK_OPEN_COLORS:
+        OpenColorsWindow();
+        return true;
+    case HK_OPEN_CONTROLLER:
+        OpenControllerWindow();
         return true;
     case HK_POLL_TRACK_INFO:
         if (hRender) PostMessage(hRender, WM_MW_HOTKEY_ACTION, (WPARAM)actionId, 0);
