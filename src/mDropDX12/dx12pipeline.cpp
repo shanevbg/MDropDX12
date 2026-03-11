@@ -169,6 +169,37 @@ bool DX12CreatePipelines(ID3D12Device* device, ID3D12RootSignature* rootSig,
     hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_ADDITIVE_SPRITEVERTEX]));
     if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
 
+    // ── Clamp-sampler variants (for textured shapes when bTexWrap=0) ──
+    // In DX9, shapes inherit the sampler address mode from the warp pass.
+    // In DX12, we need separate PSOs because samplers are static in the root signature.
+    {
+        ID3DBlob* clampPsBlob = nullptr;
+        if (CompileShaderFromString(g_szTexturedClampPS, "main", "ps_5_0", &clampPsBlob)) {
+            psoDesc.PS = { clampPsBlob->GetBufferPointer(), clampPsBlob->GetBufferSize() };
+
+            // PSO: Textured SPRITEVERTEX + alpha blend + clamp sampler
+            psoDesc.BlendState.RenderTarget[0].BlendEnable  = TRUE;
+            psoDesc.BlendState.RenderTarget[0].SrcBlend     = D3D12_BLEND_SRC_ALPHA;
+            psoDesc.BlendState.RenderTarget[0].DestBlend    = D3D12_BLEND_INV_SRC_ALPHA;
+            psoDesc.BlendState.RenderTarget[0].BlendOp      = D3D12_BLEND_OP_ADD;
+            psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha  = D3D12_BLEND_ONE;
+            psoDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+            psoDesc.BlendState.RenderTarget[0].BlendOpAlpha   = D3D12_BLEND_OP_ADD;
+            hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_TEXTURED_CLAMP_SPRITEVERTEX]));
+            if (FAILED(hr)) { clampPsBlob->Release(); texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+            // PSO: Textured SPRITEVERTEX + additive + clamp sampler
+            psoDesc.BlendState.RenderTarget[0].DestBlend      = D3D12_BLEND_ONE;
+            psoDesc.BlendState.RenderTarget[0].DestBlendAlpha  = D3D12_BLEND_ONE;
+            hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_ADDITIVE_CLAMP_SPRITEVERTEX]));
+            if (FAILED(hr)) { clampPsBlob->Release(); texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+            clampPsBlob->Release();
+        }
+        // Restore wrap PS for subsequent PSOs
+        psoDesc.PS = { texPsBlob->GetBufferPointer(), texPsBlob->GetBufferSize() };
+    }
+
     // PSO: Textured SPRITEVERTEX + premultiplied alpha blend (GDI text overlay)
     psoDesc.BlendState.RenderTarget[0].SrcBlend      = D3D12_BLEND_ONE;
     psoDesc.BlendState.RenderTarget[0].DestBlend      = D3D12_BLEND_INV_SRC_ALPHA;

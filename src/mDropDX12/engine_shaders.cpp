@@ -1723,15 +1723,10 @@ void Engine::GenWarpPShaderText(char* szShaderText, float decay, bool bWrap) {
   p += sprintf(p, "%c", 1);
 
   p += sprintf(p, "    // sample previous frame%c", LF);
-  // SPOUT
-  // Avoid freeze
   p += sprintf(p, "    ret = tex2D( sampler%ls_main, uv ).xyz;%c", bWrap ? L"" : L"_fc", LF);
-  // p += sprintf(p, "    ret = tex2D( sampler%s_main, uv ).xyz;%c", bWrap ? L"" : L"_fc", LF);
   p += sprintf(p, "    %c", LF);
-  p += sprintf(p, "    // darken (decay) over time%c", LF);
-  p += sprintf(p, "    ret *= %.2f; //or try: ret -= 0.004;%c", decay, LF);
-  //p += sprintf(p, "    %c", LF);
-  //p += sprintf(p, "    ret.w = vDiffuse.w; // pass alpha along - req'd for preset blending%c", LF);
+  p += sprintf(p, "    // darken over time (vertex color carries per-frame decay, matching DX9 fixed-function)%c", LF);
+  p += sprintf(p, "    ret *= _vDiffuse.xyz;%c", LF);
   p += sprintf(p, "}%c", LF);
 }
 

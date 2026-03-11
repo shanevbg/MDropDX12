@@ -16,7 +16,9 @@ enum DX12PsoId {
     PSO_POINT_ALPHABLEND_WFVERTEX,  // Point topology + SrcAlpha/InvSrcAlpha (dot waveforms)
     PSO_POINT_ADDITIVE_WFVERTEX,    // Point topology + SrcAlpha/One (additive dot waveforms)
     PSO_ADDITIVE_WFVERTEX,          // Triangle + SrcAlpha/One (additive shapes, untextured)
-    PSO_ADDITIVE_SPRITEVERTEX,      // Triangle + SrcAlpha/One (additive shapes, textured)
+    PSO_ADDITIVE_SPRITEVERTEX,      // Triangle + SrcAlpha/One (additive shapes, textured, wrap sampler)
+    PSO_TEXTURED_CLAMP_SPRITEVERTEX,  // Triangle + SrcAlpha/InvSrcAlpha (textured, clamp sampler)
+    PSO_ADDITIVE_CLAMP_SPRITEVERTEX,  // Triangle + SrcAlpha/One (additive, textured, clamp sampler)
     PSO_PREMULALPHA_SPRITEVERTEX,   // Triangle + One/InvSrcAlpha (premultiplied alpha, textured)
     PSO_ONEONE_SPRITEVERTEX,        // Triangle + One/One (pure additive, textured — title text)
     PSO_DARKEN_SPRITEVERTEX,        // Triangle + Zero/InvSrcColor (darken/shadow, textured — title shadow)
@@ -96,10 +98,23 @@ static const char g_szTexturedVS[] =
     "    return output;\n"
     "}\n";
 
-// PS: sample texture at texcoord0, modulate by vertex color
+// PS: sample texture at texcoord0, modulate by vertex color (wrap sampler s0)
 static const char g_szTexturedPS[] =
     "Texture2D    tex  : register(t0);\n"
     "SamplerState samp : register(s0);\n"
+    "struct PSInput {\n"
+    "    float4 pos : SV_POSITION;\n"
+    "    float4 col : COLOR;\n"
+    "    float2 uv  : TEXCOORD0;\n"
+    "};\n"
+    "float4 main(PSInput input) : SV_TARGET {\n"
+    "    return tex.Sample(samp, input.uv) * input.col;\n"
+    "}\n";
+
+// PS: same as above but uses clamp sampler (s1) for shapes when bTexWrap=0
+static const char g_szTexturedClampPS[] =
+    "Texture2D    tex  : register(t0);\n"
+    "SamplerState samp : register(s1);\n"
     "struct PSInput {\n"
     "    float4 pos : SV_POSITION;\n"
     "    float4 col : COLOR;\n"

@@ -2324,6 +2324,12 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lpDX->GetRtvCpuHandle(m_dx12VS[1]);
     cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
+    // Clear VS[1] to black before warp mesh draws.
+    // Prevents stale pixels from the ping-pong swap persisting if the mesh
+    // doesn't cover every texel (rounding, edge cases).
+    float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    cmdList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+
     SetViewportAndScissor(cmdList, m_nTexSizeX, m_nTexSizeY);
 
     // Set descriptor heaps, root sig, PSO
@@ -2508,7 +2514,8 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       // Pass 0: old preset (opaque), cull tiles fully blended to new
       if (bOldUsesWarpShader && m_dx12OldWarpPSO) {
         cmdList->SetPipelineState(m_dx12OldWarpPSO.Get());
-        D3DCOLOR cDecayOld = 0xFFFFFFFF; // shader handles decay
+        float fDecayOld = (float)(*m_pOldState->var_pf_decay);
+        D3DCOLOR cDecayOld = D3DCOLOR_RGBA_01(fDecayOld, fDecayOld, fDecayOld, 1);
         bindWarpShader(&m_OldShaders.warp, m_pOldState, m_lpDX->GetOldWarpBindingGpuHandle());
         drawWarpMesh(cDecayOld, true, true);
       } else if (!bOldUsesWarpShader) {
@@ -2526,7 +2533,8 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       // Pass 1: new preset (alpha blend), cull tiles fully old
       if (bNewUsesWarpShader && m_dx12WarpBlendPSO) {
         cmdList->SetPipelineState(m_dx12WarpBlendPSO.Get());
-        D3DCOLOR cDecayNew = 0xFFFFFFFF; // shader handles decay
+        float fDecayNew = (float)(*m_pState->var_pf_decay);
+        D3DCOLOR cDecayNew = D3DCOLOR_RGBA_01(fDecayNew, fDecayNew, fDecayNew, 1);
         bindWarpShader(&m_shaders.warp, m_pState, m_lpDX->GetWarpBindingGpuHandle());
         drawWarpMesh(cDecayNew, true, false);
       } else if (!bNewUsesWarpShader) {
@@ -2562,13 +2570,11 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
 
       bindWarpShader(&m_shaders.warp, m_pState, m_lpDX->GetWarpBindingGpuHandle());
 
-      D3DCOLOR cDecay;
-      if (!m_dx12WarpPSO) {
-        float fDecay = (float)(*m_pState->var_pf_decay);
-        cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
-      } else {
-        cDecay = 0xFFFFFFFF;
-      }
+      // Always pass per-frame decay via vertex color (like Milkwave DX9).
+      // Generated warp shaders multiply ret by _vDiffuse.xyz for decay.
+      float fDecay = (float)(*m_pState->var_pf_decay);
+      D3DCOLOR cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
+      DLOG_VERBOSE("DIAG Warp decay: fDecay=%.4f cDecay=0x%08X hasPSO=%d", fDecay, cDecay, m_dx12WarpPSO ? 1 : 0);
 
       drawWarpMesh(cDecay, false, false);
     }
@@ -3915,8 +3921,6 @@ void mdrop::Engine::DX12_DrawCustomShapes() {
           // Compute vertices (SPRITEVERTEX for texcoords, even if untextured)
           SPRITEVERTEX v[512];
           v[0].x = (float)(*pState->m_shape[i].var_pf_x * 2 - 1);
-          // Note: DX9 uses pf_y * -2 + 1 to compensate for OrthoLH(2,-2) projection Y-flip.
-          // DX12 vertex shaders bypass projection, so use pf_y * 2 - 1 directly.
           v[0].y = (float)(*pState->m_shape[i].var_pf_y * 2 - 1);
           v[0].z = 0;
           v[0].tu = 0.5f;
@@ -3959,7 +3963,7 @@ void mdrop::Engine::DX12_DrawCustomShapes() {
               v[j].x = v[0].x + (float)*pState->m_shape[i].var_pf_rad * cosf(t * 3.1415927f * 2 + (float)*pState->m_shape[i].var_pf_ang + 3.1415927f * 0.25f);
             else
               v[j].x = v[0].x + (float)*pState->m_shape[i].var_pf_rad * cosf(t * 3.1415927f * 2 + (float)*pState->m_shape[i].var_pf_ang + 3.1415927f * 0.25f) * m_fAspectY;
-            v[j].y = v[0].y + (float)*pState->m_shape[i].var_pf_rad * sinf(t * 3.1415927f * 2 + (float)*pState->m_shape[i].var_pf_ang + 3.1415927f * 0.25f);
+            v[j].y = v[0].y - (float)*pState->m_shape[i].var_pf_rad * sinf(t * 3.1415927f * 2 + (float)*pState->m_shape[i].var_pf_ang + 3.1415927f * 0.25f);
             v[j].z = 0;
             if (m_bScreenDependentRenderMode)
               v[j].tu = 0.5f + 0.5f * cosf(t * 3.1415927f * 2 + (float)*pState->m_shape[i].var_pf_tex_ang + 3.1415927f * 0.25f) / ((float)*pState->m_shape[i].var_pf_tex_zoom);
@@ -3974,7 +3978,10 @@ void mdrop::Engine::DX12_DrawCustomShapes() {
           if (textured) {
             // Bind VS0 texture at t0 for textured shapes
             cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetSrvGpuHandle(m_dx12VS[0]));
-            DX12PsoId fillPso = additive ? PSO_ADDITIVE_SPRITEVERTEX : PSO_TEXTURED_SPRITEVERTEX;
+            bool bClamp = (*pState->var_pf_wrap <= m_fSnapPoint);
+            DX12PsoId fillPso = additive
+              ? (bClamp ? PSO_ADDITIVE_CLAMP_SPRITEVERTEX : PSO_ADDITIVE_SPRITEVERTEX)
+              : (bClamp ? PSO_TEXTURED_CLAMP_SPRITEVERTEX : PSO_TEXTURED_SPRITEVERTEX);
             cmdList->SetPipelineState(m_lpDX->m_PSOs[fillPso].Get());
             SPRITEVERTEX triVerts[300]; // max 100 sides → 100 tris → 300 verts
             int nTriVerts = ExpandFanToTriList(v, sides + 2, triVerts);
@@ -4135,8 +4142,6 @@ void mdrop::Engine::DX12_DrawCustomWaves() {
               NSEEL_code_execute(pState->m_wave[i].m_pp_codehandle);
 #endif
 
-            // Note: DX9 uses pp_y * -2 + 1 to compensate for OrthoLH(2,-2) projection Y-flip.
-            // DX12 vertex shaders bypass projection, so use pp_y * 2 - 1 directly.
             if (m_bScreenDependentRenderMode) {
               v[j].x = (float)(*pState->m_wave[i].var_pp_x * 2 - 1);
               v[j].y = (float)(*pState->m_wave[i].var_pp_y * 2 - 1);
@@ -4796,7 +4801,7 @@ void mdrop::Engine::DrawCustomShapes() {
           WFVERTEX v2[512];     // for untextured shapes + borders
 
           v[0].x = (float)(*pState->m_shape[i].var_pf_x * 2 - 1);// * ASPECT;
-          v[0].y = (float)(*pState->m_shape[i].var_pf_y * -2 + 1);
+          v[0].y = (float)(*pState->m_shape[i].var_pf_y * 2 - 1);
           v[0].z = 0;
           v[0].tu = 0.5f;
           v[0].tv = 0.5f;
@@ -4818,7 +4823,7 @@ void mdrop::Engine::DrawCustomShapes() {
             else
               v[j].x = v[0].x + (float)*pState->m_shape[i].var_pf_rad * cosf(t * 3.1415927f * 2 + (float)*pState->m_shape[i].var_pf_ang + 3.1415927f * 0.25f) * m_fAspectY;  // DON'T TOUCH!
 
-            v[j].y = v[0].y + (float)*pState->m_shape[i].var_pf_rad * sinf(t * 3.1415927f * 2 + (float)*pState->m_shape[i].var_pf_ang + 3.1415927f * 0.25f);           // DON'T TOUCH!
+            v[j].y = v[0].y - (float)*pState->m_shape[i].var_pf_rad * sinf(t * 3.1415927f * 2 + (float)*pState->m_shape[i].var_pf_ang + 3.1415927f * 0.25f);           // DON'T TOUCH!
             v[j].z = 0;
 
             if (m_bScreenDependentRenderMode)

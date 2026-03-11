@@ -1416,6 +1416,10 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
     if (!m_szWarpShadersText[0]) {
       DebugLogA("DIAG Import warp: EMPTY - falling back to GenWarpPShaderText", LOG_VERBOSE);
       g_engine.GenWarpPShaderText(m_szWarpShadersText, m_fDecay.eval(-1), m_bTexWrap);
+      // DX12: pre-MilkDrop2 presets need a compiled warp PSO for per-frame decay.
+      // DX9 applied decay via vertex color multiply in the fixed-function pipeline.
+      // Set PS version so the generated shader text gets compiled.
+      nWarpPSVersionInFile = MD2_PS_2_0;
     }
     m_nWarpPSVersion = nWarpPSVersionInFile;
   }
