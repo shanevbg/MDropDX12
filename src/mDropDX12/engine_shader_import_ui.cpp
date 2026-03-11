@@ -2098,8 +2098,10 @@ std::string ShaderImportWindow::FixFloatNumberOfArguments(const std::string& inp
                 (void)std::stof(argsLine, &pos);
                 if (pos == argsLine.size()) shouldExpand = true;
             } catch (...) {}
-            if (!shouldExpand && argsLine.find('(') != std::string::npos && argsLine.find(')') != std::string::npos)
-                shouldExpand = true;
+            // NOTE: Do NOT expand function call expressions here. A single-arg constructor
+            // with a function call (e.g., float3(RAWTRAP(...))) might return a matrix, not a
+            // scalar. Expanding would incorrectly triplicate the expression. The post-Phase-3
+            // broadcast fix handles function call args correctly with matrix detection.
             if (!shouldExpand && (fullContext.find("float " + argsLine + ",") != std::string::npos ||
                                   fullContext.find("float " + argsLine + ";") != std::string::npos))
                 shouldExpand = true;
@@ -4107,12 +4109,63 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
 
         // Fix scalar-to-vector broadcast: GLSL typeN(scalar) → HLSL ((typeN)(scalar))
         // GLSL allows vec3(1.0) to broadcast; HLSL requires explicit args or cast syntax.
+        // IMPORTANT: (floatN)(floatMxK) casts are INVALID in HLSL — matrix-to-vector needs
+        // element extraction. We detect functions returning matrix types and skip the cast
+        // for expressions involving them. A helper function flattens the matrix instead.
         {
+            // Build set of functions that return matrix types (floatNxM)
+            std::set<std::string> matReturnFuncs;
+            {
+                // Scan for "floatNxM funcName(" patterns in function declarations
+                const char* matTypes[] = { "float2x2 ", "float3x3 ", "float4x4 ",
+                                           "float2x3 ", "float3x2 ", "float2x4 ",
+                                           "float4x2 ", "float3x4 ", "float4x3 " };
+                for (const char* mt : matTypes) {
+                    size_t mtLen = strlen(mt);
+                    size_t pos = 0;
+                    while ((pos = result.find(mt, pos)) != std::string::npos) {
+                        // Must be preceded by non-alnum (start of line, return type position)
+                        if (pos > 0 && (isalnum(result[pos-1]) || result[pos-1] == '_')) { pos += mtLen; continue; }
+                        // Extract identifier after the type
+                        size_t idStart = pos + mtLen;
+                        while (idStart < result.size() && result[idStart] == ' ') idStart++;
+                        size_t idEnd = idStart;
+                        while (idEnd < result.size() && (isalnum(result[idEnd]) || result[idEnd] == '_')) idEnd++;
+                        if (idEnd > idStart) {
+                            size_t afterId = idEnd;
+                            while (afterId < result.size() && result[afterId] == ' ') afterId++;
+                            if (afterId < result.size() && result[afterId] == '(') {
+                                std::string fname = result.substr(idStart, idEnd - idStart);
+                                matReturnFuncs.insert(fname);
+                            }
+                        }
+                        pos += mtLen;
+                    }
+                }
+            }
+
+            // Check if an expression involves a call to a matrix-returning function
+            auto exprInvolvesMatrix = [&](const std::string& expr) -> bool {
+                for (const auto& fn : matReturnFuncs) {
+                    size_t fpos = 0;
+                    while ((fpos = expr.find(fn, fpos)) != std::string::npos) {
+                        // Verify it's a standalone identifier followed by '('
+                        if (fpos > 0 && (isalnum(expr[fpos-1]) || expr[fpos-1] == '_')) { fpos += fn.size(); continue; }
+                        size_t after = fpos + fn.size();
+                        while (after < expr.size() && expr[after] == ' ') after++;
+                        if (after < expr.size() && expr[after] == '(') return true;
+                        fpos += fn.size();
+                    }
+                }
+                return false;
+            };
+
             const char* broadcastTypes[] = {
                 "float2(", "float3(", "float4(",
                 "int2(", "int3(", "int4(",
                 "uint2(", "uint3(", "uint4(",
             };
+            bool needsMatHelpers = false; // track if we need to inject helper functions
             for (const char* prefix : broadcastTypes) {
                 std::string typeName(prefix, strlen(prefix) - 1); // e.g. "float3"
                 size_t searchFrom = 0;
@@ -4141,13 +4194,28 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                       }
                     }
                     if (topCommas == 0 && !argsLine.empty()) {
-                        // Single argument — convert to cast: ((typeN)(arg))
+                        // Single argument — check if it involves a matrix-returning function
                         std::string trimmed = argsLine;
                         size_t s = trimmed.find_first_not_of(" \t");
                         size_t e = trimmed.find_last_not_of(" \t");
                         if (s != std::string::npos) trimmed = trimmed.substr(s, e - s + 1);
-                        // Skip if arg is already a simple scalar literal (int/float) — those work as-is in some HLSL constructors
-                        // Actually HLSL rejects single-arg vector constructors, so always convert
+
+                        if (exprInvolvesMatrix(trimmed)) {
+                            // Matrix expression — use helper function instead of C-style cast.
+                            // _m2v2/3/4 flatten a float2x2 to a vector using row-major element order.
+                            // In our convention (HLSL rows = GLSL columns), this matches GLSL's
+                            // column-major extraction for vec2/3/4(mat2).
+                            std::string helper = "_m2v" + typeName.substr(5); // e.g. "_m2v3" from "float3"
+                            std::string replacement = helper + "(" + trimmed + ")";
+                            result = result.substr(0, index) + replacement
+                                   + result.substr(index + prefixLen + closingIdx + 1);
+                            searchFrom = index + replacement.size();
+                            needsMatHelpers = true;
+                            DebugLogA(("CONV-FIX: " + typeName + "(matrix_expr) → " + helper + "(expr)\n").c_str());
+                            continue;
+                        }
+
+                        // Non-matrix single arg — convert to cast: ((typeN)(arg))
                         std::string replacement = "((" + typeName + ")(" + trimmed + "))";
                         result = result.substr(0, index) + replacement
                                + result.substr(index + prefixLen + closingIdx + 1);
@@ -4156,6 +4224,29 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                     }
                     searchFrom = index + prefixLen + closingIdx;
                 }
+            }
+
+            // Inject matrix-to-vector helper functions if needed
+            if (needsMatHelpers) {
+                std::string helpers =
+                    "// Matrix-to-vector flattening helpers (HLSL can't cast matrix to vector)\n"
+                    "float2 _m2v2(float2x2 m) { return m[0]; }\n"
+                    "float3 _m2v3(float2x2 m) { return float3(m[0], m[1][0]); }\n"
+                    "float4 _m2v4(float2x2 m) { return float4(m[0], m[1]); }\n"
+                    "float2 _m2v2(float3x3 m) { return m[0].xy; }\n"
+                    "float3 _m2v3(float3x3 m) { return m[0]; }\n"
+                    "float4 _m2v4(float3x3 m) { return float4(m[0], m[1][0]); }\n"
+                    "float2 _m2v2(float4x4 m) { return m[0].xy; }\n"
+                    "float3 _m2v3(float4x4 m) { return m[0].xyz; }\n"
+                    "float4 _m2v4(float4x4 m) { return m[0]; }\n\n";
+                // Insert before the first function declaration (look for "void " or return types)
+                size_t insertPos = result.find("\nvoid ");
+                if (insertPos == std::string::npos) insertPos = result.find("\nfloat ");
+                if (insertPos != std::string::npos)
+                    result.insert(insertPos + 1, helpers);
+                else
+                    result = helpers + result;
+                DebugLogA("CONV-FIX: injected _m2v helper functions for matrix-to-vector conversion\n");
             }
         }
 
