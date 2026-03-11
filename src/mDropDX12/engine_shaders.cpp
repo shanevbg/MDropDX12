@@ -16,6 +16,7 @@
 #include "wasabi.h"
 #include <assert.h>
 #include <strsafe.h>
+
 #include <Windows.h>
 #include <cstdint>
 #include <fstream>
@@ -1489,42 +1490,36 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         }
       }
     }
-    auto replaceTex2D = [&](const char* sampName, const char* sampState) {
-      char from[80], to[80];
-      // tex2D(sampler_name, ...) → sampler_name.Sample(sampState, ...)
-      sprintf(from, "tex2D(%s,", sampName);
-      sprintf(to, "%s.Sample(%s,", sampName, sampState);
+    // Helper: find-and-replace all occurrences of `from` with `to` in szShaderText
+    auto replacePattern = [&](const char* from, const char* to) {
       int fromLen = (int)strlen(from);
       int toLen = (int)strlen(to);
       int delta = toLen - fromLen;
       char* p = szShaderText;
-      while ((p = strstr(p, from)) != nullptr) {
-        if (delta > 0) {
-          // expand: shift tail right
-          int tailLen = (int)strlen(p + fromLen);
-          memmove(p + toLen, p + fromLen, tailLen + 1);
-        } else if (delta < 0) {
-          // shrink: shift tail left
-          int tailLen = (int)strlen(p + fromLen);
-          memmove(p + toLen, p + fromLen, tailLen + 1);
-        }
-        memcpy(p, to, toLen);
-        p += toLen;
-      }
-      // tex2Dlod(sampler_name, v) → sampler_name.SampleLevel(sampState, v.xy, v.w)
-      // (rare for special samplers, but handle it)
-      sprintf(from, "tex2Dlod(%s,", sampName);
-      sprintf(to, "%s.SampleLevel(%s,", sampName, sampState);
-      fromLen = (int)strlen(from);
-      toLen = (int)strlen(to);
-      delta = toLen - fromLen;
-      p = szShaderText;
       while ((p = strstr(p, from)) != nullptr) {
         int tailLen = (int)strlen(p + fromLen);
         memmove(p + toLen, p + fromLen, tailLen + 1);
         memcpy(p, to, toLen);
         p += toLen;
       }
+    };
+    auto replaceTex2D = [&](const char* sampName, const char* sampState) {
+      char from[80], to[80];
+      // tex2D(sampler_name, ...) and tex2d(sampler_name, ...) → sampler_name.Sample(sampState, ...)
+      // Both uppercase and lowercase variants must be handled — presets may use either.
+      // The macros in embedded_shaders.h expand both to _samp_lw (WRAP); this text-replace
+      // intercepts before macro expansion to redirect special samplers to the correct state.
+      sprintf(to, "%s.Sample(%s,", sampName, sampState);
+      sprintf(from, "tex2D(%s,", sampName);
+      replacePattern(from, to);
+      sprintf(from, "tex2d(%s,", sampName);
+      replacePattern(from, to);
+      // tex2Dlod / tex2dlod → sampler_name.SampleLevel(sampState, ...)
+      sprintf(to, "%s.SampleLevel(%s,", sampName, sampState);
+      sprintf(from, "tex2Dlod(%s,", sampName);
+      replacePattern(from, to);
+      sprintf(from, "tex2dlod(%s,", sampName);
+      replacePattern(from, to);
     };
     replaceTex2D("sampler_fc_main", "_samp_lc");  // LINEAR+CLAMP
     replaceTex2D("sampler_pc_main", "_samp_pc");  // POINT+CLAMP

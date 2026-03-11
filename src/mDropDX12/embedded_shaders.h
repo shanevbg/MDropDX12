@@ -403,8 +403,9 @@ void PS( float2 uv       : TEXCOORD,
     #define w_div  _c3.z
 
     // note: if you just take one sample at exactly uv.xy, you get an avg of 4 pixels.
-    //float2 uv2 = uv.xy;// + srctexsize.zw*float2(0.5,0.5);
-    float2 uv2 = uv.xy + srctexsize.zw*float2(1,1);     // + moves blur UP, LEFT by 1-pixel increments
+    // DX12: no half-texel offset needed (pixel centers at integer+0.5).
+    // DX9 used float2(1,1) to compensate for half-texel addressing.
+    float2 uv2 = uv.xy;
 
     float3 blur =
             ( tex2D( sampler_main, uv2 + float2( d1*srctexsize.z,0) ).xyz
@@ -466,8 +467,9 @@ void PS( float2 uv       : TEXCOORD,
     #define w_div   _c6.x
 
     // note: if you just take one sample at exactly uv.xy, you get an avg of 4 pixels.
-    //float2 uv2 = uv.xy;// + srctexsize.zw*float2(-0.5,-0.5);
-    float2 uv2 = uv.xy + srctexsize.zw*float2(1,0);     // + moves blur UP, LEFT by TWO-pixel increments! (since texture is 1/2 the size of blur1_ps)
+    // DX12: no half-texel offset needed (pixel centers at integer+0.5).
+    // DX9 used float2(1,0) to compensate for half-texel addressing.
+    float2 uv2 = uv.xy;
 
     float3 blur =
             ( tex2D( sampler_main, uv2 + float2(0, d1*srctexsize.w) ).xyz
