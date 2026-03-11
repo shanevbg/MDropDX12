@@ -497,6 +497,11 @@ EEL_F NSEEL_CGEN_CALL __NSEEL_RAM_Mem_GetValues(EEL_F **blocks, INT_PTR np, EEL_
   return __getset_values(blocks,0,(int)np,parms);
 }
 
+EEL_F *NSEEL_getgmembuf_default(void)
+{
+  return nseel_gmembuf_default;
+}
+
 void NSEEL_VM_SetGRAM(NSEEL_VMCTX ctx, void **gram)
 {
   if (ctx)

@@ -145,8 +145,9 @@ int NSEEL_VM_wantfreeRAM(NSEEL_VMCTX ctx); // want NSEEL_VM_freeRAMIfCodeRequest
 // NSEEL_VM_SetGRAM(ctx,&p);
 // .. do stuff
 // NSEEL_VM_FreeGRAM(&p);
-void NSEEL_VM_SetGRAM(NSEEL_VMCTX ctx, void **gram); 
+void NSEEL_VM_SetGRAM(NSEEL_VMCTX ctx, void **gram);
 void NSEEL_VM_FreeGRAM(void **ufd); // frees a gmem context.
+EEL_F *NSEEL_getgmembuf_default(void); // returns pointer to shared global gmegabuf (or NULL)
 void NSEEL_VM_SetCustomFuncThis(NSEEL_VMCTX ctx, void *thisptr);
 
 EEL_F *NSEEL_VM_getramptr(NSEEL_VMCTX ctx, unsigned int offs, int *validCount);

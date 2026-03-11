@@ -2339,13 +2339,19 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
 
     // Build full 16-slot binding arrays (VS + blur + noise + disk textures)
     // Warp reads VS[0] (previous frame's warp+shapes, after end-of-frame swap).
-    // Comp reads VS[1] (current frame's warp+shapes output), matching
-    // ShowToUser_NoShaders which also reads m_lpVS[1] (DX9 line 6529).
-    // DX9 ApplyShaderParams binds m_lpVS[0] for comp, but that's equivalent
-    // because DX9 does NOT swap until after comp — so m_lpVS[0] IS the warp
-    // input (previous frame), while m_lpVS[1] is the warp+shapes output.
-    // In DX12, VS[0] is ALSO the warp input. The comp shader needs the
-    // warp+shapes output = VS[1].
+    //
+    // Comp shader TEX_VS binding: DX9 ApplyShaderParams (line 4735) ALWAYS binds
+    // m_lpVS[0] for TEX_VS. This means custom comp shaders read the WARP INPUT
+    // (previous frame), not the warp output. The warp output (VS[1]) contains
+    // current-frame decay/darkening that should NOT feed into the comp shader —
+    // it only feeds back through the next frame's warp pass via the end-of-frame swap.
+    // DX9 ShowToUser_NoShaders (no comp shader) explicitly reads m_lpVS[1] (line 4907).
+    //
+    // DX12 mapping:
+    //   Custom comp shader → TEX_VS binds VS[0] (matches ApplyShaderParams)
+    //   No comp shader (passthrough) → TEX_VS binds VS[1] (matches ShowToUser_NoShaders)
+    bool bNewUsesCompShader = (m_pState->m_nCompPSVersion > 0);
+    const DX12Texture& compVsTex = bNewUsesCompShader ? m_dx12VS[0] : m_dx12VS[1];
 
     UINT warpSlots[32], bufferASlots[32], bufferBSlots[32], compSlots[32];
     UINT oldWarpSlots[32], oldCompSlots[32];
@@ -2355,20 +2361,22 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     BuildBindingSlots(&m_shaders.warp.params, m_dx12VS[0], warpSlots);
 
     // Buffer A reads feedback[read] (own previous output), comp reads feedback[write] (Buffer A's current output)
-    // Comp always reads VS[1] = current frame's warp+shapes output
     if (m_bHasBufferA) {
       BuildBindingSlots(&m_shaders.bufferA.params, m_dx12VS[1], bufferASlots, &m_dx12Feedback[fbRead]);
-      BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots, &m_dx12Feedback[fbWrite]);
+      BuildBindingSlots(&m_shaders.comp.params, compVsTex, compSlots, &m_dx12Feedback[fbWrite]);
     } else {
       memset(bufferASlots, 0xFF, sizeof(bufferASlots));  // all UINT_MAX (unused)
-      BuildBindingSlots(&m_shaders.comp.params, m_dx12VS[1], compSlots, &m_dx12Feedback[fbRead]);
+      BuildBindingSlots(&m_shaders.comp.params, compVsTex, compSlots, &m_dx12Feedback[fbRead]);
     }
 
     // Build old shader bindings during blend transitions
     if (m_pState->m_bBlending && m_OldShaders.warp.bytecodeBlob)
       BuildBindingSlots(&m_OldShaders.warp.params, m_dx12VS[0], oldWarpSlots);
-    if (m_pState->m_bBlending && m_OldShaders.comp.bytecodeBlob)
-      BuildBindingSlots(&m_OldShaders.comp.params, m_dx12VS[1], oldCompSlots);
+    if (m_pState->m_bBlending && m_OldShaders.comp.bytecodeBlob) {
+      bool bOldUsesCompShader = (m_pOldState && m_pOldState->m_nCompPSVersion > 0);
+      const DX12Texture& oldCompVsTex = bOldUsesCompShader ? m_dx12VS[0] : m_dx12VS[1];
+      BuildBindingSlots(&m_OldShaders.comp.params, oldCompVsTex, oldCompSlots);
+    }
 
     m_lpDX->UpdatePerFrameBindings(warpSlots, bufferASlots, bufferBSlots, compSlots,
                                    oldWarpSlots, oldCompSlots);
