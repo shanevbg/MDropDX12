@@ -1035,28 +1035,40 @@ void ShaderImportWindow::ApplyShader() {
     p->m_pState->m_nCompPSVersion = MD2_PS_5_0;
     p->m_pState->m_nMaxPSVersion = max(p->m_pState->m_nWarpPSVersion, (int)MD2_PS_5_0);
 
-    // Apply Buffer A if present
+    // Apply or clear Buffer A
     if (!bufAHlsl.empty()) {
         strncpy_s(p->m_pState->m_szBufferAShadersText, MAX_SHADER_TEXT_LEN, bufAHlsl.c_str(), _TRUNCATE);
         p->m_pState->m_nBufferAPSVersion = MD2_PS_5_0;
+    } else {
+        p->m_pState->m_szBufferAShadersText[0] = '\0';
+        p->m_pState->m_nBufferAPSVersion = 0;
     }
 
-    // Apply Buffer B if present
+    // Apply or clear Buffer B
     if (!bufBHlsl.empty()) {
         strncpy_s(p->m_pState->m_szBufferBShadersText, MAX_SHADER_TEXT_LEN, bufBHlsl.c_str(), _TRUNCATE);
         p->m_pState->m_nBufferBPSVersion = MD2_PS_5_0;
+    } else {
+        p->m_pState->m_szBufferBShadersText[0] = '\0';
+        p->m_pState->m_nBufferBPSVersion = 0;
     }
 
-    // Apply Buffer C if present
+    // Apply or clear Buffer C
     if (!bufCHlsl.empty()) {
         strncpy_s(p->m_pState->m_szBufferCShadersText, MAX_SHADER_TEXT_LEN, bufCHlsl.c_str(), _TRUNCATE);
         p->m_pState->m_nBufferCPSVersion = MD2_PS_5_0;
+    } else {
+        p->m_pState->m_szBufferCShadersText[0] = '\0';
+        p->m_pState->m_nBufferCPSVersion = 0;
     }
 
-    // Apply Buffer D if present
+    // Apply or clear Buffer D
     if (!bufDHlsl.empty()) {
         strncpy_s(p->m_pState->m_szBufferDShadersText, MAX_SHADER_TEXT_LEN, bufDHlsl.c_str(), _TRUNCATE);
         p->m_pState->m_nBufferDPSVersion = MD2_PS_5_0;
+    } else {
+        p->m_pState->m_szBufferDShadersText[0] = '\0';
+        p->m_pState->m_nBufferDPSVersion = 0;
     }
 
     // Update preset description to reflect import project (for diag files and logging)
@@ -4546,18 +4558,30 @@ std::wstring ShaderImportWindow::ImportFromFile(const wchar_t* path) {
     if (!bufAHlsl.empty()) {
         strncpy_s(p->m_pState->m_szBufferAShadersText, MAX_SHADER_TEXT_LEN, bufAHlsl.c_str(), _TRUNCATE);
         p->m_pState->m_nBufferAPSVersion = MD2_PS_5_0;
+    } else {
+        p->m_pState->m_szBufferAShadersText[0] = '\0';
+        p->m_pState->m_nBufferAPSVersion = 0;
     }
     if (!bufBHlsl.empty()) {
         strncpy_s(p->m_pState->m_szBufferBShadersText, MAX_SHADER_TEXT_LEN, bufBHlsl.c_str(), _TRUNCATE);
         p->m_pState->m_nBufferBPSVersion = MD2_PS_5_0;
+    } else {
+        p->m_pState->m_szBufferBShadersText[0] = '\0';
+        p->m_pState->m_nBufferBPSVersion = 0;
     }
     if (!bufCHlsl.empty()) {
         strncpy_s(p->m_pState->m_szBufferCShadersText, MAX_SHADER_TEXT_LEN, bufCHlsl.c_str(), _TRUNCATE);
         p->m_pState->m_nBufferCPSVersion = MD2_PS_5_0;
+    } else {
+        p->m_pState->m_szBufferCShadersText[0] = '\0';
+        p->m_pState->m_nBufferCPSVersion = 0;
     }
     if (!bufDHlsl.empty()) {
         strncpy_s(p->m_pState->m_szBufferDShadersText, MAX_SHADER_TEXT_LEN, bufDHlsl.c_str(), _TRUNCATE);
         p->m_pState->m_nBufferDPSVersion = MD2_PS_5_0;
+    } else {
+        p->m_pState->m_szBufferDShadersText[0] = '\0';
+        p->m_pState->m_nBufferDPSVersion = 0;
     }
 
     // Update preset description
