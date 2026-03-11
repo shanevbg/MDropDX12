@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mdrop": {
+      "command": "node",
+      "args": ["tools/mdrop-mcp/index.js"]
+    }
+  }
+}

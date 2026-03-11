@@ -6,6 +6,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import net from 'net';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 
 // ── Pipe helpers ──
@@ -97,8 +100,57 @@ async function ensureConnected() {
 }
 
 async function send(message, expectResponse = false) {
-  const path = await ensureConnected();
-  return sendPipeMessage(path, message, expectResponse);
+  const pipePath = await ensureConnected();
+  return sendPipeMessage(pipePath, message, expectResponse);
+}
+
+// ── Capture helpers ──
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(__dirname, '../..');
+
+function findCaptureDir() {
+  if (process.env.MDROP_CAPTURE_DIR) {
+    return process.env.MDROP_CAPTURE_DIR;
+  }
+  const releasePath = path.join(projectRoot, 'src/mDropDX12/Release_x64/capture');
+  if (fs.existsSync(releasePath)) return releasePath;
+  const debugPath = path.join(projectRoot, 'src/mDropDX12/Debug_x64/capture');
+  if (fs.existsSync(debugPath)) return debugPath;
+  return releasePath; // fallback — visualizer will create it
+}
+
+function waitForNewCapture(dir, afterTimestamp, timeoutMs) {
+  return new Promise((resolve) => {
+    const pollInterval = 100;
+    let elapsed = 0;
+
+    const check = () => {
+      if (elapsed >= timeoutMs) { resolve(null); return; }
+      try {
+        if (fs.existsSync(dir)) {
+          const files = fs.readdirSync(dir)
+            .filter(f => f.endsWith('.png'))
+            .map(f => {
+              const fullPath = path.join(dir, f);
+              const stat = fs.statSync(fullPath);
+              return { path: fullPath, mtime: stat.mtimeMs };
+            })
+            .filter(f => f.mtime >= afterTimestamp - 1000)
+            .sort((a, b) => b.mtime - a.mtime);
+
+          if (files.length > 0 && fs.statSync(files[0].path).size > 0) {
+            resolve(files[0].path);
+            return;
+          }
+        }
+      } catch { /* dir may not exist yet */ }
+      elapsed += pollInterval;
+      setTimeout(check, pollInterval);
+    };
+
+    setTimeout(check, 50);
+  });
 }
 
 // ── MCP Server ──
@@ -111,7 +163,7 @@ const server = new McpServer({
 // Tool: Connect / discover
 server.tool(
   'mdrop_connect',
-  'Discover and connect to a running MDropDX12 visualizer instance',
+  'Discover and connect to a running MDropDX12 instance',
   {},
   async () => {
     const pipes = discoverPipes();
@@ -237,12 +289,36 @@ server.tool(
 // Tool: Capture screenshot
 server.tool(
   'mdrop_capture',
-  'Take a screenshot of the current visualizer output',
-  {},
-  async () => {
+  'Take a screenshot of the current visualizer output and return the image',
+  {
+    return_image: z.boolean().optional().describe('Return the PNG image data (default: true). Set false for just confirmation.'),
+  },
+  async ({ return_image }) => {
     try {
-      await send('CAPTURE');
-      return { content: [{ type: 'text', text: 'Screenshot captured' }] };
+      const captureDir = findCaptureDir();
+      const beforeTime = Date.now();
+
+      await send('SIGNAL|CAPTURE');
+
+      if (return_image === false) {
+        return { content: [{ type: 'text', text: 'Screenshot capture triggered' }] };
+      }
+
+      const filePath = await waitForNewCapture(captureDir, beforeTime, 3000);
+
+      if (!filePath) {
+        return { content: [{ type: 'text', text: 'Screenshot captured but file not found within timeout. Check capture/ directory.' }] };
+      }
+
+      const imageData = fs.readFileSync(filePath);
+      const base64 = imageData.toString('base64');
+
+      return {
+        content: [
+          { type: 'image', data: base64, mimeType: 'image/png' },
+          { type: 'text', text: `Saved: ${path.basename(filePath)}` },
+        ]
+      };
     } catch (err) {
       return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
     }
