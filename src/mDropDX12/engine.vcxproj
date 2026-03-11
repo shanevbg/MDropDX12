@@ -407,7 +407,6 @@
     <ClCompile Include="support.cpp" />
     <ClCompile Include="texmgr.cpp" />
     <ClCompile Include="textmgr.cpp" />
-    <ClCompile Include="overlay.cpp" />
     <ClCompile Include="utility.cpp" />
     <ClCompile Include="wasabi.cpp" />
     <!-- ns-eel2: native JIT expression evaluator (WDL) -->
@@ -480,7 +479,6 @@
     <ClInclude Include="support.h" />
     <ClInclude Include="texmgr.h" />
     <ClInclude Include="textmgr.h" />
-    <ClInclude Include="overlay.h" />
     <ClInclude Include="utility.h" />
     <ClInclude Include="wasabi.h" />
   </ItemGroup>

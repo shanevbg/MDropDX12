@@ -631,6 +631,12 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_PRESETS_FONT_PLUS    9021
 #define IDC_MW_PRESETS_FONT_MINUS   9022
 #define IDC_MW_PRESETS_STARTUP      9023  // Combo: startup mode (Random/Current/Last Used)
+#define IDC_MW_PRESETS_SUBDIR       9024  // Button: Subdirectory mode (Never/Ask/Always)
+#define IDC_MW_PRESETS_TAG_FILTER   9025  // Combo: Tag filter dropdown
+#define IDC_MW_PRESETS_IMPORT_TAGS  9026  // Button: Import MWR tags
+#define IDC_MW_PRESETS_LIST_COMBO  9027  // Combo: Preset list selector
+#define IDC_MW_PRESETS_LIST_SAVE   9028  // Button: Save current list
+#define IDC_MW_PRESETS_LIST_CLEAR  9029  // Button: Clear active list (back to directory scan)
 
 // Sprites window controls (9040-9059)
 #define IDC_MW_SPRITES_WIN_PIN          9040

@@ -15,14 +15,34 @@ import { execSync } from 'child_process';
 
 function discoverPipes() {
   try {
-    const output = execSync(
-      'powershell -NoProfile -c "[IO.Directory]::GetFiles(\'\\\\.\\pipe\\\') | Where-Object { $_ -match \'Milkwave_\' }"',
-      { encoding: 'utf8', timeout: 5000 }
-    );
-    return output.trim().split(/\r?\n/).filter(Boolean).map(p => {
-      const match = p.match(/Milkwave_(\d+)/);
-      return match ? { path: p.replace(/\//g, '\\'), pid: parseInt(match[1]) } : null;
-    }).filter(Boolean);
+    const pipeDir = '//./pipe/';
+    const pipes = fs.readdirSync(pipeDir)
+      .filter(name => name.startsWith('Milkwave_'))
+      .map(name => {
+        const match = name.match(/Milkwave_(\d+)/);
+        return match ? { path: pipeDir + name, pid: parseInt(match[1]) } : null;
+      })
+      .filter(Boolean);
+
+    // If multiple pipes found, prefer the MDropDX12 process over Milkwave Visualizer
+    if (pipes.length > 1) {
+      try {
+        const output = execSync('tasklist /fo csv /nh', { encoding: 'utf8', timeout: 5000 });
+        const mdropPids = new Set();
+        for (const line of output.split(/\r?\n/)) {
+          if (line.toLowerCase().includes('mdropdx12')) {
+            const pidMatch = line.match(/"(\d+)"/);
+            if (pidMatch) mdropPids.add(parseInt(pidMatch[1]));
+          }
+        }
+        if (mdropPids.size > 0) {
+          const mdropPipes = pipes.filter(p => mdropPids.has(p.pid));
+          if (mdropPipes.length > 0) return mdropPipes;
+        }
+      } catch { /* fall through to return all pipes */ }
+    }
+
+    return pipes;
   } catch {
     return [];
   }

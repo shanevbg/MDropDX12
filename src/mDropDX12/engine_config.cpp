@@ -215,7 +215,7 @@ void Engine::OpenFolderPickerForPresetDir(HWND hOwnerOverride) {
             lstrcatW(m_szPresetDir, L"\\");
           WritePrivateProfileStringW(L"Settings", L"szPresetDir", m_szPresetDir, GetConfigIniFile());
           CoTaskMemFree(pszPath);
-          UpdatePresetList(false, true);
+          UpdatePresetList(true, true);
           m_bSettingsNeedAttention = false;
           wchar_t notif[512];
           swprintf(notif, L"Preset directory: %s", m_szPresetDir);

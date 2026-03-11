@@ -424,13 +424,13 @@ void Engine::MyRenderUI(
   // 1. render text in upper-right corner - EXCEPT USER MESSAGE - it goes last b/c it draws a box under itself
   //                                        and it should be visible over everything else (usually an error msg)
   {
-    // a) preset name — rendered by overlay thread; CTextManager used only as fallback
-    if (m_bShowPresetInfo && !m_blackmode && !m_overlay.IsAlive()) {
+    // a) preset name
+    if (m_bShowPresetInfo && !m_blackmode) {
       SelectFont(DECORATIVE_FONT);
       swprintf(
         buf,
-        L"%s %s ",
-        (m_bPresetLockedByUser || m_bPresetLockedByCode) && m_ShowLockSymbol ? L"\xD83D\xDD12" : L"",
+        L"%s%s ",
+        (m_bPresetLockedByUser || m_bPresetLockedByCode) && m_ShowLockSymbol ? L"\u2022 " : L"",
         (m_nLoadingPreset != 0) ? m_pNewState->m_szDesc : m_pState->m_szDesc);
 
       DWORD alpha = 255;
@@ -441,8 +441,8 @@ void Engine::MyRenderUI(
       MyTextOut_Color(buf, MTO_UPPER_RIGHT, color);
     }
 
-    // b) preset rating — rendered by overlay thread; CTextManager used only as fallback
-    if ((m_bShowRating || GetTime() < m_fShowRatingUntilThisTime) && !m_overlay.IsAlive()) {
+    // b) preset rating
+    if (m_bShowRating || GetTime() < m_fShowRatingUntilThisTime) {
       // see also: SetCurrentPresetRating() in milkdrop.cpp
       SelectFont(SIMPLE_FONT);
       swprintf(buf, L" %s: %d ", wasabiApiLangString(IDS_RATING), (int)m_pState->m_fRating);
@@ -450,254 +450,15 @@ void Engine::MyRenderUI(
       MyTextOut_Shadow(buf, MTO_UPPER_RIGHT);
     }
 
-    // Feed data to overlay thread (handles FPS, debug info, and menu rendering).
-    // Always send when alive so overlay clears to transparent when nothing is shown.
-    if (m_overlay.IsAlive()) {
-      OverlayData od = {};
-      od.bShowFPS         = m_bShowFPS;
-      od.bShowDebugInfo   = m_bShowDebugInfo;
-      od.bPresetLocked    = m_bPresetLockedByUser || m_bPresetLockedByCode;
-      od.bEnableMouseInteraction = m_bEnableMouseInteraction;
-      od.clientWidth      = m_lpDX->m_client_width;
-      od.clientHeight     = m_lpDX->m_client_height;
-      od.fps              = GetFps();
-      od.fRenderQuality   = m_fRenderQuality;
-      od.fColShiftHue     = m_ColShiftHue;
-      od.fColShiftSaturation = m_ColShiftSaturation;
-      od.fColShiftBrightness = m_ColShiftBrightness;
-      if (m_pState) {
-        od.bass         = (float)(*m_pState->var_pf_bass);
-        od.bass_att     = (float)(*m_pState->var_pf_bass_att);
-        od.bass_smooth  = (float)(*m_pState->var_pf_bass_smooth);
-        od.mid          = (float)(*m_pState->var_pf_mid);
-        od.mid_att      = (float)(*m_pState->var_pf_mid_att);
-        od.mid_smooth   = (float)(*m_pState->var_pf_mid_smooth);
-        od.treb         = (float)(*m_pState->var_pf_treb);
-        od.treb_att     = (float)(*m_pState->var_pf_treb_att);
-        od.treb_smooth  = (float)(*m_pState->var_pf_treb_smooth);
-        od.pfMonitor    = (float)(*m_pState->var_pf_monitor);
-      }
-      od.bass_imm_rel    = mysound.imm_rel[0];
-      od.bass_avg_rel    = mysound.avg_rel[0];
-      od.bass_smooth_rel = mysound.smooth_rel[0];
-      od.mid_imm_rel     = mysound.imm_rel[1];
-      od.mid_avg_rel     = mysound.avg_rel[1];
-      od.mid_smooth_rel  = mysound.smooth_rel[1];
-      od.treb_imm_rel    = mysound.imm_rel[2];
-      od.treb_avg_rel    = mysound.avg_rel[2];
-      od.treb_smooth_rel = mysound.smooth_rel[2];
-      od.presetTime      = GetTime() - m_fPresetStartTime;
-      od.mouseX          = m_mouseX;
-      od.mouseY          = m_mouseY;
-      od.mouseDown       = m_mouseDown;
-
-      // HUD: preset name
-      od.bShowPresetName = m_bShowPresetInfo && !m_blackmode;
-      if (od.bShowPresetName) {
-        swprintf(od.szPresetName, 256, L"%s%s ",
-          (m_bPresetLockedByUser || m_bPresetLockedByCode) && m_ShowLockSymbol ? L"\xD83D\xDD12 " : L"",
-          (m_nLoadingPreset != 0) ? m_pNewState->m_szDesc : m_pState->m_szDesc);
-        od.presetNameColor = ((DWORD)m_fontinfo[DECORATIVE_FONT].R << 16)
-                           | ((DWORD)m_fontinfo[DECORATIVE_FONT].G << 8)
-                           |  (DWORD)m_fontinfo[DECORATIVE_FONT].B;
-      }
-
-      // HUD: rating
-      od.bShowRating = m_bShowRating || GetTime() < m_fShowRatingUntilThisTime;
-      if (od.bShowRating && m_pState) {
-        swprintf(od.szRating, 64, L" %s: %d ", wasabiApiLangString(IDS_RATING), (int)m_pState->m_fRating);
-        if (!m_bEnableRating) lstrcatW(od.szRating, wasabiApiLangString(IDS_DISABLED));
-      }
-
-      // HUD: song title
-      od.bShowSongTitle = m_bShowSongTitle;
-      if (od.bShowSongTitle)
-        GetSongTitle(od.szSongTitle, sizeof(od.szSongTitle));
-
-      // HUD: notifications
-      od.nNotifications = 0;
-      if (!m_bWarningsDisabled2) {
-        float tN = GetTime();
-        int nErr = (int)m_errors.size();
-        for (int i = 0; i < nErr && od.nNotifications < OverlayData::OVERLAY_MAX_NOTIFICATIONS; i++) {
-          if (tN < m_errors[i].birthTime || tN >= m_errors[i].expireTime) continue;
-          int cat = m_errors[i].category;
-          if (cat == ERR_MSG_BOTTOM_EXTRA_1 || cat == ERR_MSG_BOTTOM_EXTRA_2 || cat == ERR_MSG_BOTTOM_EXTRA_3) {
-            auto& n = od.notifications[od.nNotifications++];
-            swprintf(n.text, 256, L"%s ", m_errors[i].msg.c_str());
-            int fi = NUM_BASIC_FONTS + cat - ERR_MSG_BOTTOM_EXTRA_1;
-            n.color = ((DWORD)m_fontinfo[fi].R << 16) | ((DWORD)m_fontinfo[fi].G << 8) | (DWORD)m_fontinfo[fi].B;
-            int sc = m_SongInfoDisplayCorner;
-            n.corner = (sc == 1) ? MTO_UPPER_LEFT : (sc == 2) ? MTO_UPPER_RIGHT : (sc == 4) ? MTO_LOWER_RIGHT : MTO_LOWER_LEFT;
-          }
-          else if (!m_errors[i].bSentToRemote || !m_HideNotificationsWhenRemoteActive) {
-            auto& n = od.notifications[od.nNotifications++];
-            swprintf(n.text, 256, L"%s ", m_errors[i].msg.c_str());
-            n.color = m_errors[i].color ? (m_errors[i].color & 0x00FFFFFF) : 0x00FFFFFF;
-            n.corner = 0; // upper-right
-          }
-        }
-      }
-
-      // Menu data extraction — replicate DrawMenu layout for overlay rendering
-      if (m_UI_mode == UI_MENU && m_pCurMenu) {
-        od.bShowMenu = true;
-        int fontH = GetFontHeight(SIMPLE_FONT);
-        if (fontH <= 0) fontH = 20;
-        od.menuFontHeight = fontH;
-
-        int menuTop  = *upper_left_corner_y;
-        int menuLeft = xL;
-        int availH   = *lower_left_corner_y - menuTop;
-
-        int nLines = (availH - PLAYLIST_INNER_MARGIN * 2) / fontH - 1;  // -1 for tooltip
-        if (nLines < 1) nLines = 1;
-
-        int curSel = m_pCurMenu->GetCurSel();
-        int nStart = (curSel / nLines) * nLines;
-
-        int nMenuLines = 0;
-        int lineY = menuTop + PLAYLIST_INNER_MARGIN;
-        int lineX = menuLeft + PLAYLIST_INNER_MARGIN;
-
-        if (!m_pCurMenu->IsEditingCurSel()) {
-          int nLinesDrawn = 0;
-          int idx = 0;
-
-          // Child menus
-          for (int cm = 0; cm < m_pCurMenu->GetNumChildMenus(); cm++) {
-            CMilkMenu* pChild = m_pCurMenu->GetChildMenu(cm);
-            if (idx >= nStart && idx < nStart + nLines) {
-              if (pChild && pChild->IsEnabled() && nMenuLines < OVERLAY_MAX_MENU_LINES) {
-                OverlayMenuLine& line = od.menuLines[nMenuLines];
-                swprintf(line.text, 256, L"%s", pChild->GetName());
-                line.color = (idx == curSel) ? MENU_HILITE_COLOR : MENU_COLOR;
-                line.x = lineX;
-                line.y = lineY;
-                lineY += fontH;
-                nMenuLines++;
-                nLinesDrawn++;
-              }
-              if (m_bShowMenuToolTips && idx == curSel) {
-                od.bShowTooltip = true;
-                wcsncpy(od.tooltip, wasabiApiLangString(IDS_SZ_MENU_NAV_TOOLTIP), 1023);
-                od.tooltip[1023] = 0;
-              }
-            }
-            idx++;
-          }
-
-          // Child items
-          CMilkMenuItem* pItem = m_pCurMenu->GetFirstChildItem();
-          while (pItem && nLinesDrawn < nStart + nLines) {
-            if (!pItem->m_bEnabled) { pItem = pItem->m_pNext; idx++; continue; }
-            if (idx >= nStart && nMenuLines < OVERLAY_MAX_MENU_LINES) {
-              OverlayMenuLine& line = od.menuLines[nMenuLines];
-              size_t addr = pItem->m_var_offset + (size_t)m_pState;
-              switch (pItem->m_type) {
-              case MENUITEMTYPE_BOOL:
-                swprintf(line.text, 256, L"%s [%s]", pItem->m_szName,
-                  *((bool*)addr) ? L"ON" : L"OFF");
-                break;
-              default:
-                wcsncpy(line.text, pItem->m_szName, 255);
-                line.text[255] = 0;
-                break;
-              }
-              line.color = (idx == curSel) ? MENU_HILITE_COLOR : MENU_COLOR;
-              line.x = lineX;
-              line.y = lineY;
-              lineY += fontH;
-              nMenuLines++;
-              nLinesDrawn++;
-
-              if (m_bShowMenuToolTips && idx == curSel && pItem->m_szToolTip[0]) {
-                od.bShowTooltip = true;
-                wcsncpy(od.tooltip, pItem->m_szToolTip, 1023);
-                od.tooltip[1023] = 0;
-              }
-            }
-            pItem = pItem->m_pNext;
-            idx++;
-          }
-        } else {
-          // Editing current selection — show instructions + current value
-          CMilkMenuItem* pItem = m_pCurMenu->GetFirstChildItem();
-          for (int sk = m_pCurMenu->GetNumChildMenus(); sk < curSel; sk++)
-            pItem = pItem->m_pNext;
-          size_t addr = pItem->m_var_offset + (size_t)m_pState;
-
-          if (nMenuLines < OVERLAY_MAX_MENU_LINES) {
-            OverlayMenuLine& line = od.menuLines[nMenuLines];
-            wcsncpy(line.text, wasabiApiLangString(IDS_USE_UP_DOWN_ARROW_KEYS), 255);
-            line.text[255] = 0;
-            line.color = MENU_COLOR;
-            line.x = lineX; line.y = lineY; lineY += fontH;
-            nMenuLines++;
-          }
-          if (nMenuLines < OVERLAY_MAX_MENU_LINES) {
-            OverlayMenuLine& line = od.menuLines[nMenuLines];
-            swprintf(line.text, 256, wasabiApiLangString(IDS_CURRENT_VALUE_OF_X), pItem->m_szName);
-            line.color = MENU_COLOR;
-            line.x = lineX; line.y = lineY; lineY += fontH;
-            nMenuLines++;
-          }
-          if (nMenuLines < OVERLAY_MAX_MENU_LINES) {
-            OverlayMenuLine& line = od.menuLines[nMenuLines];
-            switch (pItem->m_type) {
-            case MENUITEMTYPE_INT:
-              swprintf(line.text, 256, L" %d ", *((int*)addr));
-              break;
-            case MENUITEMTYPE_FLOAT:
-            case MENUITEMTYPE_LOGFLOAT:
-              swprintf(line.text, 256, L" %5.3f ", *((float*)addr));
-              break;
-            case MENUITEMTYPE_BLENDABLE:
-            case MENUITEMTYPE_LOGBLENDABLE:
-              swprintf(line.text, 256, L" %5.3f ", ((CBlendableFloat*)addr)->eval(-1));
-              break;
-            default:
-              wcscpy(line.text, L" ? ");
-              break;
-            }
-            line.color = MENU_HILITE_COLOR;
-            line.x = lineX; line.y = lineY; lineY += fontH;
-            nMenuLines++;
-          }
-          if (m_bShowMenuToolTips && pItem->m_szToolTip[0]) {
-            od.bShowTooltip = true;
-            wcsncpy(od.tooltip, pItem->m_szToolTip, 1023);
-            od.tooltip[1023] = 0;
-          }
-        }
-
-        od.nMenuLines = nMenuLines;
-
-        // Dark background box rect
-        od.menuBox.left   = menuLeft;
-        od.menuBox.top    = menuTop;
-        od.menuBox.right  = xR;
-        od.menuBox.bottom = lineY + PLAYLIST_INNER_MARGIN;
-
-        // Tooltip position (lower-right corner)
-        if (od.bShowTooltip) {
-          od.tooltipX = xR - 500;
-          od.tooltipY = *lower_right_corner_y - fontH - TEXT_MARGIN;
-        }
-      }
-
-      m_overlay.UpdateData(od);
-    }
-
-    // c) fps display (fallback to CTextManager if overlay thread is dead)
-    if (m_bShowFPS && !m_overlay.IsAlive()) {
+    // c) fps display
+    if (m_bShowFPS) {
       SelectFont(SIMPLE_FONT);
       swprintf(buf, L"%s: %4.2f ", wasabiApiLangString(IDS_FPS), GetFps()); // leave extra space @ end, so italicized fonts don't get clipped
       MyTextOut_Shadow(buf, MTO_UPPER_RIGHT);
     }
 
-    // d) debug information (fallback to CTextManager if overlay thread is dead)
-    if (m_bShowDebugInfo && !m_overlay.IsAlive()) {
+    // d) debug information
+    if (m_bShowDebugInfo) {
       SelectFont(SIMPLE_FONT);
       DWORD color = GetFontColor(SIMPLE_FONT);
 
@@ -754,8 +515,8 @@ void Engine::MyRenderUI(
     wchar_t buf2[512] = { 0 };
     wchar_t buf3[512 + 1] = { 0 }; // add two extra spaces to end, so italicized fonts don't get clipped
 
-    // render song title in lower-left corner — overlay thread handles it; CTextManager is fallback
-    if (m_bShowSongTitle && !m_overlay.IsAlive()) {
+    // render song title in lower-left corner
+    if (m_bShowSongTitle) {
       wchar_t buf4[512] = { 0 };
       SelectFont(DECORATIVE_FONT);
       GetSongTitle(buf4, sizeof(buf4)); // defined in utility.h/cpp
@@ -1649,49 +1410,46 @@ void Engine::MyRenderUI(
       for (int i = 0; i < N; i++) {
         if (t >= m_errors[i].birthTime && t < m_errors[i].expireTime) {
           if (m_errors[i].category == ERR_MSG_BOTTOM_EXTRA_1 || m_errors[i].category == ERR_MSG_BOTTOM_EXTRA_2 || m_errors[i].category == ERR_MSG_BOTTOM_EXTRA_3) {
-            // Overlay thread renders these; CTextManager used only as fallback
-            if (!m_overlay.IsAlive()) {
-              int fontIndex = NUM_BASIC_FONTS + m_errors[i].category - ERR_MSG_BOTTOM_EXTRA_1;
-              SelectFont(static_cast<eFontIndex>(fontIndex));
+            int fontIndex = NUM_BASIC_FONTS + m_errors[i].category - ERR_MSG_BOTTOM_EXTRA_1;
+            SelectFont(static_cast<eFontIndex>(fontIndex));
 
-              swprintf(buf, L"%s ", m_errors[i].msg.c_str());
+            swprintf(buf, L"%s ", m_errors[i].msg.c_str());
 
-              // 0..1
-              float totalDuration = m_errors[i].expireTime - m_errors[i].birthTime;
-              float age_rel;
-              if (totalDuration > 3600.0f) {
-                // Always-show: 0.5s fade in, then full alpha permanently
-                float age = t - m_errors[i].birthTime;
-                age_rel = (age < 0.5f) ? (age / 0.5f) * 0.05f : 0.5f;
-              } else {
-                age_rel = (t - m_errors[i].birthTime) / totalDuration;
-              }
-              DWORD cr = m_fontinfo[fontIndex].R;
-              DWORD cg = m_fontinfo[fontIndex].G;
-              DWORD cb = m_fontinfo[fontIndex].B;
-              DWORD alpha = 0;
-              if (age_rel >= 0.0f && age_rel < 0.05f) {
-                alpha = (DWORD)(255 * (age_rel / 0.05f));
-              }
-              else if (age_rel > 0.8f && age_rel <= 1.0f) {
-                alpha = (DWORD)(255 * ((1.0f - age_rel) / 0.2f));
-              }
-              else if (age_rel >= 0.05f && age_rel <= 0.8f) {
-                alpha = 255;
-              }
-              DWORD z = (alpha << 24) | (cr << 16) | (cg << 8) | cb;
-              if (m_SongInfoDisplayCorner == 1) {
-                MyTextOut_Color(buf, MTO_UPPER_LEFT, z);
-              }
-              else if (m_SongInfoDisplayCorner == 2) {
-                MyTextOut_Color(buf, MTO_UPPER_RIGHT, z);
-              }
-              else if (m_SongInfoDisplayCorner == 4) {
-                MyTextOut_Color(buf, MTO_LOWER_RIGHT, z);
-              }
-              else {
-                MyTextOut_Color(buf, MTO_LOWER_LEFT, z);
-              }
+            // 0..1
+            float totalDuration = m_errors[i].expireTime - m_errors[i].birthTime;
+            float age_rel;
+            if (totalDuration > 3600.0f) {
+              // Always-show: 0.5s fade in, then full alpha permanently
+              float age = t - m_errors[i].birthTime;
+              age_rel = (age < 0.5f) ? (age / 0.5f) * 0.05f : 0.5f;
+            } else {
+              age_rel = (t - m_errors[i].birthTime) / totalDuration;
+            }
+            DWORD cr = m_fontinfo[fontIndex].R;
+            DWORD cg = m_fontinfo[fontIndex].G;
+            DWORD cb = m_fontinfo[fontIndex].B;
+            DWORD alpha = 0;
+            if (age_rel >= 0.0f && age_rel < 0.05f) {
+              alpha = (DWORD)(255 * (age_rel / 0.05f));
+            }
+            else if (age_rel > 0.8f && age_rel <= 1.0f) {
+              alpha = (DWORD)(255 * ((1.0f - age_rel) / 0.2f));
+            }
+            else if (age_rel >= 0.05f && age_rel <= 0.8f) {
+              alpha = 255;
+            }
+            DWORD z = (alpha << 24) | (cr << 16) | (cg << 8) | cb;
+            if (m_SongInfoDisplayCorner == 1) {
+              MyTextOut_Color(buf, MTO_UPPER_LEFT, z);
+            }
+            else if (m_SongInfoDisplayCorner == 2) {
+              MyTextOut_Color(buf, MTO_UPPER_RIGHT, z);
+            }
+            else if (m_SongInfoDisplayCorner == 4) {
+              MyTextOut_Color(buf, MTO_LOWER_RIGHT, z);
+            }
+            else {
+              MyTextOut_Color(buf, MTO_LOWER_LEFT, z);
             }
           }
           else {
@@ -1700,14 +1458,11 @@ void Engine::MyRenderUI(
               int res = SendMessageToMDropDX12Remote((L"STATUS=" + m_errors[i].msg).c_str());
               m_errors[i].bSentToRemote = res != 0;
             }
-            // Overlay thread renders these; CTextManager used only as fallback
-            if (!m_overlay.IsAlive()) {
-              if (!m_errors[i].bSentToRemote || !m_HideNotificationsWhenRemoteActive) {
-                SelectFont(m_errors[i].color ? TOOLTIP_FONT : SIMPLE_FONT);
-                swprintf(buf, L"%s ", m_errors[i].msg.c_str());
-                DWORD col = m_errors[i].color ? m_errors[i].color : GetFontColor(SIMPLE_FONT);
-                MyTextOut_Color(buf, MTO_UPPER_RIGHT, col);
-              }
+            if (!m_errors[i].bSentToRemote || !m_HideNotificationsWhenRemoteActive) {
+              SelectFont(m_errors[i].color ? TOOLTIP_FONT : SIMPLE_FONT);
+              swprintf(buf, L"%s ", m_errors[i].msg.c_str());
+              DWORD col = m_errors[i].color ? m_errors[i].color : GetFontColor(SIMPLE_FONT);
+              MyTextOut_Color(buf, MTO_UPPER_RIGHT, col);
             }
           }
         }

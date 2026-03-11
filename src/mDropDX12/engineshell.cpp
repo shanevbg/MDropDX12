@@ -672,20 +672,10 @@ int EngineShell::AllocateDX9Stuff() {
   m_playlist_top_idx = -1;    // invalidating playlist cache forces recompute of playlist width
   //m_icon_list.clear();      // clear desktop mode icon list, so it has to read the bitmaps back in
 
-  // GDI overlay disabled — HUD text now rendered via DX12 font atlas (CTextManager).
-  // The overlay had layered window issues in fullscreen and during move/resize.
-  // All HUD elements (FPS, preset name, debug info, notifications) use the
-  // !m_overlay.IsAlive() fallback paths in MyRenderUI / engine_rendering.cpp.
-  // Menu is rendered via m_pCurMenu->DrawMenu() (DX12 text pipeline).
-
   return ret;
 }
 
 void EngineShell::CleanUpDX9Stuff(int final_cleanup) {
-  // Signal overlay to shut down early (it will wind down during GPU wait)
-  if (!m_vj_mode && final_cleanup)
-    m_overlay.RequestShutdown();
-
   // In DX12, wait for GPU idle before releasing resources
   if (m_lpDX) {
     m_lpDX->WaitForGpu();
@@ -703,9 +693,6 @@ void EngineShell::CleanUpDX9Stuff(int final_cleanup) {
     m_helpTexture.Reset();
     m_helpUploadBuffer.Reset();
     m_helpTexturePage = 0;
-
-    // Wait for overlay thread to finish (should already be done after GPU wait)
-    m_overlay.Shutdown();
   }
 
   CleanUpMyDX9Stuff(final_cleanup);
@@ -2620,7 +2607,6 @@ LRESULT EngineShell::PluginShellWindowProc(HWND hWnd, unsigned uMsg, WPARAM wPar
     return DefWindowProc(hWnd, uMsg, wParam, lParam);
   }
   if (uMsg == WM_WINDOWPOSCHANGED) {
-    m_overlay.OnParentMove();
     return DefWindowProc(hWnd, uMsg, wParam, lParam);
   }
   return MyWindowProc(hWnd, uMsg, wParam, lParam);

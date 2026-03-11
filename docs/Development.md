@@ -118,11 +118,14 @@ powershell -ExecutionPolicy Bypass -File build.ps1 Release x64
 
 Arguments: `[Debug|Release]` `[x64]` `[Clean]`
 
+Pass `Clean` as the third argument to do a full clean + rebuild (deletes all .obj files first).
+
 The build script will:
 
 1. Locate MSBuild via `vswhere.exe`
 2. Clone the Spout2 SDK into `external/Spout2/` if not already present
-3. Invoke MSBuild with the specified configuration and platform
+3. Kill any running `MDropDX12.exe` instance (the linker overwrites the exe)
+4. Invoke MSBuild with the specified configuration and platform
 
 ### From VSCodium
 
@@ -141,7 +144,7 @@ The project includes pre-configured build tasks in `.vscode/tasks.json`.
 
 Press **F5** in VSCodium to build and launch the debugger. The launch configuration (`.vscode/launch.json`) builds the Debug configuration, then runs the exe with `Release/` as the working directory.
 
-Make sure you've run `Developer-Setup.cmd` first so the `Release/` folder has the required config files and resources.
+The exe self-bootstraps on first run — no manual setup of the `Release/` folder is needed.
 
 ### Release
 
@@ -178,7 +181,7 @@ MDropDX12/
       engine_input.cpp   -- Keyboard/mouse/hotkey handlers
       engine_presets.cpp  -- Preset loading, parsing, cross-fading
       state.cpp/h        -- Preset state and parameter storage
-      overlay.cpp/h      -- GDI layered window for HUD text
+      textmgr.cpp/h      -- DX12 font atlas text rendering (GDI atlas + sprite quads)
       ...
     ns-eel2/             -- Expression evaluator (Cockos WDL ns-eel2, x64 JIT)
   external/              -- Auto-fetched dependencies (Spout2 SDK)
@@ -369,7 +372,9 @@ Font atlas SRV slots must be allocated **before** `m_srvSlotBaseline` is set. `R
 ### Thread Safety
 
 - Use `std::atomic` for cross-thread flags (e.g., `m_bScreenshotRequested`, `m_bMirrorStylesDirty`)
-- **Render thread** owns DX12 resources; **message pump thread** owns HWNDs
+- **Render thread** owns DX12 resources and all HUD text rendering (CTextManager)
+- **Message pump thread** owns HWNDs
+- **IPC thread** runs a hidden 1x1 window for `WM_COPYDATA` from Milkwave Remote
 - Use the `RenderCommand` queue (`EnqueueRenderCmd`) for cross-thread communication
 - ToolWindows run on **their own threads** — don't access DX12 from ToolWindow code
 

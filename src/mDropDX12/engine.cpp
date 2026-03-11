@@ -721,6 +721,7 @@ volatile HANDLE g_hThread;  // only r/w from our MAIN thread
 volatile bool g_bThreadAlive; // set true by MAIN thread, and set false upon exit from 2nd thread.
 volatile int  g_bThreadShouldQuit;  // set by MAIN thread to flag 2nd thread that it wants it to exit.
 CRITICAL_SECTION g_cs;
+CRITICAL_SECTION g_csPresetPending;
 
 // IsAlphabetChar, IsAlphanumericChar, IsNumericChar now in engine_helpers.h
 
@@ -1405,6 +1406,19 @@ void Engine::MyReadConfig() {
   // Preset annotations
   LoadPresetAnnotations();
 
+  // Auto-import MWR tags if tags-remote.json exists in preset dir or base dir
+  {
+    wchar_t szTagsPath[MAX_PATH];
+    swprintf(szTagsPath, MAX_PATH, L"%stags-remote.json", m_szPresetDir);
+    if (GetFileAttributesW(szTagsPath) != INVALID_FILE_ATTRIBUTES) {
+      ImportMWRTags(szTagsPath);
+    } else {
+      swprintf(szTagsPath, MAX_PATH, L"%stags-remote.json", m_szBaseDir);
+      if (GetFileAttributesW(szTagsPath) != INVALID_FILE_ATTRIBUTES)
+        ImportMWRTags(szTagsPath);
+    }
+  }
+
   m_nInjectEffectMode = GetPrivateProfileIntW(L"Settings", L"nInjectEffectMode", 0, pIni);
   m_nInjectEffectMode = max(0, min(4, m_nInjectEffectMode)); // clamp to valid range
   // ======================================
@@ -1470,6 +1484,16 @@ void Engine::MyReadConfig() {
   //m_bAnisotropicFiltering = GetPrivateProfileBool("settings","bAnisotropicFiltering",m_bAnisotropicFiltering,pIni);
   m_bPresetLockOnAtStartup = GetPrivateProfileBoolW(L"Settings", L"bPresetLockOnAtStartup", m_bPresetLockOnAtStartup, pIni);
   m_bSequentialPresetOrder = GetPrivateProfileBoolW(L"Settings", L"bSequentialPresetOrder", m_bSequentialPresetOrder, pIni);
+  m_nSubdirMode = GetPrivateProfileIntW(L"Settings", L"nSubdirMode", m_nSubdirMode, pIni);
+  if (m_nSubdirMode < 0 || m_nSubdirMode > 1) m_nSubdirMode = 0;
+  m_bRecursivePresets = (m_nSubdirMode == 1);
+  m_nPresetFilter = GetPrivateProfileIntW(L"Settings", L"nPresetFilter", m_nPresetFilter, pIni);
+  if (m_nPresetFilter < 0 || m_nPresetFilter > 3) m_nPresetFilter = 0;
+  {
+    wchar_t szList[256] = {};
+    GetPrivateProfileStringW(L"Settings", L"szActivePresetList", L"", szList, 256, pIni);
+    m_szActivePresetList = szList;
+  }
 
   m_bPreventScollLockHandling = GetPrivateProfileBoolW(L"Settings", L"m_bPreventScollLockHandling", m_bPreventScollLockHandling, pIni);
 
@@ -1758,6 +1782,9 @@ void Engine::MyWriteConfig() {
   //WritePrivateProfileIntW(m_bAnisotropicFiltering,	"bAnisotropicFiltering",pIni, "settings");
   WritePrivateProfileIntW(m_bPresetLockOnAtStartup, L"bPresetLockOnAtStartup", pIni, L"Settings");
   WritePrivateProfileIntW(m_bSequentialPresetOrder, L"bSequentialPresetOrder", pIni, L"Settings");
+  WritePrivateProfileIntW(m_nSubdirMode, L"nSubdirMode", pIni, L"Settings");
+  WritePrivateProfileIntW(m_nPresetFilter, L"nPresetFilter", pIni, L"Settings");
+  WritePrivateProfileStringW(L"Settings", L"szActivePresetList", m_szActivePresetList.c_str(), pIni);
 
   WritePrivateProfileIntW(m_bPreventScollLockHandling, L"m_bPreventScollLockHandling", pIni, L"Settings");
   // note: this is also written @ exit of the visualizer
@@ -1981,6 +2008,7 @@ int Engine::AllocateMyNonDx9Stuff() {
   g_bThreadAlive = false;
   g_bThreadShouldQuit = false;
   InitializeCriticalSection(&g_cs);
+  InitializeCriticalSection(&g_csPresetPending);
 
   // read in 'm_szShaderIncludeText'
   bool bSuccess = true;
@@ -2073,6 +2101,7 @@ void Engine::CleanUpMyNonDx9Stuff() {
     // NOTE: DO NOT DELETE m_gdi_titlefont_doublesize HERE!!!
 
   DeleteCriticalSection(&g_cs);
+  DeleteCriticalSection(&g_csPresetPending);
 
   CancelThread(1000);
 
@@ -3153,7 +3182,17 @@ int Engine::AllocateMyDX9Stuff() {
   }
 
   if (!m_bInitialPresetSelected) {
-    UpdatePresetList(true); //...just does its initial burst!
+    // If a saved preset list was active, reload it instead of scanning the directory
+    if (!m_szActivePresetList.empty()) {
+      wchar_t szListDir[MAX_PATH];
+      GetPresetListDir(szListDir, MAX_PATH);
+      wchar_t szListPath[MAX_PATH];
+      swprintf(szListPath, L"%s%s.txt", szListDir, m_szActivePresetList.c_str());
+      if (!LoadPresetList(szListPath))
+        m_szActivePresetList.clear();  // file gone — fall through to normal scan
+    }
+    if (m_szActivePresetList.empty())
+      UpdatePresetList(true); //...just does its initial burst!
     if (m_bEnablePresetStartup && wcslen(m_szPresetStartup) > 0) {
       LoadPreset(m_szPresetStartup, 0.0f);
 
@@ -3509,6 +3548,35 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
 void Engine::MyRenderFn(int redraw) {
 
   EnterCriticalSection(&g_cs);
+
+  // Check for pending preset list swap from scan thread
+  if (m_bPendingPresetSwap.load(std::memory_order_acquire)) {
+    EnterCriticalSection(&g_csPresetPending);
+    m_presets = std::move(m_pendingPresets);
+    m_nPresets = m_nPendingPresets;
+    m_nDirs = m_nPendingDirs;
+    m_nPresetListCurPos = m_nPendingCurPos;
+    m_bPresetListReady = m_bPendingListReady;
+    m_nPendingPresets = 0;
+    m_nPendingDirs = 0;
+    m_bPendingPresetSwap.store(false, std::memory_order_release);
+    LeaveCriticalSection(&g_csPresetPending);
+    ClearErrors(ERR_SCANNING_PRESETS);
+  }
+
+  // Check for pending ratings swap from scan thread
+  if (m_bPendingRatingsSwap.load(std::memory_order_acquire)) {
+    EnterCriticalSection(&g_csPresetPending);
+    int n = min(m_nPendingRatingsCount, m_nPresets);
+    for (int i = 0; i < n; i++) {
+      m_presets[i].fRatingThis = m_pendingRatings[i];
+      m_presets[i].fRatingCum = (i == 0) ? m_pendingRatings[i]
+                                          : m_presets[i - 1].fRatingCum + m_pendingRatings[i];
+    }
+    m_nPendingRatingsCount = 0;
+    m_bPendingRatingsSwap.store(false, std::memory_order_release);
+    LeaveCriticalSection(&g_csPresetPending);
+  }
 
   // Render a frame of animation here.
   // This function is called each frame just AFTER BeginScene().

@@ -22,6 +22,7 @@
 #include "AutoCharFn.h"
 #include <sstream>
 #include <condition_variable>
+#include <algorithm>
 
 #define FRAND ((rand() % 7381)/7380.0f)
 
@@ -187,6 +188,7 @@ extern volatile HANDLE g_hThread;
 extern volatile bool g_bThreadAlive;
 extern volatile int g_bThreadShouldQuit;
 extern CRITICAL_SECTION g_cs;
+extern CRITICAL_SECTION g_csPresetPending;
 
 // Forward declaration for helper defined later in this file
 // (non-static because also called from engine.cpp and engine_input.cpp)
@@ -2300,314 +2302,331 @@ char* NextLine(char* p) {
   return s;
 }
 
+// Recursive directory scanner for building flat preset lists.
+// Scans baseDir + relPrefix for .milk/.milk2/.milk3 files and recurses into subdirs.
+// Appends results to temp_presets with relative paths (relPrefix + filename).
+static void ScanDirRecursive(
+    const wchar_t* baseDir,
+    const wchar_t* relPrefix,    // e.g., L"" or L"subdir\\"
+    int nMaxPSVersion,
+    int nPresetFilter,
+    PresetList& temp_presets,
+    int& temp_nPresets)
+{
+    wchar_t szMask[MAX_PATH];
+    swprintf(szMask, L"%s%s*.*", baseDir, relPrefix);
+
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW(szMask, &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+
+    do {
+        if (g_bThreadShouldQuit) break;
+
+        bool bIsDir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+
+        if (bIsDir) {
+            // Skip . and ..
+            if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0)
+                continue;
+            // Recurse into subdirectory
+            wchar_t newPrefix[MAX_PATH];
+            swprintf(newPrefix, L"%s%s\\", relPrefix, fd.cFileName);
+            ScanDirRecursive(baseDir, newPrefix, nMaxPSVersion, nPresetFilter, temp_presets, temp_nPresets);
+            continue;
+        }
+
+        // Check file extension
+        int len = lstrlenW(fd.cFileName);
+        bool bIsMilk  = (len >= 5 && wcsicmp(fd.cFileName + len - 5, L".milk")  == 0);
+        bool bIsMilk2 = (len >= 6 && wcsicmp(fd.cFileName + len - 6, L".milk2") == 0);
+        bool bIsMilk3 = (len >= 6 && _wcsicmp(fd.cFileName + len - 6, L".milk3") == 0);
+        if (!bIsMilk && !bIsMilk2 && !bIsMilk3) continue;
+
+        // Apply preset filter
+        if (nPresetFilter == 1 && !bIsMilk) continue;
+        if (nPresetFilter == 2 && !bIsMilk2) continue;
+        if (nPresetFilter == 3 && !bIsMilk3) continue;
+
+        // Skip file I/O for rating in recursive mode — use default rating
+        float fRating = 3.0f;
+
+        // Build relative filename: relPrefix + filename
+        wchar_t szRelFilename[MAX_PATH];
+        swprintf(szRelFilename, L"%s%s", relPrefix, fd.cFileName);
+
+        float fPrevCum = temp_nPresets > 0 ? temp_presets[temp_nPresets - 1].fRatingCum : 0;
+        PresetInfo x;
+        x.szFilename = szRelFilename;
+        x.fRatingThis = fRating;
+        x.fRatingCum = fPrevCum + fRating;
+        temp_presets.push_back(x);
+        temp_nPresets++;
+    } while (FindNextFileW(h, &fd));
+
+    FindClose(h);
+}
+
+// Parameters snapshotted from engine state before thread launch (no CS needed in thread)
+struct ScanParams {
+  bool bForce;
+  bool bTryReselectCurrentPreset;
+  int  nMaxPSVersion;
+  int  nPresetFilter;
+  bool bRecursive;
+  wchar_t szPresetDir[MAX_PATH];
+  wchar_t szCurrentPresetFile[512];
+  wchar_t szUpdatePresetMask[MAX_PATH];  // previous mask for staleness check
+  wchar_t szMilkdrop2Path[MAX_PATH];
+  wchar_t szPluginsDirPath[MAX_PATH];
+};
+
+// Try fallback preset directories locally (no g_engine writes)
+static bool FindValidPresetDirLocal(wchar_t* szPresetDir, const wchar_t* szMilkdrop2Path, const wchar_t* szPluginsDirPath) {
+  swprintf(szPresetDir, L"%spresets\\", szMilkdrop2Path);
+  if (GetFileAttributesW(szPresetDir) != INVALID_FILE_ATTRIBUTES)
+    return true;
+  lstrcpyW(szPresetDir, szMilkdrop2Path);
+  if (GetFileAttributesW(szPresetDir) != INVALID_FILE_ATTRIBUTES)
+    return true;
+  lstrcpyW(szPresetDir, szPluginsDirPath);
+  if (GetFileAttributesW(szPresetDir) != INVALID_FILE_ATTRIBUTES)
+    return true;
+  // Keep default preset path
+  swprintf(szPresetDir, L"%spresets\\", szMilkdrop2Path);
+  return false;
+}
+
 static unsigned int WINAPI __UpdatePresetList(void* lpVoid) {
   // NOTE - this is run in a separate thread!!!
+  // This thread publishes results via g_csPresetPending + atomic flags.
+  // It never touches g_cs. The old preset list stays visible until the render thread swaps in the new one.
 
-  DWORD flags = (DWORD)(uintptr_t)lpVoid;
-  bool bForce = (flags & 1) ? true : false;
-  bool bTryReselectCurrentPreset = (flags & 2) ? true : false;
+  ScanParams* params = (ScanParams*)lpVoid;
+  bool bForce = params->bForce;
+  bool bTryReselectCurrentPreset = params->bTryReselectCurrentPreset;
+  int  nMaxPSVersion = params->nMaxPSVersion;
+  int  nPresetFilter = params->nPresetFilter;
+  bool bRecursive = params->bRecursive;
+  wchar_t szPresetDir[MAX_PATH];
+  lstrcpyW(szPresetDir, params->szPresetDir);
+  wchar_t szCurrentPresetFile[512];
+  lstrcpyW(szCurrentPresetFile, params->szCurrentPresetFile);
+  wchar_t szMilkdrop2Path[MAX_PATH];
+  lstrcpyW(szMilkdrop2Path, params->szMilkdrop2Path);
+  wchar_t szPluginsDirPath[MAX_PATH];
+  lstrcpyW(szPluginsDirPath, params->szPluginsDirPath);
 
-  WIN32_FIND_DATAW fd;
-  ZeroMemory(&fd, sizeof(fd));
-  HANDLE h = INVALID_HANDLE_VALUE;
-
-  int nTry = 0;
-  bool bRetrying = false;
-
-  EnterCriticalSection(&g_cs);
-retry:
-
-  // make sure the path exists; if not, go to winamp plugins dir
-  if (GetFileAttributesW(g_engine.m_szPresetDir) == -1) {
-    //FIXME...
-    g_engine.FindValidPresetDir();
-  }
-
-  // if Mask (dir) changed, do a full re-scan;
-  // if not, just finish our old scan.
+  // Check if rescan is needed (compare mask)
   wchar_t szMask[MAX_PATH];
-  swprintf(szMask, L"%s*.*", g_engine.m_szPresetDir);  // cuz dirnames could have extensions, etc.
-  if (bForce || !g_engine.m_szUpdatePresetMask[0] || wcscmp(szMask, g_engine.m_szUpdatePresetMask)) {
-    // if old dir was "" or the dir changed, reset our search
-    if (h != INVALID_HANDLE_VALUE)
-      FindClose(h);
-    h = INVALID_HANDLE_VALUE;
-    g_engine.m_bPresetListReady = false;
-    lstrcpyW(g_engine.m_szUpdatePresetMask, szMask);
-    ZeroMemory(&fd, sizeof(fd));
+  swprintf(szMask, L"%s*.*", szPresetDir);
+  bool bNeedRescan = bForce || !params->szUpdatePresetMask[0] || wcscmp(szMask, params->szUpdatePresetMask);
 
-    g_engine.m_nPresets = 0;
-    g_engine.m_nDirs = 0;
-    g_engine.m_presets.clear();
-
-    // find first .MILK file
-    //if( (hFile = _findfirst(szMask, &c_file )) != -1L )		// note: returns filename -without- path
-    if ((h = FindFirstFileW(g_engine.m_szUpdatePresetMask, &fd)) == INVALID_HANDLE_VALUE)		// note: returns filename -without- path
-    {
-      // Only show error if no preset is currently loaded (first run / empty dir)
-      bool bHasPreset = wcscmp(g_engine.m_pState->m_szDesc, INVALID_PRESET_DESC) != 0;
-      if (!bHasPreset) {
-        wchar_t buf[1024];
-        swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILES_OR_DIRS_FOUND_IN_X), g_engine.m_szPresetDir);
-        g_engine.AddError(buf, g_engine.m_ErrorDuration, ERR_MISC, true);
-      }
-
-      if (bRetrying) {
-        LeaveCriticalSection(&g_cs);
-        g_bThreadAlive = false;
-        _endthreadex(0);
-        return 0;
-      }
-
-      g_engine.FindValidPresetDir();
-
-      bRetrying = true;
-      goto retry;
-    }
-
-    // g_engine.AddError(wasabiApiLangString(IDS_SCANNING_PRESETS), 8.0f, ERR_SCANNING_PRESETS, false);
-  }
-
-  if (g_engine.m_bPresetListReady) {
-    LeaveCriticalSection(&g_cs);
+  if (!bNeedRescan) {
+    // Already up to date — nothing to do
+    delete params;
     g_bThreadAlive = false;
     _endthreadex(0);
     return 0;
   }
+  delete params;
+  params = nullptr;
 
-  int  nMaxPSVersion = g_engine.m_nMaxPSVersion;
-  wchar_t szPresetDir[MAX_PATH];
-  lstrcpyW(szPresetDir, g_engine.m_szPresetDir);
+  // Update the mask on the engine (no g_cs needed — only main thread reads this)
+  lstrcpyW(g_engine.m_szUpdatePresetMask, szMask);
 
-  LeaveCriticalSection(&g_cs);
+  // Validate preset directory — try fallbacks locally
+  for (int attempt = 0; attempt < 2 && !g_bThreadShouldQuit; attempt++) {
+    if (GetFileAttributesW(szPresetDir) != INVALID_FILE_ATTRIBUTES)
+      break;
+    FindValidPresetDirLocal(szPresetDir, szMilkdrop2Path, szPluginsDirPath);
+  }
 
+  // Scan directory
   PresetList temp_presets;
   int temp_nDirs = 0;
   int temp_nPresets = 0;
 
-  // scan for the desired # of presets, this call...
-  while (!g_bThreadShouldQuit && h != INVALID_HANDLE_VALUE) {
-    bool bSkip = false;
-    bool bIsDir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-    float fRating = 0;
+  if (bRecursive) {
+    ScanDirRecursive(szPresetDir, L"", nMaxPSVersion, nPresetFilter, temp_presets, temp_nPresets);
+  } else {
+    // Non-recursive: single-level scan
+    swprintf(szMask, L"%s*.*", szPresetDir);
+    WIN32_FIND_DATAW fd;
+    ZeroMemory(&fd, sizeof(fd));
+    HANDLE h = FindFirstFileW(szMask, &fd);
 
-    wchar_t szFilename[512];
-    lstrcpyW(szFilename, fd.cFileName);
-
-    if (bIsDir) {
-      // skip "." directory
-      if (wcscmp(fd.cFileName, L".") == 0)// || lstrlen(ffd.cFileName) < 1)
-        bSkip = true;
-      else
-        swprintf(szFilename, L"*%s", fd.cFileName);
+    if (h == INVALID_HANDLE_VALUE) {
+      // Try fallback directory
+      FindValidPresetDirLocal(szPresetDir, szMilkdrop2Path, szPluginsDirPath);
+      swprintf(szMask, L"%s*.*", szPresetDir);
+      h = FindFirstFileW(szMask, &fd);
     }
-    else {
-      // skip normal files not ending in ".milk", ".milk2", or ".milk3"
-      int len = lstrlenW(fd.cFileName);
-      bool bIsMilk  = (len >= 5 && wcsicmp(fd.cFileName + len - 5, L".milk")  == 0);
-      bool bIsMilk2 = (len >= 6 && wcsicmp(fd.cFileName + len - 6, L".milk2") == 0);
-      bool bIsMilk3 = (len >= 6 && _wcsicmp(fd.cFileName + len - 6, L".milk3") == 0);
-      if (!bIsMilk && !bIsMilk2 && !bIsMilk3)
-        bSkip = true;
 
-      // Apply preset filter: 0=all, 1=.milk only, 2=.milk2 only, 3=.milk3 only
-      if (!bSkip && g_engine.m_nPresetFilter == 1 && !bIsMilk)
-        bSkip = true;
-      if (!bSkip && g_engine.m_nPresetFilter == 2 && !bIsMilk2)
-        bSkip = true;
-      if (!bSkip && g_engine.m_nPresetFilter == 3 && !bIsMilk3)
-        bSkip = true;
+    if (h != INVALID_HANDLE_VALUE) {
+      do {
+        if (g_bThreadShouldQuit) break;
 
-      // .milk3 files are always runnable (JSON + HLSL, no PS version check needed)
-      if (!bSkip && bIsMilk3) {
-        fRating = 3.0f;  // default rating so CDF-weighted random selection can pick them
-      }
-      // if it is .milk/.milk2, make sure we know how to run its pixel shaders -
-      // otherwise we don't want to show it in the preset list!
-      else if (!bSkip) {
-        // If the first line of the file is not "MILKDROP_PRESET_VERSION XXX",
-        //   then it's a MilkDrop 1 era preset, so it is definitely runnable. (no shaders)
-        // Otherwise, check for the value "PSVERSION".  It will be 0, 2, or 3.
-        //   If missing, assume it is 2.
-        wchar_t szFullPath[MAX_PATH];
-        swprintf(szFullPath, L"%s%s", szPresetDir, fd.cFileName);
-        FILE* f = _wfopen(szFullPath, L"r");
-        if (!f)
-          bSkip = true;
-        else {
-#define PRESET_HEADER_SCAN_BYTES 160
-          char szLine[PRESET_HEADER_SCAN_BYTES];
-          char* p = szLine;
+        bool bSkip = false;
+        bool bIsDir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        wchar_t szFilename[512];
+        lstrcpyW(szFilename, fd.cFileName);
 
-          int bytes_to_read = sizeof(szLine) - 1;
-          size_t count = fread(szLine, bytes_to_read, 1, f);
-          if (count < 1) {
-            fseek(f, SEEK_SET, 0);
-            count = fread(szLine, 1, bytes_to_read, f);
-            szLine[(int)count] = 0;
-          }
+        if (bIsDir) {
+          if (wcscmp(fd.cFileName, L".") == 0)
+            bSkip = true;
           else
-            szLine[bytes_to_read - 1] = 0;
-
-          bool bScanForPreset00AndRating = false;
-          bool bRatingKnown = false;
-
-          // try to read the PSVERSION and the fRating= value.
-          // most presets (unless hand-edited) will have these right at the top.
-          // if not, [at least for fRating] use GetPrivateProfileFloat to search whole file.
-          // read line 1
-          //p = NextLine(p);//fgets(p, sizeof(p)-1, f);
-          if (!strncmp(p, "MILKDROP_PRESET_VERSION", 23)) {
-            p = NextLine(p);//fgets(p, sizeof(p)-1, f);
-            int ps_version = 2;
-            if (p && !strncmp(p, "PSVERSION", 9)) {
-              sscanf(&p[10], "%d", &ps_version);
-              if (ps_version > nMaxPSVersion)
-                bSkip = true;
-              else {
-                p = NextLine(p);//fgets(p, sizeof(p)-1, f);
-                bScanForPreset00AndRating = true;
-              }
-            }
-          }
-          else {
-            // otherwise it's a MilkDrop 1 preset - we can run it.
-            bScanForPreset00AndRating = true;
-          }
-
-          // scan up to 10 more lines in the file, looking for [preset00] and fRating=...
-          // (this is WAY faster than GetPrivateProfileFloat, when it works!)
-          int reps = (bScanForPreset00AndRating) ? 10 : 0;
-          for (int z = 0; z < reps; z++) {
-            if (p && !strncmp(p, "[preset00]", 10)) {
-              p = NextLine(p);
-              if (p && !strncmp(p, "fRating=", 8)) {
-                _sscanf_l(&p[8], "%f", g_use_C_locale, &fRating);
-                bRatingKnown = true;
-                break;
-              }
-            }
-            p = NextLine(p);
-          }
-
-          fclose(f);
-
-          if (!bRatingKnown)
-            fRating = GetPrivateProfileFloatW(L"preset00", L"fRating", 3.0f, szFullPath);
-          fRating = max(0.0f, min(5.0f, fRating));
+            swprintf(szFilename, L"*%s", fd.cFileName);
+        } else {
+          int len = lstrlenW(fd.cFileName);
+          bool bIsMilk  = (len >= 5 && wcsicmp(fd.cFileName + len - 5, L".milk")  == 0);
+          bool bIsMilk2 = (len >= 6 && wcsicmp(fd.cFileName + len - 6, L".milk2") == 0);
+          bool bIsMilk3 = (len >= 6 && _wcsicmp(fd.cFileName + len - 6, L".milk3") == 0);
+          if (!bIsMilk && !bIsMilk2 && !bIsMilk3)
+            bSkip = true;
+          if (!bSkip && nPresetFilter == 1 && !bIsMilk)  bSkip = true;
+          if (!bSkip && nPresetFilter == 2 && !bIsMilk2) bSkip = true;
+          if (!bSkip && nPresetFilter == 3 && !bIsMilk3) bSkip = true;
         }
-      }
-    }
 
-    if (!bSkip) {
-      float fPrevPresetRatingCum = 0;
-      if (temp_nPresets > 0)
-        fPrevPresetRatingCum += temp_presets[temp_nPresets - 1].fRatingCum;
-
-      PresetInfo x;
-      x.szFilename = szFilename;
-      x.fRatingThis = fRating;
-      x.fRatingCum = fPrevPresetRatingCum + fRating;
-      temp_presets.push_back(x);
-
-      temp_nPresets++;
-      if (bIsDir)
-        temp_nDirs++;
-    }
-
-    if (!FindNextFileW(h, &fd)) {
+        if (!bSkip) {
+          PresetInfo x;
+          x.szFilename = szFilename;
+          x.fRatingThis = 3.0f;
+          x.fRatingCum = 0;
+          temp_presets.push_back(x);
+          temp_nPresets++;
+          if (bIsDir) temp_nDirs++;
+        }
+      } while (FindNextFileW(h, &fd));
       FindClose(h);
-      h = INVALID_HANDLE_VALUE;
-
-      break;
-    }
-
-    // every so often, add some presets...
-#define PRESET_UPDATE_INTERVAL 64
-    if (temp_nPresets == 30 || ((temp_nPresets % PRESET_UPDATE_INTERVAL) == 0)) {
-      EnterCriticalSection(&g_cs);
-
-      //g_engine.m_presets  = temp_presets;
-      int curPreset = g_engine.m_nPresets;
-      while (!g_bThreadShouldQuit && curPreset < temp_nPresets) {
-        g_engine.m_presets.push_back(temp_presets[curPreset]);
-        curPreset++;
-      }
-      g_engine.m_nPresets = curPreset;
-      g_engine.m_nDirs = temp_nDirs;
-
-      LeaveCriticalSection(&g_cs);
     }
   }
 
   if (g_bThreadShouldQuit) {
-    // just abort... we are exiting the program or restarting the scan.
     g_bThreadAlive = false;
     _endthreadex(0);
     return 0;
   }
 
-  EnterCriticalSection(&g_cs);
-
-  //g_engine.m_presets  = temp_presets;
-  for (int i = g_engine.m_nPresets; i < temp_nPresets; i++)
-    g_engine.m_presets.push_back(temp_presets[i]);
-  g_engine.m_nPresets = temp_nPresets;
-  g_engine.m_nDirs = temp_nDirs;
-  g_engine.m_bPresetListReady = true;
-
-  if (g_engine.m_bPresetListReady && g_engine.m_nPresets == 0) {
-    // no presets OR directories found
-    // Only show error if no preset is currently loaded
-    bool bHasPreset = wcscmp(g_engine.m_pState->m_szDesc, INVALID_PRESET_DESC) != 0;
-    if (!bHasPreset) {
-      wchar_t buf[1024];
-      swprintf(buf, wasabiApiLangString(IDS_ERROR_NO_PRESET_FILES_OR_DIRS_FOUND_IN_X), g_engine.m_szPresetDir);
-      g_engine.AddError(buf, g_engine.m_ErrorDuration, ERR_MISC, true);
-    }
-
-    if (bRetrying) {
-      LeaveCriticalSection(&g_cs);
-      g_bThreadAlive = false;
-      _endthreadex(0);
-      return 0;
-    }
-
-    g_engine.FindValidPresetDir();
-
-    bRetrying = true;
-    goto retry;
+  if (temp_nPresets == 0) {
+    // Publish empty list via pending buffer
+    DLOG_INFO("__UpdatePresetList: no presets found in %ls", szPresetDir);
+    EnterCriticalSection(&g_csPresetPending);
+    g_engine.m_pendingPresets.clear();
+    g_engine.m_nPendingPresets = 0;
+    g_engine.m_nPendingDirs = 0;
+    g_engine.m_nPendingCurPos = 0;
+    g_engine.m_bPendingListReady = true;
+    g_engine.m_bPendingPresetSwap.store(true, std::memory_order_release);
+    LeaveCriticalSection(&g_csPresetPending);
+    g_bThreadAlive = false;
+    _endthreadex(0);
+    return 0;
   }
 
-  if (g_engine.m_bPresetListReady) {
-    g_engine.MergeSortPresets(0, g_engine.m_nPresets - 1);
+  // Sort: directories first, then alphabetical
+  {
+    auto sortCmp = [](const PresetInfo& a, const PresetInfo& b) {
+      bool aDir = !a.szFilename.empty() && a.szFilename[0] == L'*';
+      bool bDir = !b.szFilename.empty() && b.szFilename[0] == L'*';
+      if (aDir != bDir) return aDir;
+      return mystrcmpiW(a.szFilename.c_str(), b.szFilename.c_str()) < 0;
+    };
+    std::sort(temp_presets.begin(), temp_presets.begin() + temp_nPresets, sortCmp);
+  }
 
-    // update cumulative ratings, since order changed...
-    g_engine.m_presets[0].fRatingCum = g_engine.m_presets[0].fRatingThis;
-    for (int i = 0; i < g_engine.m_nPresets; i++)
-      g_engine.m_presets[i].fRatingCum = i == 0 ? 0 : g_engine.m_presets[i - 1].fRatingCum + g_engine.m_presets[i].fRatingThis;
+  // Cumulative ratings
+  for (int i = 0; i < temp_nPresets; i++)
+    temp_presets[i].fRatingCum = (i == 0) ? temp_presets[i].fRatingThis
+                                          : temp_presets[i - 1].fRatingCum + temp_presets[i].fRatingThis;
 
-    // clear the "scanning presets" msg
-    g_engine.ClearErrors(ERR_SCANNING_PRESETS);
-
-    // finally, try to re-select the most recently-used preset in the list
-    g_engine.m_nPresetListCurPos = 0;
-    if (bTryReselectCurrentPreset) {
-      if (g_engine.m_szCurrentPresetFile[0]) {
-        // try to automatically seek to the last preset loaded
-        wchar_t* p = wcsrchr(g_engine.m_szCurrentPresetFile, L'\\');
-        p = (p) ? (p + 1) : g_engine.m_szCurrentPresetFile;
-        for (int i = g_engine.m_nDirs; i < g_engine.m_nPresets; i++) {
-          if (wcscmp(p, g_engine.m_presets[i].szFilename.c_str()) == 0) {
-            g_engine.m_nPresetListCurPos = i;
-            break;
-          }
-        }
+  // Reselect current preset (uses snapshotted szCurrentPresetFile — no CS needed)
+  int newCurPos = 0;
+  if (bTryReselectCurrentPreset && szCurrentPresetFile[0]) {
+    const wchar_t* pMatch = szCurrentPresetFile;
+    int dirLen = lstrlenW(szPresetDir);
+    if (dirLen > 0 && _wcsnicmp(pMatch, szPresetDir, dirLen) == 0)
+      pMatch += dirLen;
+    else {
+      const wchar_t* p2 = wcsrchr(pMatch, L'\\');
+      pMatch = p2 ? (p2 + 1) : pMatch;
+    }
+    for (int i = temp_nDirs; i < temp_nPresets; i++) {
+      if (wcscmp(pMatch, temp_presets[i].szFilename.c_str()) == 0) {
+        newCurPos = i;
+        break;
       }
     }
   }
 
-  LeaveCriticalSection(&g_cs);
+  // Save filenames locally before std::move (needed for pass 2 rating reads)
+  std::vector<std::wstring> filenames(temp_nPresets);
+  for (int i = 0; i < temp_nPresets; i++)
+    filenames[i] = temp_presets[i].szFilename;
+
+  // Publish preset list via pending buffer (render thread picks it up next frame)
+  EnterCriticalSection(&g_csPresetPending);
+  g_engine.m_pendingPresets = std::move(temp_presets);
+  g_engine.m_nPendingPresets = temp_nPresets;
+  g_engine.m_nPendingDirs = temp_nDirs;
+  g_engine.m_nPendingCurPos = newCurPos;
+  g_engine.m_bPendingListReady = true;
+  g_engine.m_bPendingPresetSwap.store(true, std::memory_order_release);
+  LeaveCriticalSection(&g_csPresetPending);
+
+  // Pass 2: read ratings from preset files in background
+  // Uses locally-saved filenames — NO CS held during file reads
+  {
+    std::vector<float> ratings(temp_nPresets, 3.0f);
+
+    for (int i = temp_nDirs; i < temp_nPresets && !g_bThreadShouldQuit; i++) {
+      if (filenames[i].empty() || filenames[i][0] == L'*') continue;
+
+      wchar_t szFullPath[MAX_PATH];
+      swprintf(szFullPath, L"%s%s", szPresetDir, filenames[i].c_str());
+
+      FILE* f = _wfopen(szFullPath, L"r");
+      if (!f) continue;
+
+      char szLine[160];
+      int bytes_to_read = sizeof(szLine) - 1;
+      size_t count = fread(szLine, bytes_to_read, 1, f);
+      if (count < 1) {
+        fseek(f, SEEK_SET, 0);
+        count = fread(szLine, 1, bytes_to_read, f);
+        szLine[(int)count] = 0;
+      } else {
+        szLine[bytes_to_read - 1] = 0;
+      }
+      fclose(f);
+
+      char* p = szLine;
+      if (!strncmp(p, "MILKDROP_PRESET_VERSION", 23))
+        p = NextLine(p);
+      if (p && !strncmp(p, "PSVERSION", 9))
+        p = NextLine(p);
+      for (int z = 0; z < 10 && p; z++) {
+        if (!strncmp(p, "[preset00]", 10)) {
+          p = NextLine(p);
+          if (p && !strncmp(p, "fRating=", 8))
+            _sscanf_l(&p[8], "%f", g_use_C_locale, &ratings[i]);
+          break;
+        }
+        p = NextLine(p);
+      }
+      ratings[i] = max(0.0f, min(5.0f, ratings[i]));
+    }
+
+    // Publish ratings via pending buffer
+    if (!g_bThreadShouldQuit) {
+      EnterCriticalSection(&g_csPresetPending);
+      g_engine.m_pendingRatings = std::move(ratings);
+      g_engine.m_nPendingRatingsCount = temp_nPresets;
+      g_engine.m_bPendingRatingsSwap.store(true, std::memory_order_release);
+      LeaveCriticalSection(&g_csPresetPending);
+    }
+  }
 
   g_bThreadAlive = false;
   _endthreadex(0);
@@ -2617,9 +2636,12 @@ retry:
 void Engine::UpdatePresetList(bool bBackground, bool bForce, bool bTryReselectCurrentPreset) {
   // note: if dir changed, make sure bForce is true!
 
+  // Subdir mode: 0=off, 1=on (recursive)
+  m_bRecursivePresets = (m_nSubdirMode == 1);
+
   if (bForce) {
     if (g_bThreadAlive)
-      CancelThread(500);  // flags it to exit; shorter timeout for interactive responsiveness
+      CancelThread(500);
   }
   else {
     if (bBackground && (g_bThreadAlive || m_bPresetListReady))
@@ -2630,43 +2652,27 @@ void Engine::UpdatePresetList(bool bBackground, bool bForce, bool bTryReselectCu
 
   assert(!g_bThreadAlive);
 
-  // spawn new thread:
-  DWORD flags = (bForce ? 1 : 0) | (bTryReselectCurrentPreset ? 2 : 0);
+  // Snapshot all engine state into ScanParams (main thread, safe to read)
+  ScanParams* params = new ScanParams();
+  params->bForce = bForce;
+  params->bTryReselectCurrentPreset = bTryReselectCurrentPreset;
+  params->nMaxPSVersion = m_nMaxPSVersion;
+  params->nPresetFilter = m_nPresetFilter;
+  params->bRecursive = m_bRecursivePresets;
+  lstrcpyW(params->szPresetDir, m_szPresetDir);
+  lstrcpyW(params->szCurrentPresetFile, m_szCurrentPresetFile);
+  lstrcpyW(params->szUpdatePresetMask, m_szUpdatePresetMask);
+  lstrcpyW(params->szMilkdrop2Path, m_szMilkdrop2Path);
+  lstrcpyW(params->szPluginsDirPath, GetPluginsDirPath());
+
+  // Spawn scan thread
   g_bThreadShouldQuit = false;
   g_bThreadAlive = true;
-  g_hThread = (HANDLE)_beginthreadex(NULL, 0, __UpdatePresetList, (void*)(uintptr_t)flags, 0, 0);
+  g_hThread = (HANDLE)_beginthreadex(NULL, 0, __UpdatePresetList, params, 0, 0);
 
-  if (!bBackground) {
-    // crank up priority, wait for it to finish, and then return
-    SetThreadPriority(g_hThread, THREAD_PRIORITY_HIGHEST); //THREAD_PRIORITY_IDLE,    THREAD_PRIORITY_LOWEST,    THREAD_PRIORITY_NORMAL,    THREAD_PRIORITY_HIGHEST,
-
-    // wait for it to finish
-    while (g_bThreadAlive)
-      Sleep(30);
-
-    assert(g_hThread != INVALID_HANDLE_VALUE);
-    CloseHandle(g_hThread);
-    g_hThread = INVALID_HANDLE_VALUE;
-  }
-  else {
-    // Background mode: wait briefly for an initial batch of presets so that
-    // LoadRandomPreset (called right after this at startup) has something to work with.
-    // This does NOT hold the critical section, so the render loop is NOT blocked.
-    SetThreadPriority(g_hThread, THREAD_PRIORITY_ABOVE_NORMAL);
-
-    int waited = 0;
-    while (g_bThreadAlive && waited < 3000) {
-      Sleep(30);
-      waited += 30;
-
-      // Check preset count without the CS to avoid blocking the render thread.
-      // A brief race on m_nPresets is acceptable — we just need a rough count.
-      if (g_engine.m_nPresets >= 30)
-        break;
-    }
-  }
-
-  return;
+  // Always background — scan thread publishes via pending buffer, render thread swaps.
+  // Old preset list stays visible until the new one is ready.
+  SetThreadPriority(g_hThread, bBackground ? THREAD_PRIORITY_ABOVE_NORMAL : THREAD_PRIORITY_HIGHEST);
 }
 
 void Engine::MergeSortPresets(int left, int right) {

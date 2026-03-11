@@ -397,7 +397,9 @@ private:
   HWND m_hLblPreset = NULL, m_hLblDir = NULL;
   HWND m_hList = NULL;
   HWND m_hBtnPrev = NULL, m_hBtnNext = NULL, m_hBtnCopy = NULL;
-  HWND m_hBtnUp = NULL, m_hBtnInto = NULL, m_hBtnFilter = NULL;
+  HWND m_hBtnUp = NULL, m_hBtnInto = NULL, m_hBtnFilter = NULL, m_hBtnSubdir = NULL;
+  HWND m_hLblTag = NULL, m_hTagFilter = NULL, m_hBtnImportTags = NULL;
+  HWND m_hLblListName = NULL, m_hPresetListCombo = NULL, m_hBtnListSave = NULL, m_hBtnListClear = NULL;
   HWND m_hLblSens = NULL, m_hEditSens = NULL;
   HWND m_hLblBlend = NULL, m_hEditBlend = NULL;
   HWND m_hLblTime = NULL, m_hEditTime = NULL;
@@ -407,12 +409,14 @@ private:
 
   void LayoutControls();
   void RefreshPresetList();
+  void SyncListBoxToCurrentPreset();
   void UpdateCurrentPresetDisplay();
   void UpdatePresetDirDisplay();
   void NavigatePresetDirUp();
   void NavigatePresetDirInto(int sel);
   bool ShowNoteDialog(HWND hParent, const wchar_t* presetName, wchar_t* szNote, int nMaxNote);
   int  m_nContextSel = -1;  // listbox index for context menu
+  int  m_nLastPresetCount = -1; // for detecting scan completion
 };
 
 // ── Concrete subclass: Annotations window ──

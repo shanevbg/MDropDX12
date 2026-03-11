@@ -9,7 +9,7 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - **Audio**: WASAPI loopback capture
 - **Spout** integration for texture sharing
 - **Expression eval**: ns-eel2 (Cockos WDL, x64 JIT) — see `src/ns-eel2/`
-- **Main source**: `src/mDropDX12/` (engine, app, overlay, text, menu, audio capture)
+- **Main source**: `src/mDropDX12/` (engine, app, text, menu, audio capture)
 - **Build**: `powershell -ExecutionPolicy Bypass -File build.ps1 Release x64`
 - **Build outputs**: `src/mDropDX12/Debug_x64/` (Debug), `src/mDropDX12/Release_x64/` (Release)
 - Debug uses `Release/` as working dir; Release uses exe directory
@@ -35,7 +35,7 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - **Render thread**: Main window and DirectX rendering
 - **Setup thread**: Shader precompilation
 - **Audio thread**: WASAPI loopback capture
-- **Overlay thread**: GDI layered window for HUD text
+- **IPC thread**: Hidden window for WM_COPYDATA from Milkwave Remote
 - Use `std::atomic` for thread-safe flags
 
 ## Error Handling
@@ -44,10 +44,10 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 - Logging via `mdropdx12.LogInfo()`, `mdropdx12.LogException()`, etc.
 - `settings.ini`: `LogLevel=2` for verbose logging
 
-## Key Features (current: v1.7.7)
+## Key Features (current: v1.7.8)
 
 - DirectX 12 rendering backend (migrated from DX9Ex)
-- GDI overlay window for HUD text (preset name, FPS, debug info, notifications)
+- DX12 font atlas HUD text rendering (preset name, FPS, debug info, notifications)
 - In-app Settings window (F8 / Ctrl+L) with tri-mode theme (Dark/Light/Follow System), 5-tab UI (General, Tools, System, Files, About), preset browser, resource viewer, path display on About tab
 - ToolWindow system: 20+ standalone windows (Visual, Colors, Controller, Displays, Song Info, Hotkeys, MIDI, Presets, Sprites, Messages, Remote, Script, Shader Import, Video Effects, VFX Profiles, Text Animations, Button Board, Workspace Layout, Error Display, Annotations) run on their own threads with independent always-on-top, sticky positions, and tab memory
 - Configurable hotkeys (Ctrl+F7) with per-binding local/global scope, mouse button bindings, conflict detection, dynamic Script/Launch entries, and Reset to Defaults

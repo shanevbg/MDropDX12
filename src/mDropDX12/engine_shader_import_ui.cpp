@@ -185,7 +185,7 @@ LRESULT WelcomeWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
             WritePrivateProfileStringW(L"Settings", L"szPresetDir", p->m_szPresetDir, p->GetConfigIniFile());
 
             // Rescan presets
-            p->UpdatePresetList(false, true);
+            p->UpdatePresetList(true, true);
 
             // Update path label
             wchar_t pathLabel[MAX_PATH + 32];

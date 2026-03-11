@@ -560,7 +560,7 @@ bool Engine::DispatchHotkeyAction(int actionId)
                 TryDescendIntoPresetSubdirHelper(m_szPresetDir);
                 WritePrivateProfileStringW(L"Settings", L"szPresetDir", m_szPresetDir, GetConfigIniFile());
             }
-            UpdatePresetList(false, true);
+            UpdatePresetList(true, true);
             m_UI_mode = UI_LOAD;
             m_bUserPagedUp = false;
             m_bUserPagedDown = false;

@@ -416,7 +416,7 @@ void LoadPresetFilesViaDragAndDrop(WPARAM wParam) {
     if (dir.back() != L'\\') dir += L'\\';
     lstrcpyW(g_engine.m_szPresetDir, dir.c_str());
     WritePrivateProfileStringW(L"Settings", L"szPresetDir", g_engine.m_szPresetDir, g_engine.GetConfigIniFile());
-    g_engine.UpdatePresetList(false, true);
+    g_engine.UpdatePresetList(true, true);
     wchar_t buf[512];
     swprintf(buf, 512, L"Preset directory: %s", g_engine.m_szPresetDir);
     g_engine.AddNotification(buf);
@@ -470,7 +470,7 @@ void LoadPresetFilesViaDragAndDrop(WPARAM wParam) {
   // Set as preset directory
   lstrcpyW(g_engine.m_szPresetDir, dndDir);
   WritePrivateProfileStringW(L"Settings", L"szPresetDir", g_engine.m_szPresetDir, g_engine.GetConfigIniFile());
-  g_engine.UpdatePresetList(false, true);
+  g_engine.UpdatePresetList(true, true);
 
   // Load first preset
   if (!firstDest.empty())
@@ -1886,7 +1886,7 @@ int Engine::HandleRegularKey(WPARAM wParam) {
           TryDescendIntoPresetSubdirHelper(m_szPresetDir);
           WritePrivateProfileStringW(L"Settings", L"szPresetDir", m_szPresetDir, GetConfigIniFile());
         }
-        UpdatePresetList(false, true);
+        UpdatePresetList(true, true);
         m_UI_mode = UI_LOAD;
         m_bUserPagedUp = false;
         m_bUserPagedDown = false;

@@ -395,6 +395,7 @@ struct PresetAnnotation {
     uint32_t     flags = 0;     // PFLAG_ bitmask
     std::wstring notes;
     std::wstring errorText;     // auto-captured from shader compile
+    std::vector<std::wstring> tags;  // user-defined tags (e.g., "ambient", "dark")
 };
 
 
@@ -771,12 +772,29 @@ public:
   int			m_nPresets;			// the # of entries in the file listing.  Includes directories and then files, sorted alphabetically.
   int			m_nDirs;			// the # of presets that are actually directories.  Always between 0 and m_nPresets.
   int			m_nPresetFilter = 0;	// 0=all, 1=.milk only, 2=.milk2 only, 3=.milk3 only
+  int			m_nSubdirMode = 0;		// 0=never include subdirs, 1=ask, 2=always include
+  bool		m_bRecursivePresets = false;	// true when current list was built recursively
+  std::wstring m_szTagFilter;		// if non-empty, only show presets with this tag
+  std::wstring m_szActivePresetList;	// if non-empty, currently loaded preset list name
   int			m_nPresetListCurPos;// Index of the currently-HIGHLIGHTED preset (the user must press Enter on it to select it).
   int			m_nCurrentPreset;	// Index of the currently-RUNNING preset.
   //   Note that this is NOT the same as the currently-highlighted preset! (that's m_nPresetListCurPos)
   //   Be careful - this can be -1 if the user changed dir. & a new preset hasn't been loaded yet.
   wchar_t		m_szCurrentPresetFile[512];	// w/o path.  this is always valid (unless no presets were found)
   PresetList  m_presets;
+
+  // Pending preset data — scan thread writes, render thread swaps in
+  PresetList              m_pendingPresets;
+  int                     m_nPendingPresets = 0;
+  int                     m_nPendingDirs = 0;
+  int                     m_nPendingCurPos = 0;
+  bool                    m_bPendingListReady = false;
+  std::atomic<bool>       m_bPendingPresetSwap{false};
+
+  // Pending ratings (pass 2)
+  std::vector<float>      m_pendingRatings;
+  int                     m_nPendingRatingsCount = 0;
+  std::atomic<bool>       m_bPendingRatingsSwap{false};
 
   // Preset annotation system (presets.json)
   std::unordered_map<std::wstring, PresetAnnotation> m_presetAnnotations;
@@ -786,6 +804,15 @@ public:
   PresetAnnotation* GetAnnotation(const wchar_t* filename, bool create = false);
   void SetPresetFlag(const wchar_t* filename, uint32_t flag, bool set);
   void SetPresetNote(const wchar_t* filename, const std::wstring& note);
+  void SetPresetTags(const wchar_t* filename, const std::vector<std::wstring>& tags);
+  int  ImportMWRTags(const wchar_t* szTagsJsonPath);  // returns count of presets updated
+  void CollectAllTags(std::vector<std::wstring>& allTags) const;  // unique sorted list of all tags
+
+  // Preset lists: save/load named subsets of presets
+  bool SavePresetList(const wchar_t* listName);  // saves current preset list to file
+  bool LoadPresetList(const wchar_t* listPath);   // loads a preset list from file
+  void GetPresetListDir(wchar_t* szDir, int nMax) const;  // preset_lists/ dir
+  void EnumPresetLists(std::vector<std::wstring>& names) const;  // list available .txt files
   void AutoFlagPresetError(const wchar_t* filename, const std::wstring& errorMsg);
   // Import: parse annotations from an arbitrary presets.json file
   static std::unordered_map<std::wstring, PresetAnnotation> ParseAnnotationsFile(const wchar_t* path);

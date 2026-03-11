@@ -45,11 +45,36 @@ using namespace mdrop;
 #define MAX_MSG_CHARS (65536*2)
 static wchar_t g_szMsgPool[MAX_MSG_CHARS];
 
-// Atlas grid layout: 16 columns × 15 rows = 240 cells (covers 0x20-0xFF = 224 chars)
+// Atlas grid layout: 16 columns × 15 rows = 240 cells (covers 0x20-0xFF = 224 chars + extras)
 static const int ATLAS_COLS = 16;
 static const int ATLAS_ROWS = 15;
 static const int ATLAS_FIRST_CHAR = 0x20;
 static const int ATLAS_LAST_CHAR  = 0xFF;
+
+// Extra Unicode characters beyond 0xFF, rendered into spare atlas slots (224..239).
+// These get atlas glyph index = (ATLAS_LAST_CHAR - ATLAS_FIRST_CHAR + 1) + i
+static const wchar_t ATLAS_EXTRA_CHARS[] = {
+    0x2022, // • BULLET (lock indicator)
+    0x2191, // ↑ UP ARROW (Shadertoy preset indicator)
+};
+static const int ATLAS_NUM_EXTRAS = (int)(sizeof(ATLAS_EXTRA_CHARS) / sizeof(ATLAS_EXTRA_CHARS[0]));
+
+// Map a Unicode character to its atlas glyph index, or -1 if not in atlas.
+// Main range (0x20-0xFF): glyph index = character code (direct indexing).
+// Extra chars: glyph index = ATLAS_EXTRAS_BASE + i.
+static const int ATLAS_EXTRAS_BASE = ATLAS_LAST_CHAR + 1; // 0x100 = 256 — but glyphs[] is 256 entries (0..255)
+
+static int CharToGlyphIndex(int c) {
+    if (c >= ATLAS_FIRST_CHAR && c <= ATLAS_LAST_CHAR)
+        return c; // direct index into glyphs[]
+    // Check extra characters — but they'd need index >= 256 which exceeds glyphs[256]
+    // So we reuse the unused low indices (0x00-0x1F) for extras
+    for (int i = 0; i < ATLAS_NUM_EXTRAS; i++) {
+        if (c == (int)ATLAS_EXTRA_CHARS[i])
+            return i; // map to glyphs[0], glyphs[1], ... (unused control char slots)
+    }
+    return -1; // not in atlas
+}
 
 CTextManager::CTextManager()
   : m_lpDevice(nullptr)
@@ -240,6 +265,40 @@ bool CTextManager::BuildFontAtlas(int fontIdx) {
   if (atlas.glyphs[' '].advanceX <= 0)
     atlas.glyphs[' '].advanceX = (float)tm.tmAveCharWidth;
 
+  // 5b. Render extra Unicode characters into spare atlas slots.
+  // Atlas grid has 240 cells; main range uses slots 0..223 (chars 0x20-0xFF).
+  // Extra chars go into slots 224..239 (the tail of the grid).
+  for (int ei = 0; ei < ATLAS_NUM_EXTRAS; ei++) {
+    int gridSlot = (ATLAS_LAST_CHAR - ATLAS_FIRST_CHAR + 1) + ei; // 224, 225, ...
+    int glyphIdx = ei; // stored at glyphs[0], glyphs[1], ... (unused control char range)
+    if (glyphIdx >= ATLAS_FIRST_CHAR) break; // safety: don't overwrite main range
+    int col = gridSlot % ATLAS_COLS;
+    int row = gridSlot / ATLAS_COLS;
+    int x = col * cellW;
+    int y = row * cellH;
+
+    wchar_t ch = ATLAS_EXTRA_CHARS[ei];
+    TextOutW(memDC, x, y, &ch, 1);
+
+    // Measure advance width for this character
+    INT charWidth = 0;
+    GetCharWidth32W(memDC, (UINT)ch, (UINT)ch, &charWidth);
+    float advance = (charWidth > 0) ? (float)charWidth : (float)tm.tmAveCharWidth;
+
+    float halfTexelU = 0.5f / (float)atlasW;
+    float halfTexelV = 0.5f / (float)atlasH;
+
+    GlyphInfo& g = atlas.glyphs[glyphIdx];
+    g.u0       = (float)x / (float)atlasW + halfTexelU;
+    g.v0       = (float)y / (float)atlasH + halfTexelV;
+    g.u1       = (float)(x + cellW) / (float)atlasW - halfTexelU;
+    g.v1       = (float)(y + cellH) / (float)atlasH - halfTexelV;
+    g.advanceX = advance;
+    g.bearingX = 0;
+    g.glyphWidth  = (float)cellW;
+    g.glyphHeight = (float)cellH;
+  }
+
   SelectObject(memDC, oldFont);
   SelectObject(memDC, oldBmp);
   DeleteObject(hFont);
@@ -392,12 +451,13 @@ float CTextManager::MeasureStringWidth(int fontIdx, const wchar_t* text, int len
   float width = 0;
   for (int i = 0; i < len; i++) {
     int c = (int)text[i];
-    if (c >= ATLAS_FIRST_CHAR && c <= ATLAS_LAST_CHAR)
-      width += atlas.glyphs[c].advanceX;
+    int gi = CharToGlyphIndex(c);
+    if (gi >= 0)
+      width += atlas.glyphs[gi].advanceX;
     else if (c == '\t')
-      width += atlas.glyphs[' '].advanceX * 8; // tab = 8 spaces
+      width += atlas.glyphs[' '].advanceX * 8;
     else if (c > ATLAS_LAST_CHAR)
-      width += atlas.glyphs['?'].advanceX; // unknown Unicode → '?'
+      width += atlas.glyphs['?'].advanceX;
     // skip control chars
   }
   return width;
@@ -564,8 +624,9 @@ void CTextManager::DrawNow() {
         for (int j = 0; j < textLen; j++) {
           int c = (int)text[j];
           float charW = 0;
-          if (c >= ATLAS_FIRST_CHAR && c <= ATLAS_LAST_CHAR)
-            charW = atlas.glyphs[c].advanceX;
+          int gi = CharToGlyphIndex(c);
+          if (gi >= 0)
+            charW = atlas.glyphs[gi].advanceX;
           else if (c > ATLAS_LAST_CHAR)
             charW = atlas.glyphs['?'].advanceX;
           if (accum + charW + ellipsisW > rectW) break;
@@ -577,11 +638,13 @@ void CTextManager::DrawNow() {
 
       // Lambda to emit a character quad
       auto emitChar = [&](int c) {
-        if (c < ATLAS_FIRST_CHAR || c > ATLAS_LAST_CHAR) {
-          if (c > ATLAS_LAST_CHAR) c = '?';
+        int gi = CharToGlyphIndex(c);
+        if (gi < 0) {
+          if (c > ATLAS_LAST_CHAR) gi = CharToGlyphIndex('?');
           else return; // skip control chars
+          if (gi < 0) return;
         }
-        const GlyphInfo& g = atlas.glyphs[c];
+        const GlyphInfo& g = atlas.glyphs[gi];
 
         // Character quad in pixel space
         float x0px = penX;
