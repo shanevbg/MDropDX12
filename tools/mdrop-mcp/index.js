@@ -98,15 +98,15 @@ function sendPipeMessage(pipePath, message, expectResponse = false) {
 
 let cachedPipePath = null;
 
-async function ensureConnected() {
-  // Test if cached pipe is still valid
+function findPipe() {
+  // Check if cached pipe still exists
   if (cachedPipePath) {
+    const pipeName = cachedPipePath.split('/').pop();
     try {
-      await sendPipeMessage(cachedPipePath, 'STATE', true);
-      return cachedPipePath;
-    } catch {
-      cachedPipePath = null;
-    }
+      const exists = fs.readdirSync('//./pipe/').includes(pipeName);
+      if (exists) return cachedPipePath;
+    } catch { /* fall through */ }
+    cachedPipePath = null;
   }
 
   const pipes = discoverPipes();
@@ -114,14 +114,20 @@ async function ensureConnected() {
     throw new Error('No running MDropDX12 instance found. Start the visualizer first.');
   }
 
-  // Try first discovered pipe
   cachedPipePath = pipes[0].path;
   return cachedPipePath;
 }
 
 async function send(message, expectResponse = false) {
-  const pipePath = await ensureConnected();
-  return sendPipeMessage(pipePath, message, expectResponse);
+  const pipePath = findPipe();
+  try {
+    return await sendPipeMessage(pipePath, message, expectResponse);
+  } catch {
+    // Pipe may have recycled — rediscover and retry once
+    cachedPipePath = null;
+    const retryPath = findPipe();
+    return sendPipeMessage(retryPath, message, expectResponse);
+  }
 }
 
 // ── Capture helpers ──
