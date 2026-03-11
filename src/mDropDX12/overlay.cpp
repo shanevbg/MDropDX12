@@ -237,6 +237,7 @@ void COverlayThread::CreateDIB(UINT w, UINT h) {
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
 
+
     SetBkMode(m_hMemDC, TRANSPARENT);
 }
 
@@ -384,86 +385,94 @@ void COverlayThread::RenderOverlayToDIB() {
 
     // --- HUD: Preset name (top-right, above FPS) ---
     if (m_currentData.bShowPresetName && m_currentData.szPresetName[0] && m_hHUDFont) {
-        // Measure at normal HUD font size; shrink if too wide for available area
         int availW = (int)w - margin * 2;
-        HFONT hUseFont = m_hHUDFont;
         HFONT hShrunk = NULL;
-        int useFontH = m_hudFontH;
 
         HFONT hPrev = (HFONT)SelectObject(m_hMemDC, m_hHUDFont);
         RECT rCalc = { 0, 0, availW, 2048 };
         ::DrawTextW(m_hMemDC, m_currentData.szPresetName, -1, &rCalc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
-        if (rCalc.right - rCalc.left > availW && m_hudFontH > 10) {
-            // Compute scaled font height to fit
-            useFontH = (int)(m_hudFontH * (float)availW / (float)(rCalc.right - rCalc.left));
+
+        // Compute lock icon dimensions (drawn as pixels into DIB)
+        int textH = rCalc.bottom - rCalc.top;
+        int lockW = 0;
+        if (m_currentData.bPresetLocked) {
+            int iconH = max(8, textH * 2 / 3);
+            lockW = iconH + textH / 4;  // icon width + gap
+        }
+
+        if (rCalc.right - rCalc.left + lockW > availW && m_hudFontH > 10) {
+            int useFontH = (int)(m_hudFontH * (float)(availW - lockW) / (float)(rCalc.right - rCalc.left));
             if (useFontH < 10) useFontH = 10;
             hShrunk = CreateFontW(-useFontH, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                 ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
             if (hShrunk) {
-                hUseFont = hShrunk;
-                SelectObject(m_hMemDC, hUseFont);
+                SelectObject(m_hMemDC, hShrunk);
+                rCalc = { 0, 0, availW - lockW, 2048 };
+                ::DrawTextW(m_hMemDC, m_currentData.szPresetName, -1, &rCalc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+                textH = rCalc.bottom - rCalc.top;
             }
         }
 
-        int textH = rCalc.bottom - rCalc.top;
-        int lockW = 0;
-
-        BYTE cr = (BYTE)((m_currentData.presetNameColor >> 16) & 0xFF);
-        BYTE cg = (BYTE)((m_currentData.presetNameColor >> 8) & 0xFF);
-        BYTE cb = (BYTE)(m_currentData.presetNameColor & 0xFF);
-
-        if (m_currentData.bPresetLocked) {
-            // Lock icon dimensions based on text height
-            int iconH = textH * 3 / 4;
-            int bodyH = iconH * 5 / 8;
-            int bodyW = iconH * 5 / 8;
-            int shackleH = iconH - bodyH;
-            lockW = bodyW + textH / 3;  // icon width + gap
-        }
-
-        // Compute right-aligned position for lock + name
         int nameW = rCalc.right - rCalc.left;
         int totalW = lockW + nameW;
         int startX = (int)w - margin - totalW;
         if (startX < margin) startX = margin;
 
-        // Draw lock icon using GDI primitives (no font dependency)
-        if (m_currentData.bPresetLocked) {
-            int iconH = textH * 3 / 4;
-            int bodyH = iconH * 5 / 8;
-            int bodyW = iconH * 5 / 8;
-            int shackleH = iconH - bodyH;
-            int iconY = upperRightY + (textH - iconH) / 2;
-            int iconX = startX;
+        BYTE cr = (BYTE)((m_currentData.presetNameColor >> 16) & 0xFF);
+        BYTE cg = (BYTE)((m_currentData.presetNameColor >> 8) & 0xFF);
+        BYTE cb = (BYTE)(m_currentData.presetNameColor & 0xFF);
 
-            auto drawLockAt = [&](int ox, int oy, COLORREF color) {
-                int bx = iconX + ox;
-                int by = iconY + oy + shackleH;
-                // Body (filled rectangle)
-                HBRUSH hBr = CreateSolidBrush(color);
-                RECT rBody = { bx, by, bx + bodyW, by + bodyH };
-                FillRect(m_hMemDC, &rBody, hBr);
-                DeleteObject(hBr);
-                // Shackle (arc above body)
-                HPEN hPen = CreatePen(PS_SOLID, max(1, bodyW / 6), color);
-                HPEN hOldPen = (HPEN)SelectObject(m_hMemDC, hPen);
-                HBRUSH hOldBr = (HBRUSH)SelectObject(m_hMemDC, GetStockObject(NULL_BRUSH));
-                int sx = bx + bodyW / 5;
-                int sw = bodyW * 3 / 5;
-                Arc(m_hMemDC, sx, iconY + oy, sx + sw, iconY + oy + shackleH * 2,
-                    sx + sw, iconY + oy + shackleH, sx, iconY + oy + shackleH);
-                SelectObject(m_hMemDC, hOldPen);
-                SelectObject(m_hMemDC, hOldBr);
-                DeleteObject(hPen);
+        // Draw lock icon directly into DIB pixel buffer (GDI can't render
+        // extended Unicode glyphs on DIB-backed memory DCs).
+        if (m_currentData.bPresetLocked && m_pDIBBits) {
+            int iconH = max(8, textH * 2 / 3);
+            int bodyW = iconH * 3 / 4;
+            int bodyH = iconH / 2;
+            int shackleH = iconH - bodyH;
+            int shackleW = bodyW * 3 / 5;
+            int penW = max(2, bodyW / 5);
+            int iconX = startX;
+            int iconY = upperRightY + (textH - iconH) / 2;
+            int stride = (int)w;
+
+            auto fillRect = [&](int rx, int ry, int rw, int rh, BYTE pr, BYTE pg, BYTE pb) {
+                for (int dy = 0; dy < rh; dy++) {
+                    for (int dx = 0; dx < rw; dx++) {
+                        int px = rx + dx, py = ry + dy;
+                        if (px >= 0 && px < (int)w && py >= 0 && py < (int)h) {
+                            BYTE* p = m_pDIBBits + (py * stride + px) * 4;
+                            p[0] = pb; p[1] = pg; p[2] = pr; // alpha set by PostProcessAlpha
+                        }
+                    }
+                }
             };
 
-            drawLockAt(1, 1, RGB(64, 64, 64));  // shadow
-            drawLockAt(0, 0, RGB(cr, cg, cb));    // main
+            struct { int ox, oy; BYTE r, g, b; } passes[] = {
+                { 1, 1, 48, 48, 48 },    // shadow
+                { 0, 0, cr, cg, cb },     // main color
+            };
+            for (auto& pass : passes) {
+                int bx = iconX + pass.ox;
+                int by = iconY + pass.oy + shackleH;
+                // Body: solid rectangle
+                fillRect(bx, by, bodyW, bodyH, pass.r, pass.g, pass.b);
+                // Keyhole: dark dot in center of body
+                if (pass.ox == 0) {
+                    int khX = bx + bodyW / 2 - penW / 2;
+                    int khY = by + bodyH / 3;
+                    fillRect(khX, khY, penW, penW, 0, 0, 0);
+                }
+                // Shackle: inverted U above body
+                int sx = bx + (bodyW - shackleW) / 2;
+                int sy = iconY + pass.oy;
+                fillRect(sx, sy, penW, shackleH, pass.r, pass.g, pass.b);                       // left
+                fillRect(sx + shackleW - penW, sy, penW, shackleH, pass.r, pass.g, pass.b);     // right
+                fillRect(sx, sy, shackleW, penW, pass.r, pass.g, pass.b);                       // top
+            }
         }
 
-        // Draw preset name
-        SelectObject(m_hMemDC, hUseFont);
+        // Draw preset name text
         int nameX = startX + lockW;
         int nameLen = (int)wcslen(m_currentData.szPresetName);
         SetTextColor(m_hMemDC, RGB(64, 64, 64));

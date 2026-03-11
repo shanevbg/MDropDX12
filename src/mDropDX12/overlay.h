@@ -25,7 +25,7 @@ struct OverlayData {
     // HUD: preset name (top-right, above FPS)
     bool    bShowPresetName;
     DWORD   presetNameColor;            // 0x00RRGGBB — passed to SetTextColor via DrawShadowText
-    wchar_t szPresetName[256];          // lock-symbol prefix already included if locked
+    wchar_t szPresetName[256];          // preset name (no lock prefix; bPresetLocked controls icon)
 
     // HUD: rating (top-right, below preset name)
     bool    bShowRating;

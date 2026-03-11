@@ -80,6 +80,23 @@ Get-Process -Name $exeName -ErrorAction SilentlyContinue | ForEach-Object {
 # ── 5. Run the build ───────────────────────────────────────────────────────────
 $project = Join-Path $PSScriptRoot "src\mDropDX12\engine.vcxproj"
 
+# "Clean" target means clean first, then build (full rebuild)
+if ($Target -eq "Clean") {
+    Write-Host "Cleaning..."
+    & $msbuild $project `
+        /t:Clean `
+        /p:Configuration=$Configuration `
+        /p:Platform=$Platform `
+        /p:PlatformToolset=v143 `
+        /m `
+        /nologo `
+        /clp:Summary
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Write-Host ""
+    Write-Host "Building..."
+    $Target = "Build"
+}
+
 & $msbuild $project `
     /t:$Target `
     /p:Configuration=$Configuration `

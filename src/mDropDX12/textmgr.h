@@ -68,7 +68,7 @@ struct GlyphInfo {
 // Font atlas: pre-rendered bitmap of all glyphs for one font
 struct FontAtlas {
     DX12Texture texture;       // atlas texture on GPU
-    GlyphInfo glyphs[256];     // indexed by character code (0x00-0xFF)
+    GlyphInfo glyphs[256];     // indexed by glyph index (0..223 for 0x20-0xFF, 224+ for extras)
     float lineHeight;          // total line height in pixels
     float ascent;              // baseline distance from top of cell
     int cellWidth;             // cell width in atlas (pixels)
