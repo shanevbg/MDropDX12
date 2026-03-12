@@ -1163,8 +1163,16 @@ void Engine::MyRenderUI(
                 swprintf(str2, L" [ %s ] ", m_presets[i].szFilename.c_str() + 1);
             }
             else {
-              // preset file
-              lstrcpyW(str, m_presets[i].szFilename.c_str());
+              // preset file — show relative name for readability
+              const wchar_t* displayName = m_presets[i].szFilename.c_str();
+              if (displayName[0] && displayName[1] == L':') {
+                // Absolute path: strip preset dir prefix, or find "\presets\" portion
+                int dirLen = lstrlenW(m_szPresetDir);
+                if (dirLen > 0 && _wcsnicmp(displayName, m_szPresetDir, dirLen) == 0)
+                  displayName += dirLen;
+                else { const wchar_t* p = wcsstr(displayName, L"\\presets\\"); if (p) displayName = p + 1; }
+              }
+              lstrcpyW(str, displayName);
               RemoveExtension(str);
               swprintf(str2, L" %s ", str);
 
@@ -1308,8 +1316,16 @@ void Engine::MyRenderUI(
                 swprintf(str2, L" [ %s ] ", m_presets[i].szFilename.c_str() + 1);
             }
             else {
-              // preset file
-              lstrcpyW(str, m_presets[i].szFilename.c_str());
+              // preset file — show relative name for readability
+              const wchar_t* displayName = m_presets[i].szFilename.c_str();
+              if (displayName[0] && displayName[1] == L':') {
+                // Absolute path: strip preset dir prefix, or find "\presets\" portion
+                int dirLen = lstrlenW(m_szPresetDir);
+                if (dirLen > 0 && _wcsnicmp(displayName, m_szPresetDir, dirLen) == 0)
+                  displayName += dirLen;
+                else { const wchar_t* p = wcsstr(displayName, L"\\presets\\"); if (p) displayName = p + 1; }
+              }
+              lstrcpyW(str, displayName);
               RemoveExtension(str);
               swprintf(str2, L" %s ", str);
 

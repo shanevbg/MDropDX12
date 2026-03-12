@@ -67,6 +67,24 @@ void PresetsWindow::RefreshPresetList() {
             if (!hasTag) continue;
         }
 
+        // For list-loaded presets with absolute paths, show relative to preset dir for readability
+        const wchar_t* displayFn = fn;
+        if (fn[0] && fn[1] == L':') {
+            // Absolute path — try to make relative to preset dir
+            int dirLen = lstrlenW(p->m_szPresetDir);
+            if (dirLen > 0 && _wcsnicmp(fn, p->m_szPresetDir, dirLen) == 0) {
+                displayFn = fn + dirLen;
+            } else {
+                // Different base dir — show relative from "presets\" or just the filename portion
+                const wchar_t* presetsDir = wcsstr(fn, L"\\presets\\");
+                if (presetsDir) {
+                    displayFn = presetsDir + 1;  // skip leading backslash, show "presets\..."
+                } else {
+                    displayFn = fnOnly;  // just the filename
+                }
+            }
+        }
+
         // Add annotation prefix indicators
         int lbIdx;
         if (a && a->flags) {
@@ -75,10 +93,10 @@ void PresetsWindow::RefreshPresetList() {
             if (a->flags & (PFLAG_ERROR | PFLAG_BROKEN)) display += L"\x26A0";  // warning
             if (a->flags & PFLAG_SKIP) display += L"\x2298";  // circled dash
             display += L" ";
-            display += fn;
+            display += displayFn;
             lbIdx = (int)SendMessageW(m_hList, LB_ADDSTRING, 0, (LPARAM)display.c_str());
         } else {
-            lbIdx = (int)SendMessageW(m_hList, LB_ADDSTRING, 0, (LPARAM)fn);
+            lbIdx = (int)SendMessageW(m_hList, LB_ADDSTRING, 0, (LPARAM)displayFn);
         }
         // Store actual preset index so selection works correctly when filtered
         if (lbIdx >= 0)
@@ -249,7 +267,7 @@ void PresetsWindow::DoBuildControls() {
     m_hEditBlend = CreateEdit(hw, buf, IDC_MW_BLEND_TIME, x + slw + 4, y, 60, lineH, hFont);
     y += lineH + gap;
 
-    m_hLblTime = CreateLabel(hw, L"Time Between (s):", x, y, slw, lineH, hFont);
+    m_hLblTime = CreateLabel(hw, L"Time Between (s, 0=off):", x, y, slw, lineH, hFont);
     swprintf(buf, 64, L"%.0f", p->m_fTimeBetweenPresets);
     m_hEditTime = CreateEdit(hw, buf, IDC_MW_TIME_BETWEEN, x + slw + 4, y, 60, lineH, hFont);
     y += lineH + gap + 4;
@@ -737,8 +755,8 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
             return 0;
         case IDC_MW_TIME_BETWEEN:
             p->m_fTimeBetweenPresets = (float)_wtof(buf);
-            if (p->m_fTimeBetweenPresets < 1) p->m_fTimeBetweenPresets = 1;
-            if (p->m_fTimeBetweenPresets > 300) p->m_fTimeBetweenPresets = 300;
+            if (p->m_fTimeBetweenPresets < 0) p->m_fTimeBetweenPresets = 0;
+            if (p->m_fTimeBetweenPresets > 99999) p->m_fTimeBetweenPresets = 99999;
             p->SaveSettingToINI(SET_TIME_BETWEEN);
             return 0;
         }

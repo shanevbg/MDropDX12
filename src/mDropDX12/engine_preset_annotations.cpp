@@ -14,6 +14,9 @@ namespace mdrop {
 
 extern CRITICAL_SECTION g_cs;
 extern CRITICAL_SECTION g_csPresetPending;
+extern volatile bool g_bThreadAlive;
+extern volatile int g_bThreadShouldQuit;
+void CancelThread(int max_wait_time_ms);
 
 //----------------------------------------------------------------------
 // Flag serialization helpers
@@ -434,13 +437,36 @@ bool Engine::LoadPresetList(const wchar_t* listPath)
     wchar_t savedBaseDir[MAX_PATH] = {};
     int baseDirLen = 0;
 
+    // Also extract list file's directory as fallback basedir
+    wchar_t listDir[MAX_PATH] = {};
+    lstrcpynW(listDir, listPath, MAX_PATH);
+    wchar_t* pLastSlash = wcsrchr(listDir, L'\\');
+    if (pLastSlash) pLastSlash[1] = 0;
+    else listDir[0] = 0;
+
     while (fgetws(line, MAX_PATH, f)) {
         // Strip newline
         int len = (int)wcslen(line);
         while (len > 0 && (line[len-1] == L'\n' || line[len-1] == L'\r'))
             line[--len] = 0;
         if (len == 0) continue;
-        if (line[0] == L'#') continue;  // skip comments
+
+        // Parse comments — look for "# Base directory:" as basedir fallback
+        if (line[0] == L'#') {
+            if (baseDirLen == 0 && _wcsnicmp(line, L"# Base directory:", 17) == 0) {
+                const wchar_t* p = line + 17;
+                while (*p == L' ') p++;
+                lstrcpynW(savedBaseDir, p, MAX_PATH);
+                baseDirLen = lstrlenW(savedBaseDir);
+                // Ensure trailing backslash
+                if (baseDirLen > 0 && savedBaseDir[baseDirLen-1] != L'\\') {
+                    savedBaseDir[baseDirLen] = L'\\';
+                    savedBaseDir[baseDirLen+1] = 0;
+                    baseDirLen++;
+                }
+            }
+            continue;
+        }
 
         // Parse @basedir= header
         if (wcsncmp(line, L"@basedir=", 9) == 0) {
@@ -449,38 +475,20 @@ bool Engine::LoadPresetList(const wchar_t* listPath)
             continue;
         }
 
-        // Determine filename to store:
-        // - If absolute path and starts with current m_szPresetDir, make relative
-        // - If absolute path with saved basedir, make relative to current dir
-        // - Otherwise store as-is (absolute paths handled by BuildPresetPath)
+        // Always store absolute paths so BuildPresetPath works regardless of m_szPresetDir
         const wchar_t* fn = line;
         bool bAbsolute = (fn[0] && fn[1] == L':') || (fn[0] == L'\\' && fn[1] == L'\\');
 
         wchar_t resolved[MAX_PATH];
-        if (bAbsolute) {
-            int curDirLen = lstrlenW(m_szPresetDir);
-            if (curDirLen > 0 && _wcsnicmp(fn, m_szPresetDir, curDirLen) == 0) {
-                // Absolute path under current preset dir — make relative
-                lstrcpynW(resolved, fn + curDirLen, MAX_PATH);
-                fn = resolved;
-            }
-            // else: absolute path not under current dir — keep absolute
-            //       (BuildPresetPath will use it as-is)
-        } else if (baseDirLen > 0) {
-            // Old-format relative path with a saved basedir — resolve to absolute,
-            // then try to make relative to current dir
-            wchar_t absPath[MAX_PATH];
-            swprintf(absPath, MAX_PATH, L"%s%s", savedBaseDir, fn);
-            int curDirLen = lstrlenW(m_szPresetDir);
-            if (curDirLen > 0 && _wcsnicmp(absPath, m_szPresetDir, curDirLen) == 0) {
-                lstrcpynW(resolved, absPath + curDirLen, MAX_PATH);
-                fn = resolved;
-            } else {
-                // Different base dir — store absolute path
-                lstrcpynW(resolved, absPath, MAX_PATH);
+        if (!bAbsolute) {
+            // Relative path — resolve to absolute using basedir or list file directory
+            const wchar_t* base = (baseDirLen > 0) ? savedBaseDir : listDir;
+            if (base[0]) {
+                swprintf(resolved, MAX_PATH, L"%s%s", base, fn);
                 fn = resolved;
             }
         }
+        // Absolute paths stored as-is
 
         PresetInfo pi;
         pi.szFilename = fn;
@@ -492,6 +500,16 @@ bool Engine::LoadPresetList(const wchar_t* listPath)
     fclose(f);
 
     if (temp_nPresets == 0) return false;
+
+    // Cancel any running background preset scan so it doesn't overwrite our list
+    if (g_bThreadAlive)
+        CancelThread(500);
+
+    // Clear any pending swap that a just-finished scan might have queued
+    EnterCriticalSection(&g_csPresetPending);
+    m_bPendingPresetSwap.store(false, std::memory_order_release);
+    m_bPendingRatingsSwap.store(false, std::memory_order_release);
+    LeaveCriticalSection(&g_csPresetPending);
 
     // Replace the current preset list directly (called from main/UI thread)
     EnterCriticalSection(&g_cs);

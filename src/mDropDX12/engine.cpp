@@ -1707,8 +1707,8 @@ void Engine::MyReadConfig() {
     m_nGridY = MAX_GRID_Y;
   if (m_fTimeBetweenPresetsRand < 0)
     m_fTimeBetweenPresetsRand = 0;
-  if (m_fTimeBetweenPresets < 0.1f)
-    m_fTimeBetweenPresets = 0.1f;
+  if (m_fTimeBetweenPresets < 0)
+    m_fTimeBetweenPresets = 0;
 
   // DERIVED SETTINGS
   m_bPresetLockedByUser = m_bPresetLockOnAtStartup;
@@ -3228,11 +3228,22 @@ int Engine::AllocateMyDX9Stuff() {
         sFilename = message;
       }
 
-      // try to set the current preset index
+      // try to set the current preset index (match full path first, then filename only)
       for (size_t i = 0; i < m_presets.size(); i++) {
-        if (wcscmp(m_presets[i].szFilename.c_str(), sFilename.c_str()) == 0) {
+        if (_wcsicmp(m_presets[i].szFilename.c_str(), m_szPresetStartup) == 0) {
           m_nCurrentPreset = (int)i;
           break;
+        }
+      }
+      if (m_nCurrentPreset < 0) {
+        // Fallback: match by filename only (for lists with absolute paths)
+        for (size_t i = 0; i < m_presets.size(); i++) {
+          const wchar_t* fn = wcsrchr(m_presets[i].szFilename.c_str(), L'\\');
+          fn = fn ? fn + 1 : m_presets[i].szFilename.c_str();
+          if (_wcsicmp(fn, sFilename.c_str()) == 0) {
+            m_nCurrentPreset = (int)i;
+            break;
+          }
         }
       }
     }

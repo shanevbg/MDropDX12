@@ -45,6 +45,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <assert.h>
 #include <math.h>
 #include <algorithm>  // std::swap
+#include <thread>
 using namespace mdrop;
 
 #define D3DCOLOR_RGBA_01(r,g,b,a) D3DCOLOR_RGBA(((int)(r*255)),((int)(g*255)),((int)(b*255)),((int)(a*255)))
@@ -293,8 +294,10 @@ bool mdrop::Engine::RenderStringToTitleTexture(int supertextIndex)
         if (*p == L'\n') ++lineCount;
       }
 
+      // Measure text width for autosize calculation
       RECT temp = rect;
       int h = ::DrawTextW(m_titleDC, szTextToDraw, -1, &temp, DT_SINGLELINE | DT_CALCRECT | DT_CENTER);
+      m_supertexts[supertextIndex].nTextWidthUsed = (int)(temp.right - temp.left);
 
       long offset = h / 2;
       if (lineCount > 1) offset *= lineCount;
@@ -307,11 +310,23 @@ bool mdrop::Engine::RenderStringToTitleTexture(int supertextIndex)
       DWORD flags = (lineCount == 1) ? (DT_SINGLELINE | DT_CENTER) : (DT_WORDBREAK | DT_CENTER);
       m_supertexts[supertextIndex].nFontSizeUsed = ::DrawTextW(m_titleDC, szTextToDraw, -1, &temp, flags);
 
-      // Global autosize: compute fFontSize so text fills ~90% of screen width
-      if (m_bMessageAutoSize && m_supertexts[supertextIndex].nFontSizeUsed > 0) {
-        const float kFill = 0.9f;
-        float ratio = kFill * (float)m_supertexts[supertextIndex].nFontSizeUsed
-                      / ((float)m_nTexSizeX / 1024.0f * 100.0f);
+      // Global autosize: compute fFontSize so text fits on screen at maximum growth,
+      // accounting for aspect ratio correction and off-center positioning.
+      // The visible half-width on screen is: fSizeX * growth * textFillRatio / aspectScale
+      // This must fit within: 1.0 - abs(dx), where dx = fX*2-1 (offset from center in clip space).
+      if (m_bMessageAutoSize && m_supertexts[supertextIndex].nFontSizeUsed > 0
+                              && m_supertexts[supertextIndex].nTextWidthUsed > 0) {
+        float maxGrowth = max(1.0f, m_supertexts[supertextIndex].fGrowth);
+        float aspectCorr = (float)m_nTexSizeX / ((float)m_nTexSizeY * 4.0f / 3.0f) * 1.4f;
+        float aspectScale = (aspectCorr < 1.0f) ? aspectCorr : 1.0f;
+        // Account for off-center positioning: reduce fill to prevent edge clipping
+        float dx = fabsf(m_supertexts[supertextIndex].fX * 2.0f - 1.0f);
+        float kFill = max(0.3f, min(0.88f, 1.0f - dx - 0.05f));  // 0.05 margin
+        float textW = (float)m_supertexts[supertextIndex].nTextWidthUsed;
+        float texW  = (float)m_nTitleTexSizeX;
+        float fontH = (float)m_supertexts[supertextIndex].nFontSizeUsed;
+        float screenScale = (float)m_nTexSizeX / 1024.0f * 100.0f;
+        float ratio = kFill * aspectScale * texW * fontH / (screenScale * textW * maxGrowth);
         float computed = 50.0f + logf(ratio) / logf(1.033f);
         m_supertexts[supertextIndex].fFontSize = max(0.0f, min(100.0f, computed));
       }
@@ -805,7 +820,7 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
       m_bPresetDiagLogged = false;
     }
 
-    if (m_fNextPresetTime < 0) {
+    if (m_fNextPresetTime < 0 && m_fTimeBetweenPresets > 0) {
       float dt = m_fTimeBetweenPresetsRand * (rand() % 1000) * 0.001f;
       m_fNextPresetTime = GetTime() + m_fBlendTimeAuto + m_fTimeBetweenPresets + dt;
     }
@@ -813,10 +828,22 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
     if (!bRedraw) {
       m_rand_frame = D3DXVECTOR4(FRAND, FRAND, FRAND, FRAND);
 
-      // randomly change the preset, if it's time
-      if (m_fNextPresetTime < GetTime()) {
+      // randomly change the preset, if it's time (disabled when m_fTimeBetweenPresets == 0)
+      if (m_fTimeBetweenPresets > 0 && m_fNextPresetTime < GetTime()) {
         if (m_nLoadingPreset == 0) // don't start a load if one is already underway!
           LoadRandomPreset(m_fBlendTimeAuto);
+      }
+
+      // Deferred startup preset save — persist to INI after 5s of uninterrupted render
+      if (m_fPendingStartupSaveTime > 0 && GetTime() - m_fPendingStartupSaveTime >= 5.0f) {
+        std::wstring savePath(m_szPendingStartupSave);
+        std::wstring saveIni(GetConfigIniFile());
+        m_fPendingStartupSaveTime = 0;
+        m_szPendingStartupSave[0] = 0;
+        // Fire-and-forget background write to avoid blocking the render thread
+        std::thread([savePath, saveIni]() {
+          WritePrivateProfileStringW(L"Settings", L"szPresetStartup", savePath.c_str(), saveIni.c_str());
+        }).detach();
       }
 
       if (MessagesEnabled()) {
@@ -7963,9 +7990,20 @@ void mdrop::Engine::ShowSongTitleAnim(int w, int h, float fProgress, int superte
     float fSizeX = (float)m_nTexSizeX / 1024.0f * 100.0f / (float)m_supertexts[supertextIndex].nFontSizeUsed * powf(1.033f, m_supertexts[supertextIndex].fFontSize - 50.0f);
     float fSizeY = fSizeX * m_nTitleTexSizeY / (float)m_nTitleTexSizeX;
 
-    if (fSizeX > 0.88f) {
-      fSizeY *= 0.88f / fSizeX;
-      fSizeX = 0.88f;
+    // Clamp so text fits on screen, accounting for growth, aspect, text fill ratio,
+    // and off-center positioning. The visible half-width must not exceed 1.0 - abs(dx).
+    float maxGrowth = max(1.0f, m_supertexts[supertextIndex].fGrowth);
+    float aspectCorr = w / (float)(h * 4.0f / 3.0f) * 1.4f;
+    float aspectScale = (aspectCorr < 1.0f) ? aspectCorr : 1.0f;
+    float textFillRatio = (m_supertexts[supertextIndex].nTextWidthUsed > 0)
+      ? (float)m_supertexts[supertextIndex].nTextWidthUsed / (float)m_nTitleTexSizeX
+      : 1.0f;
+    float posDx = fabsf(m_supertexts[supertextIndex].fX * 2.0f - 1.0f);
+    float kFill = max(0.3f, min(0.88f, 1.0f - posDx - 0.05f));
+    float maxAllowed = kFill * aspectScale / (maxGrowth * textFillRatio);
+    if (fSizeX > maxAllowed) {
+      fSizeY *= maxAllowed / fSizeX;
+      fSizeX = maxAllowed;
     }
 
     i = 0;

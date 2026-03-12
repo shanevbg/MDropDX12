@@ -2078,6 +2078,13 @@ void Engine::LoadPresetTick() {
     lstrcpyW(m_szCurrentPresetFile, m_szLoadingPreset);
     m_szLoadingPreset[0] = 0;
 
+    // Defer startup preset save — only persist after 5s of render time (avoids
+    // hammering INI when user cycles presets quickly)
+    if (m_bEnablePresetStartupSavingOnClose) {
+      lstrcpynW(m_szPendingStartupSave, m_szCurrentPresetFile, 512);
+      m_fPendingStartupSaveTime = GetTime();
+    }
+
     // Log which preset is now actively rendering (helps diagnose GPU TDR crashes)
     {
       const wchar_t* name = wcsrchr(m_szCurrentPresetFile, L'\\');
