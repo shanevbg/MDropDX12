@@ -3078,6 +3078,10 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                 "// CONV: texture() → tex2Dlod LOD=0 (gradient-safe for loops)\n"
                 "float4 tex2D_lod0(sampler2D _s, float2 _tc) {\n"
                 "  return tex2Dlod(_s, float4(_tc, 0, 0));\n"
+                "}\n"
+                "// CONV: texture(s, uv, bias) → tex2Dbias wrapper\n"
+                "float4 tex2D_lod0(sampler2D _s, float2 _tc, float _bias) {\n"
+                "  return tex2Dbias(_s, float4(_tc, 0, _bias));\n"
                 "}\n\n";
             inpHeader = helper + inpHeader;
         }
@@ -4426,6 +4430,47 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                         if (isDecl) { pos += qPat.size(); continue; }
                         // Insert zero-init at top of function body
                         std::string init = "\n  " + paramName + " = (" + sn + ")0;";
+                        result.insert(braceOpen + 1, init);
+                        pos = braceOpen + 1 + init.size();
+                    }
+                }
+            }
+
+            // Fix HLSL X3508 for 'out' built-in type params (float4, float3, etc.)
+            // Same issue as struct params: GLSL hardware zero-inits, HLSL doesn't.
+            {
+                const char* builtinTypes[] = {
+                    "float4 ", "float3 ", "float2 ", "float ",
+                    "int4 ", "int3 ", "int2 ", "int ",
+                    "uint4 ", "uint3 ", "uint2 ", "uint ",
+                    "float4x4 ", "float3x3 ", "float2x2 ",
+                };
+                for (const char* bt : builtinTypes) {
+                    std::string qPat = std::string("out ") + bt;
+                    std::string typeName(bt, strlen(bt) - 1); // trim trailing space
+                    size_t pos = 0;
+                    while ((pos = result.find(qPat, pos)) != std::string::npos) {
+                        size_t prev = pos;
+                        if (prev > 0) prev--;
+                        while (prev > 0 && (result[prev]==' '||result[prev]=='\n'||result[prev]=='\r'||result[prev]=='\t')) prev--;
+                        char c = (prev < result.size()) ? result[prev] : 0;
+                        if (c != '(' && c != ',') { pos += qPat.size(); continue; }
+                        if (pos >= 2 && result.substr(pos - 2, 2) == "in") { pos += qPat.size(); continue; }
+                        size_t pnStart = pos + qPat.size();
+                        while (pnStart < result.size() && result[pnStart] == ' ') pnStart++;
+                        size_t pnEnd = pnStart;
+                        while (pnEnd < result.size() && (isalnum((unsigned char)result[pnEnd]) || result[pnEnd] == '_')) pnEnd++;
+                        if (pnEnd == pnStart) { pos += qPat.size(); continue; }
+                        std::string paramName = result.substr(pnStart, pnEnd - pnStart);
+                        size_t closeParen = result.find(')', pnEnd);
+                        if (closeParen == std::string::npos) { pos += qPat.size(); continue; }
+                        size_t braceOpen = result.find('{', closeParen);
+                        if (braceOpen == std::string::npos) { pos += qPat.size(); continue; }
+                        bool isDecl = false;
+                        for (size_t k = closeParen; k < braceOpen; k++)
+                            if (result[k] == ';') { isDecl = true; break; }
+                        if (isDecl) { pos += qPat.size(); continue; }
+                        std::string init = "\n  " + paramName + " = (" + typeName + ")0;";
                         result.insert(braceOpen + 1, init);
                         pos = braceOpen + 1 + init.size();
                     }
