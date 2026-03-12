@@ -19,6 +19,30 @@ namespace mdrop {
 extern Engine g_engine;
 
 //----------------------------------------------------------------------
+// Song Title Animation Profile combo helpers
+//----------------------------------------------------------------------
+
+static void PopulateSongAnimCombo(HWND hCombo, Engine* p) {
+  if (!hCombo) return;
+  SendMessage(hCombo, CB_RESETCONTENT, 0, 0);
+  SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"(Default)");
+  SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"(Random)");
+  for (int i = 0; i < p->m_nAnimProfileCount; i++)
+    SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)p->m_AnimProfiles[i].szName);
+  int sel = 0;
+  if (p->m_nSongTitleAnimProfile == -2) sel = 1;
+  else if (p->m_nSongTitleAnimProfile >= 0) sel = p->m_nSongTitleAnimProfile + 2;
+  SendMessage(hCombo, CB_SETCURSEL, sel, 0);
+}
+
+static int ComboToSongAnimIndex(HWND hCombo) {
+  int sel = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
+  if (sel <= 0) return -1;   // (Default)
+  if (sel == 1) return -2;   // (Random)
+  return sel - 2;             // profile index
+}
+
+//----------------------------------------------------------------------
 // Constructor
 //----------------------------------------------------------------------
 
@@ -201,6 +225,28 @@ void SongInfoWindow::DoBuildControls() {
 
   // ── Checkboxes ──
   TrackControl(CreateCheck(hw, L"Song Title Animations",   IDC_MW_SONG_TITLE,        x, y, rw, lineH, hFont, p->m_bSongTitleAnims)); y += lineH + 2;
+
+  // ── Song Title Animation Profile row ──
+  {
+    int profileLabelW = MulDiv(50, lineH, 26);
+    int btnW = MulDiv(70, lineH, 26);
+    int editBtnW = MulDiv(90, lineH, 26);
+    int comboW = rw - profileLabelW - btnW - editBtnW - 12;
+    TrackControl(CreateLabel(hw, L"Profile:", x + 16, y, profileLabelW, lineH, hFont));
+    HWND hAnimCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+      x + 16 + profileLabelW, y, comboW, lineH * 10, hw,
+      (HMENU)(INT_PTR)IDC_MW_SONG_ANIM_COMBO, GetModuleHandle(NULL), NULL);
+    if (hAnimCombo && hFont) SendMessage(hAnimCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
+    TrackControl(hAnimCombo);
+    PopulateSongAnimCombo(hAnimCombo, p);
+    TrackControl(CreateBtn(hw, L"Push Title", IDC_MW_SONG_PUSH_TITLE,
+      x + 16 + profileLabelW + comboW + 4, y, btnW, lineH, hFont));
+    TrackControl(CreateBtn(hw, L"Edit Profiles...", IDC_MW_SONG_EDIT_PROFILES,
+      x + 16 + profileLabelW + comboW + btnW + 8, y, editBtnW, lineH, hFont));
+  }
+  y += lineH + 2;
+
   TrackControl(CreateCheck(hw, L"Overlay Notifications",   IDC_MW_SONG_OVERLAY,      x, y, rw, lineH, hFont, p->m_bSongInfoOverlay)); y += lineH + 2;
   TrackControl(CreateCheck(hw, L"Change Preset w/ Song",   IDC_MW_CHANGE_SONG,       x, y, rw, lineH, hFont, p->m_ChangePresetWithSong)); y += lineH + 2;
   TrackControl(CreateCheck(hw, L"Show Cover Art",          IDC_MW_SONG_COVER,        x, y, rw, lineH, hFont, p->m_DisplayCover)); y += lineH + 2;
@@ -257,6 +303,24 @@ LRESULT SongInfoWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
   // Edit Parser button
   if (id == IDC_MW_WT_EDIT_PARSER && code == BN_CLICKED) {
     p->OpenWindowTitleParserPopup(hWnd);
+    return 0;
+  }
+
+  // Song Title Animation Profile combo
+  if (id == IDC_MW_SONG_ANIM_COMBO && code == CBN_SELCHANGE) {
+    p->m_nSongTitleAnimProfile = ComboToSongAnimIndex(GetDlgItem(hWnd, IDC_MW_SONG_ANIM_COMBO));
+    return 0;
+  }
+
+  // Push Title button
+  if (id == IDC_MW_SONG_PUSH_TITLE && code == BN_CLICKED) {
+    p->PushSongTitleAsMessage();
+    return 0;
+  }
+
+  // Edit Profiles button — opens Text Animations window
+  if (id == IDC_MW_SONG_EDIT_PROFILES && code == BN_CLICKED) {
+    p->OpenTextAnimWindow();
     return 0;
   }
 

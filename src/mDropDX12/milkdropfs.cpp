@@ -7943,9 +7943,18 @@ void mdrop::Engine::ShowSongTitleAnim(int w, int h, float fProgress, int superte
     float fSizeX = 50.0f / (float)m_supertexts[supertextIndex].nFontSizeUsed * powf(1.5f, m_supertexts[supertextIndex].fFontSize - 2.0f);
     float fSizeY = fSizeX * m_nTitleTexSizeY / (float)m_nTitleTexSizeX;// * m_nWidth/(float)m_nHeight;
 
-    if (fSizeX > 0.88f) {
-      fSizeY *= 0.88f / fSizeX;
-      fSizeX = 0.88f;
+    // Clamp for aspect ratio (portrait mode stretches X via aspect correction later)
+    {
+      float aspectCorr = w / (float)(h * 4.0f / 3.0f) * 1.4f;
+      float aspectScale = (aspectCorr < 1.0f) ? aspectCorr : 1.0f;
+      float textFillRatio = (m_supertexts[supertextIndex].nTextWidthUsed > 0)
+        ? (float)m_supertexts[supertextIndex].nTextWidthUsed / (float)m_nTitleTexSizeX
+        : 1.0f;
+      float maxAllowed = 0.88f * aspectScale / textFillRatio;
+      if (fSizeX > maxAllowed) {
+        fSizeY *= maxAllowed / fSizeX;
+        fSizeX = maxAllowed;
+      }
     }
 
     i = 0;

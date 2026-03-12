@@ -328,6 +328,9 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_SONG_WT_LABEL       2171  // Static label: "Window Title:" (for show/hide)
 #define IDC_MW_WT_PROFILE          2172  // ComboBox: profile selector (General tab)
 #define IDC_MW_WT_EDIT_PARSER      2173  // Button: "Edit Parser..." (General tab)
+#define IDC_MW_SONG_ANIM_COMBO    2175  // ComboBox: song title animation profile
+#define IDC_MW_SONG_PUSH_TITLE    2176  // Button: "Push Title"
+#define IDC_MW_SONG_EDIT_PROFILES 2177  // Button: "Edit Profiles..."
 
 // Window Title Parser popup controls
 #define IDC_MW_WTP_PROFILE         2180  // ComboBox: profile selector

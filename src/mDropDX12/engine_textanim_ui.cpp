@@ -389,19 +389,6 @@ void TextAnimWindow::DoBuildControls()
   int comboW = rw - labelW - MulDiv(80, lineH, 26) - 8;
   int pushW = MulDiv(80, lineH, 26);
 
-  TrackControl(CreateLabel(hw, L"Song Title Profile:", x, y, labelW, lineH, hFont));
-  HWND hSongCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
-    WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
-    x + labelW, y, comboW, lineH * 10, hw,
-    (HMENU)(INT_PTR)IDC_MW_TEXTANIM_SONG_COMBO, GetModuleHandle(NULL), NULL);
-  if (hSongCombo && hFont) SendMessage(hSongCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
-  TrackControl(hSongCombo);
-  PopulateProfileCombo(hSongCombo, p, p->m_nSongTitleAnimProfile, L"(Default)");
-
-  TrackControl(CreateBtn(hw, L"Push Title", IDC_MW_TEXTANIM_PUSH_TITLE,
-    x + labelW + comboW + 4, y, pushW, lineH, hFont));
-  y += lineH + gap;
-
   TrackControl(CreateLabel(hw, L"Preset Name Profile:", x, y, labelW, lineH, hFont));
   HWND hPresetCombo = CreateWindowExW(0, L"COMBOBOX", NULL,
     WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
@@ -858,8 +845,6 @@ LRESULT TextAnimWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
       p->CreateDefaultAnimProfiles();
       PopulateListView();
       SelectProfile(0);
-      PopulateProfileCombo(GetDlgItem(hWnd, IDC_MW_TEXTANIM_SONG_COMBO),
-                           p, p->m_nSongTitleAnimProfile, L"(Default)");
       PopulateProfileCombo(GetDlgItem(hWnd, IDC_MW_TEXTANIM_PRESET_COMBO),
                            p, p->m_nPresetNameAnimProfile, L"(Disabled)", true);
     }
@@ -912,8 +897,6 @@ LRESULT TextAnimWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
       p->ImportAnimProfiles(szFile);
       PopulateListView();
       SelectProfile(0);
-      PopulateProfileCombo(GetDlgItem(hWnd, IDC_MW_TEXTANIM_SONG_COMBO),
-                           p, p->m_nSongTitleAnimProfile, L"(Default)");
       PopulateProfileCombo(GetDlgItem(hWnd, IDC_MW_TEXTANIM_PRESET_COMBO),
                            p, p->m_nPresetNameAnimProfile, L"(Disabled)", true);
       wchar_t msg[MAX_PATH + 64];
@@ -943,16 +926,6 @@ LRESULT TextAnimWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
     SaveEditControls();
     p->WriteAnimProfiles();
     p->AddNotification(L"Animation profiles saved.");
-    return 0;
-
-  case IDC_MW_TEXTANIM_PUSH_TITLE:
-    p->PushSongTitleAsMessage();
-    return 0;
-
-  case IDC_MW_TEXTANIM_SONG_COMBO:
-    if (code == CBN_SELCHANGE) {
-      p->m_nSongTitleAnimProfile = ComboToProfileIndex(GetDlgItem(hWnd, IDC_MW_TEXTANIM_SONG_COMBO));
-    }
     return 0;
 
   case IDC_MW_TEXTANIM_PRESET_COMBO:
