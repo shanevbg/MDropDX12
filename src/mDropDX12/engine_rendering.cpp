@@ -1479,7 +1479,8 @@ void Engine::MyRenderUI(
               int res = SendMessageToMDropDX12Remote((L"STATUS=" + m_errors[i].msg).c_str());
               m_errors[i].bSentToRemote = res != 0;
             }
-            if (!m_errors[i].bSentToRemote || !m_HideNotificationsWhenRemoteActive) {
+            bool hideForRemote = m_errors[i].bSentToRemote && m_HideNotificationsWhenRemoteActive;
+            if (m_bShowNotifications && !hideForRemote) {
               SelectFont(m_errors[i].color ? TOOLTIP_FONT : SIMPLE_FONT);
               swprintf(buf, L"%s ", m_errors[i].msg.c_str());
               DWORD col = m_errors[i].color ? m_errors[i].color : GetFontColor(SIMPLE_FONT);

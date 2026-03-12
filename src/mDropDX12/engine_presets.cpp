@@ -1929,6 +1929,9 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
 void Engine::OnFinishedLoadingPreset() {
   // note: only used this if you loaded the preset *intact* (or mostly intact)
 
+  // Clear stale notifications from previous preset (issue #17)
+  ClearErrors(ERR_NOTIFY);
+
   // Clamp unreasonably low gamma to avoid black-screen presets
   if (m_pState->m_fGammaAdj.eval(-1) < 0.5f)
     m_pState->m_fGammaAdj = 1.0f;

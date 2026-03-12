@@ -1615,6 +1615,7 @@ void Engine::MyReadConfig() {
   m_DisplayCoverWhenPressingB = GetPrivateProfileBoolW(L"Milkwave", L"DisplayCoverWhenPressingB", m_DisplayCoverWhenPressingB, pIni);
   m_bSongInfoAlwaysShow = GetPrivateProfileBoolW(L"Milkwave", L"SongInfoAlwaysShow", m_bSongInfoAlwaysShow, pIni);
   m_HideNotificationsWhenRemoteActive = GetPrivateProfileBoolW(L"Milkwave", L"HideNotificationsWhenRemoteActive", m_HideNotificationsWhenRemoteActive, pIni);
+  m_bShowNotifications = GetPrivateProfileBoolW(L"Milkwave", L"ShowNotifications", m_bShowNotifications, pIni);
 
   // Error Display Settings
   m_ErrorDuration   = GetPrivateProfileFloatW(L"Milkwave", L"ErrorDuration", m_ErrorDuration, pIni);

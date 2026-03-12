@@ -632,6 +632,7 @@ public:
   bool m_DisplayCoverWhenPressingB = true;
   float m_MediaKeyNotifyTime = 1.0f;  // seconds to show media key notification
   bool m_HideNotificationsWhenRemoteActive = false;
+  bool m_bShowNotifications = true;  // false = suppress all HUD notifications
 
   // Error Display Settings
   float   m_ErrorDuration       = 8.0f;     // seconds
