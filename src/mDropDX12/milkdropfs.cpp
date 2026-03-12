@@ -4084,13 +4084,11 @@ void mdrop::Engine::DX12_DrawCustomShapes() {
           v[0].z = 0;
           v[0].tu = 0.5f;
           v[0].tv = 0.5f;
-          // Early-exit: skip shapes where both center and outer alpha are zero.
-          // With SrcAlpha/InvSrcAlpha blending, alpha=0 shapes contribute nothing
-          // but still cost draw calls. Matches MilkDrop2 behavior where invisible
-          // shapes don't affect the render target.
+          // Early-exit: skip shapes where fill, outer, AND border alpha are all zero.
           float shapeA  = (float)*pState->m_shape[i].var_pf_a  * alpha_mult;
           float shapeA2 = (float)*pState->m_shape[i].var_pf_a2 * alpha_mult;
-          if (shapeA <= 0.0f && shapeA2 <= 0.0f)
+          float borderA = (float)*pState->m_shape[i].var_pf_border_a;
+          if (shapeA <= 0.0f && shapeA2 <= 0.0f && borderA <= 0.0f)
             continue;
 
           v[0].Diffuse =
@@ -4177,6 +4175,9 @@ void mdrop::Engine::DX12_DrawCustomShapes() {
             }
 
             // Border uses line alpha blend PSO
+            if (!m_lpDX->m_PSOs[PSO_LINE_ALPHABLEND_WFVERTEX]) {
+              if (instance == 0) DLOG_INFO("SHAPE BORDER: PSO_LINE_ALPHABLEND_WFVERTEX is NULL!");
+            }
             cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_LINE_ALPHABLEND_WFVERTEX].Get());
 
             int its = ((int)(*pState->m_shape[i].var_pf_thick) != 0) ? 4 : 1;

@@ -1442,11 +1442,13 @@ void Engine::MyReadConfig() {
   m_bEnableAudioCapture = GetPrivateProfileBoolW(L"Settings", L"bEnableAudioCapture", m_bEnableAudioCapture, pIni);
   m_bEnableD2DText = GetPrivateProfileBoolW(L"Settings", L"bEnableD2DText", m_bEnableD2DText, pIni);
   m_fAudioSensitivity = GetPrivateProfileFloatW(L"Milkwave", L"AudioSensitivity", m_fAudioSensitivity, pIni);
-  if (m_fAudioSensitivity < -1.0f) m_fAudioSensitivity = -1.0f;
+  if (m_fAudioSensitivity < -2.0f) m_fAudioSensitivity = -2.0f;
   if (m_fAudioSensitivity > 256.0f) m_fAudioSensitivity = 256.0f;
-  if (m_fAudioSensitivity == -1.0f) {
+  if (m_fAudioSensitivity <= -1.0f) {
+    // -1 = improved adaptive (average-tracking, preserves transients)
+    // -2 = legacy adaptive (peak-tracking, compresses transients)
     mdropdx12_audio_adaptive = true;
-    mdropdx12_audio_sensitivity = 1.0f;   // fallback, not used in adaptive mode
+    mdropdx12_audio_sensitivity = m_fAudioSensitivity;  // pass through so FltToInt can distinguish
   } else {
     mdropdx12_audio_adaptive = false;
     if (m_fAudioSensitivity < 0.5f) m_fAudioSensitivity = 0.5f;

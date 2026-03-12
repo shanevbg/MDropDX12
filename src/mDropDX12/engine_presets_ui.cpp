@@ -257,7 +257,7 @@ void PresetsWindow::DoBuildControls() {
     // Preset settings
     wchar_t buf[64];
     int slw = MulDiv(200, lineH, 26); // wider label for settings rows
-    m_hLblSens = CreateLabel(hw, L"Audio Gain (-1=Auto):", x, y, slw, lineH, hFont);
+    m_hLblSens = CreateLabel(hw, L"Audio Gain (-1=Auto, -2=Legacy):", x, y, slw, lineH, hFont);
     swprintf(buf, 64, L"%g", (double)p->m_fAudioSensitivity);
     m_hEditSens = CreateEdit(hw, buf, IDC_MW_AUDIO_SENS, x + slw + 4, y, 60, lineH, hFont);
     y += lineH + gap;
@@ -733,12 +733,14 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         switch (id) {
         case IDC_MW_AUDIO_SENS: {
             p->m_fAudioSensitivity = (float)_wtof(buf);
-            if (p->m_fAudioSensitivity < -1) p->m_fAudioSensitivity = -1;
+            if (p->m_fAudioSensitivity < -2) p->m_fAudioSensitivity = -2;
             if (p->m_fAudioSensitivity > 256) p->m_fAudioSensitivity = 256;
             extern bool mdropdx12_audio_adaptive;
             extern float mdropdx12_audio_sensitivity;
-            if (p->m_fAudioSensitivity == -1.0f) {
+            if (p->m_fAudioSensitivity <= -1.0f) {
+                // -1 = improved adaptive, -2 = legacy adaptive
                 mdropdx12_audio_adaptive = true;
+                mdropdx12_audio_sensitivity = p->m_fAudioSensitivity;
             } else {
                 mdropdx12_audio_adaptive = false;
                 if (p->m_fAudioSensitivity < 0.5f) p->m_fAudioSensitivity = 0.5f;

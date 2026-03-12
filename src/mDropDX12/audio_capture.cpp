@@ -39,7 +39,8 @@ float mdropdx12_audio_sensitivity = 1.0f;
 bool  mdropdx12_audio_adaptive = false;
 
 // Adaptive audio normalization state
-static float s_adaptivePeak = 0.1f;
+static float s_adaptivePeak = 0.1f;   // legacy: peak tracker (instant attack, slow decay)
+static float s_adaptiveAvg  = 0.01f;  // new: running average of |sample| (slow adaptation)
 static float s_adaptiveGain = 1.0f;
 
 void ResetAudioBuf() {
@@ -82,21 +83,38 @@ int8_t FltToInt(float flt) {
   float gain;
   if (mdropdx12_audio_adaptive) {
     float absFlt = fabsf(flt);
-    if (absFlt > s_adaptivePeak)
-      s_adaptivePeak = absFlt;
-    else
-      s_adaptivePeak *= 0.99998f;
-    gain = 0.10f / (s_adaptivePeak > 0.0001f ? s_adaptivePeak : 0.0001f);
-    if (gain < 0.1f)  gain = 0.1f;
-    if (gain > 8.0f)  gain = 8.0f;
+
+    if (mdropdx12_audio_sensitivity <= -2.0f) {
+      // Legacy adaptive: instant peak attack, slow decay.
+      // Targets 10% of float range. Compresses transients aggressively.
+      if (absFlt > s_adaptivePeak)
+        s_adaptivePeak = absFlt;
+      else
+        s_adaptivePeak *= 0.99998f;
+      gain = 0.10f / (s_adaptivePeak > 0.0001f ? s_adaptivePeak : 0.0001f);
+      if (gain < 0.1f)  gain = 0.1f;
+      if (gain > 8.0f)  gain = 8.0f;
+    } else {
+      // Improved adaptive (-1): tracks average level, not peak.
+      // Slow adaptation preserves beat transients for better beat detection.
+      // Targets 20% of float range for average level (~25 counts in int8).
+      // This leaves headroom for 4x transients before clipping (25→100 counts),
+      // preserving the imm_rel ratio dynamics that presets depend on.
+      // alpha ~= 1.4s half-life at 48kHz (slow enough to not compress beats)
+      const float alpha = 0.00001f;
+      s_adaptiveAvg += (absFlt - s_adaptiveAvg) * alpha;
+      gain = 0.20f / (s_adaptiveAvg > 0.0001f ? s_adaptiveAvg : 0.0001f);
+      if (gain < 0.1f)  gain = 0.1f;
+      if (gain > 64.0f) gain = 64.0f;
+    }
     s_adaptiveGain = gain;
   } else {
     gain = mdropdx12_audio_sensitivity;
   }
   flt *= gain;
   if (++s_diagCount >= 48000) {
-    DLOG_VERBOSE("[AudioDiag] adaptive=%d gain=%.3f peak=%.5f flt_out=%.4f",
-      (int)mdropdx12_audio_adaptive, gain, s_adaptivePeak, flt);
+    DLOG_VERBOSE("[AudioDiag] adaptive=%d gain=%.3f avg=%.5f peak=%.5f flt_out=%.4f",
+      (int)mdropdx12_audio_adaptive, gain, s_adaptiveAvg, s_adaptivePeak, flt);
     s_diagCount = 0;
   }
   if (flt >= 1.0f)  return +127;
