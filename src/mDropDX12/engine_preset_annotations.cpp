@@ -458,8 +458,8 @@ bool Engine::LoadPresetList(const wchar_t* listPath)
                 while (*p == L' ') p++;
                 lstrcpynW(savedBaseDir, p, MAX_PATH);
                 baseDirLen = lstrlenW(savedBaseDir);
-                // Ensure trailing backslash
-                if (baseDirLen > 0 && savedBaseDir[baseDirLen-1] != L'\\') {
+                // Ensure trailing backslash (with bounds check)
+                if (baseDirLen > 0 && baseDirLen < MAX_PATH - 1 && savedBaseDir[baseDirLen-1] != L'\\') {
                     savedBaseDir[baseDirLen] = L'\\';
                     savedBaseDir[baseDirLen+1] = 0;
                     baseDirLen++;
@@ -472,6 +472,12 @@ bool Engine::LoadPresetList(const wchar_t* listPath)
         if (wcsncmp(line, L"@basedir=", 9) == 0) {
             lstrcpynW(savedBaseDir, line + 9, MAX_PATH);
             baseDirLen = lstrlenW(savedBaseDir);
+            // Ensure trailing backslash (with bounds check)
+            if (baseDirLen > 0 && baseDirLen < MAX_PATH - 1 && savedBaseDir[baseDirLen-1] != L'\\') {
+                savedBaseDir[baseDirLen] = L'\\';
+                savedBaseDir[baseDirLen+1] = 0;
+                baseDirLen++;
+            }
             continue;
         }
 

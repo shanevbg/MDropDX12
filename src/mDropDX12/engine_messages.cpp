@@ -9,6 +9,7 @@
 #include "engine_helpers.h"
 #include "tool_window.h"
 #include "pipe_server.h"
+#include <thread>
 #include "utility.h"
 #include "AutoCharFn.h"
 #include "support.h"
@@ -2645,43 +2646,53 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     m_bFFTSmoothingActive = true;
   }
   else if (wcsncmp(sMessage, L"LOAD_LIST=", 10) == 0) {
-    // Load a saved preset list by name.  Format: LOAD_LIST=<listname>
+    // Offloaded from render thread — file I/O + CancelThread can block up to 500ms
     std::wstring listName(sMessage + 10);
-    wchar_t szDir[MAX_PATH];
-    GetPresetListDir(szDir, MAX_PATH);
-    wchar_t szPath[MAX_PATH];
-    swprintf(szPath, MAX_PATH, L"%s%s.txt", szDir, listName.c_str());
-    extern PipeServer g_pipeServer;
-    if (LoadPresetList(szPath)) {
-      WritePrivateProfileStringW(L"Settings", L"szActivePresetList", m_szActivePresetList.c_str(), GetConfigIniFile());
-      g_pipeServer.Send(L"LOAD_LIST_RESULT=OK|" + listName);
-    } else {
-      g_pipeServer.Send(L"LOAD_LIST_RESULT=ERROR|list not found: " + listName);
-    }
+    std::thread([this, listName]() {
+      extern PipeServer g_pipeServer;
+      if (listName.find_first_of(L"\\/:") != std::wstring::npos ||
+          listName.find(L"..") != std::wstring::npos) {
+        g_pipeServer.Send(L"LOAD_LIST_RESULT=ERROR|invalid list name");
+        return;
+      }
+      wchar_t szDir[MAX_PATH];
+      GetPresetListDir(szDir, MAX_PATH);
+      wchar_t szPath[MAX_PATH];
+      swprintf(szPath, MAX_PATH, L"%s%s.txt", szDir, listName.c_str());
+      if (LoadPresetList(szPath)) {
+        WritePrivateProfileStringW(L"Settings", L"szActivePresetList", m_szActivePresetList.c_str(), GetConfigIniFile());
+        g_pipeServer.Send(L"LOAD_LIST_RESULT=OK|" + listName);
+      } else {
+        g_pipeServer.Send(L"LOAD_LIST_RESULT=ERROR|list not found: " + listName);
+      }
+    }).detach();
   }
   else if (wcsncmp(sMessage, L"CLEAR_LIST", 10) == 0) {
-    // Clear the active preset list and revert to directory scan
-    m_szActivePresetList.clear();
-    WritePrivateProfileStringW(L"Settings", L"szActivePresetList", L"", GetConfigIniFile());
-    m_bRecursivePresets = (m_nSubdirMode == 1);
-    UpdatePresetList(true, true);
-    extern PipeServer g_pipeServer;
-    g_pipeServer.Send(L"CLEAR_LIST_RESULT=OK");
+    // Offloaded from render thread — INI write + UpdatePresetList
+    std::thread([this]() {
+      m_szActivePresetList.clear();
+      WritePrivateProfileStringW(L"Settings", L"szActivePresetList", L"", GetConfigIniFile());
+      UpdatePresetList(true, true);
+      extern PipeServer g_pipeServer;
+      g_pipeServer.Send(L"CLEAR_LIST_RESULT=OK");
+    }).detach();
   }
   else if (wcsncmp(sMessage, L"ENUM_LISTS", 10) == 0) {
-    // Enumerate available preset lists.  Returns pipe-separated list names.
-    std::vector<std::wstring> names;
-    EnumPresetLists(names);
-    std::wstring result = L"ENUM_LISTS_RESULT=";
-    for (size_t i = 0; i < names.size(); i++) {
-      if (i > 0) result += L"|";
-      result += names[i];
-    }
-    extern PipeServer g_pipeServer;
-    g_pipeServer.Send(result);
+    // Offloaded from render thread — directory scan
+    std::thread([this]() {
+      std::vector<std::wstring> names;
+      EnumPresetLists(names);
+      std::wstring result = L"ENUM_LISTS_RESULT=";
+      for (size_t i = 0; i < names.size(); i++) {
+        if (i > 0) result += L"|";
+        result += names[i];
+      }
+      extern PipeServer g_pipeServer;
+      g_pipeServer.Send(result);
+    }).detach();
   }
   else if (wcsncmp(sMessage, L"SET_DIR=", 8) == 0) {
-    // Change preset directory.  Format: SET_DIR=<path>[|recursive]
+    // Offloaded from render thread — dir validation + ChangePresetDir (INI write + UpdatePresetList)
     std::wstring value(sMessage + 8);
     bool bRecursive = false;
     size_t pipePos = value.find(L'|');
@@ -2691,22 +2702,23 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
         bRecursive = true;
       value = value.substr(0, pipePos);
     }
-    // Ensure trailing backslash
     if (!value.empty() && value.back() != L'\\')
       value += L'\\';
-    wchar_t szNewDir[MAX_PATH];
-    lstrcpynW(szNewDir, value.c_str(), MAX_PATH);
-    extern PipeServer g_pipeServer;
-    if (GetFileAttributesW(szNewDir) != INVALID_FILE_ATTRIBUTES) {
-      m_szActivePresetList.clear();
-      ChangePresetDir(szNewDir, m_szPresetDir);
-      m_bRecursivePresets = bRecursive;
-      m_nCurrentPreset = -1;
-      UpdatePresetList(true, true);
-      g_pipeServer.Send(L"SET_DIR_RESULT=OK|" + value);
-    } else {
-      g_pipeServer.Send(L"SET_DIR_RESULT=ERROR|directory not found: " + value);
-    }
+    std::thread([this, value, bRecursive]() {
+      wchar_t szNewDir[MAX_PATH];
+      lstrcpynW(szNewDir, value.c_str(), MAX_PATH);
+      extern PipeServer g_pipeServer;
+      if (GetFileAttributesW(szNewDir) != INVALID_FILE_ATTRIBUTES) {
+        m_szActivePresetList.clear();
+        WritePrivateProfileStringW(L"Settings", L"szActivePresetList", L"", GetConfigIniFile());
+        m_nSubdirMode = bRecursive ? 1 : 0;
+        m_nCurrentPreset = -1;
+        ChangePresetDir(szNewDir, m_szPresetDir);
+        g_pipeServer.Send(L"SET_DIR_RESULT=OK|" + value);
+      } else {
+        g_pipeServer.Send(L"SET_DIR_RESULT=ERROR|directory not found: " + value);
+      }
+    }).detach();
   }
   else if (wcsncmp(sMessage, L"SHADER_IMPORT=", 14) == 0) {
     // Load JSON, convert GLSL→HLSL, apply.  Format: SHADER_IMPORT=<path>
