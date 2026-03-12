@@ -98,15 +98,15 @@ function sendPipeMessage(pipePath, message, expectResponse = false) {
 
 let cachedPipePath = null;
 
-async function ensureConnected() {
-  // Test if cached pipe is still valid
+function findPipe() {
+  // Check if cached pipe still exists
   if (cachedPipePath) {
+    const pipeName = cachedPipePath.split('/').pop();
     try {
-      await sendPipeMessage(cachedPipePath, 'STATE', true);
-      return cachedPipePath;
-    } catch {
-      cachedPipePath = null;
-    }
+      const exists = fs.readdirSync('//./pipe/').includes(pipeName);
+      if (exists) return cachedPipePath;
+    } catch { /* fall through */ }
+    cachedPipePath = null;
   }
 
   const pipes = discoverPipes();
@@ -114,14 +114,20 @@ async function ensureConnected() {
     throw new Error('No running MDropDX12 instance found. Start the visualizer first.');
   }
 
-  // Try first discovered pipe
   cachedPipePath = pipes[0].path;
   return cachedPipePath;
 }
 
 async function send(message, expectResponse = false) {
-  const pipePath = await ensureConnected();
-  return sendPipeMessage(pipePath, message, expectResponse);
+  const pipePath = findPipe();
+  try {
+    return await sendPipeMessage(pipePath, message, expectResponse);
+  } catch {
+    // Pipe may have recycled — rediscover and retry once
+    cachedPipePath = null;
+    const retryPath = findPipe();
+    return sendPipeMessage(retryPath, message, expectResponse);
+  }
 }
 
 // ── Capture helpers ──
@@ -359,6 +365,81 @@ server.tool(
       if (attack !== undefined) { await send(`FFT_ATTACK=${attack}`); results.push(`attack=${attack}`); }
       if (decay !== undefined) { await send(`FFT_DECAY=${decay}`); results.push(`decay=${decay}`); }
       return { content: [{ type: 'text', text: results.length ? `Set FFT: ${results.join(', ')}` : 'No parameters specified' }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
+    }
+  }
+);
+
+// Tool: Shader import (load JSON, convert GLSL→HLSL, apply)
+server.tool(
+  'mdrop_shader_import',
+  'Import a Shadertoy shader from a .json file — loads, converts GLSL→HLSL, and applies to the visualizer. Returns conversion result. Use for debugging shader import issues.',
+  {
+    file_path: z.string().describe('Full path to the shader_import .json file'),
+  },
+  async ({ file_path }) => {
+    try {
+      // Normalize path separators for Windows
+      const normalizedPath = file_path.replace(/\//g, '\\');
+      const response = await send(`SHADER_IMPORT=${normalizedPath}`, true);
+      return { content: [{ type: 'text', text: response || '(no response — check debug.log)' }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
+    }
+  }
+);
+
+// Tool: Load preset list
+server.tool(
+  'mdrop_load_list',
+  'Load a saved preset list by name, or clear the active list to revert to directory scanning',
+  {
+    list_name: z.string().optional().describe('Name of the preset list to load (without .txt). Omit to clear the active list.'),
+  },
+  async ({ list_name }) => {
+    try {
+      if (!list_name) {
+        const response = await send('CLEAR_LIST', true);
+        return { content: [{ type: 'text', text: response || 'Cleared preset list' }] };
+      }
+      const response = await send(`LOAD_LIST=${list_name}`, true);
+      return { content: [{ type: 'text', text: response || `Loaded list: ${list_name}` }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
+    }
+  }
+);
+
+// Tool: Enumerate preset lists
+server.tool(
+  'mdrop_enum_lists',
+  'List all available saved preset lists',
+  {},
+  async () => {
+    try {
+      const response = await send('ENUM_LISTS', true);
+      return { content: [{ type: 'text', text: response || '(no lists found)' }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
+    }
+  }
+);
+
+// Tool: Set preset directory
+server.tool(
+  'mdrop_set_dir',
+  'Change the preset directory and optionally enable recursive subdirectory scanning',
+  {
+    directory: z.string().describe('Full path to the preset directory'),
+    recursive: z.boolean().optional().describe('Enable recursive subdirectory scanning (default: false)'),
+  },
+  async ({ directory, recursive }) => {
+    try {
+      let cmd = `SET_DIR=${directory}`;
+      if (recursive) cmd += '|recursive';
+      const response = await send(cmd, true);
+      return { content: [{ type: 'text', text: response || `Set directory: ${directory}` }] };
     } catch (err) {
       return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
     }

@@ -407,12 +407,14 @@ bool Engine::SavePresetList(const wchar_t* listName)
     FILE* f = _wfopen(szPath, L"w, ccs=UTF-8");
     if (!f) return false;
 
-    // Write the base preset directory as the first line (for reference)
     fwprintf(f, L"# Preset list: %s\n", listName);
-    fwprintf(f, L"# Base directory: %s\n", m_szPresetDir);
+    fwprintf(f, L"@basedir=%s\n", m_szPresetDir);
 
     for (int i = m_nDirs; i < m_nPresets; i++) {
-        fwprintf(f, L"%s\n", m_presets[i].szFilename.c_str());
+        // Save absolute paths so the list works regardless of current preset dir
+        wchar_t szFile[MAX_PATH];
+        BuildPresetPath(i, szFile, MAX_PATH);
+        fwprintf(f, L"%s\n", szFile);
     }
 
     fclose(f);
@@ -429,18 +431,59 @@ bool Engine::LoadPresetList(const wchar_t* listPath)
     PresetList temp_presets;
     int temp_nPresets = 0;
     wchar_t line[MAX_PATH];
+    wchar_t savedBaseDir[MAX_PATH] = {};
+    int baseDirLen = 0;
 
     while (fgetws(line, MAX_PATH, f)) {
         // Strip newline
         int len = (int)wcslen(line);
         while (len > 0 && (line[len-1] == L'\n' || line[len-1] == L'\r'))
             line[--len] = 0;
-        if (len == 0 || line[0] == L'#') continue;  // skip empty lines and comments
+        if (len == 0) continue;
+        if (line[0] == L'#') continue;  // skip comments
 
-        // No file existence check — trust the saved list. Missing presets
-        // are handled gracefully at load time (LoadPreset fails silently).
+        // Parse @basedir= header
+        if (wcsncmp(line, L"@basedir=", 9) == 0) {
+            lstrcpynW(savedBaseDir, line + 9, MAX_PATH);
+            baseDirLen = lstrlenW(savedBaseDir);
+            continue;
+        }
+
+        // Determine filename to store:
+        // - If absolute path and starts with current m_szPresetDir, make relative
+        // - If absolute path with saved basedir, make relative to current dir
+        // - Otherwise store as-is (absolute paths handled by BuildPresetPath)
+        const wchar_t* fn = line;
+        bool bAbsolute = (fn[0] && fn[1] == L':') || (fn[0] == L'\\' && fn[1] == L'\\');
+
+        wchar_t resolved[MAX_PATH];
+        if (bAbsolute) {
+            int curDirLen = lstrlenW(m_szPresetDir);
+            if (curDirLen > 0 && _wcsnicmp(fn, m_szPresetDir, curDirLen) == 0) {
+                // Absolute path under current preset dir — make relative
+                lstrcpynW(resolved, fn + curDirLen, MAX_PATH);
+                fn = resolved;
+            }
+            // else: absolute path not under current dir — keep absolute
+            //       (BuildPresetPath will use it as-is)
+        } else if (baseDirLen > 0) {
+            // Old-format relative path with a saved basedir — resolve to absolute,
+            // then try to make relative to current dir
+            wchar_t absPath[MAX_PATH];
+            swprintf(absPath, MAX_PATH, L"%s%s", savedBaseDir, fn);
+            int curDirLen = lstrlenW(m_szPresetDir);
+            if (curDirLen > 0 && _wcsnicmp(absPath, m_szPresetDir, curDirLen) == 0) {
+                lstrcpynW(resolved, absPath + curDirLen, MAX_PATH);
+                fn = resolved;
+            } else {
+                // Different base dir — store absolute path
+                lstrcpynW(resolved, absPath, MAX_PATH);
+                fn = resolved;
+            }
+        }
+
         PresetInfo pi;
-        pi.szFilename = line;
+        pi.szFilename = fn;
         pi.fRatingThis = 3.0f;
         pi.fRatingCum = (temp_nPresets > 0 ? temp_presets[temp_nPresets-1].fRatingCum : 0) + 3.0f;
         temp_presets.push_back(pi);

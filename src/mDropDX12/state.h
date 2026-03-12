@@ -71,7 +71,7 @@ struct EelCompileScope {
 #define NUM_T_VAR 8
 
 #define MAX_BIGSTRING_LEN    32768
-#define MAX_SHADER_TEXT_LEN  131072  // 128KB for large Shadertoy shaders
+#define MAX_SHADER_TEXT_LEN  262144  // 256KB for large Shadertoy shaders
 
 class CBlendableFloat {
 public:
@@ -397,6 +397,10 @@ public:
   int             m_nBufferAPSVersion = 0;             // 0 = no Buffer A shader
   char            m_szBufferBShadersText[MAX_SHADER_TEXT_LEN]; // Shadertoy Buffer B shader code
   int             m_nBufferBPSVersion = 0;             // 0 = no Buffer B shader
+  char            m_szBufferCShadersText[MAX_SHADER_TEXT_LEN]; // Shadertoy Buffer C shader code
+  int             m_nBufferCPSVersion = 0;             // 0 = no Buffer C shader
+  char            m_szBufferDShadersText[MAX_SHADER_TEXT_LEN]; // Shadertoy Buffer D shader code
+  int             m_nBufferDPSVersion = 0;             // 0 = no Buffer D shader
   void			FreeVarsAndCode(bool bFree = true);
   void			RegisterBuiltInVariables(int flags);
   void			StripLinefeedCharsAndComments(char* src, char* dest);

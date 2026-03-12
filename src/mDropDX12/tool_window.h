@@ -660,6 +660,8 @@ enum ChannelSource {
   CHAN_AUDIO,            // sampler_audio (512x2 audio FFT + waveform)
   CHAN_RANDOM_TEX,       // sampler_rand00 (random texture from disk)
   CHAN_BUFFER_B,         // sampler_bufferB (Buffer B output)
+  CHAN_BUFFER_C,         // sampler_bufferC (Buffer C output)
+  CHAN_BUFFER_D,         // sampler_bufferD (Buffer D output)
   CHAN_TEXTURE_FILE,     // sampler_chtex0..3 (user-selected texture file)
   CHAN_COUNT
 };
@@ -723,6 +725,9 @@ public:
   void ConvertGLSLtoHLSL(int passOverride = -1);  // Convert pass GLSL→HLSL
   void ConvertAndApply();           // Convert all passes, then apply
   void OnPasteGLSL(const std::string& glsl);  // Paste intelligence: detect pass type + channels
+  std::wstring ImportFromFile(const wchar_t* path);  // Headless: load JSON, convert, apply — returns status
+  std::wstring ImportFromGLSL(const std::string& glsl, bool applyToEngine = true);  // Headless: convert GLSL, optionally apply
+  std::wstring SavePresetToFile(const wchar_t* path);  // Headless: save current passes as .milk3
 
 protected:
   TOOLWINDOW_META(L"Shader Import", L"MDropDX12ShaderImportWnd", L"ShaderImport",

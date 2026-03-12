@@ -2248,6 +2248,28 @@ void Engine::ExecuteRenderCommand(const RenderCommand& cmd) {
             allOK = false;
           }
         }
+        // Recompile Buffer C if present
+        m_bHasBufferC = false;
+        m_shaders.bufferC.Clear();
+        if (m_pState->m_nBufferCPSVersion > 0 && m_pState->m_szBufferCShadersText[0]) {
+          if (RecompilePShader(m_pState->m_szBufferCShadersText, &m_shaders.bufferC,
+                               SHADER_COMP, false, m_pState->m_nBufferCPSVersion, false, "bufferC")) {
+            m_bHasBufferC = true;
+          } else {
+            allOK = false;
+          }
+        }
+        // Recompile Buffer D if present
+        m_bHasBufferD = false;
+        m_shaders.bufferD.Clear();
+        if (m_pState->m_nBufferDPSVersion > 0 && m_pState->m_szBufferDShadersText[0]) {
+          if (RecompilePShader(m_pState->m_szBufferDShadersText, &m_shaders.bufferD,
+                               SHADER_COMP, false, m_pState->m_nBufferDPSVersion, false, "bufferD")) {
+            m_bHasBufferD = true;
+          } else {
+            allOK = false;
+          }
+        }
         // Recompile Image/comp shader last (so diag_comp_* reflects Image pass)
         m_shaders.comp.Clear();
         if (!RecompilePShader(m_pState->m_szCompShadersText, &m_shaders.comp,

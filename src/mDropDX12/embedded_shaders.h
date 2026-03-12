@@ -235,6 +235,8 @@ Texture2D sampler_rand03;
 Texture2D sampler_feedback;
 Texture2D sampler_image;
 Texture2D sampler_bufferB;
+Texture2D sampler_bufferC;
+Texture2D sampler_bufferD;
 Texture2D sampler_audio;
 #define sampler_fft sampler_audio
 

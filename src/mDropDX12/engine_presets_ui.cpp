@@ -449,7 +449,7 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
             }
             p->m_nCurrentPreset = sel;
             wchar_t szFile[MAX_PATH];
-            swprintf(szFile, MAX_PATH, L"%s%s", p->m_szPresetDir, p->m_presets[sel].szFilename.c_str());
+            p->BuildPresetPath(sel, szFile, MAX_PATH);
             p->LoadPreset(szFile, p->m_fBlendTimeUser);
             UpdateCurrentPresetDisplay();
         }
@@ -469,7 +469,7 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
             } else {
                 p->m_nCurrentPreset = sel;
                 wchar_t szFile[MAX_PATH];
-                swprintf(szFile, MAX_PATH, L"%s%s", p->m_szPresetDir, p->m_presets[sel].szFilename.c_str());
+                p->BuildPresetPath(sel, szFile, MAX_PATH);
                 p->LoadPreset(szFile, p->m_fBlendTimeUser);
                 UpdateCurrentPresetDisplay();
             }
@@ -499,7 +499,7 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         int sel = (lbSel >= 0) ? (int)SendMessage(m_hList, LB_GETITEMDATA, lbSel, 0) : -1;
         if (sel >= 0 && sel < p->m_nPresets) {
             wchar_t szFile[MAX_PATH];
-            swprintf(szFile, MAX_PATH, L"%s%s", p->m_szPresetDir, p->m_presets[sel].szFilename.c_str());
+            p->BuildPresetPath(sel, szFile, MAX_PATH);
             if (OpenClipboard(hWnd)) {
                 EmptyClipboard();
                 size_t len = (wcslen(szFile) + 1) * sizeof(wchar_t);

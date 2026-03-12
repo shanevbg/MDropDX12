@@ -1,5 +1,105 @@
 # MDropDX12 Changelog
 
+## v2.0.0 (2026-03-12)
+
+Major milestone release. MDropDX12 2.0 marks the point where the engine has been fully rebuilt on DirectX 12 with a comprehensive feature set that goes well beyond the original MilkDrop2 visualizer.
+
+Special thanks to [IkeC](https://github.com/IkeC) for all his hard work on [Milkwave](https://github.com/IkeC/Milkwave) — the inspiration, testing, feedback, and collaboration that made this project possible.
+
+### Shadertoy Import & GLSL→HLSL Converter
+
+- Full Shadertoy rendering pipeline with `.milk3` JSON preset format
+- Multi-pass rendering: Buffer A → Buffer B → Buffer C → Buffer D → Image, with Common shared code
+- SM5.0 (`ps_5_0`) shader compilation for all Shadertoy presets
+- FLOAT32 ping-pong feedback buffers for temporal accumulation effects
+- Comprehensive GLSL→HLSL converter handling matrices, structs, vector comparisons, array params, over-specified constructors, and more
+- Shader Import window with two-panel editor, per-pass channel combos, Convert & Apply, and Save .milk3 export
+- Channel auto-detection: self-feedback, audio, noise textures, and JSON channel names
+- Shadertoy-compatible `iMouse`, `iDate`, `iResolution`, `iTime`, `iChannel0–3` uniforms
+- sRGB gamma correction for Shadertoy-accurate color output
+- 17+ converter fixes since initial release (variable shadowing, matrix chains, precision strips, texture bias, and more)
+
+### Named Pipe IPC
+
+- Replaced WM_COPYDATA / hidden window IPC with Named Pipes (`\\.\pipe\Milkwave_<PID>`)
+- PID-based discovery eliminates fragile window-title matching
+- Multi-instance pipe server: concurrent client connections (Milkwave Remote + MCP simultaneously)
+- Duplex message-mode communication with non-blocking outgoing messages
+- 32 of 34 Milkwave commands handled natively
+- Signal messages (`SIGNAL|NAME=VALUE`) for extensible event notification
+- MCP server (`tools/mdrop-mcp/`) for AI-assisted visualizer control
+
+### ToolWindow System
+
+- 20+ standalone windows running on their own threads with independent always-on-top, sticky positions, and tab memory
+- Windows: Visual, Colors, Controller, Displays, Song Info, Hotkeys, MIDI, Presets, Sprites, Messages, Remote, Script, Shader Import, Video Effects, VFX Profiles, Text Animations, Button Board, Workspace Layout, Error Display, Annotations
+- Dark-themed popup context menus using uxtheme dark mode APIs
+- ModalDialog base class for themed popup dialogs with shared font/theme/DPI support
+
+### Configurable Hotkeys & Input
+
+- Dedicated Hotkeys window (Ctrl+F7) with per-binding local/global scope
+- Mouse button bindings (Left, Right, Middle, X1, X2)
+- Dynamic Script and Launch App hotkey slots with unlimited entries
+- Conflict detection and Reset to Defaults
+- Native MIDI input with 50 mapping slots, learn mode, button/knob actions
+- Game controller support with JSON config and IPC command binding
+
+### Preset Annotations
+
+- Persistent per-preset ratings (0-5), flags (favorite/error/skip/broken), notes
+- Auto-captured shader error text in `presets.json`
+- Annotations ToolWindow with filter, import, scan, and detail dialogs
+- Right-click context menu on Presets window
+
+### Video & Display
+
+- Native webcam and video file input mixing (background/overlay compositing with luma key)
+- Spout video input mixing via D3D11On12
+- Video Effects window with transform, color, and audio-reactive controls
+- VFX JSON profiles for saving/loading effect presets
+- Monitor mirroring with per-display opacity, click-through, and safety controls
+- Workspace Layout window for tiling tool windows across the screen
+- Two-pass shader blending for preset transitions
+
+### Audio & FFT
+
+- FFT EQ smoothing with configurable attack/decay and peak hold
+- Audio texture 512x2 R32_FLOAT (smoothed spectrum + peak values)
+- Shader functions: `get_fft()`, `get_fft_hz()`, `get_fft_peak()`, `get_fft_peak_hz()`
+- Separate clean FFT for shader audio texture (Hann³ window, no EQ)
+
+### UI & Settings
+
+- In-app Settings window (F8) with tri-mode theme (Dark/Light/Follow System)
+- 5-tab UI (General, Tools, System, Files, About) with preset browser and resource viewer
+- Button Board with slot images, hotkeys, JSON layouts, drag-drop
+- Text Animations window with DX12 warped text, color/font pickers, animation profiles
+- Cover art sprite system with IPC signal
+- File association registration for .milk/.milk2 (Settings → About, no admin required)
+- Command-line preset loading (double-click .milk/.milk2/.milk3 in Explorer)
+- Welcome window with first-run setup options
+
+### Fixed Issues (since v1.0)
+
+- Fixed fullscreen black rendering for dot-based presets (DX12 point size emulation)
+- Fixed dark/incorrect blur presets (removed DX9 half-texel UV offsets)
+- Fixed non-shader preset rendering (comp shader binding, shape alpha blend, warp decay)
+- Fixed pre-MilkDrop2 preset rendering (clamp sampler, Y-flip)
+- Fixed ns-eel2 `regNN * regNN` multiply bug (optimizer treated different regs as identical)
+- Fixed `ps_2_a` silently dropping texture bindings on complex shaders (raised to ps_3_0 minimum)
+- Fixed comp shader reading post-warp darkened texture instead of pre-warp input
+- Fixed TDR crash when disabling mirror outputs (GPU flush before resource release)
+- Fixed HUD text overflow on portrait/large displays
+- Fixed render hang on display mode switching (swap chain recovery)
+- Fixed mirror window deadlock (cross-thread message pumping)
+- Fixed global hotkeys not dispatching most actions
+- Fixed `sampler_rand` black screen and random texture directory search
+- Fixed GLSL converter: variable shadowing, matrix chains, precision strips, texture bias, out param zero-init, over-specified constructors, reserved keywords, and many more
+- Fixed channel auto-detection: temporal reprojection false positives, audio heuristic overrides
+- Fixed screenshot filename using previous preset name after shader import
+- Fixed notification overlay persisting across preset changes
+
 ## v1.7.7 (2026-03-11)
 
 ### Rendering Fixes

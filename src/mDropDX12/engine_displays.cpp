@@ -569,6 +569,9 @@ void Engine::DestroyAllDisplayOutputs()
 
 void Engine::ResizeMirrorSwapChain(MonitorMirrorState& ms, int newW, int newH)
 {
+    // Flush GPU before releasing backbuffers — mirror commands may still reference them
+    if (m_lpDX) m_lpDX->WaitForGpu();
+
     // Release back buffer references before resize
     for (int i = 0; i < DXC_FRAME_COUNT; i++)
         ms.backBuffers[i].Reset();
@@ -605,6 +608,20 @@ void Engine::SendToDisplayOutputs()
         ApplyMirrorWindowStyles();
 
     // Cleanup: destroy outputs that are disabled or (for monitors) globally deactivated
+    // Must flush GPU first — previous frame's mirror commands may still be in flight
+    {
+        bool needsFlush = false;
+        for (auto& out : m_displayOutputs) {
+            if (out.config.type == DisplayOutputType::Monitor &&
+                (!m_bMirrorsActive || !out.config.bEnabled) && out.monitorState)
+                needsFlush = true;
+            else if (out.config.type != DisplayOutputType::Monitor &&
+                     !out.config.bEnabled && out.spoutState)
+                needsFlush = true;
+        }
+        if (needsFlush && m_lpDX)
+            m_lpDX->WaitForGpu();
+    }
     for (auto& out : m_displayOutputs) {
         if (out.config.type == DisplayOutputType::Monitor) {
             if ((!m_bMirrorsActive || !out.config.bEnabled) && out.monitorState) {

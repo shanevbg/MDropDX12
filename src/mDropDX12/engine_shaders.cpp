@@ -198,6 +198,22 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
           m_texture_bindings[cd.RegisterIndex].bBilinear = true;
         }
       }
+      else if (!wcscmp(L"bufferC", szRootName)) {
+        m_texture_bindings[cd.RegisterIndex].texptr = NULL;
+        m_texcode[cd.RegisterIndex] = TEX_BUFFER_C;
+        if (!bWrapFilterSpecified) {
+          m_texture_bindings[cd.RegisterIndex].bWrap = false;
+          m_texture_bindings[cd.RegisterIndex].bBilinear = true;
+        }
+      }
+      else if (!wcscmp(L"bufferD", szRootName)) {
+        m_texture_bindings[cd.RegisterIndex].texptr = NULL;
+        m_texcode[cd.RegisterIndex] = TEX_BUFFER_D;
+        if (!bWrapFilterSpecified) {
+          m_texture_bindings[cd.RegisterIndex].bWrap = false;
+          m_texture_bindings[cd.RegisterIndex].bBilinear = true;
+        }
+      }
 #if (NUM_BLUR_TEX >= 2)
       else if (!wcscmp(L"blur1", szRootName)) {
         m_texture_bindings[cd.RegisterIndex].texptr = g_engine.m_lpBlur[1];
@@ -762,6 +778,18 @@ bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompi
     DebugLogA(bOK ? "DX12: LoadShaders bufferB: compiled OK" : "DX12: LoadShaders bufferB: FAILED", bOK ? LOG_VERBOSE : LOG_ERROR);
   }
 
+  // Buffer C shader (Shadertoy four-pass)
+  if (!sh->bufferC.ptr && !sh->bufferC.CT && pState->m_nBufferCPSVersion > 0) {
+    bool bOK = RecompilePShader(pState->m_szBufferCShadersText, &sh->bufferC, SHADER_COMP, false, pState->m_nBufferCPSVersion, bCompileOnly, "bufferC");
+    DebugLogA(bOK ? "DX12: LoadShaders bufferC: compiled OK" : "DX12: LoadShaders bufferC: FAILED", bOK ? LOG_VERBOSE : LOG_ERROR);
+  }
+
+  // Buffer D shader (Shadertoy five-pass)
+  if (!sh->bufferD.ptr && !sh->bufferD.CT && pState->m_nBufferDPSVersion > 0) {
+    bool bOK = RecompilePShader(pState->m_szBufferDShadersText, &sh->bufferD, SHADER_COMP, false, pState->m_nBufferDPSVersion, bCompileOnly, "bufferD");
+    DebugLogA(bOK ? "DX12: LoadShaders bufferD: compiled OK" : "DX12: LoadShaders bufferD: FAILED", bOK ? LOG_VERBOSE : LOG_ERROR);
+  }
+
   // Comp (Image) shader — compiled after bufferA/bufferB so diag_comp_shader.txt reflects comp
   if (!sh->comp.ptr && !sh->comp.CT && pState->m_nCompPSVersion > 0) {
     bool bOK = RecompilePShader(pState->m_szCompShadersText, &sh->comp, SHADER_COMP, false, pState->m_nCompPSVersion, bCompileOnly);
@@ -852,6 +880,32 @@ void Engine::CreateDX12PresetPSOs() {
       g_pCompVSBlob,
       m_shaders.bufferB.bytecodeBlob->GetBufferPointer(),
       (UINT)m_shaders.bufferB.bytecodeBlob->GetBufferSize(),
+      g_MyVertexLayout, _countof(g_MyVertexLayout),
+      false, &dummy);
+  }
+
+  // Create Buffer C PSO — same FLOAT32 feedback format
+  m_dx12BufferCPSO.Reset();
+  if (m_shaders.bufferC.bytecodeBlob && g_pCompVSBlob) {
+    UINT dummy = 0;
+    m_dx12BufferCPSO = DX12CreatePresetPSO(
+      device, rootSig, feedbackRtvFormat,
+      g_pCompVSBlob,
+      m_shaders.bufferC.bytecodeBlob->GetBufferPointer(),
+      (UINT)m_shaders.bufferC.bytecodeBlob->GetBufferSize(),
+      g_MyVertexLayout, _countof(g_MyVertexLayout),
+      false, &dummy);
+  }
+
+  // Create Buffer D PSO — same FLOAT32 feedback format
+  m_dx12BufferDPSO.Reset();
+  if (m_shaders.bufferD.bytecodeBlob && g_pCompVSBlob) {
+    UINT dummy = 0;
+    m_dx12BufferDPSO = DX12CreatePresetPSO(
+      device, rootSig, feedbackRtvFormat,
+      g_pCompVSBlob,
+      m_shaders.bufferD.bytecodeBlob->GetBufferPointer(),
+      (UINT)m_shaders.bufferD.bytecodeBlob->GetBufferSize(),
       g_MyVertexLayout, _countof(g_MyVertexLayout),
       false, &dummy);
   }
@@ -1217,8 +1271,12 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
             shaderType, szWhichShader, origLen, preview);
   }
 
-  char szShaderText[128000];
-  char temp[128000];
+  // Heap-allocate shader buffers — stack arrays would risk overflow with large Shadertoy shaders
+  struct ShaderBuf { char* p; ShaderBuf(size_t n) : p((char*)malloc(n)) {} ~ShaderBuf() { free(p); } };
+  ShaderBuf _szShaderText(MAX_SHADER_TEXT_LEN), _temp(MAX_SHADER_TEXT_LEN);
+  char* szShaderText = _szShaderText.p;
+  char* temp = _temp.p;
+  if (!szShaderText || !temp) return false;
   int writePos = 0;
 
   // paste the universal #include
@@ -1254,6 +1312,8 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
     blankDecl("Texture2D sampler_feedback");
     blankDecl("Texture2D sampler_image");
     blankDecl("Texture2D sampler_bufferB");
+    blankDecl("Texture2D sampler_bufferC");
+    blankDecl("Texture2D sampler_bufferD");
     // NOTE: sampler_audio is NOT blanked — get_fft() functions in include.fx need it
     blankDecl("Texture2D sampler_noise_lq_st");
     blankDecl("Texture2D sampler_noise_mq_st");
@@ -1271,6 +1331,19 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
     lstrcpy(&szShaderText[writePos], szCompDefines);
     writePos += lstrlen(szCompDefines);
   }
+  // Shadertoy shaders: #undef MilkDrop Q-variable macros (q1..q32 → _qa.x etc.)
+  // to avoid collisions with local GLSL variable names like "float3 q2 = abs(p2);"
+  // which would expand to "float3 _qa.y = abs(p2);" and fail to compile.
+  if (m_bLoadingShadertoyMode) {
+    for (int qi = 1; qi <= 32; qi++) {
+      char undef[20];
+      int n = sprintf(undef, "#undef q%d\n", qi);
+      memcpy(&szShaderText[writePos], undef, n);
+      writePos += n;
+    }
+    szShaderText[writePos] = 0;
+  }
+
   // paste in the shader itself - converting LCC's to 13+10's.
   // avoid lstrcpy b/c it might not handle the linefeed stuff...?
   int shaderStartPos = writePos;
@@ -1406,7 +1479,8 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
             // Shadertoy output: Buffer A/B preserve full float4 (alpha stores data);
             // Image/comp forces alpha=1 (shaders that write .rgb leave alpha=0 which
             // would be transparent — the old non-Shadertoy wrapper used _vDiffuse.w=1).
-            bool bIsBuffer = szDiagName && (strcmp(szDiagName, "bufferA") == 0 || strcmp(szDiagName, "bufferB") == 0);
+            bool bIsBuffer = szDiagName && (strcmp(szDiagName, "bufferA") == 0 || strcmp(szDiagName, "bufferB") == 0 ||
+                                            strcmp(szDiagName, "bufferC") == 0 || strcmp(szDiagName, "bufferD") == 0);
             const char* szLastLine = bIsBuffer
               ? "    _return_value = ret;"
               : "    _return_value = float4(ret.xyz, 1.0);";

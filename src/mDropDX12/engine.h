@@ -89,7 +89,7 @@ struct WindowTitleProfile {
     int nPollIntervalSec = 2;          // Poll interval in seconds (1-10)
 };
 
-typedef enum { TEX_DISK, TEX_VS, TEX_FEEDBACK, TEX_IMAGE_FEEDBACK, TEX_AUDIO, TEX_BUFFER_B, TEX_BLUR0, TEX_BLUR1, TEX_BLUR2, TEX_BLUR3, TEX_BLUR4, TEX_BLUR5, TEX_BLUR6, TEX_BLUR_LAST } tex_code;
+typedef enum { TEX_DISK, TEX_VS, TEX_FEEDBACK, TEX_IMAGE_FEEDBACK, TEX_AUDIO, TEX_BUFFER_B, TEX_BUFFER_C, TEX_BUFFER_D, TEX_BLUR0, TEX_BLUR1, TEX_BLUR2, TEX_BLUR3, TEX_BLUR4, TEX_BLUR5, TEX_BLUR6, TEX_BLUR_LAST } tex_code;
 typedef enum { UI_REGULAR, UI_MENU, UI_LOAD, UI_LOAD_DEL, UI_LOAD_RENAME, UI_SAVEAS, UI_SAVE_OVERWRITE, UI_EDIT_MENU_STRING, UI_CHANGEDIR, UI_IMPORT_WAVE, UI_EXPORT_WAVE, UI_IMPORT_SHAPE, UI_EXPORT_SHAPE, UI_UPGRADE_PIXEL_SHADER, UI_MASHUP, UI_SETTINGS } ui_mode;
 typedef struct { float rad; float ang; float a; float c; } td_vertinfo; // blending: mix = max(0,min(1,a*t + c));
 typedef char* CHARPTR;
@@ -369,6 +369,8 @@ typedef struct {
   PShaderInfo comp;
   PShaderInfo bufferA;  // Shadertoy Buffer A (pre-comp pass)
   PShaderInfo bufferB;  // Shadertoy Buffer B (second compute buffer)
+  PShaderInfo bufferC;  // Shadertoy Buffer C (third compute buffer)
+  PShaderInfo bufferD;  // Shadertoy Buffer D (fourth compute buffer)
 } PShaderSet;
 
 typedef struct {
@@ -630,6 +632,7 @@ public:
   bool m_DisplayCoverWhenPressingB = true;
   float m_MediaKeyNotifyTime = 1.0f;  // seconds to show media key notification
   bool m_HideNotificationsWhenRemoteActive = false;
+  bool m_bShowNotifications = true;  // false = suppress all HUD notifications
 
   // Error Display Settings
   float   m_ErrorDuration       = 8.0f;     // seconds
@@ -832,6 +835,7 @@ public:
   int m_presetHistoryPos;
   int m_presetHistoryBackFence;
   int m_presetHistoryFwdFence;
+  void BuildPresetPath(int idx, wchar_t* szOut, int nMax) const;  // absolute path from m_presets[idx]
   void PrevPreset(float fBlendTime);
   void NextPreset(float fBlendTime);  // if not retracing our former steps, it will choose a random one.
   void OnFinishedLoadingPreset();
@@ -988,11 +992,17 @@ public:
   std::wstring m_szChannelTexPath[4];        // file paths (set by Import UI)
   bool m_bHasBufferA = false;                        // true when preset has a Buffer A shader
   bool m_bHasBufferB = false;                        // true when preset has a Buffer B shader
+  bool m_bHasBufferC = false;                        // true when preset has a Buffer C shader
+  bool m_bHasBufferD = false;                        // true when preset has a Buffer D shader
   bool m_bShadertoyMode = false;                     // true when a .milk3 Shadertoy preset is active
   int  m_nShadertoyStartFrame = 0;                   // frame at which Shadertoy mode was activated (for iFrame=0)
   ComPtr<ID3D12PipelineState> m_dx12BufferAPSO;      // Buffer A pixel shader PSO
   ComPtr<ID3D12PipelineState> m_dx12BufferBPSO;      // Buffer B pixel shader PSO
+  ComPtr<ID3D12PipelineState> m_dx12BufferCPSO;      // Buffer C pixel shader PSO
+  ComPtr<ID3D12PipelineState> m_dx12BufferDPSO;      // Buffer D pixel shader PSO
   DX12Texture m_dx12FeedbackB[2];                    // ping-pong feedback buffers for Buffer B (FLOAT32)
+  DX12Texture m_dx12FeedbackC[2];                    // ping-pong feedback buffers for Buffer C (FLOAT32)
+  DX12Texture m_dx12FeedbackD[2];                    // ping-pong feedback buffers for Buffer D (FLOAT32)
   std::atomic<int> m_nRecompileResult{0};            // 0=idle, 1=pending, 2=done-ok, 3=done-fail
   void CopyBackbufferToFeedback();                   // capture comp output for next frame's feedback (single-pass)
   void RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList);  // Shadertoy pipeline (skip warp/blur/shapes)
@@ -1519,7 +1529,7 @@ public:
   void        UvToMathSpace(float u, float v, float* rad, float* ang);
   void        ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CState* pState);
   void        RestoreShaderParams();
-  void        BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[32], const DX12Texture* feedbackTex = nullptr, const DX12Texture* imageFeedbackTex = nullptr, const DX12Texture* bufferBTex = nullptr);
+  void        BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[32], const DX12Texture* feedbackTex = nullptr, const DX12Texture* imageFeedbackTex = nullptr, const DX12Texture* bufferBTex = nullptr, const DX12Texture* bufferCTex = nullptr, const DX12Texture* bufferDTex = nullptr);
   bool        AddNoiseTex(const wchar_t* szTexName, int size, int zoom_factor);
   bool        AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor);
   bool        AddNoiseTex_ST(const wchar_t* szTexName, int size);

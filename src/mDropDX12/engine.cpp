@@ -1615,6 +1615,7 @@ void Engine::MyReadConfig() {
   m_DisplayCoverWhenPressingB = GetPrivateProfileBoolW(L"Milkwave", L"DisplayCoverWhenPressingB", m_DisplayCoverWhenPressingB, pIni);
   m_bSongInfoAlwaysShow = GetPrivateProfileBoolW(L"Milkwave", L"SongInfoAlwaysShow", m_bSongInfoAlwaysShow, pIni);
   m_HideNotificationsWhenRemoteActive = GetPrivateProfileBoolW(L"Milkwave", L"HideNotificationsWhenRemoteActive", m_HideNotificationsWhenRemoteActive, pIni);
+  m_bShowNotifications = GetPrivateProfileBoolW(L"Milkwave", L"ShowNotifications", m_bShowNotifications, pIni);
 
   // Error Display Settings
   m_ErrorDuration   = GetPrivateProfileFloatW(L"Milkwave", L"ErrorDuration", m_ErrorDuration, pIni);
@@ -2709,6 +2710,16 @@ int Engine::AllocateMyDX9Stuff() {
       m_dx12FeedbackB[1] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
       if (m_dx12FeedbackB[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackB[0]);
       if (m_dx12FeedbackB[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackB[1]);
+      // Buffer C feedback pair
+      m_dx12FeedbackC[0] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
+      m_dx12FeedbackC[1] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
+      if (m_dx12FeedbackC[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackC[0]);
+      if (m_dx12FeedbackC[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackC[1]);
+      // Buffer D feedback pair
+      m_dx12FeedbackD[0] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
+      m_dx12FeedbackD[1] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT);
+      if (m_dx12FeedbackD[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackD[0]);
+      if (m_dx12FeedbackD[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackD[1]);
       m_nFeedbackIdx = 0;
       DebugLogA(m_dx12Feedback[0].IsValid() && m_dx12Feedback[1].IsValid()
                 ? "DX12: Feedback buffers: created (ping-pong pair)"
@@ -2719,6 +2730,12 @@ int Engine::AllocateMyDX9Stuff() {
       DebugLogA(m_dx12FeedbackB[0].IsValid() && m_dx12FeedbackB[1].IsValid()
                 ? "DX12: FeedbackB buffers: created (ping-pong pair)"
                 : "DX12: FeedbackB buffers: FAILED");
+      DebugLogA(m_dx12FeedbackC[0].IsValid() && m_dx12FeedbackC[1].IsValid()
+                ? "DX12: FeedbackC buffers: created (ping-pong pair)"
+                : "DX12: FeedbackC buffers: FAILED");
+      DebugLogA(m_dx12FeedbackD[0].IsValid() && m_dx12FeedbackD[1].IsValid()
+                ? "DX12: FeedbackD buffers: created (ping-pong pair)"
+                : "DX12: FeedbackD buffers: FAILED");
     }
 
     // Audio FFT/waveform texture (512x2, R32_FLOAT) for Shadertoy sound shaders
@@ -3253,10 +3270,12 @@ int Engine::AllocateMyDX9Stuff() {
     m_lpDX->m_uploadAllocator->Reset();
     m_lpDX->m_uploadCommandList->Reset(m_lpDX->m_uploadAllocator.Get(), nullptr);
     float black[] = { 0.f, 0.f, 0.f, 0.f };
-    // Clear all feedback buffer pairs (Buffer A + Buffer B + Image)
+    // Clear all feedback buffer pairs (Buffer A + B + C + D + Image)
     DX12Texture* clearList[] = {
         &m_dx12Feedback[0], &m_dx12Feedback[1],
         &m_dx12FeedbackB[0], &m_dx12FeedbackB[1],
+        &m_dx12FeedbackC[0], &m_dx12FeedbackC[1],
+        &m_dx12FeedbackD[0], &m_dx12FeedbackD[1],
         &m_dx12ImageFeedback[0], &m_dx12ImageFeedback[1]
     };
     for (auto* tex : clearList) {
@@ -3480,10 +3499,16 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
     m_dx12ImageFeedback[1].Reset();
     m_dx12FeedbackB[0].Reset();
     m_dx12FeedbackB[1].Reset();
+    m_dx12FeedbackC[0].Reset();
+    m_dx12FeedbackC[1].Reset();
+    m_dx12FeedbackD[0].Reset();
+    m_dx12FeedbackD[1].Reset();
     m_dx12AudioTex.Reset();
     m_audioUploadBuffer.Reset();
     m_dx12BufferAPSO.Reset();
     m_dx12BufferBPSO.Reset();
+    m_dx12BufferCPSO.Reset();
+    m_dx12BufferDPSO.Reset();
     m_pInjectEffectPSO.Reset();
     m_pSpoutInputPSO.Reset();
     DestroySpoutInput();

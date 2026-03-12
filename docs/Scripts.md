@@ -549,6 +549,60 @@ See the [Messages](#messages) section above for the full list of MSG parameters 
 | `CLEARTEXTS` | Remove all active text overlays |
 | `LINK=N` | Link Remote to preset index N |
 
+### Preset Lists and Directory (IPC)
+
+These commands manage saved preset lists and the active preset directory.
+
+| Command | Response | Description |
+|---------|----------|-------------|
+| `LOAD_LIST=<name>` | `LOAD_LIST_RESULT=OK\|<name>` or `ERROR\|...` | Load a saved preset list by name (without `.txt` extension) |
+| `CLEAR_LIST` | `CLEAR_LIST_RESULT=OK` | Clear the active preset list and revert to directory scanning |
+| `ENUM_LISTS` | `ENUM_LISTS_RESULT=name1\|name2\|...` | Enumerate all available saved preset lists |
+| `SET_DIR=<path>` | `SET_DIR_RESULT=OK\|<path>` or `ERROR\|...` | Change the preset directory to `<path>` |
+| `SET_DIR=<path>\|recursive` | `SET_DIR_RESULT=OK\|<path>` or `ERROR\|...` | Change directory with recursive subdirectory scanning enabled |
+
+**Examples:**
+
+```text
+ENUM_LISTS
+LOAD_LIST=favorites
+SET_DIR=C:\MyPresets\collection1|recursive
+CLEAR_LIST
+```
+
+### Shader Import (IPC)
+
+These commands provide headless GLSL→HLSL shader import and conversion via the pipe. All are bidirectional — the visualizer sends a response back through the pipe. The `ShaderImportWindow` is created lazily if needed and does not need to be open.
+
+| Command | Response | Description |
+|---------|----------|-------------|
+| `SHADER_IMPORT=<path>` | `SHADER_IMPORT_RESULT=OK\|...` or `ERROR\|...` | Load a `shader_import` JSON file, convert all passes GLSL→HLSL, and apply to the engine |
+| `SHADER_GLSL=<glsl>` | `SHADER_GLSL_RESULT=OK\|...` or `ERROR\|...` | Send raw GLSL source for a single Image pass, convert and apply |
+| `SHADER_CONVERT=<glsl>` | `SHADER_CONVERT_RESULT=OK\|<hlsl>` or `ERROR\|...` | Convert GLSL to HLSL without applying — returns the HLSL output |
+| `SHADER_SAVE=<path>` | `SHADER_SAVE_RESULT=OK\|...` or `ERROR\|...` | Save the current shader passes as a `.milk3` or `.milk` preset file |
+
+**SHADER_IMPORT** loads a `shader_import` format JSON file (the same format used by the Shader Import window's Load/Save Project feature). The JSON must have `"type": "shader_import"` and a `"passes"` array. Example:
+
+```json
+{
+  "type": "shader_import",
+  "version": 1,
+  "passes": [
+    {
+      "name": "Image",
+      "glsl": "void mainImage(out vec4 o, in vec2 fc) { o = vec4(fc/iResolution.xy, 0, 1); }",
+      "channels": { "ch0": 0, "ch1": 0, "ch2": 1, "ch3": 2 }
+    }
+  ]
+}
+```
+
+**SHADER_GLSL** takes inline GLSL source (UTF-16LE encoded like all pipe messages). Useful for quick single-pass shader testing. Channel assignments are auto-detected from the GLSL source.
+
+**SHADER_CONVERT** is the same as `SHADER_GLSL` but does not apply the shader — it only converts and returns the HLSL. Useful for inspecting the GLSL→HLSL conversion output.
+
+**SHADER_SAVE** saves whatever was last imported/converted. Use `.milk3` extension for the JSON Shadertoy format or `.milk` for legacy MilkDrop format. Requires a prior `SHADER_IMPORT`, `SHADER_GLSL`, or `SHADER_CONVERT` call to populate the shader passes.
+
 ### Fallback
 
 Any command not recognized by the IPC handler is passed to the script engine (`ExecuteScriptLine`). This means all script commands (NEXT, PREV, LOCK, RAND, ACTION=, LAUNCH=, etc.) work seamlessly over IPC.

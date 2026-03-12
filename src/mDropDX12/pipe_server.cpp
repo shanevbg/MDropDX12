@@ -7,6 +7,7 @@
 #include <tlhelp32.h>  // CreateToolhelp32Snapshot
 #include <cstdlib>     // _wtoi, wcstof
 #include <cstring>     // wcsncmp, wcsstr
+#include <algorithm>   // std::find
 
 // Self-contained logging — uses OutputDebugStringA (works in all projects)
 #include <cstdio>  // vsnprintf
@@ -40,11 +41,10 @@ void PipeServer::Start(HWND hTargetWindow, UINT wmIPCMessage, UINT wmSignalBase)
     // Build pipe name: \\.\pipe\Milkwave_<PID>
     swprintf_s(m_szPipeName, L"\\\\.\\pipe\\Milkwave_%u", GetCurrentProcessId());
 
-    // Create events
-    m_hShutdownEvent = CreateEventW(NULL, TRUE, FALSE, NULL);  // manual-reset
-    m_hOutEvent = CreateEventW(NULL, FALSE, FALSE, NULL);       // auto-reset
+    // Create shutdown event (manual-reset, shared across all threads)
+    m_hShutdownEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
 
-    // Start server thread
+    // Start accept thread
     m_hServerThread = (HANDLE)_beginthreadex(
         nullptr, 0, &PipeServer::ServerThread, this, 0, nullptr);
 
@@ -63,27 +63,64 @@ void PipeServer::Stop() {
     m_bShutdown.store(true);
     if (m_hShutdownEvent)
         SetEvent(m_hShutdownEvent);
-    if (m_hOutEvent)
-        SetEvent(m_hOutEvent);
 
-    // Cancel any pending I/O on the pipe
-    if (m_hPipe != INVALID_HANDLE_VALUE)
-        CancelIoEx(m_hPipe, NULL);
+    // Snapshot client handles for cancellation and joining
+    std::vector<HANDLE> clientPipes;
+    std::vector<HANDLE> clientThreads;
+    std::vector<HANDLE> clientOutEvents;
+    {
+        std::lock_guard<std::mutex> lock(m_clientsMutex);
+        for (auto* ctx : m_clients) {
+            clientPipes.push_back(ctx->hPipe);
+            clientThreads.push_back(ctx->hThread);
+            clientOutEvents.push_back(ctx->hOutEvent);
+        }
+    }
 
+    // Cancel pending I/O and wake all client handlers
+    for (HANDLE h : clientPipes)
+        CancelIoEx(h, NULL);
+    for (HANDLE h : clientOutEvents)
+        SetEvent(h);
+
+    // Wait for accept thread
     if (m_hServerThread) {
         WaitForSingleObject(m_hServerThread, 5000);
         CloseHandle(m_hServerThread);
         m_hServerThread = nullptr;
     }
 
-    if (m_hPipe != INVALID_HANDLE_VALUE) {
-        DisconnectNamedPipe(m_hPipe);
-        CloseHandle(m_hPipe);
-        m_hPipe = INVALID_HANDLE_VALUE;
+    // Wait for client handler threads
+    for (HANDLE h : clientThreads)
+        WaitForSingleObject(h, 3000);
+
+    // Clean up any remaining clients (handlers should have finished by now)
+    {
+        std::lock_guard<std::mutex> lock(m_clientsMutex);
+        for (auto* ctx : m_clients) {
+            if (ctx->hPipe != INVALID_HANDLE_VALUE) {
+                DisconnectNamedPipe(ctx->hPipe);
+                CloseHandle(ctx->hPipe);
+            }
+            if (ctx->hThread) CloseHandle(ctx->hThread);
+            if (ctx->hOutEvent) CloseHandle(ctx->hOutEvent);
+            delete ctx;
+        }
+        m_clients.clear();
+
+        // Also clean up finished clients
+        for (auto* ctx : m_finishedClients) {
+            if (ctx->hThread) {
+                WaitForSingleObject(ctx->hThread, 100);
+                CloseHandle(ctx->hThread);
+            }
+            if (ctx->hOutEvent) CloseHandle(ctx->hOutEvent);
+            delete ctx;
+        }
+        m_finishedClients.clear();
     }
 
     if (m_hShutdownEvent) { CloseHandle(m_hShutdownEvent); m_hShutdownEvent = nullptr; }
-    if (m_hOutEvent) { CloseHandle(m_hOutEvent); m_hOutEvent = nullptr; }
 
     m_bRunning.store(false);
     m_bClientConnected.store(false);
@@ -93,16 +130,47 @@ void PipeServer::Stop() {
 void PipeServer::Send(const wchar_t* message) {
     if (!message || !*message || m_bShutdown.load())
         return;
-    {
-        std::lock_guard<std::mutex> lock(m_outMutex);
-        m_outQueue.emplace(message);
+
+    std::lock_guard<std::mutex> lock(m_clientsMutex);
+    for (auto* ctx : m_clients) {
+        {
+            std::lock_guard<std::mutex> qlock(ctx->outMutex);
+            ctx->outQueue.emplace(message);
+        }
+        SetEvent(ctx->hOutEvent);
     }
-    if (m_hOutEvent)
-        SetEvent(m_hOutEvent);
 }
 
 void PipeServer::Send(const std::wstring& message) {
     Send(message.c_str());
+}
+
+int PipeServer::GetClientCount() const {
+    std::lock_guard<std::mutex> lock(m_clientsMutex);
+    return (int)m_clients.size();
+}
+
+void PipeServer::RemoveClient(PipeClientContext* ctx) {
+    std::lock_guard<std::mutex> lock(m_clientsMutex);
+    auto it = std::find(m_clients.begin(), m_clients.end(), ctx);
+    if (it != m_clients.end())
+        m_clients.erase(it);
+    m_finishedClients.push_back(ctx);
+    m_bClientConnected.store(!m_clients.empty());
+}
+
+void PipeServer::SweepFinished() {
+    std::lock_guard<std::mutex> lock(m_clientsMutex);
+    for (auto* ctx : m_finishedClients) {
+        if (ctx->hThread) {
+            WaitForSingleObject(ctx->hThread, 1000);
+            CloseHandle(ctx->hThread);
+        }
+        if (ctx->hOutEvent)
+            CloseHandle(ctx->hOutEvent);
+        delete ctx;
+    }
+    m_finishedClients.clear();
 }
 
 unsigned __stdcall PipeServer::ServerThread(void* pParam) {
@@ -110,6 +178,14 @@ unsigned __stdcall PipeServer::ServerThread(void* pParam) {
     self->ServerLoop();
     return 0;
 }
+
+unsigned __stdcall PipeServer::ClientThread(void* pParam) {
+    PipeClientContext* ctx = static_cast<PipeClientContext*>(pParam);
+    ctx->pServer->ClientHandler(ctx);
+    return 0;
+}
+
+// ─── Accept loop ────────────────────────────────────────────────────────────────
 
 void PipeServer::ServerLoop() {
     // Security: allow same-user access (handles admin/non-admin mismatch)
@@ -126,18 +202,21 @@ void PipeServer::ServerLoop() {
     }
 
     while (!m_bShutdown.load()) {
-        // Create the pipe instance
-        m_hPipe = CreateNamedPipeW(
+        // Clean up finished handler threads
+        SweepFinished();
+
+        // Create a pipe instance for the next client
+        HANDLE hPipe = CreateNamedPipeW(
             m_szPipeName,
             PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
             PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
-            1,       // max instances (single client)
+            PIPE_UNLIMITED_INSTANCES,
             65536,   // out buffer
             65536,   // in buffer
             0,       // default timeout
             pSD ? &sa : NULL);
 
-        if (m_hPipe == INVALID_HANDLE_VALUE) {
+        if (hPipe == INVALID_HANDLE_VALUE) {
             PipeLog("PipeServer: CreateNamedPipe failed, err=%u\n", GetLastError());
             Sleep(1000);
             continue;
@@ -147,7 +226,7 @@ void PipeServer::ServerLoop() {
         OVERLAPPED ovConnect = {};
         ovConnect.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
 
-        BOOL connected = ConnectNamedPipe(m_hPipe, &ovConnect);
+        BOOL connected = ConnectNamedPipe(hPipe, &ovConnect);
         if (!connected) {
             DWORD err = GetLastError();
             if (err == ERROR_IO_PENDING) {
@@ -157,19 +236,17 @@ void PipeServer::ServerLoop() {
 
                 if (waitResult == WAIT_OBJECT_0 + 1 || m_bShutdown.load()) {
                     // Shutdown requested
-                    CancelIoEx(m_hPipe, &ovConnect);
+                    CancelIoEx(hPipe, &ovConnect);
                     CloseHandle(ovConnect.hEvent);
-                    CloseHandle(m_hPipe);
-                    m_hPipe = INVALID_HANDLE_VALUE;
+                    CloseHandle(hPipe);
                     break;
                 }
 
                 // Check if ConnectNamedPipe completed successfully
                 DWORD bytesTransferred;
-                if (!GetOverlappedResult(m_hPipe, &ovConnect, &bytesTransferred, FALSE)) {
+                if (!GetOverlappedResult(hPipe, &ovConnect, &bytesTransferred, FALSE)) {
                     CloseHandle(ovConnect.hEvent);
-                    CloseHandle(m_hPipe);
-                    m_hPipe = INVALID_HANDLE_VALUE;
+                    CloseHandle(hPipe);
                     continue;
                 }
             } else if (err == ERROR_PIPE_CONNECTED) {
@@ -177,141 +254,176 @@ void PipeServer::ServerLoop() {
             } else {
                 // Real error
                 CloseHandle(ovConnect.hEvent);
-                CloseHandle(m_hPipe);
-                m_hPipe = INVALID_HANDLE_VALUE;
+                CloseHandle(hPipe);
                 Sleep(100);
                 continue;
             }
         }
         CloseHandle(ovConnect.hEvent);
 
-        // Client is connected — capture its exe path for "Open Remote" launch
-        m_bClientConnected.store(true);
+        // Client connected — create context and spawn handler thread
+        PipeClientContext* ctx = new PipeClientContext();
+        ctx->hPipe = hPipe;
+        ctx->pServer = this;
+        ctx->hOutEvent = CreateEventW(NULL, FALSE, FALSE, NULL);  // auto-reset
+
         {
-            ULONG clientPid = 0;
-            if (GetNamedPipeClientProcessId(m_hPipe, &clientPid) && clientPid != 0) {
-                HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, clientPid);
-                if (hProc) {
-                    DWORD pathLen = MAX_PATH;
-                    if (QueryFullProcessImageNameW(hProc, 0, m_szLastClientExePath, &pathLen)) {
-                        PipeLog("PipeServer: client exe: %ls\n", m_szLastClientExePath);
-                    }
-                    CloseHandle(hProc);
+            std::lock_guard<std::mutex> lock(m_clientsMutex);
+            ctx->nClientId = m_nNextClientId++;
+            m_clients.push_back(ctx);
+            m_bClientConnected.store(true);
+        }
+
+        // Capture client exe path
+        ULONG clientPid = 0;
+        if (GetNamedPipeClientProcessId(hPipe, &clientPid) && clientPid != 0) {
+            HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, clientPid);
+            if (hProc) {
+                DWORD pathLen = MAX_PATH;
+                if (QueryFullProcessImageNameW(hProc, 0, ctx->szClientExePath, &pathLen)) {
+                    // Update shared last-client path (most recent wins)
+                    wcscpy_s(m_szLastClientExePath, ctx->szClientExePath);
+                    PipeLog("PipeServer: client #%d exe: %ls\n", ctx->nClientId, ctx->szClientExePath);
                 }
+                CloseHandle(hProc);
             }
         }
-        PipeLog("PipeServer: client connected\n");
 
-        // ─── Read/Write loop ───────────────────────────────────────────────
-        // Single thread: alternate between checking for incoming and draining outgoing.
-        // Use overlapped reads with short waits so we can also send.
+        // Start handler thread
+        ctx->hThread = (HANDLE)_beginthreadex(
+            nullptr, 0, &PipeServer::ClientThread, ctx, 0, nullptr);
 
-        OVERLAPPED ovRead = {};
-        ovRead.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
-
-        wchar_t readBuf[32768];  // 64KB in wchars
-        bool readPending = false;
-
-        while (!m_bShutdown.load()) {
-            // Start an async read if not already pending
-            if (!readPending) {
-                ResetEvent(ovRead.hEvent);
-                DWORD bytesRead = 0;
-                BOOL ok = ReadFile(m_hPipe, readBuf, sizeof(readBuf) - sizeof(wchar_t),
-                                   &bytesRead, &ovRead);
-                if (ok) {
-                    // Completed immediately
-                    readBuf[bytesRead / sizeof(wchar_t)] = L'\0';
-                    DispatchMessage(readBuf, bytesRead / sizeof(wchar_t));
-                } else {
-                    DWORD err = GetLastError();
-                    if (err == ERROR_IO_PENDING) {
-                        readPending = true;
-                    } else if (err == ERROR_BROKEN_PIPE || err == ERROR_NO_DATA) {
-                        break;  // client disconnected
-                    } else {
-                        break;  // unexpected error
-                    }
-                }
-            }
-
-            // Wait on: read completion, outgoing data, or shutdown
-            HANDLE waitHandles[] = { ovRead.hEvent, m_hOutEvent, m_hShutdownEvent };
-            DWORD nHandles = readPending ? 3 : 2;
-            DWORD waitIdx = WaitForMultipleObjects(
-                nHandles, readPending ? waitHandles : waitHandles + 1,
-                FALSE, 50);  // 50ms timeout for responsiveness
-
-            if (m_bShutdown.load())
-                break;
-
-            // Check read completion
-            if (readPending) {
-                if (waitIdx == WAIT_OBJECT_0) {
-                    DWORD bytesRead = 0;
-                    if (GetOverlappedResult(m_hPipe, &ovRead, &bytesRead, FALSE)) {
-                        readBuf[bytesRead / sizeof(wchar_t)] = L'\0';
-                        DispatchMessage(readBuf, bytesRead / sizeof(wchar_t));
-                        readPending = false;
-                    } else {
-                        DWORD err = GetLastError();
-                        if (err == ERROR_BROKEN_PIPE || err == ERROR_NO_DATA) {
-                            break;
-                        } else if (err == ERROR_MORE_DATA) {
-                            // Message too large for buffer — dispatch what we have, discard rest
-                            readBuf[bytesRead / sizeof(wchar_t)] = L'\0';
-                            DispatchMessage(readBuf, bytesRead / sizeof(wchar_t));
-                            readPending = false;
-                        }
-                    }
-                }
-            }
-
-            // Drain outgoing queue
+        if (!ctx->hThread) {
+            PipeLog("PipeServer: failed to start handler for client #%d\n", ctx->nClientId);
+            DisconnectNamedPipe(hPipe);
+            CloseHandle(hPipe);
+            CloseHandle(ctx->hOutEvent);
             {
-                std::lock_guard<std::mutex> lock(m_outMutex);
-                while (!m_outQueue.empty() && !m_bShutdown.load()) {
-                    std::wstring& msg = m_outQueue.front();
-                    DWORD bytesWritten = 0;
-                    DWORD cbWrite = (DWORD)((msg.size() + 1) * sizeof(wchar_t));
-                    OVERLAPPED ovWrite = {};
-                    ovWrite.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
-                    BOOL ok = WriteFile(m_hPipe, msg.c_str(), cbWrite, &bytesWritten, &ovWrite);
-                    if (!ok && GetLastError() == ERROR_IO_PENDING) {
-                        // Wait for write (with timeout)
-                        DWORD wr = WaitForSingleObject(ovWrite.hEvent, 1000);
-                        if (wr == WAIT_OBJECT_0)
-                            GetOverlappedResult(m_hPipe, &ovWrite, &bytesWritten, FALSE);
-                    }
-                    CloseHandle(ovWrite.hEvent);
-                    m_outQueue.pop();
-                }
+                std::lock_guard<std::mutex> lock(m_clientsMutex);
+                auto it = std::find(m_clients.begin(), m_clients.end(), ctx);
+                if (it != m_clients.end()) m_clients.erase(it);
+                m_bClientConnected.store(!m_clients.empty());
             }
+            delete ctx;
+            continue;
         }
 
-        // Cancel pending read
-        if (readPending)
-            CancelIoEx(m_hPipe, &ovRead);
-        CloseHandle(ovRead.hEvent);
-
-        // Disconnect and loop to accept next client
-        m_bClientConnected.store(false);
-        DisconnectNamedPipe(m_hPipe);
-        CloseHandle(m_hPipe);
-        m_hPipe = INVALID_HANDLE_VALUE;
-        PipeLog("PipeServer: client disconnected\n");
-
-        // Clear pending outgoing messages (stale for next client)
-        {
-            std::lock_guard<std::mutex> lock(m_outMutex);
-            std::queue<std::wstring> empty;
-            m_outQueue.swap(empty);
-        }
+        PipeLog("PipeServer: client #%d connected (total: %d)\n",
+                ctx->nClientId, GetClientCount());
     }
 
     if (pSD)
         LocalFree(pSD);
 }
+
+// ─── Per-client read/write loop ─────────────────────────────────────────────────
+
+void PipeServer::ClientHandler(PipeClientContext* ctx) {
+    OVERLAPPED ovRead = {};
+    ovRead.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+
+    wchar_t readBuf[32768];  // 64KB in wchars
+    bool readPending = false;
+
+    while (!m_bShutdown.load()) {
+        // Start an async read if not already pending
+        if (!readPending) {
+            ResetEvent(ovRead.hEvent);
+            DWORD bytesRead = 0;
+            BOOL ok = ReadFile(ctx->hPipe, readBuf, sizeof(readBuf) - sizeof(wchar_t),
+                               &bytesRead, &ovRead);
+            if (ok) {
+                // Completed immediately
+                readBuf[bytesRead / sizeof(wchar_t)] = L'\0';
+                DispatchMessage(readBuf, bytesRead / sizeof(wchar_t));
+            } else {
+                DWORD err = GetLastError();
+                if (err == ERROR_IO_PENDING) {
+                    readPending = true;
+                } else if (err == ERROR_BROKEN_PIPE || err == ERROR_NO_DATA) {
+                    break;  // client disconnected
+                } else {
+                    break;  // unexpected error
+                }
+            }
+        }
+
+        // Wait on: read completion, outgoing data, or shutdown
+        HANDLE waitHandles[] = { ovRead.hEvent, ctx->hOutEvent, m_hShutdownEvent };
+        DWORD nHandles = readPending ? 3 : 2;
+        DWORD waitIdx = WaitForMultipleObjects(
+            nHandles, readPending ? waitHandles : waitHandles + 1,
+            FALSE, 50);  // 50ms timeout for responsiveness
+
+        if (m_bShutdown.load())
+            break;
+
+        // Check read completion
+        if (readPending) {
+            if (waitIdx == WAIT_OBJECT_0) {
+                DWORD bytesRead = 0;
+                if (GetOverlappedResult(ctx->hPipe, &ovRead, &bytesRead, FALSE)) {
+                    readBuf[bytesRead / sizeof(wchar_t)] = L'\0';
+                    DispatchMessage(readBuf, bytesRead / sizeof(wchar_t));
+                    readPending = false;
+                } else {
+                    DWORD err = GetLastError();
+                    if (err == ERROR_BROKEN_PIPE || err == ERROR_NO_DATA) {
+                        break;
+                    } else if (err == ERROR_MORE_DATA) {
+                        // Message too large for buffer — dispatch what we have, discard rest
+                        readBuf[bytesRead / sizeof(wchar_t)] = L'\0';
+                        DispatchMessage(readBuf, bytesRead / sizeof(wchar_t));
+                        readPending = false;
+                    }
+                }
+            }
+        }
+
+        // Drain outgoing queue
+        {
+            std::lock_guard<std::mutex> lock(ctx->outMutex);
+            while (!ctx->outQueue.empty() && !m_bShutdown.load()) {
+                std::wstring& msg = ctx->outQueue.front();
+                DWORD bytesWritten = 0;
+                DWORD cbWrite = (DWORD)((msg.size() + 1) * sizeof(wchar_t));
+                OVERLAPPED ovWrite = {};
+                ovWrite.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+                BOOL ok = WriteFile(ctx->hPipe, msg.c_str(), cbWrite, &bytesWritten, &ovWrite);
+                if (!ok) {
+                    DWORD err = GetLastError();
+                    if (err == ERROR_IO_PENDING) {
+                        DWORD wr = WaitForSingleObject(ovWrite.hEvent, 1000);
+                        if (wr == WAIT_OBJECT_0)
+                            GetOverlappedResult(ctx->hPipe, &ovWrite, &bytesWritten, FALSE);
+                    } else if (err == ERROR_BROKEN_PIPE || err == ERROR_NO_DATA) {
+                        CloseHandle(ovWrite.hEvent);
+                        ctx->outQueue.pop();
+                        break;  // client disconnected during write
+                    }
+                }
+                CloseHandle(ovWrite.hEvent);
+                ctx->outQueue.pop();
+            }
+        }
+    }
+
+    // Cancel pending read
+    if (readPending)
+        CancelIoEx(ctx->hPipe, &ovRead);
+    CloseHandle(ovRead.hEvent);
+
+    // Disconnect pipe
+    DisconnectNamedPipe(ctx->hPipe);
+    CloseHandle(ctx->hPipe);
+    ctx->hPipe = INVALID_HANDLE_VALUE;
+
+    // Move to finished list (accept loop will clean up)
+    RemoveClient(ctx);
+    PipeLog("PipeServer: client #%d disconnected\n", ctx->nClientId);
+}
+
+// ─── Message dispatch ───────────────────────────────────────────────────────────
 
 void PipeServer::DispatchMessage(const wchar_t* message, size_t len) {
     if (!message || len == 0 || !m_hTargetWindow) {

@@ -35,6 +35,8 @@ static const char* kChannelSamplers[] = {
     "sampler_audio",       // CHAN_AUDIO
     "sampler_rand00",      // CHAN_RANDOM_TEX
     "sampler_bufferB",     // CHAN_BUFFER_B
+    "sampler_bufferC",     // CHAN_BUFFER_C
+    "sampler_bufferD",     // CHAN_BUFFER_D
     "",                    // CHAN_TEXTURE_FILE (handled specially per-channel)
 };
 // Shadertoy-compatible noise (uniform white noise, no interpolation, fixed seed)
@@ -49,6 +51,8 @@ static const char* kChannelSamplers_ST[] = {
     "sampler_audio",          // CHAN_AUDIO (unchanged)
     "sampler_rand00",         // CHAN_RANDOM_TEX (unchanged)
     "sampler_bufferB",        // CHAN_BUFFER_B (unchanged)
+    "sampler_bufferC",        // CHAN_BUFFER_C (unchanged)
+    "sampler_bufferD",        // CHAN_BUFFER_D (unchanged)
     "",                       // CHAN_TEXTURE_FILE (handled specially per-channel)
 };
 static const wchar_t* kChannelNames[] = {
@@ -56,10 +60,10 @@ static const wchar_t* kChannelNames[] = {
     L"Buffer A / Self", L"Noise Vol LQ",  L"Noise Vol HQ",
     L"Image (prev frame)", L"Audio (FFT + Wave)",
     L"Random Texture",
-    L"Buffer B",
+    L"Buffer B",       L"Buffer C",       L"Buffer D",
     L"Texture File...",
 };
-static const int kChannelTexDim[] = { 256, 256, 256, 0, 32, 32, 0, 0, 0, 0, 0 }; // 0 = use texsize
+static const int kChannelTexDim[] = { 256, 256, 256, 0, 32, 32, 0, 0, 0, 0, 0, 0, 0 }; // 0 = use texsize
 
 WelcomeWindow::WelcomeWindow(Engine* pEngine) : ToolWindow(pEngine, 420, 500) {
 }
@@ -640,8 +644,19 @@ void ShaderImportWindow::RebuildPassList() {
     HWND hList = GetDlgItem(m_hWnd, IDC_MW_SHIMPORT_PASS_LIST);
     if (!hList) return;
     SendMessage(hList, LB_RESETCONTENT, 0, 0);
-    for (auto& p : m_passes)
-        SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)p.name.c_str());
+    for (auto& p : m_passes) {
+        wchar_t label[128];
+        size_t sz = p.glslSource.size();
+        if (p.name == L"Common" && sz == 0)
+            swprintf(label, 128, L"%s", p.name.c_str());
+        else if (sz == 0)
+            swprintf(label, 128, L"%s  (empty)", p.name.c_str());
+        else if (sz < 1024)
+            swprintf(label, 128, L"%s  (%zu B)", p.name.c_str(), sz);
+        else
+            swprintf(label, 128, L"%s  (%.1f KB)", p.name.c_str(), sz / 1024.0);
+        SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)label);
+    }
     if (m_nSelectedPass >= (int)m_passes.size())
         m_nSelectedPass = 0;
     SendMessage(hList, LB_SETCURSEL, m_nSelectedPass, 0);
@@ -761,12 +776,14 @@ LRESULT ShaderImportWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam
     if (code == BN_CLICKED) {
         switch (id) {
         case IDC_MW_SHIMPORT_ADD_PASS: {
-            // Add passes in priority order: Common → Buffer A → Buffer B
-            bool hasCommon = false, hasBufferA = false, hasBufferB = false;
+            // Add passes in priority order: Common → Buffer A → Buffer B → Buffer C → Buffer D
+            bool hasCommon = false, hasBufferA = false, hasBufferB = false, hasBufferC = false, hasBufferD = false;
             for (auto& p : m_passes) {
                 if (p.name == L"Common") hasCommon = true;
                 if (p.name == L"Buffer A") hasBufferA = true;
                 if (p.name == L"Buffer B") hasBufferB = true;
+                if (p.name == L"Buffer C") hasBufferC = true;
+                if (p.name == L"Buffer D") hasBufferD = true;
             }
 
             if (!hasCommon) {
@@ -793,6 +810,20 @@ LRESULT ShaderImportWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam
                         break;
                     }
                 }
+            } else if (!hasBufferC) {
+                ShaderPass bufC;
+                bufC.name = L"Buffer C";
+                bufC.channels[0] = CHAN_BUFFER_C;  // Buffer C ch0 = self-feedback
+                m_passes.push_back(std::move(bufC));
+                // Image ch2 = Buffer C
+                m_passes[0].channels[2] = CHAN_BUFFER_C;
+            } else if (!hasBufferD) {
+                ShaderPass bufD;
+                bufD.name = L"Buffer D";
+                bufD.channels[0] = CHAN_BUFFER_D;  // Buffer D ch0 = self-feedback
+                m_passes.push_back(std::move(bufD));
+                // Image ch3 = Buffer D
+                m_passes[0].channels[3] = CHAN_BUFFER_D;
             } else {
                 return 0;  // all passes added
             }
@@ -895,24 +926,36 @@ LRESULT ShaderImportWindow::DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
         bool compOK = (p->m_shaders.comp.bytecodeBlob != NULL);
         bool bufAOK = !p->m_bHasBufferA || (p->m_shaders.bufferA.bytecodeBlob != NULL);
         bool bufBOK = !p->m_bHasBufferB || (p->m_shaders.bufferB.bytecodeBlob != NULL);
+        bool bufCOK = !p->m_bHasBufferC || (p->m_shaders.bufferC.bytecodeBlob != NULL);
+        bool bufDOK = !p->m_bHasBufferD || (p->m_shaders.bufferD.bytecodeBlob != NULL);
 
-        if (compOK && bufAOK && bufBOK) {
+        if (compOK && bufAOK && bufBOK && bufCOK && bufDOK) {
             errText = L"Shader compiled successfully.";
-            if (p->m_bHasBufferA && p->m_bHasBufferB)
-                errText += L" (Buffer A + Buffer B + Image)";
-            else if (p->m_bHasBufferA)
-                errText += L" (Buffer A + Image)";
+            int bufCount = (p->m_bHasBufferA ? 1 : 0) + (p->m_bHasBufferB ? 1 : 0) +
+                           (p->m_bHasBufferC ? 1 : 0) + (p->m_bHasBufferD ? 1 : 0);
+            if (bufCount > 0) {
+                errText += L" (";
+                if (p->m_bHasBufferA) errText += L"Buffer A + ";
+                if (p->m_bHasBufferB) errText += L"Buffer B + ";
+                if (p->m_bHasBufferC) errText += L"Buffer C + ";
+                if (p->m_bHasBufferD) errText += L"Buffer D + ";
+                errText += L"Image)";
+            }
         } else {
             errText = L"Compilation failed.\r\n";
             if (!compOK) errText += L"[Image/comp] ";
             if (!bufAOK) errText += L"[Buffer A] ";
             if (!bufBOK) errText += L"[Buffer B] ";
+            if (!bufCOK) errText += L"[Buffer C] ";
+            if (!bufDOK) errText += L"[Buffer D] ";
             errText += L"\r\n";
             // Read error files for each failed pass
-            const wchar_t* diagNames[] = { nullptr, nullptr, nullptr };
+            const wchar_t* diagNames[] = { nullptr, nullptr, nullptr, nullptr, nullptr };
             int diagCount = 0;
             if (!bufAOK) diagNames[diagCount++] = L"bufferA";
             if (!bufBOK) diagNames[diagCount++] = L"bufferB";
+            if (!bufCOK) diagNames[diagCount++] = L"bufferC";
+            if (!bufDOK) diagNames[diagCount++] = L"bufferD";
             if (!compOK) diagNames[diagCount++] = L"comp";
             for (int di = 0; di < diagCount; di++) {
                 wchar_t errPath[MAX_PATH];
@@ -973,11 +1016,13 @@ void ShaderImportWindow::ApplyShader() {
     Engine* p = m_pEngine;
 
     // Find passes by name
-    std::string imageHlsl, bufAHlsl, bufBHlsl;
+    std::string imageHlsl, bufAHlsl, bufBHlsl, bufCHlsl, bufDHlsl;
     for (auto& pass : m_passes) {
         if (pass.name == L"Image") imageHlsl = pass.hlslOutput;
         else if (pass.name == L"Buffer A") bufAHlsl = pass.hlslOutput;
         else if (pass.name == L"Buffer B") bufBHlsl = pass.hlslOutput;
+        else if (pass.name == L"Buffer C") bufCHlsl = pass.hlslOutput;
+        else if (pass.name == L"Buffer D") bufDHlsl = pass.hlslOutput;
     }
 
     if (imageHlsl.empty()) {
@@ -990,16 +1035,40 @@ void ShaderImportWindow::ApplyShader() {
     p->m_pState->m_nCompPSVersion = MD2_PS_5_0;
     p->m_pState->m_nMaxPSVersion = max(p->m_pState->m_nWarpPSVersion, (int)MD2_PS_5_0);
 
-    // Apply Buffer A if present
+    // Apply or clear Buffer A
     if (!bufAHlsl.empty()) {
         strncpy_s(p->m_pState->m_szBufferAShadersText, MAX_SHADER_TEXT_LEN, bufAHlsl.c_str(), _TRUNCATE);
         p->m_pState->m_nBufferAPSVersion = MD2_PS_5_0;
+    } else {
+        p->m_pState->m_szBufferAShadersText[0] = '\0';
+        p->m_pState->m_nBufferAPSVersion = 0;
     }
 
-    // Apply Buffer B if present
+    // Apply or clear Buffer B
     if (!bufBHlsl.empty()) {
         strncpy_s(p->m_pState->m_szBufferBShadersText, MAX_SHADER_TEXT_LEN, bufBHlsl.c_str(), _TRUNCATE);
         p->m_pState->m_nBufferBPSVersion = MD2_PS_5_0;
+    } else {
+        p->m_pState->m_szBufferBShadersText[0] = '\0';
+        p->m_pState->m_nBufferBPSVersion = 0;
+    }
+
+    // Apply or clear Buffer C
+    if (!bufCHlsl.empty()) {
+        strncpy_s(p->m_pState->m_szBufferCShadersText, MAX_SHADER_TEXT_LEN, bufCHlsl.c_str(), _TRUNCATE);
+        p->m_pState->m_nBufferCPSVersion = MD2_PS_5_0;
+    } else {
+        p->m_pState->m_szBufferCShadersText[0] = '\0';
+        p->m_pState->m_nBufferCPSVersion = 0;
+    }
+
+    // Apply or clear Buffer D
+    if (!bufDHlsl.empty()) {
+        strncpy_s(p->m_pState->m_szBufferDShadersText, MAX_SHADER_TEXT_LEN, bufDHlsl.c_str(), _TRUNCATE);
+        p->m_pState->m_nBufferDPSVersion = MD2_PS_5_0;
+    } else {
+        p->m_pState->m_szBufferDShadersText[0] = '\0';
+        p->m_pState->m_nBufferDPSVersion = 0;
     }
 
     // Update preset description to reflect import project (for diag files and logging)
@@ -1011,6 +1080,7 @@ void ShaderImportWindow::ApplyShader() {
         size_t dot = desc.rfind(L'.');
         if (dot != std::wstring::npos) desc = desc.substr(0, dot);
         wcsncpy_s(p->m_pState->m_szDesc, desc.c_str(), _TRUNCATE);
+        wcsncpy_s(p->m_szCurrentPresetFile, desc.c_str(), _TRUNCATE);
     }
 
     // Propagate custom channel texture paths from all passes to Engine
@@ -1038,14 +1108,16 @@ void ShaderImportWindow::ApplyShader() {
         int storedLen = (int)strlen(p->m_pState->m_szCompShadersText);
         int bufALen = bufAHlsl.empty() ? 0 : (int)strlen(p->m_pState->m_szBufferAShadersText);
         int bufBLen = bufBHlsl.empty() ? 0 : (int)strlen(p->m_pState->m_szBufferBShadersText);
-        wchar_t msg[256];
+        int bufCLen = bufCHlsl.empty() ? 0 : (int)strlen(p->m_pState->m_szBufferCShadersText);
+        int bufDLen = bufDHlsl.empty() ? 0 : (int)strlen(p->m_pState->m_szBufferDShadersText);
+        wchar_t msg[512];
         bool truncated = ((int)imageHlsl.size() > storedLen + 1);
         if (truncated)
-            swprintf(msg, 256, L"Compiling... (TRUNCATED: %d of %d chars stored)", storedLen, (int)imageHlsl.size());
-        else if (bufALen > 0 || bufBLen > 0)
-            swprintf(msg, 256, L"Compiling... (Image: %d, BufA: %d, BufB: %d chars)", storedLen, bufALen, bufBLen);
+            swprintf(msg, 512, L"Compiling... (TRUNCATED: %d of %d chars stored)", storedLen, (int)imageHlsl.size());
+        else if (bufALen > 0 || bufBLen > 0 || bufCLen > 0 || bufDLen > 0)
+            swprintf(msg, 512, L"Compiling... (Image: %d, BufA: %d, BufB: %d, BufC: %d, BufD: %d chars)", storedLen, bufALen, bufBLen, bufCLen, bufDLen);
         else
-            swprintf(msg, 256, L"Compiling... (%d chars)", storedLen);
+            swprintf(msg, 512, L"Compiling... (%d chars)", storedLen);
         SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, msg);
     }
     SetTimer(hw, 1, 200, NULL);
@@ -1089,6 +1161,8 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass, bool jsonLoaded) {
 
     bool isBufferA = (pass.name == L"Buffer A");
     bool isBufferB = (pass.name == L"Buffer B");
+    bool isBufferC = (pass.name == L"Buffer C");
+    bool isBufferD = (pass.name == L"Buffer D");
     bool isImage   = (pass.name == L"Image");
 
     for (int ch = 0; ch < 4; ch++) {
@@ -1105,9 +1179,10 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass, bool jsonLoaded) {
         // --- Pattern 1: Audio texture (texelFetch with ivec2(expr, 0) or ivec2(expr, 1)) ---
         // Audio textures are 512x2: row 0=FFT, row 1=waveform.
         // Distinguish from buffer reads which use ivec2(fragCoord) or ivec2(x, y).
-        // Skip if JSON explicitly assigned CHAN_FEEDBACK — small-coord texelFetch reads
-        // (e.g. ivec2(0,0)) are ambiguous between audio and stored pixel data in feedback.
-        if (!(jsonLoaded && pass.channels[ch] == CHAN_FEEDBACK))
+        // Skip if JSON explicitly assigned a non-noise channel — small-coord texelFetch
+        // reads (e.g. ivec2(x,0)) are ambiguous between audio and buffer pixel data.
+        if (!(jsonLoaded && pass.channels[ch] != CHAN_NOISE_LQ &&
+              pass.channels[ch] != CHAN_NOISE_MQ && pass.channels[ch] != CHAN_NOISE_HQ))
         {
             char pat[64];
             sprintf_s(pat, "texelFetch(iChannel%d", ch);
@@ -1142,8 +1217,17 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass, bool jsonLoaded) {
                 pos += strlen(pat);
             }
             if (isAudio) {
-                pass.channels[ch] = CHAN_AUDIO;
-                continue;
+                // Audio textures are only read via texelFetch, never textureLod/texture.
+                // If this channel ALSO has textureLod calls, it's not audio — it's a buffer
+                // storing pixel data at small coordinates (e.g. camera matrix in temporal reprojection).
+                char lodCheck[64];
+                sprintf_s(lodCheck, "textureLod(iChannel%d", ch);
+                char texCheck[64];
+                sprintf_s(texCheck, "texture(iChannel%d", ch);
+                if (src.find(lodCheck) == std::string::npos && src.find(texCheck) == std::string::npos) {
+                    pass.channels[ch] = CHAN_AUDIO;
+                    continue;
+                }
             }
         }
 
@@ -1226,9 +1310,31 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass, bool jsonLoaded) {
             }
         }
 
-        // --- Pattern 2c: Buffer B ch0 cross-buffer read (high confidence) ---
+        // --- Pattern 2c: Buffer B/C/D ch0 cross-buffer read (high confidence) ---
         // If Buffer B ch0 uses texelFetch and Buffer A exists, it reads Buffer A output.
         if (isBufferB && ch == 0) {
+            bool hasBufA = false;
+            for (auto& p : m_passes)
+                if (p.name == L"Buffer A") { hasBufA = true; break; }
+            char fetchPat[64];
+            sprintf_s(fetchPat, "texelFetch(iChannel%d", ch);
+            if (hasBufA && src.find(fetchPat) != std::string::npos) {
+                pass.channels[ch] = CHAN_FEEDBACK;  // Read from Buffer A
+                continue;
+            }
+        }
+        if (isBufferC && ch == 0) {
+            bool hasBufA = false;
+            for (auto& p : m_passes)
+                if (p.name == L"Buffer A") { hasBufA = true; break; }
+            char fetchPat[64];
+            sprintf_s(fetchPat, "texelFetch(iChannel%d", ch);
+            if (hasBufA && src.find(fetchPat) != std::string::npos) {
+                pass.channels[ch] = CHAN_FEEDBACK;  // Read from Buffer A
+                continue;
+            }
+        }
+        if (isBufferD && ch == 0) {
             bool hasBufA = false;
             for (auto& p : m_passes)
                 if (p.name == L"Buffer A") { hasBufA = true; break; }
@@ -1290,12 +1396,85 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass, bool jsonLoaded) {
         if (jsonLoaded && pass.channels[ch] == CHAN_FEEDBACK && isBufferA) {
             char fetchPat[64];
             sprintf_s(fetchPat, "texelFetch(iChannel%d", ch);
-            if (src.find(fetchPat) == std::string::npos) {
+            bool hasFeedbackEvidence = (src.find(fetchPat) != std::string::npos);
+            // Also check for #define aliasing: "#define alias iChannelN" then "texelFetch(alias"
+            if (!hasFeedbackEvidence) {
+                char chPat[16];
+                sprintf_s(chPat, "iChannel%d", ch);
+                // Search for "#define <name> iChannelN"
+                size_t dpos = 0;
+                while ((dpos = combinedSrc.find("#define ", dpos)) != std::string::npos) {
+                    dpos += 8;
+                    while (dpos < combinedSrc.size() && combinedSrc[dpos] == ' ') dpos++;
+                    size_t nameStart = dpos;
+                    while (dpos < combinedSrc.size() && (isalnum((unsigned char)combinedSrc[dpos]) || combinedSrc[dpos] == '_')) dpos++;
+                    std::string alias = combinedSrc.substr(nameStart, dpos - nameStart);
+                    while (dpos < combinedSrc.size() && combinedSrc[dpos] == ' ') dpos++;
+                    size_t valEnd = dpos;
+                    while (valEnd < combinedSrc.size() && combinedSrc[valEnd] != '\n' && combinedSrc[valEnd] != '\r') valEnd++;
+                    std::string val = combinedSrc.substr(dpos, valEnd - dpos);
+                    // Trim trailing whitespace
+                    while (!val.empty() && (val.back() == ' ' || val.back() == '\t')) val.pop_back();
+                    if (val == chPat && !alias.empty()) {
+                        // Found "#define alias iChannelN" — check for texelFetch(alias or texture(alias
+                        if (combinedSrc.find("texelFetch(" + alias) != std::string::npos ||
+                            combinedSrc.find("texture(" + alias) != std::string::npos ||
+                            combinedSrc.find("textureLod(" + alias) != std::string::npos) {
+                            hasFeedbackEvidence = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!hasFeedbackEvidence) {
                 // No texelFetch evidence — downgrade to noise default
                 const int noiseDefaults[] = {CHAN_NOISE_LQ, CHAN_NOISE_LQ, CHAN_NOISE_MQ, CHAN_NOISE_HQ};
                 pass.channels[ch] = noiseDefaults[ch];
             }
             continue;
+        }
+
+        // --- Pattern 2f: Promote noise→CHAN_FEEDBACK on Buffer A for temporal reprojection ---
+        // Handles cases where JSON has wrong channel (e.g. ch0/ch3 swapped).
+        // Greek Temple: iChannel3 used for temporal reprojection — shader stores camera
+        // data in low-row pixels (fragCoord.y<1) and reads back via texelFetch + textureLod.
+        // Detect: shader writes state to specific pixels AND reads same channel with texelFetch.
+        // This "pixel data storage" pattern is unique to self-feedback, never noise.
+        if (isBufferA && (pass.channels[ch] == CHAN_NOISE_LQ ||
+                          pass.channels[ch] == CHAN_NOISE_MQ ||
+                          pass.channels[ch] == CHAN_NOISE_HQ)) {
+            // Evidence 1: shader stores data in low-row pixels (temporal reprojection pattern)
+            bool hasPixelStorage = (src.find("fragCoord.y<1") != std::string::npos ||
+                                    src.find("fragCoord.y < 1") != std::string::npos ||
+                                    src.find("fragCoord.y<=0") != std::string::npos ||
+                                    src.find("fragCoord.y == 0") != std::string::npos);
+            // Evidence 2: channel read via texelFetch WITHOUT noise modular coords (&255, &(res)
+            // Noise reads: texelFetch(iChannel1, (i+ivec2(0,0))&255, 0) — has &255
+            // Feedback reads: texelFetch(iChannel3, ivec2(0,0), 0) — no modular pattern
+            char fetchPat[64];
+            sprintf_s(fetchPat, "texelFetch(iChannel%d", ch);
+            bool hasNonNoiseFetch = false;
+            size_t fPos = src.find(fetchPat);
+            while (fPos != std::string::npos) {
+                // Extract the call
+                size_t end = src.find('\n', fPos);
+                if (end == std::string::npos) end = src.size();
+                std::string line = src.substr(fPos, end - fPos);
+                bool isNoiseRead = (line.find("&255") != std::string::npos ||
+                                    line.find("& 255") != std::string::npos ||
+                                    line.find("&(res") != std::string::npos ||
+                                    line.find("& (res") != std::string::npos);
+                if (!isNoiseRead) {
+                    hasNonNoiseFetch = true;
+                    break;
+                }
+                fPos = src.find(fetchPat, fPos + 1);
+            }
+            // Require pixel storage + non-noise texelFetch on this channel
+            if (hasPixelStorage && hasNonNoiseFetch) {
+                pass.channels[ch] = CHAN_FEEDBACK;
+                continue;
+            }
         }
 
         // --- Pattern 3: Self-feedback / buffer reads ---
@@ -1318,6 +1497,16 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass, bool jsonLoaded) {
                 pass.channels[ch] = CHAN_BUFFER_B;  // Self-feedback (no texelFetch evidence)
             continue;  // leave other channels at defaults
         }
+        if (isBufferC) {
+            if (ch == 0)
+                pass.channels[ch] = CHAN_BUFFER_C;  // Self-feedback (no texelFetch evidence)
+            continue;  // leave other channels at defaults
+        }
+        if (isBufferD) {
+            if (ch == 0)
+                pass.channels[ch] = CHAN_BUFFER_D;  // Self-feedback (no texelFetch evidence)
+            continue;  // leave other channels at defaults
+        }
         if (isImage) {
             // Only assign buffer channels when there's texelFetch evidence
             // (buffer reads use texelFetch for screen-sized pixel-exact reads).
@@ -1325,15 +1514,19 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass, bool jsonLoaded) {
             char fetchPat[64];
             sprintf_s(fetchPat, "texelFetch(iChannel%d", ch);
             if (src.find(fetchPat) != std::string::npos) {
-                bool hasBufA = false, hasBufB = false;
+                bool hasBufA = false, hasBufB = false, hasBufC = false, hasBufD = false;
                 for (auto& p : m_passes) {
                     if (p.name == L"Buffer A") hasBufA = true;
                     if (p.name == L"Buffer B") hasBufB = true;
+                    if (p.name == L"Buffer C") hasBufC = true;
+                    if (p.name == L"Buffer D") hasBufD = true;
                 }
-                bool feedbackUsed = false, bufBUsed = false;
+                bool feedbackUsed = false, bufBUsed = false, bufCUsed = false, bufDUsed = false;
                 for (int k = 0; k < ch; k++) {
                     if (pass.channels[k] == CHAN_FEEDBACK) feedbackUsed = true;
                     if (pass.channels[k] == CHAN_BUFFER_B) bufBUsed = true;
+                    if (pass.channels[k] == CHAN_BUFFER_C) bufCUsed = true;
+                    if (pass.channels[k] == CHAN_BUFFER_D) bufDUsed = true;
                 }
                 if (!feedbackUsed && hasBufA) {
                     pass.channels[ch] = CHAN_FEEDBACK;
@@ -1341,6 +1534,14 @@ void ShaderImportWindow::AnalyzeChannels(ShaderPass& pass, bool jsonLoaded) {
                 }
                 if (!bufBUsed && hasBufB) {
                     pass.channels[ch] = CHAN_BUFFER_B;
+                    continue;
+                }
+                if (!bufCUsed && hasBufC) {
+                    pass.channels[ch] = CHAN_BUFFER_C;
+                    continue;
+                }
+                if (!bufDUsed && hasBufD) {
+                    pass.channels[ch] = CHAN_BUFFER_D;
                     continue;
                 }
             }
@@ -1507,11 +1708,13 @@ void ShaderImportWindow::SaveAsPreset() {
     bool isMilk3 = (ext.size() >= 6 && _wcsicmp(ext.c_str() + ext.size() - 6, L".milk3") == 0);
 
     // Find passes by name
-    bool hasBufferA = false, hasBufferB = false, hasCommon = false;
+    bool hasBufferA = false, hasBufferB = false, hasBufferC = false, hasBufferD = false, hasCommon = false;
     std::string commonGlsl;
     for (auto& pass : m_passes) {
         if (pass.name == L"Buffer A" && !pass.hlslOutput.empty()) hasBufferA = true;
         if (pass.name == L"Buffer B" && !pass.hlslOutput.empty()) hasBufferB = true;
+        if (pass.name == L"Buffer C" && !pass.hlslOutput.empty()) hasBufferC = true;
+        if (pass.name == L"Buffer D" && !pass.hlslOutput.empty()) hasBufferD = true;
         if (pass.name == L"Common" && !pass.glslSource.empty()) {
             hasCommon = true;
             commonGlsl = pass.glslSource;
@@ -1542,6 +1745,8 @@ void ShaderImportWindow::SaveAsPreset() {
                     if (pass.name == L"Image") w.String(L"image", wn.c_str());
                     else if (pass.name == L"Buffer A") w.String(L"bufferA", wn.c_str());
                     else if (pass.name == L"Buffer B") w.String(L"bufferB", wn.c_str());
+                    else if (pass.name == L"Buffer C") w.String(L"bufferC", wn.c_str());
+                    else if (pass.name == L"Buffer D") w.String(L"bufferD", wn.c_str());
                 }
                 w.EndObject();
             }
@@ -1574,6 +1779,10 @@ void ShaderImportWindow::SaveAsPreset() {
                 w.String(L"bufferA", hlslToWide(pass.hlslOutput).c_str());
             else if (pass.name == L"Buffer B" && !pass.hlslOutput.empty())
                 w.String(L"bufferB", hlslToWide(pass.hlslOutput).c_str());
+            else if (pass.name == L"Buffer C" && !pass.hlslOutput.empty())
+                w.String(L"bufferC", hlslToWide(pass.hlslOutput).c_str());
+            else if (pass.name == L"Buffer D" && !pass.hlslOutput.empty())
+                w.String(L"bufferD", hlslToWide(pass.hlslOutput).c_str());
             else if (pass.name == L"Image" && !pass.hlslOutput.empty())
                 w.String(L"image", hlslToWide(pass.hlslOutput).c_str());
         }
@@ -1587,6 +1796,16 @@ void ShaderImportWindow::SaveAsPreset() {
         }
         if (hasBufferB) {
             w.BeginObject(L"bufferB");
+            w.String(L"iChannel0", L"self");
+            w.EndObject();
+        }
+        if (hasBufferC) {
+            w.BeginObject(L"bufferC");
+            w.String(L"iChannel0", L"self");
+            w.EndObject();
+        }
+        if (hasBufferD) {
+            w.BeginObject(L"bufferD");
             w.String(L"iChannel0", L"self");
             w.EndObject();
         }
@@ -1715,44 +1934,54 @@ std::string ShaderImportWindow::FixMatrixMultiplication(const std::string& input
         // Phase 1b handles named matrix variables with the same swap.
         // Must check both "matN(" and "floatNxN(" since Phase 1 may have already replaced.
 
-        // Helper: find *=matN( or *=floatNxN( pattern and return {index, matSize, skip}
-        auto findMulAssign = [&](size_t& outIdx, int& outSize, size_t& outSkip) -> bool {
-            for (int ms = 2; ms <= 4; ms++) {
-                char tokens[2][16];
-                sprintf_s(tokens[0], "*=mat%d(", ms);
-                sprintf_s(tokens[1], "*=float%dx%d(", ms, ms);
-                for (int ti = 0; ti < 2; ti++) {
-                    size_t idx = result.find(tokens[ti]);
-                    if (idx != std::string::npos) {
-                        outIdx = idx;
-                        outSize = ms;
-                        outSkip = strlen(tokens[ti]);
-                        return true;
+        // Helper: find *=matN( or *=floatNxM( pattern (square AND non-square matrices)
+        // Returns {index, matType string e.g. "float4x2", skip}
+        std::string matType;
+        auto findMulAssign = [&](size_t& outIdx, size_t& outSkip) -> bool {
+            for (int n = 2; n <= 4; n++) {
+                for (int m = 2; m <= 4; m++) {
+                    char tokens[2][20];
+                    if (n == m) sprintf_s(tokens[0], "*=mat%d(", n);
+                    else sprintf_s(tokens[0], "*=mat%dx%d(", n, m);
+                    sprintf_s(tokens[1], "*=float%dx%d(", n, m);
+                    for (int ti = 0; ti < 2; ti++) {
+                        size_t idx = result.find(tokens[ti]);
+                        if (idx != std::string::npos) {
+                            outIdx = idx;
+                            outSkip = strlen(tokens[ti]);
+                            char mt[16]; sprintf_s(mt, "float%dx%d", n, m);
+                            matType = mt;
+                            return true;
+                        }
                     }
                 }
             }
             return false;
         };
-        auto findMulRight = [&](size_t& outIdx, int& outSize, size_t& outSkip) -> bool {
-            for (int ms = 2; ms <= 4; ms++) {
-                char tokens[2][16];
-                sprintf_s(tokens[0], "*mat%d(", ms);
-                sprintf_s(tokens[1], "*float%dx%d(", ms, ms);
-                for (int ti = 0; ti < 2; ti++) {
-                    size_t idx = result.find(tokens[ti]);
-                    if (idx != std::string::npos) {
-                        outIdx = idx;
-                        outSize = ms;
-                        outSkip = strlen(tokens[ti]);
-                        return true;
+        auto findMulRight = [&](size_t& outIdx, size_t& outSkip) -> bool {
+            for (int n = 2; n <= 4; n++) {
+                for (int m = 2; m <= 4; m++) {
+                    char tokens[2][20];
+                    if (n == m) sprintf_s(tokens[0], "*mat%d(", n);
+                    else sprintf_s(tokens[0], "*mat%dx%d(", n, m);
+                    sprintf_s(tokens[1], "*float%dx%d(", n, m);
+                    for (int ti = 0; ti < 2; ti++) {
+                        size_t idx = result.find(tokens[ti]);
+                        if (idx != std::string::npos) {
+                            outIdx = idx;
+                            outSkip = strlen(tokens[ti]);
+                            char mt[16]; sprintf_s(mt, "float%dx%d", n, m);
+                            matType = mt;
+                            return true;
+                        }
                     }
                 }
             }
             return false;
         };
 
-        size_t index; int matSize; size_t skip;
-        if (findMulAssign(index, matSize, skip)) {
+        size_t index; size_t skip;
+        if (findMulAssign(index, skip)) {
             // e.g. "uv *= mat2(cos(a), -sin(a), sin(a), cos(a));"
             std::string fac1 = result.substr(0, index);
             // Trim right
@@ -1767,76 +1996,95 @@ std::string ShaderImportWindow::FixMatrixMultiplication(const std::string& input
             int closingIdx = FindClosingBracket(rest, '(', ')', 1);
             if (closingIdx > 0) {
                 std::string args = rest.substr(0, closingIdx);
-                // v *= matN(args) → v = mul(floatNxN(args), v)  [swapped for column-major]
-                result = indent_str + fac1 + " = mul(float"
-                       + std::to_string(matSize) + "x" + std::to_string(matSize)
-                       + "(" + args + "), " + fac1 + ");";
+                // v *= matN(args) → v = mul(floatNxM(args), v)  [swapped for column-major]
+                result = indent_str + fac1 + " = mul("
+                       + matType + "(" + args + "), " + fac1 + ");";
             }
-        } else if (findMulRight(index, matSize, skip)) {
+        } else if (findMulRight(index, skip)) {
             std::string prefix = result.substr(0, index);
-            // Trim to get fac1 (last word before *mat)
-            while (!prefix.empty() && prefix.back() == ' ') prefix.pop_back();
-            size_t lastSpace = prefix.rfind(' ');
-            std::string fac1 = (lastSpace != std::string::npos) ? prefix.substr(lastSpace + 1) : prefix;
-            std::string left = (lastSpace != std::string::npos) ? prefix.substr(0, lastSpace + 1) : "";
+            // Extract fac1: the left operand of *, working backward from '*'
+            // Must handle cases like "float2(v*mat2(...))" where fac1 is just "v",
+            // not "float2(v" (which would include the outer constructor's open paren).
+            size_t fac1End = prefix.size();
+            while (fac1End > 0 && prefix[fac1End - 1] == ' ') fac1End--;
+            size_t fac1Start = fac1End;
+            if (fac1Start > 0 && prefix[fac1Start - 1] == ')') {
+                // Balanced paren expression: scan backward to find matching '('
+                int depth = 0;
+                fac1Start--;
+                while (fac1Start > 0) {
+                    if (prefix[fac1Start] == ')') depth++;
+                    else if (prefix[fac1Start] == '(') { depth--; if (depth == 0) break; }
+                    fac1Start--;
+                }
+                // Include any identifier prefix (e.g. "func(...)")
+                while (fac1Start > 0 && (isalnum((unsigned char)prefix[fac1Start - 1]) || prefix[fac1Start - 1] == '_'))
+                    fac1Start--;
+            } else {
+                // Simple identifier: scan backward past identifier chars and '.'
+                while (fac1Start > 0 && (isalnum((unsigned char)prefix[fac1Start - 1]) || prefix[fac1Start - 1] == '_' || prefix[fac1Start - 1] == '.'))
+                    fac1Start--;
+            }
+            std::string fac1 = prefix.substr(fac1Start, fac1End - fac1Start);
+            std::string left = prefix.substr(0, fac1Start);
 
             std::string rest = result.substr(index + skip);
             int closingIdx = FindClosingBracket(rest, '(', ')', 1);
             if (closingIdx > 0) {
                 std::string args = rest.substr(0, closingIdx);
-                // x * matN(args) → mul(floatNxN(args), x)  [swapped for column-major]
-                result = left + "mul(float"
-                       + std::to_string(matSize) + "x" + std::to_string(matSize)
-                       + "(" + args + "), " + fac1 + ");";
+                std::string suffix = rest.substr(closingIdx + 1);
+                // x * matNxM(args) → mul(floatNxM(args), x)  [swapped for column-major]
+                result = left + "mul("
+                       + matType + "(" + args + "), " + fac1 + ")" + suffix;
             }
         }
 
-        // Handle matN(args)*expr or floatNxN(args)*expr — matrix constructor on LEFT of multiply
+        // Handle matNxM(args)*expr or floatNxM(args)*expr — matrix constructor on LEFT of multiply
         // GLSL (column-major): M * v → HLSL (row-major): mul(v, M)
-        // Must check both forms since Phase 1 may have already replaced mat2→float2x2
-        for (int ms = 2; ms <= 4; ms++) {
-            char matTokens[2][16];
-            sprintf_s(matTokens[0], "mat%d(", ms);
-            sprintf_s(matTokens[1], "float%dx%d(", ms, ms);
-            for (int ti = 0; ti < 2; ti++) {
-                const char* matToken = matTokens[ti];
-                size_t mpos = result.find(matToken);
-                if (mpos != std::string::npos) {
-                    std::string afterMat = result.substr(mpos + strlen(matToken));
-                    int closeIdx = FindClosingBracket(afterMat, '(', ')', 1);
-                    if (closeIdx > 0) {
+        // Must check both forms since Phase 1 may have already replaced mat→float
+        // Handles both square (mat2, mat3, mat4) and non-square (mat2x3, mat4x2, etc.)
+        {
+            bool handled = false;
+            for (int n = 2; n <= 4 && !handled; n++) {
+                for (int m = 2; m <= 4 && !handled; m++) {
+                    char matTokens[3][20];
+                    int numTokens = 0;
+                    if (n == m) { sprintf_s(matTokens[numTokens++], "mat%d(", n); }
+                    else { sprintf_s(matTokens[numTokens++], "mat%dx%d(", n, m); }
+                    sprintf_s(matTokens[numTokens++], "float%dx%d(", n, m);
+                    for (int ti = 0; ti < numTokens && !handled; ti++) {
+                        const char* matToken = matTokens[ti];
+                        size_t mpos = result.find(matToken);
+                        if (mpos == std::string::npos) continue;
+                        std::string afterMat = result.substr(mpos + strlen(matToken));
+                        int closeIdx = FindClosingBracket(afterMat, '(', ')', 1);
+                        if (closeIdx <= 0) continue;
                         size_t afterClose = mpos + strlen(matToken) + closeIdx + 1;
-                        // Skip whitespace after closing paren
                         size_t starPos = afterClose;
                         while (starPos < result.size() && result[starPos] == ' ') starPos++;
-                        if (starPos < result.size() && result[starPos] == '*') {
-                            // Make sure it's not *= (handled above)
-                            if (starPos + 1 < result.size() && result[starPos + 1] == '=') continue;
-                            // Extract the right-hand operand after *
-                            size_t rhsStart = starPos + 1;
-                            while (rhsStart < result.size() && result[rhsStart] == ' ') rhsStart++;
-                            // Find end of RHS: stop at ; or ) or , respecting brackets
-                            size_t rhsEnd = rhsStart;
-                            int depth = 0;
-                            while (rhsEnd < result.size()) {
-                                char c = result[rhsEnd];
-                                if (c == '(' || c == '[') depth++;
-                                else if (c == ')' || c == ']') { if (depth == 0) break; depth--; }
-                                else if ((c == ';' || c == ',') && depth == 0) break;
-                                rhsEnd++;
-                            }
-                            if (rhsEnd > rhsStart) {
-                                std::string matArgs = afterMat.substr(0, closeIdx);
-                                std::string rhs = result.substr(rhsStart, rhsEnd - rhsStart);
-                                // Trim trailing whitespace from rhs
-                                while (!rhs.empty() && rhs.back() == ' ') rhs.pop_back();
-                                std::string prefix = result.substr(0, mpos);
-                                std::string suffix = result.substr(rhsEnd);
-                                result = prefix + "mul(" + rhs + ", float"
-                                       + std::to_string(ms) + "x" + std::to_string(ms)
-                                       + "(" + matArgs + "))" + suffix;
-                                break; // handled, don't check second token form
-                            }
+                        if (starPos >= result.size() || result[starPos] != '*') continue;
+                        if (starPos + 1 < result.size() && result[starPos + 1] == '=') continue;
+                        size_t rhsStart = starPos + 1;
+                        while (rhsStart < result.size() && result[rhsStart] == ' ') rhsStart++;
+                        size_t rhsEnd = rhsStart;
+                        int depth = 0;
+                        while (rhsEnd < result.size()) {
+                            char c = result[rhsEnd];
+                            if (c == '(' || c == '[') depth++;
+                            else if (c == ')' || c == ']') { if (depth == 0) break; depth--; }
+                            else if ((c == ';' || c == ',') && depth == 0) break;
+                            rhsEnd++;
+                        }
+                        if (rhsEnd > rhsStart) {
+                            std::string matArgs = afterMat.substr(0, closeIdx);
+                            std::string rhs = result.substr(rhsStart, rhsEnd - rhsStart);
+                            while (!rhs.empty() && rhs.back() == ' ') rhs.pop_back();
+                            std::string pfx = result.substr(0, mpos);
+                            std::string sfx = result.substr(rhsEnd);
+                            char mt[16]; sprintf_s(mt, "float%dx%d", n, m);
+                            result = pfx + "mul(" + rhs + ", " + mt
+                                   + "(" + matArgs + "))" + sfx;
+                            handled = true;
                         }
                     }
                 }
@@ -1850,6 +2098,19 @@ std::string ShaderImportWindow::FixMatrixMultiplication(const std::string& input
         replaceAll(result, "mat2 ", "float2x2 ");
         replaceAll(result, "mat3 ", "float3x3 ");
         replaceAll(result, "mat4 ", "float4x4 ");
+        // Non-square matrices
+        for (int n = 2; n <= 4; n++) {
+            for (int m = 2; m <= 4; m++) {
+                if (n == m) continue;
+                char from1[12], to1[14], from2[12], to2[14];
+                sprintf_s(from1, "mat%dx%d(", n, m);
+                sprintf_s(to1, "float%dx%d(", n, m);
+                sprintf_s(from2, "mat%dx%d ", n, m);
+                sprintf_s(to2, "float%dx%d ", n, m);
+                replaceAll(result, from1, to1);
+                replaceAll(result, from2, to2);
+            }
+        }
     } catch (...) {
         return inputLine;
     }
@@ -1890,8 +2151,10 @@ std::string ShaderImportWindow::FixFloatNumberOfArguments(const std::string& inp
                 (void)std::stof(argsLine, &pos);
                 if (pos == argsLine.size()) shouldExpand = true;
             } catch (...) {}
-            if (!shouldExpand && argsLine.find('(') != std::string::npos && argsLine.find(')') != std::string::npos)
-                shouldExpand = true;
+            // NOTE: Do NOT expand function call expressions here. A single-arg constructor
+            // with a function call (e.g., float3(RAWTRAP(...))) might return a matrix, not a
+            // scalar. Expanding would incorrectly triplicate the expression. The post-Phase-3
+            // broadcast fix handles function call args correctly with matrix detection.
             if (!shouldExpand && (fullContext.find("float " + argsLine + ",") != std::string::npos ||
                                   fullContext.find("float " + argsLine + ";") != std::string::npos))
                 shouldExpand = true;
@@ -2107,6 +2370,36 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
     try {
         // Phase 1: Global replacements
 
+        // Strip GLSL-only constructs that have no HLSL equivalent
+        // precision qualifiers: "precision highp float;", "precision mediump sampler2D;" etc.
+        {
+            size_t pos = 0;
+            while ((pos = inp.find("precision ", pos)) != std::string::npos) {
+                // Must be at start of line (or start of string)
+                if (pos > 0 && inp[pos-1] != '\n' && inp[pos-1] != '\r') { pos += 10; continue; }
+                size_t eol = inp.find('\n', pos);
+                if (eol == std::string::npos) eol = inp.size();
+                inp.erase(pos, eol - pos);
+            }
+        }
+        // Strip 'uniform' qualifier (framework-specific, not standard Shadertoy)
+        // "uniform vec2 x;" → "vec2 x;" — also strip entire sampler array declarations
+        {
+            size_t pos = 0;
+            while ((pos = inp.find("uniform ", pos)) != std::string::npos) {
+                if (pos > 0 && inp[pos-1] != '\n' && inp[pos-1] != '\r' && inp[pos-1] != ' ') { pos += 8; continue; }
+                // If it's a sampler array, strip entire line (can't declare sampler arrays in our shader)
+                size_t eol = inp.find('\n', pos);
+                std::string line = inp.substr(pos, (eol != std::string::npos ? eol : inp.size()) - pos);
+                if (line.find("sampler") != std::string::npos && line.find('[') != std::string::npos) {
+                    if (eol == std::string::npos) eol = inp.size();
+                    inp.erase(pos, eol - pos);
+                } else {
+                    inp.erase(pos, 8); // just strip "uniform "
+                }
+            }
+        }
+
         // Integer/unsigned/boolean vector types (must come BEFORE vec→float to avoid ivec2→ifloat2)
         replaceAll(inp, "uvec2", "uint2");
         replaceAll(inp, "uvec3", "uint3");
@@ -2206,11 +2499,25 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
         inp = WholeWordReplace(inp, "rad", "_st_rad");
         inp = WholeWordReplace(inp, "ang", "_st_ang");
         replaceAll(inp, "iTimeDelta", "xTimeDelta"); // protect from iTime replace
-        replaceAll(inp, "iTime", "time");
+        replaceAll(inp, "iTime", "_c2.x");  // Direct ref to avoid local 'time' shadowing #define
+        // Note: 'time' already renamed to 'time_conv' at line 2435, so no further rename needed
         // iResolution: Shadertoy vec3(width, height, pixelAspect=1.0)
         // texsize = float4(w, h, 1/w, 1/h), so texsize.z would be wrong.
         // Inline-expand so iResolution.z → float3(...).z → 1.0
+        // First: rename any local variable declarations (e.g. "vec2 iResolution = iResolution.xy")
+        // so the variable name doesn't get replaced by the expansion.
+        replaceAll(inp, "float2 iResolution", "float2 _iRes");
+        replaceAll(inp, "float3 iResolution", "float3 _iRes");
+        replaceAll(inp, "float4 iResolution", "float4 _iRes");
         replaceAll(inp, "iResolution", "float3(texsize.x, texsize.y, 1.0)");
+
+        // iChannelResolution[N]: Shadertoy vec3 per-channel resolution
+        // All feedback/buffer textures use the render target size, so map to texsize.
+        for (int ci = 0; ci < 4; ci++) {
+            char from[32];
+            sprintf_s(from, "iChannelResolution[%d]", ci);
+            replaceAll(inp, from, "float3(texsize.x, texsize.y, 1.0)");
+        }
 
         // Replace hardcoded resolution constants with texsize.xy.
         // Shadertoy authors often hardcode their preview resolution (e.g. vec2(1280,720))
@@ -2234,7 +2541,9 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
             }
         }
 
-        replaceAll(inp, "iFrame", "frame");
+        replaceAll(inp, "iFrame", "_c2.z");  // Direct ref to avoid local 'frame' shadowing #define
+        // Rename remaining 'frame' tokens (local vars/params) to avoid #define frame _c2.z collision
+        inp = WholeWordReplace(inp, "frame", "_st_frame");
         replaceAll(inp, "iMouse", "_c14");  // Direct ref to avoid local 'mouse' shadowing #define
         replaceAll(inp, "iDate", "_c19");   // float4(year, month 0-11, day, seconds since midnight)
         // ZERO/ZEROU: Shadertoy anti-optimization trick (#define ZERO min(iFrame,0)).
@@ -2273,12 +2582,15 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                 replaceAll(inp, from, to);
             }
         }
-        replaceAll(inp, "texture(", "tex2D(");
-        // Volume textures need tex3D, not tex2D (sampler3D + float3 coords)
-        replaceAll(inp, "tex2D(sampler_noisevol_lq,", "tex3D(sampler_noisevol_lq,");
-        replaceAll(inp, "tex2D(sampler_noisevol_hq,", "tex3D(sampler_noisevol_hq,");
-        replaceAll(inp, "tex2D(sampler_noisevol_lq_st,", "tex3D(sampler_noisevol_lq_st,");
-        replaceAll(inp, "tex2D(sampler_noisevol_hq_st,", "tex3D(sampler_noisevol_hq_st,");
+        // Use tex2Dlod with LOD=0 for all texture() calls.  GLSL texture() uses
+        // implicit gradients, but HLSL tex2D gradient instructions fail inside
+        // dynamic loops (raymarching).  tex2Dlod avoids this entirely.
+        replaceAll(inp, "texture(", "tex2D_lod0(");
+        // Volume textures need tex3D_lod0, not tex2D_lod0 (sampler3D + float3 coords)
+        replaceAll(inp, "tex2D_lod0(sampler_noisevol_lq,", "tex3D_lod0(sampler_noisevol_lq,");
+        replaceAll(inp, "tex2D_lod0(sampler_noisevol_hq,", "tex3D_lod0(sampler_noisevol_hq,");
+        replaceAll(inp, "tex2D_lod0(sampler_noisevol_lq_st,", "tex3D_lod0(sampler_noisevol_lq_st,");
+        replaceAll(inp, "tex2D_lod0(sampler_noisevol_hq_st,", "tex3D_lod0(sampler_noisevol_hq_st,");
         replaceAll(inp, "textureLod(", "tex2Dlod_conv(");
         replaceAll(inp, "texelFetch(", "texelFetch_conv(");
 
@@ -2310,11 +2622,11 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                 }
                 if (depth != 0) { pos = nameEnd; continue; }
 
-                // Within this function body, replace tex2D(paramName, → tex3D(paramName,
+                // Within this function body, replace tex2D_lod0(paramName, → tex3D_lod0(paramName,
                 // tex2Dlod_conv already has a sampler3D overload, so leave those alone.
                 std::string body = inp.substr(braceOpen, braceClose - braceOpen);
-                std::string from2D = "tex2D(" + paramName + ",";
-                std::string to3D = "tex3D(" + paramName + ",";
+                std::string from2D = "tex2D_lod0(" + paramName + ",";
+                std::string to3D = "tex3D_lod0(" + paramName + ",";
                 size_t rpos = 0;
                 while ((rpos = body.find(from2D, rpos)) != std::string::npos) {
                     body.replace(rpos, from2D.size(), to3D);
@@ -2345,7 +2657,7 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
             };
             for (auto* s : extSamplers) {
                 char from[64], to[64];
-                sprintf_s(from, "tex2D(%s,", s);
+                sprintf_s(from, "tex2D_lod0(%s,", s);
                 sprintf_s(to, "tex2D_flipV(%s,", s);
                 replaceAll(inp, from, to);
                 sprintf_s(from, "tex2Dlod_conv(%s,", s);
@@ -2417,10 +2729,25 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                     pos = after;
                 }
             }
+            // Helper: detect scalar numeric literals (e.g., "3.0", "0.5f", "2", "1e-3").
+            // Scalar*matrix and matrix*scalar should use * (component-wise), NOT mul().
+            auto isScalarLiteral = [](const std::string& s) -> bool {
+                if (s.empty()) return false;
+                bool hasDigit = false;
+                for (char c : s) {
+                    if (isdigit(c)) hasDigit = true;
+                    else if (c != '.' && c != 'e' && c != 'E' && c != '-' && c != '+' && c != 'f' && c != ' ')
+                        return false;
+                }
+                return hasDigit;
+            };
+
             // Convert matVar*expr and expr*matVar to mul() calls.
             // All matrices use mul-swap: matVar*expr → mul(expr, matVar), expr*matVar → mul(matVar, expr)
             //   floatNxM(a,b,c) stores a,b,c as ROWS but GLSL treats them as COLUMNS.
             //   Swapping mul() args compensates. Preserves M[i] indexing (row i = GLSL col i).
+            // IMPORTANT: Skip conversion when operand is a scalar literal — scalar*matrix
+            // is valid component-wise multiplication in both GLSL and HLSL.
             for (const auto& mv : matVars) {
                 int mvLen = (int)mv.name.size();
                 size_t pos = 0;
@@ -2468,6 +2795,8 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                                     afterStar = swizEnd;
                             }
                             std::string operand = inp.substr(opStart, afterStar - opStart);
+                            // Skip scalar*matrix — use * for component-wise multiply
+                            if (isScalarLiteral(operand)) { pos = afterStar; continue; }
                             std::string repl;
                             if (mv.isSquare)
                                 repl = "mul(" + operand + ", " + mv.name + ")";  // SWAPPED
@@ -2601,6 +2930,8 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                         }
                         if (opEnd > opStart) {
                             std::string operand = inp.substr(opStart, opEnd - opStart);
+                            // Skip scalar*matrix — use * for component-wise multiply
+                            if (isScalarLiteral(operand)) { pos = callEnd; continue; }
                             std::string repl;
                             if (mf.isSquare)
                                 repl = "mul(" + funcCall + ", " + operand + ")";  // SWAPPED
@@ -2633,6 +2964,8 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                             if (rhsEnd > rhsStart) {
                                 std::string rhs = inp.substr(rhsStart, rhsEnd - rhsStart);
                                 while (!rhs.empty() && rhs.back() == ' ') rhs.pop_back();
+                                // Skip matrix*scalar — use * for component-wise multiply
+                                if (isScalarLiteral(rhs)) { pos = callEnd; continue; }
                                 // Check for chain: if there's a "* expr" after the RHS, fold it in.
                                 // e.g. matFunc1(...) * matFunc2(...) * vec → mul(mul(vec, M2), M1)
                                 std::string suffix = inp.substr(rhsEnd);
@@ -2742,7 +3075,8 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                     if (inComment) continue;
                     if (!trimmed.empty() || !prevLine.empty()) {
                         // GLSL 'const' at line start → HLSL 'static const'
-                        if (trimmed.substr(0, 6) == "const ")
+                        // But not 'const in' — that's a function parameter qualifier on a continuation line
+                        if (trimmed.substr(0, 6) == "const " && trimmed.substr(0, 9) != "const in ")
                             trimmed = "static " + trimmed;
                         clean << trimmed << "\n";
                     }
@@ -2793,13 +3127,36 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
             inpHeader = helper + inpHeader;
         }
 
+        // Add tex2D_lod0/tex3D_lod0 helpers — gradient-safe texture sampling
+        // GLSL texture() uses implicit gradients; HLSL tex2D does too, which
+        // fails inside dynamic loops (raymarching).  tex2Dlod avoids this.
+        if (inp.find("tex2D_lod0(") != std::string::npos) {
+            std::string helper =
+                "// CONV: texture() → tex2Dlod LOD=0 (gradient-safe for loops)\n"
+                "float4 tex2D_lod0(sampler2D _s, float2 _tc) {\n"
+                "  return tex2Dlod(_s, float4(_tc, 0, 0));\n"
+                "}\n"
+                "// CONV: texture(s, uv, bias) → tex2Dbias wrapper\n"
+                "float4 tex2D_lod0(sampler2D _s, float2 _tc, float _bias) {\n"
+                "  return tex2Dbias(_s, float4(_tc, 0, _bias));\n"
+                "}\n\n";
+            inpHeader = helper + inpHeader;
+        }
+        if (inp.find("tex3D_lod0(") != std::string::npos) {
+            std::string helper =
+                "float4 tex3D_lod0(sampler3D _s, float3 _tc) {\n"
+                "  return tex3Dlod(_s, float4(_tc, 0));\n"
+                "}\n\n";
+            inpHeader = helper + inpHeader;
+        }
+
         // Add V-flip texture helpers for Image pass external texture reads
         if (inp.find("tex2D_flipV(") != std::string::npos || inp.find("tex2Dlod_flipV(") != std::string::npos) {
             std::string helper =
                 "// CONV: V-flip wrappers for external textures in Image pass\n"
                 "// Compensates for flipped quad UVs (Shadertoy fragCoord convention)\n"
                 "float4 tex2D_flipV(sampler2D _s, float2 _tc) {\n"
-                "  return tex2D(_s, float2(_tc.x, 1.0 - _tc.y));\n"
+                "  return tex2Dlod(_s, float4(_tc.x, 1.0 - _tc.y, 0, 0));\n"
                 "}\n"
                 "float4 tex2Dlod_flipV(sampler2D _s, float2 _tc, float _lod) {\n"
                 "  return tex2Dlod(_s, float4(_tc.x, 1.0 - _tc.y, 0, _lod));\n"
@@ -2990,6 +3347,158 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                 }
             }
             result = clean.str();
+        }
+
+        // Fix multi-line matrix multiply: expr *floatNxM(...) or floatNxM(...) *expr
+        // Phase 3 per-line FixMatrixMultiplication can't handle multi-line matrix constructors.
+        // This full-text pass handles them by scanning with FindClosingBracket across newlines.
+        {
+            auto replaceAllInPlace = [](std::string& s, const std::string& from, const std::string& to) {
+                size_t pos = 0;
+                while ((pos = s.find(from, pos)) != std::string::npos) {
+                    s.replace(pos, from.size(), to);
+                    pos += to.size();
+                }
+            };
+            // Normalize spaces around * for matrix patterns
+            replaceAllInPlace(result, "* float", "*float");
+            replaceAllInPlace(result, " *float", "*float");
+
+            for (int n = 2; n <= 4; n++) {
+                for (int m = 2; m <= 4; m++) {
+                    char mt[16]; sprintf_s(mt, "float%dx%d", n, m);
+                    // Pattern 1: expr *floatNxM(...) → mul(floatNxM(...), expr)
+                    {
+                        char token[20]; sprintf_s(token, "*%s(", mt);
+                        size_t pos = 0;
+                        while ((pos = result.find(token, pos)) != std::string::npos) {
+                            // Check it's not *= (assignment handled elsewhere)
+                            if (pos > 0 && result[pos - 1] == '=') { pos++; continue; } // skip "=*float..."
+                            // Actually we need *= check on the * itself
+                            if (pos + 1 < result.size() && result[pos + 1] == '=') { pos++; continue; }
+
+                            // Extract fac1 (left operand) by working backward
+                            size_t fac1End = pos;
+                            while (fac1End > 0 && result[fac1End - 1] == ' ') fac1End--;
+                            size_t fac1Start = fac1End;
+                            if (fac1Start > 0 && result[fac1Start - 1] == ')') {
+                                int depth = 0;
+                                fac1Start--;
+                                while (fac1Start > 0) {
+                                    if (result[fac1Start] == ')') depth++;
+                                    else if (result[fac1Start] == '(') { depth--; if (depth == 0) break; }
+                                    fac1Start--;
+                                }
+                                while (fac1Start > 0 && (isalnum((unsigned char)result[fac1Start - 1]) || result[fac1Start - 1] == '_'))
+                                    fac1Start--;
+                            } else {
+                                while (fac1Start > 0 && (isalnum((unsigned char)result[fac1Start - 1]) || result[fac1Start - 1] == '_' || result[fac1Start - 1] == '.'))
+                                    fac1Start--;
+                            }
+                            if (fac1Start >= fac1End) { pos++; continue; }
+                            std::string fac1 = result.substr(fac1Start, fac1End - fac1Start);
+                            std::string left = result.substr(0, fac1Start);
+
+                            // Find matching closing paren for the matrix constructor (across lines)
+                            size_t argsStart = pos + strlen(token);
+                            std::string rest = result.substr(argsStart);
+                            int closingIdx = FindClosingBracket(rest, '(', ')', 1);
+                            if (closingIdx <= 0) { pos++; continue; }
+                            std::string args = rest.substr(0, closingIdx);
+                            std::string suffix = rest.substr(closingIdx + 1);
+
+                            result = left + "mul(" + mt + "(" + args + "), " + fac1 + ")" + suffix;
+                            pos = left.size(); // continue scanning from replacement
+                        }
+                    }
+                    // Pattern 2: floatNxM(...) *expr → mul(expr, floatNxM(...))
+                    {
+                        char token[20]; sprintf_s(token, "%s(", mt);
+                        size_t pos = 0;
+                        while ((pos = result.find(token, pos)) != std::string::npos) {
+                            // Don't match if preceded by identifier char
+                            if (pos > 0 && (isalnum((unsigned char)result[pos - 1]) || result[pos - 1] == '_')) { pos++; continue; }
+                            size_t argsStart = pos + strlen(token);
+                            std::string rest = result.substr(argsStart);
+                            int closeIdx = FindClosingBracket(rest, '(', ')', 1);
+                            if (closeIdx <= 0) { pos += strlen(token); continue; }
+                            size_t afterClose = argsStart + closeIdx + 1;
+                            size_t starPos = afterClose;
+                            while (starPos < result.size() && (result[starPos] == ' ' || result[starPos] == '\n' || result[starPos] == '\r')) starPos++;
+                            if (starPos >= result.size() || result[starPos] != '*') { pos += strlen(token); continue; }
+                            if (starPos + 1 < result.size() && result[starPos + 1] == '=') { pos += strlen(token); continue; }
+                            size_t rhsStart = starPos + 1;
+                            while (rhsStart < result.size() && (result[rhsStart] == ' ' || result[rhsStart] == '\n')) rhsStart++;
+                            size_t rhsEnd = rhsStart;
+                            int depth = 0;
+                            while (rhsEnd < result.size()) {
+                                char c = result[rhsEnd];
+                                if (c == '(' || c == '[') depth++;
+                                else if (c == ')' || c == ']') { if (depth == 0) break; depth--; }
+                                else if ((c == ';' || c == ',') && depth == 0) break;
+                                rhsEnd++;
+                            }
+                            if (rhsEnd <= rhsStart) { pos += strlen(token); continue; }
+                            std::string matArgs = rest.substr(0, closeIdx);
+                            std::string rhs = result.substr(rhsStart, rhsEnd - rhsStart);
+                            while (!rhs.empty() && rhs.back() == ' ') rhs.pop_back();
+                            std::string pfx = result.substr(0, pos);
+                            std::string sfx = result.substr(rhsEnd);
+                            result = pfx + "mul(" + rhs + ", " + mt + "(" + matArgs + "))" + sfx;
+                            pos = pfx.size(); // continue scanning
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fix transpose(mat)*expr → mul(mat, expr)  [drop transpose]
+        // With mul-swap strategy: M_hlsl = M_glsl^T (GLSL columns stored as HLSL rows).
+        // GLSL transpose(M)*v means M^T*v. Since M_hlsl already IS M_glsl^T,
+        // we just need mul(M_hlsl, v) without transpose — the storage swap cancels it.
+        // transpose() returns a matrix, so ident*matVar won't catch it.
+        {
+            size_t pos = 0;
+            while ((pos = result.find("transpose(", pos)) != std::string::npos) {
+                // Don't match if preceded by identifier char
+                if (pos > 0 && (isalnum((unsigned char)result[pos - 1]) || result[pos - 1] == '_')) { pos++; continue; }
+                size_t argsStart = pos + 10; // strlen("transpose(")
+                std::string rest = result.substr(argsStart);
+                int closeIdx = FindClosingBracket(rest, '(', ')', 1);
+                if (closeIdx <= 0) { pos += 10; continue; }
+                size_t afterClose = argsStart + closeIdx + 1;
+                // Skip whitespace after ')'
+                size_t starPos = afterClose;
+                while (starPos < result.size() && result[starPos] == ' ') starPos++;
+                if (starPos < result.size() && result[starPos] == '*' &&
+                    (starPos + 1 >= result.size() || result[starPos + 1] != '=')) {
+                    // Extract RHS
+                    size_t rhsStart = starPos + 1;
+                    while (rhsStart < result.size() && result[rhsStart] == ' ') rhsStart++;
+                    size_t rhsEnd = rhsStart;
+                    int depth = 0;
+                    while (rhsEnd < result.size()) {
+                        char c = result[rhsEnd];
+                        if (c == '(' || c == '[') depth++;
+                        else if (c == ')' || c == ']') { if (depth == 0) break; depth--; }
+                        else if ((c == ';' || c == ',') && depth == 0) break;
+                        rhsEnd++;
+                    }
+                    if (rhsEnd > rhsStart) {
+                        // Extract inner arg of transpose(): transpose(X) → X
+                        std::string matInner = rest.substr(0, closeIdx);
+                        std::string rhs = result.substr(rhsStart, rhsEnd - rhsStart);
+                        while (!rhs.empty() && rhs.back() == ' ') rhs.pop_back();
+                        std::string pfx = result.substr(0, pos);
+                        std::string sfx = result.substr(rhsEnd);
+                        // mul(mat, vec) — drop transpose, storage swap cancels it
+                        result = pfx + "mul(" + matInner + ", " + rhs + ")" + sfx;
+                        pos = pfx.size();
+                        continue;
+                    }
+                }
+                pos += 10;
+            }
         }
 
         // Fix GLSL vector comparisons in if/while conditions:
@@ -3213,70 +3722,511 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
             }
         }
 
-        // Fix over-specified identical constructors: float3(expr, expr, expr) → ((float3)(expr))
+        // Fix over-specified constructors: GLSL vecN(args) accepts excess components; HLSL rejects (X3014).
+        // Case 1: all args identical: float3(expr,expr,expr) → ((float3)(expr))
+        // Case 2: mixed args with vectors: float3(Z.z, 0, -Z) → float3(Z.z, 0, (-Z).x)
         // This runs AFTER backslash continuation removal so multi-line constructs are joined.
-        // GLSL allows vec3(vec3,vec3,vec3) (takes first N components); HLSL rejects excess.
-        for (int numArgs = 2; numArgs <= 4; numArgs++) {
-            std::string prefix = "float" + std::to_string(numArgs) + "(";
-            std::string typeName = "float" + std::to_string(numArgs);
-            size_t searchFrom = 0;
-            while (searchFrom < result.size()) {
-                size_t index = result.find(prefix, searchFrom);
-                if (index == std::string::npos) break;
-                std::string rest = result.substr(index + prefix.size());
-                int closingIdx = FindClosingBracket(rest, '(', ')', 1);
-                if (closingIdx <= 0) { searchFrom = index + prefix.size(); continue; }
-                std::string argsLine = rest.substr(0, closingIdx);
-                // Count top-level commas
-                int topCommas = 0;
-                { int depth = 0;
-                  for (char c : argsLine) {
-                    if (c == '(') depth++;
-                    else if (c == ')') depth--;
-                    else if (c == ',' && depth == 0) topCommas++;
-                  }
+        {
+            // Build variable type map from declarations in the converted HLSL
+            std::map<std::string, int> varTypeMap;
+            for (int dim = 2; dim <= 4; dim++) {
+                std::string ts = "float" + std::to_string(dim);
+                size_t pos = 0;
+                while ((pos = result.find(ts, pos)) != std::string::npos) {
+                    size_t after = pos + ts.size();
+                    // Skip float2x2 etc. and float2( constructors
+                    if (after < result.size() && (result[after] == 'x' || isdigit(result[after]))) { pos = after; continue; }
+                    // Must be preceded by non-alnum (or start of string) to avoid matching "Myfloat3"
+                    if (pos > 0 && (isalnum(result[pos-1]) || result[pos-1] == '_')) { pos = after; continue; }
+                    // Must be followed by whitespace
+                    if (after >= result.size() || (result[after] != ' ' && result[after] != '\t')) { pos = after; continue; }
+                    while (after < result.size() && (result[after] == ' ' || result[after] == '\t')) after++;
+                    // Extract identifier
+                    size_t idStart = after;
+                    while (after < result.size() && (isalnum(result[after]) || result[after] == '_')) after++;
+                    if (after > idStart) {
+                        std::string vn = result.substr(idStart, after - idStart);
+                        if (!isdigit(vn[0])) {
+                            // Skip if followed by '(' — likely a function declaration, not a variable
+                            size_t ck = after;
+                            while (ck < result.size() && result[ck] == ' ') ck++;
+                            if (ck >= result.size() || result[ck] != '(')
+                                varTypeMap[vn] = dim;
+                        }
+                        // Follow comma-separated declarations: float3 p = ..., Z = ..., X = ...;
+                        // After the first variable, scan through the rest of the declaration
+                        // picking up more identifiers of the same type after commas at depth 0.
+                        {
+                            size_t scanPos = after;
+                            int dp = 0;
+                            while (scanPos < result.size()) {
+                                char c = result[scanPos];
+                                if (c == '(' || c == '[') dp++;
+                                else if (c == ')' || c == ']') { dp--; if (dp < 0) break; }
+                                else if (c == ';' || c == '{') break;
+                                else if (c == ',' && dp == 0) {
+                                    scanPos++;
+                                    while (scanPos < result.size() && (result[scanPos]==' '||result[scanPos]=='\t'||result[scanPos]=='\n'||result[scanPos]=='\r')) scanPos++;
+                                    size_t id2 = scanPos;
+                                    while (scanPos < result.size() && (isalnum(result[scanPos]) || result[scanPos] == '_')) scanPos++;
+                                    if (scanPos > id2) {
+                                        std::string vn2 = result.substr(id2, scanPos - id2);
+                                        if (!isdigit(vn2[0])) {
+                                            size_t ck2 = scanPos;
+                                            while (ck2 < result.size() && result[ck2] == ' ') ck2++;
+                                            if (ck2 >= result.size() || result[ck2] != '(')
+                                                varTypeMap[vn2] = dim;
+                                        }
+                                    }
+                                    continue;
+                                }
+                                scanPos++;
+                            }
+                            after = scanPos;
+                        }
+                    }
+                    pos = after;
                 }
-                if (topCommas == numArgs - 1) {
+            }
+
+            // Estimate component count of a constructor argument
+            auto getArgCompCount = [&](const std::string& arg) -> int {
+                if (arg.empty()) return 1;
+                // Check for trailing swizzle (e.g., .xyz → 3, .xy → 2, .x → 1)
+                // Find last '.' not inside parentheses
+                size_t lastDot = std::string::npos;
+                int dp = 0;
+                for (size_t i = arg.size(); i > 0; i--) {
+                    if (arg[i-1] == ')') dp++;
+                    else if (arg[i-1] == '(') dp--;
+                    else if (arg[i-1] == '.' && dp == 0) { lastDot = i-1; break; }
+                }
+                if (lastDot != std::string::npos && lastDot < arg.size() - 1) {
+                    std::string swz = arg.substr(lastDot + 1);
+                    bool isSwizzle = !swz.empty() && swz.size() <= 4;
+                    for (char c : swz)
+                        if (c!='x'&&c!='y'&&c!='z'&&c!='w'&&c!='r'&&c!='g'&&c!='b'&&c!='a') { isSwizzle = false; break; }
+                    if (isSwizzle) return (int)swz.size();
+                }
+                // Strip leading unary operators and whitespace
+                size_t start = 0;
+                while (start < arg.size() && (arg[start]==' '||arg[start]=='\t'||arg[start]=='-'||arg[start]=='+'||arg[start]=='!')) start++;
+                if (start >= arg.size()) return 1;
+                // Extract leading identifier
+                size_t end = start;
+                while (end < arg.size() && (isalnum(arg[end]) || arg[end] == '_')) end++;
+                if (end == start) return 1;
+                std::string varName = arg.substr(start, end - start);
+                if (isdigit(varName[0])) return 1;
+                // Only look up if identifier is the entire expression (no trailing operators)
+                size_t tail = end;
+                while (tail < arg.size() && (arg[tail]==' '||arg[tail]=='\t')) tail++;
+                if (tail >= arg.size()) {
+                    auto it = varTypeMap.find(varName);
+                    if (it != varTypeMap.end()) return it->second;
+                }
+                return 1;
+            };
+
+            for (int numArgs = 2; numArgs <= 4; numArgs++) {
+                std::string prefix = "float" + std::to_string(numArgs) + "(";
+                std::string typeName = "float" + std::to_string(numArgs);
+                size_t searchFrom = 0;
+                while (searchFrom < result.size()) {
+                    size_t index = result.find(prefix, searchFrom);
+                    if (index == std::string::npos) break;
+                    // Don't match identifiers ending with float3( e.g. "Myfloat3("
+                    if (index > 0 && (isalnum(result[index-1]) || result[index-1] == '_')) {
+                        searchFrom = index + prefix.size(); continue;
+                    }
+                    std::string rest = result.substr(index + prefix.size());
+                    int closingIdx = FindClosingBracket(rest, '(', ')', 1);
+                    if (closingIdx <= 0) { searchFrom = index + prefix.size(); continue; }
+                    std::string argsLine = rest.substr(0, closingIdx);
+
                     // Split by top-level commas
                     std::vector<std::string> args;
-                    int depth2 = 0;
-                    std::string current;
-                    for (char c : argsLine) {
-                        if (c == '(') depth2++;
-                        else if (c == ')') depth2--;
-                        if (c == ',' && depth2 == 0) { args.push_back(current); current.clear(); }
-                        else current += c;
+                    { int depth = 0; std::string cur;
+                      for (char c : argsLine) {
+                          if (c == '(') depth++;
+                          else if (c == ')') depth--;
+                          if (c == ',' && depth == 0) { args.push_back(cur); cur.clear(); }
+                          else cur += c;
+                      }
+                      args.push_back(cur);
                     }
-                    args.push_back(current);
                     for (auto& a : args) {
                         size_t s = a.find_first_not_of(" \t\n\r");
                         size_t e = a.find_last_not_of(" \t\n\r");
                         a = (s != std::string::npos) ? a.substr(s, e - s + 1) : "";
                     }
-                    bool allIdentical = args.size() == (size_t)numArgs;
-                    for (size_t ai = 1; ai < args.size() && allIdentical; ai++)
-                        if (args[ai] != args[0]) allIdentical = false;
-                    if (allIdentical && !args[0].empty() && args[0].find('(') != std::string::npos) {
-                        std::string replacement = "((" + typeName + ")(" + args[0] + "))";
+
+                    // Case 1: All args identical — float3(expr,expr,expr) → ((float3)(expr))
+                    if ((int)args.size() == numArgs) {
+                        bool allIdentical = true;
+                        for (size_t ai = 1; ai < args.size() && allIdentical; ai++)
+                            if (args[ai] != args[0]) allIdentical = false;
+                        if (allIdentical && !args[0].empty() && args[0].find('(') != std::string::npos) {
+                            std::string replacement = "((" + typeName + ")(" + args[0] + "))";
+                            result = result.substr(0, index) + replacement
+                                   + result.substr(index + prefix.size() + closingIdx + 1);
+                            searchFrom = index + replacement.size();
+                            DebugLogA(("CONV-FIX: " + typeName + "(...) over-specified identical → cast\n").c_str());
+                            continue;
+                        }
+                    }
+
+                    // Case 2: Mixed args — estimate total components, truncate if over-specified
+                    int totalComp = 0;
+                    std::vector<int> argComp(args.size());
+                    for (size_t ai = 0; ai < args.size(); ai++) {
+                        argComp[ai] = getArgCompCount(args[ai]);
+                        totalComp += argComp[ai];
+                    }
+                    if (totalComp > numArgs) {
+                        int excess = totalComp - numArgs;
+                        bool fixed = true;
+                        for (int ai = (int)args.size()-1; ai >= 0 && excess > 0; ai--) {
+                            if (argComp[ai] > 1) {
+                                int needed = argComp[ai] - excess;
+                                if (needed < 1) needed = 1;
+                                static const char* swz[] = {"", ".x", ".xy", ".xyz"};
+                                // Wrap in parens if arg has operators (so .x binds to the whole expression)
+                                bool hasOps = false;
+                                for (char c : args[ai])
+                                    if (c=='+' || c=='*' || c=='/' || c==' ') { hasOps = true; break; }
+                                // Also wrap if starts with unary minus (for clarity: (-Z).x not -Z.x)
+                                if (!args[ai].empty() && args[ai][0] == '-') hasOps = true;
+                                if (hasOps)
+                                    args[ai] = "(" + args[ai] + ")" + swz[needed];
+                                else
+                                    args[ai] = args[ai] + swz[needed];
+                                excess -= (argComp[ai] - needed);
+                            }
+                        }
+                        if (excess == 0) {
+                            std::string replacement = typeName + "(";
+                            for (size_t ai = 0; ai < args.size(); ai++) {
+                                if (ai > 0) replacement += ", ";
+                                replacement += args[ai];
+                            }
+                            replacement += ")";
+                            result = result.substr(0, index) + replacement
+                                   + result.substr(index + prefix.size() + closingIdx + 1);
+                            searchFrom = index + replacement.size();
+                            DebugLogA(("CONV-FIX: " + typeName + "(...) over-specified → truncated\n").c_str());
+                            continue;
+                        }
+                    }
+
+                    searchFrom = index + prefix.size() + closingIdx;
+                }
+            }
+        }
+
+        // Fix matrix-returning #define macros used with * operator.
+        // HLSL's * does NOT do matrix-vector multiply (only mul() does).
+        // Detect: #define R(a) float2x2(...) then R(args)*expr → mul(expr, R(args))
+        // Uses mul-swap convention: GLSL mat*vec → HLSL mul(vec, mat)
+        {
+            std::set<std::string> matMacros;
+            size_t defPos = 0;
+            while ((defPos = result.find("#define ", defPos)) != std::string::npos) {
+                defPos += 8;
+                size_t nameStart = defPos;
+                while (defPos < result.size() && (isalnum(result[defPos]) || result[defPos] == '_')) defPos++;
+                if (defPos == nameStart) continue;
+                std::string macName = result.substr(nameStart, defPos - nameStart);
+                if (defPos < result.size() && result[defPos] == '(') {
+                    int d = 1; defPos++;
+                    while (defPos < result.size() && d > 0) {
+                        if (result[defPos] == '(') d++;
+                        else if (result[defPos] == ')') d--;
+                        defPos++;
+                    }
+                }
+                while (defPos < result.size() && (result[defPos] == ' ' || result[defPos] == '\t')) defPos++;
+                bool isMatrix = false;
+                for (int mr = 2; mr <= 4 && !isMatrix; mr++)
+                    for (int mc = 2; mc <= 4 && !isMatrix; mc++) {
+                        std::string mt = "float" + std::to_string(mr) + "x" + std::to_string(mc) + "(";
+                        if (result.compare(defPos, mt.size(), mt) == 0) isMatrix = true;
+                    }
+                if (isMatrix) matMacros.insert(macName);
+                while (defPos < result.size() && result[defPos] != '\n') defPos++;
+            }
+
+            for (const auto& macName : matMacros) {
+                size_t pos = 0;
+                std::string macPfx = macName + "(";
+                while ((pos = result.find(macPfx, pos)) != std::string::npos) {
+                    if (pos > 0 && (isalnum(result[pos-1]) || result[pos-1] == '_')) { pos++; continue; }
+                    // Check we're not inside the #define line itself
+                    size_t lineStart = result.rfind('\n', pos);
+                    if (lineStart == std::string::npos) lineStart = 0; else lineStart++;
+                    std::string linePrefix = result.substr(lineStart, 8);
+                    if (linePrefix == "#define ") { pos += macPfx.size(); continue; }
+
+                    size_t callStart = pos;
+                    size_t argsStart = pos + macPfx.size();
+                    int d = 1; size_t p = argsStart;
+                    while (p < result.size() && d > 0) {
+                        if (result[p] == '(') d++;
+                        else if (result[p] == ')') d--;
+                        p++;
+                    }
+                    if (d != 0) { pos++; continue; }
+                    size_t callEnd = p;
+                    // Check if followed by *
+                    size_t afterCall = callEnd;
+                    while (afterCall < result.size() && result[afterCall] == ' ') afterCall++;
+                    if (afterCall < result.size() && result[afterCall] == '*') {
+                        afterCall++; // skip *
+                        while (afterCall < result.size() && result[afterCall] == ' ') afterCall++;
+                        // Extract RHS: identifier (with optional .swizzle) or parenthesized expr
+                        size_t rhsStart = afterCall, rhsEnd = rhsStart;
+                        if (rhsEnd < result.size() && result[rhsEnd] == '(') {
+                            int d2 = 1; rhsEnd++;
+                            while (rhsEnd < result.size() && d2 > 0) {
+                                if (result[rhsEnd] == '(') d2++;
+                                else if (result[rhsEnd] == ')') d2--;
+                                rhsEnd++;
+                            }
+                        } else {
+                            while (rhsEnd < result.size() && (isalnum(result[rhsEnd]) || result[rhsEnd] == '_')) rhsEnd++;
+                            if (rhsEnd < result.size() && result[rhsEnd] == '.') {
+                                rhsEnd++;
+                                while (rhsEnd < result.size() && (result[rhsEnd]=='x'||result[rhsEnd]=='y'||result[rhsEnd]=='z'||result[rhsEnd]=='w')) rhsEnd++;
+                            }
+                        }
+                        if (rhsEnd > rhsStart) {
+                            std::string macCall = result.substr(callStart, callEnd - callStart);
+                            std::string rhs = result.substr(rhsStart, rhsEnd - rhsStart);
+                            std::string replacement = "mul(" + rhs + ", " + macCall + ")";
+                            result = result.substr(0, callStart) + replacement + result.substr(rhsEnd);
+                            pos = callStart + replacement.size();
+                            DebugLogA(("CONV-FIX: " + macName + "(...)*expr → mul(expr, " + macName + "(...))\n").c_str());
+                            continue;
+                        }
+                    }
+                    pos = callEnd;
+                }
+            }
+        }
+
+        // Fix mul()*expr → mul(expr, mul()) — matrix chain results followed by vector multiply.
+        // After Phase 1b converts M1*M2*M3 into nested mul() calls, the final *vector
+        // may be left as the * operator. HLSL requires mul() for matrix-vector multiply.
+        {
+            auto isScalarLit = [](const std::string& s) -> bool {
+                if (s.empty()) return false;
+                bool hasDigit = false;
+                for (char c : s) {
+                    if (isdigit(c)) hasDigit = true;
+                    else if (c!='.'&&c!='e'&&c!='E'&&c!='-'&&c!='+'&&c!='f'&&c!=' ') return false;
+                }
+                return hasDigit;
+            };
+            size_t pos = 0;
+            while ((pos = result.find("mul(", pos)) != std::string::npos) {
+                // Don't match identifiers ending with "mul(" (e.g., "cmul(")
+                if (pos > 0 && (isalnum(result[pos-1]) || result[pos-1] == '_')) { pos += 4; continue; }
+                size_t mulStart = pos;
+                std::string rest = result.substr(pos + 4);
+                int closingIdx = FindClosingBracket(rest, '(', ')', 1);
+                if (closingIdx < 0) { pos += 4; continue; }
+                size_t mulEnd = pos + 4 + closingIdx + 1;
+                size_t afterMul = mulEnd;
+                while (afterMul < result.size() && result[afterMul] == ' ') afterMul++;
+                if (afterMul < result.size() && result[afterMul] == '*' &&
+                    (afterMul + 1 >= result.size() || result[afterMul + 1] != '=')) {
+                    afterMul++;
+                    while (afterMul < result.size() && result[afterMul] == ' ') afterMul++;
+                    size_t rhsStart = afterMul, rhsEnd = rhsStart;
+                    if (rhsEnd < result.size() && result[rhsEnd] == '(') {
+                        int d = 1; rhsEnd++;
+                        while (rhsEnd < result.size() && d > 0) {
+                            if (result[rhsEnd] == '(') d++;
+                            else if (result[rhsEnd] == ')') d--;
+                            rhsEnd++;
+                        }
+                    } else {
+                        while (rhsEnd < result.size() && (isalnum(result[rhsEnd]) || result[rhsEnd] == '_')) rhsEnd++;
+                        if (rhsEnd < result.size() && result[rhsEnd] == '.') {
+                            rhsEnd++;
+                            while (rhsEnd < result.size() && (result[rhsEnd]=='x'||result[rhsEnd]=='y'||result[rhsEnd]=='z'||result[rhsEnd]=='w')) rhsEnd++;
+                        }
+                    }
+                    if (rhsEnd > rhsStart) {
+                        std::string mulCall = result.substr(mulStart, mulEnd - mulStart);
+                        std::string rhs = result.substr(rhsStart, rhsEnd - rhsStart);
+                        if (!isScalarLit(rhs)) {
+                            std::string replacement = "mul(" + rhs + ", " + mulCall + ")";
+                            result = result.substr(0, mulStart) + replacement + result.substr(rhsEnd);
+                            pos = mulStart; // re-scan from start in case of nested mul()
+                            DebugLogA("CONV-FIX: mul(...)*expr → mul(expr, mul(...))\n");
+                            continue;
+                        }
+                    }
+                }
+                pos = mulEnd;
+            }
+        }
+
+        // Zero-initialize uninitialized local variable declarations.
+        // GLSL hardware typically zero-inits locals; HLSL does NOT (X4000 error).
+        // Handles: "float s, i, d;" → "float s = 0, i = 0, d = 0;"
+        //          "float4 ref;" → "float4 ref = 0;"
+        // Only bare declarations without '=' are modified.
+        {
+            for (const char* typeStr : {"float ", "float2 ", "float3 ", "float4 ",
+                                        "int ", "int2 ", "int3 ", "int4 ",
+                                        "uint ", "uint2 ", "uint3 ", "uint4 "}) {
+                size_t tsLen = strlen(typeStr);
+                size_t pos = 0;
+                while ((pos = result.find(typeStr, pos)) != std::string::npos) {
+                    // Must be preceded by non-alnum (not inside "Myfloat" or "float2x2")
+                    if (pos > 0 && (isalnum(result[pos-1]) || result[pos-1] == '_')) { pos += tsLen; continue; }
+                    // Skip float2x2 etc.
+                    if (typeStr[0] == 'f' && pos + tsLen < result.size() && result[pos + tsLen - 1] == ' ' &&
+                        pos + tsLen < result.size() && (result[pos + tsLen - 1] == 'x')) { pos += tsLen; continue; }
+                    // Find the end of the declaration (semicolon)
+                    size_t semi = std::string::npos;
+                    { int dp = 0;
+                      for (size_t s = pos + tsLen; s < result.size(); s++) {
+                          if (result[s] == '(' || result[s] == '[') dp++;
+                          else if (result[s] == ')' || result[s] == ']') dp--;
+                          else if (result[s] == ';' && dp == 0) { semi = s; break; }
+                          else if (result[s] == '{' && dp == 0) break; // entered a block, stop
+                      }
+                    }
+                    if (semi == std::string::npos) { pos += tsLen; continue; }
+                    std::string decl = result.substr(pos + tsLen, semi - (pos + tsLen));
+                    // Skip if there's already an '=' (has initializer — may be partial, but don't touch)
+                    if (decl.find('=') != std::string::npos) { pos = semi + 1; continue; }
+                    // This is a bare declaration. Add "= 0" before each comma and before semicolon.
+                    // "s, i, d" → "s = 0, i = 0, d = 0"
+                    std::string fixed;
+                    int dp = 0;
+                    for (size_t ci = 0; ci < decl.size(); ci++) {
+                        if (decl[ci] == '(') dp++;
+                        else if (decl[ci] == ')') dp--;
+                        if (decl[ci] == ',' && dp == 0)
+                            fixed += " = 0,";
+                        else
+                            fixed += decl[ci];
+                    }
+                    fixed += " = 0";
+                    result = result.substr(0, pos + tsLen) + fixed + result.substr(semi);
+                    pos = pos + tsLen + fixed.size() + 1;
+                }
+            }
+        }
+
+        // Fix matrix size promotion: GLSL mat4(mat3_var) extends with identity; HLSL rejects.
+        // float4x4(m3x3) → float4x4(float4(m3x3[0],0), float4(m3x3[1],0), float4(m3x3[2],0), float4(0,0,0,1))
+        {
+            const char* prefix = "float4x4(";
+            size_t searchFrom = 0;
+            while (searchFrom < result.size()) {
+                size_t index = result.find(prefix, searchFrom);
+                if (index == std::string::npos) break;
+                if (index > 0 && (isalnum((unsigned char)result[index - 1]) || result[index - 1] == '_')) {
+                    searchFrom = index + 1; continue;
+                }
+                size_t prefixLen = strlen(prefix);
+                std::string rest = result.substr(index + prefixLen);
+                int closingIdx = FindClosingBracket(rest, '(', ')', 1);
+                if (closingIdx <= 0) { searchFrom = index + prefixLen; continue; }
+                std::string argsLine = rest.substr(0, closingIdx);
+                // Count top-level commas — if 0 and arg is an identifier (not a scalar), it's a mat promotion
+                int topCommas = 0;
+                { int depth = 0;
+                  for (char c : argsLine) {
+                    if (c == '(') depth++; else if (c == ')') depth--;
+                    else if (c == ',' && depth == 0) topCommas++;
+                  }
+                }
+                if (topCommas == 0 && !argsLine.empty()) {
+                    std::string arg = argsLine;
+                    size_t s = arg.find_first_not_of(" \t\n\r");
+                    size_t e = arg.find_last_not_of(" \t\n\r");
+                    if (s != std::string::npos) arg = arg.substr(s, e - s + 1);
+                    // Skip if arg is a scalar literal (number) — that's a valid broadcast
+                    bool isScalar = false;
+                    try { size_t pos; (void)std::stof(arg, &pos); if (pos == arg.size()) isScalar = true; } catch (...) {}
+                    if (!isScalar && arg.find('(') == std::string::npos) {
+                        // It's a single identifier — likely a mat3 promotion to mat4
+                        std::string replacement = "float4x4(float4(" + arg + "[0],0), float4(" + arg + "[1],0), float4(" + arg + "[2],0), float4(0,0,0,1))";
                         result = result.substr(0, index) + replacement
-                               + result.substr(index + prefix.size() + closingIdx + 1);
+                               + result.substr(index + prefixLen + closingIdx + 1);
                         searchFrom = index + replacement.size();
-                        DebugLogA(("CONV-FIX: " + typeName + "(...) over-specified → cast\n").c_str());
                         continue;
                     }
                 }
-                searchFrom = index + prefix.size() + closingIdx;
+                searchFrom = index + prefixLen + closingIdx;
             }
         }
 
         // Fix scalar-to-vector broadcast: GLSL typeN(scalar) → HLSL ((typeN)(scalar))
         // GLSL allows vec3(1.0) to broadcast; HLSL requires explicit args or cast syntax.
+        // IMPORTANT: (floatN)(floatMxK) casts are INVALID in HLSL — matrix-to-vector needs
+        // element extraction. We detect functions returning matrix types and skip the cast
+        // for expressions involving them. A helper function flattens the matrix instead.
         {
+            // Build set of functions that return matrix types (floatNxM)
+            std::set<std::string> matReturnFuncs;
+            {
+                // Scan for "floatNxM funcName(" patterns in function declarations
+                const char* matTypes[] = { "float2x2 ", "float3x3 ", "float4x4 ",
+                                           "float2x3 ", "float3x2 ", "float2x4 ",
+                                           "float4x2 ", "float3x4 ", "float4x3 " };
+                for (const char* mt : matTypes) {
+                    size_t mtLen = strlen(mt);
+                    size_t pos = 0;
+                    while ((pos = result.find(mt, pos)) != std::string::npos) {
+                        // Must be preceded by non-alnum (start of line, return type position)
+                        if (pos > 0 && (isalnum(result[pos-1]) || result[pos-1] == '_')) { pos += mtLen; continue; }
+                        // Extract identifier after the type
+                        size_t idStart = pos + mtLen;
+                        while (idStart < result.size() && result[idStart] == ' ') idStart++;
+                        size_t idEnd = idStart;
+                        while (idEnd < result.size() && (isalnum(result[idEnd]) || result[idEnd] == '_')) idEnd++;
+                        if (idEnd > idStart) {
+                            size_t afterId = idEnd;
+                            while (afterId < result.size() && result[afterId] == ' ') afterId++;
+                            if (afterId < result.size() && result[afterId] == '(') {
+                                std::string fname = result.substr(idStart, idEnd - idStart);
+                                matReturnFuncs.insert(fname);
+                            }
+                        }
+                        pos += mtLen;
+                    }
+                }
+            }
+
+            // Check if an expression involves a call to a matrix-returning function
+            auto exprInvolvesMatrix = [&](const std::string& expr) -> bool {
+                for (const auto& fn : matReturnFuncs) {
+                    size_t fpos = 0;
+                    while ((fpos = expr.find(fn, fpos)) != std::string::npos) {
+                        // Verify it's a standalone identifier followed by '('
+                        if (fpos > 0 && (isalnum(expr[fpos-1]) || expr[fpos-1] == '_')) { fpos += fn.size(); continue; }
+                        size_t after = fpos + fn.size();
+                        while (after < expr.size() && expr[after] == ' ') after++;
+                        if (after < expr.size() && expr[after] == '(') return true;
+                        fpos += fn.size();
+                    }
+                }
+                return false;
+            };
+
             const char* broadcastTypes[] = {
                 "float2(", "float3(", "float4(",
                 "int2(", "int3(", "int4(",
                 "uint2(", "uint3(", "uint4(",
             };
+            bool needsMatHelpers = false; // track if we need to inject helper functions
             for (const char* prefix : broadcastTypes) {
                 std::string typeName(prefix, strlen(prefix) - 1); // e.g. "float3"
                 size_t searchFrom = 0;
@@ -3305,13 +4255,28 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                       }
                     }
                     if (topCommas == 0 && !argsLine.empty()) {
-                        // Single argument — convert to cast: ((typeN)(arg))
+                        // Single argument — check if it involves a matrix-returning function
                         std::string trimmed = argsLine;
                         size_t s = trimmed.find_first_not_of(" \t");
                         size_t e = trimmed.find_last_not_of(" \t");
                         if (s != std::string::npos) trimmed = trimmed.substr(s, e - s + 1);
-                        // Skip if arg is already a simple scalar literal (int/float) — those work as-is in some HLSL constructors
-                        // Actually HLSL rejects single-arg vector constructors, so always convert
+
+                        if (exprInvolvesMatrix(trimmed)) {
+                            // Matrix expression — use helper function instead of C-style cast.
+                            // _m2v2/3/4 flatten a float2x2 to a vector using row-major element order.
+                            // In our convention (HLSL rows = GLSL columns), this matches GLSL's
+                            // column-major extraction for vec2/3/4(mat2).
+                            std::string helper = "_m2v" + typeName.substr(5); // e.g. "_m2v3" from "float3"
+                            std::string replacement = helper + "(" + trimmed + ")";
+                            result = result.substr(0, index) + replacement
+                                   + result.substr(index + prefixLen + closingIdx + 1);
+                            searchFrom = index + replacement.size();
+                            needsMatHelpers = true;
+                            DebugLogA(("CONV-FIX: " + typeName + "(matrix_expr) → " + helper + "(expr)\n").c_str());
+                            continue;
+                        }
+
+                        // Non-matrix single arg — convert to cast: ((typeN)(arg))
                         std::string replacement = "((" + typeName + ")(" + trimmed + "))";
                         result = result.substr(0, index) + replacement
                                + result.substr(index + prefixLen + closingIdx + 1);
@@ -3320,6 +4285,29 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                     }
                     searchFrom = index + prefixLen + closingIdx;
                 }
+            }
+
+            // Inject matrix-to-vector helper functions if needed
+            if (needsMatHelpers) {
+                std::string helpers =
+                    "// Matrix-to-vector flattening helpers (HLSL can't cast matrix to vector)\n"
+                    "float2 _m2v2(float2x2 m) { return m[0]; }\n"
+                    "float3 _m2v3(float2x2 m) { return float3(m[0], m[1][0]); }\n"
+                    "float4 _m2v4(float2x2 m) { return float4(m[0], m[1]); }\n"
+                    "float2 _m2v2(float3x3 m) { return m[0].xy; }\n"
+                    "float3 _m2v3(float3x3 m) { return m[0]; }\n"
+                    "float4 _m2v4(float3x3 m) { return float4(m[0], m[1][0]); }\n"
+                    "float2 _m2v2(float4x4 m) { return m[0].xy; }\n"
+                    "float3 _m2v3(float4x4 m) { return m[0].xyz; }\n"
+                    "float4 _m2v4(float4x4 m) { return m[0]; }\n\n";
+                // Insert before the first function declaration (look for "void " or return types)
+                size_t insertPos = result.find("\nvoid ");
+                if (insertPos == std::string::npos) insertPos = result.find("\nfloat ");
+                if (insertPos != std::string::npos)
+                    result.insert(insertPos + 1, helpers);
+                else
+                    result = helpers + result;
+                DebugLogA("CONV-FIX: injected _m2v helper functions for matrix-to-vector conversion\n");
             }
         }
 
@@ -3456,6 +4444,92 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                             if (nl != std::string::npos) structEnd = nl + 1;
                             result.insert(structEnd, helper);
                         }
+                    }
+                }
+            }
+
+            // Fix HLSL X3508 for 'out' struct params: insert zero-init
+            // at top of function body so fxc sees all members written.
+            // Handles multi-parameter functions (e.g. void F(float x, out Struct s)).
+            // NOTE: Only 'out' params — 'inout' carries pre-computed data that must not be destroyed.
+            for (const auto& sn : structNames) {
+                for (const char* qualifier : {"out "}) {
+                    std::string qPat = std::string(qualifier) + sn + " ";
+                    size_t pos = 0;
+                    while ((pos = result.find(qPat, pos)) != std::string::npos) {
+                        // Verify it's a parameter qualifier (preceded by '(' or ',')
+                        size_t prev = pos;
+                        if (prev > 0) prev--;
+                        while (prev > 0 && (result[prev] == ' ' || result[prev] == '\n' || result[prev] == '\r' || result[prev] == '\t')) prev--;
+                        char c = (prev < result.size()) ? result[prev] : 0;
+                        if (c != '(' && c != ',') { pos += qPat.size(); continue; }
+                        // Don't match "inout" when scanning for "out" (would double-match)
+                        if (strcmp(qualifier, "out ") == 0 && pos >= 2 && result.substr(pos - 2, 2) == "in") {
+                            pos += qPat.size(); continue;
+                        }
+                        // Extract param name
+                        size_t pnStart = pos + qPat.size();
+                        while (pnStart < result.size() && result[pnStart] == ' ') pnStart++;
+                        size_t pnEnd = pnStart;
+                        while (pnEnd < result.size() && (isalnum((unsigned char)result[pnEnd]) || result[pnEnd] == '_')) pnEnd++;
+                        if (pnEnd == pnStart) { pos += qPat.size(); continue; }
+                        std::string paramName = result.substr(pnStart, pnEnd - pnStart);
+                        // Find the function body's opening brace
+                        size_t closeParen = result.find(')', pnEnd);
+                        if (closeParen == std::string::npos) { pos += qPat.size(); continue; }
+                        size_t braceOpen = result.find('{', closeParen);
+                        if (braceOpen == std::string::npos) { pos += qPat.size(); continue; }
+                        // Verify no semicolon between ) and { (it's a definition, not declaration)
+                        bool isDecl = false;
+                        for (size_t k = closeParen; k < braceOpen; k++) {
+                            if (result[k] == ';') { isDecl = true; break; }
+                        }
+                        if (isDecl) { pos += qPat.size(); continue; }
+                        // Insert zero-init at top of function body
+                        std::string init = "\n  " + paramName + " = (" + sn + ")0;";
+                        result.insert(braceOpen + 1, init);
+                        pos = braceOpen + 1 + init.size();
+                    }
+                }
+            }
+
+            // Fix HLSL X3508 for 'out' built-in type params (float4, float3, etc.)
+            // Same issue as struct params: GLSL hardware zero-inits, HLSL doesn't.
+            {
+                const char* builtinTypes[] = {
+                    "float4 ", "float3 ", "float2 ", "float ",
+                    "int4 ", "int3 ", "int2 ", "int ",
+                    "uint4 ", "uint3 ", "uint2 ", "uint ",
+                    "float4x4 ", "float3x3 ", "float2x2 ",
+                };
+                for (const char* bt : builtinTypes) {
+                    std::string qPat = std::string("out ") + bt;
+                    std::string typeName(bt, strlen(bt) - 1); // trim trailing space
+                    size_t pos = 0;
+                    while ((pos = result.find(qPat, pos)) != std::string::npos) {
+                        size_t prev = pos;
+                        if (prev > 0) prev--;
+                        while (prev > 0 && (result[prev]==' '||result[prev]=='\n'||result[prev]=='\r'||result[prev]=='\t')) prev--;
+                        char c = (prev < result.size()) ? result[prev] : 0;
+                        if (c != '(' && c != ',') { pos += qPat.size(); continue; }
+                        if (pos >= 2 && result.substr(pos - 2, 2) == "in") { pos += qPat.size(); continue; }
+                        size_t pnStart = pos + qPat.size();
+                        while (pnStart < result.size() && result[pnStart] == ' ') pnStart++;
+                        size_t pnEnd = pnStart;
+                        while (pnEnd < result.size() && (isalnum((unsigned char)result[pnEnd]) || result[pnEnd] == '_')) pnEnd++;
+                        if (pnEnd == pnStart) { pos += qPat.size(); continue; }
+                        std::string paramName = result.substr(pnStart, pnEnd - pnStart);
+                        size_t closeParen = result.find(')', pnEnd);
+                        if (closeParen == std::string::npos) { pos += qPat.size(); continue; }
+                        size_t braceOpen = result.find('{', closeParen);
+                        if (braceOpen == std::string::npos) { pos += qPat.size(); continue; }
+                        bool isDecl = false;
+                        for (size_t k = closeParen; k < braceOpen; k++)
+                            if (result[k] == ';') { isDecl = true; break; }
+                        if (isDecl) { pos += qPat.size(); continue; }
+                        std::string init = "\n  " + paramName + " = (" + typeName + ")0;";
+                        result.insert(braceOpen + 1, init);
+                        pos = braceOpen + 1 + init.size();
                     }
                 }
             }
@@ -3831,6 +4905,8 @@ void ShaderImportWindow::LoadImportProject() {
                     std::wstring s = v.asString(L"");
                     if (s == L"self" || s == L"bufferA" || s == L"feedback") return CHAN_FEEDBACK;
                     if (s == L"bufferB") return CHAN_BUFFER_B;
+                    if (s == L"bufferC") return CHAN_BUFFER_C;
+                    if (s == L"bufferD") return CHAN_BUFFER_D;
                     if (s == L"noiseLQ") return CHAN_NOISE_LQ;
                     if (s == L"noiseMQ") return CHAN_NOISE_MQ;
                     if (s == L"noiseHQ") return CHAN_NOISE_HQ;
@@ -3888,19 +4964,478 @@ void ShaderImportWindow::LoadImportProject() {
     // Diagnostic: show detected channels after JSON load + AnalyzeChannels
     {
         std::wstring msg = L"Import project loaded. Channels:\r\n";
-        const wchar_t* chanNames[] = {L"NoiseLQ",L"NoiseMQ",L"NoiseHQ",L"BufA/Self",L"NoiseVolLQ",L"NoiseVolHQ",L"ImgPrev",L"Audio",L"RandTex",L"BufB"};
+        const wchar_t* chanNames[] = {L"NoiseLQ",L"NoiseMQ",L"NoiseHQ",L"BufA/Self",L"NoiseVolLQ",L"NoiseVolHQ",L"ImgPrev",L"Audio",L"RandTex",L"BufB",L"BufC",L"BufD"};
         for (auto& p : m_passes) {
             if (p.name == L"Common") continue;
             msg += p.name + L": ";
             for (int i = 0; i < 4; i++) {
                 int c = p.channels[i];
                 msg += L"ch" + std::to_wstring(i) + L"=";
-                msg += (c >= 0 && c <= 9) ? chanNames[c] : std::to_wstring(c);
+                msg += (c >= 0 && c <= 11) ? chanNames[c] : std::to_wstring(c);
                 if (i < 3) msg += L" ";
             }
             msg += L"\r\n";
         }
         SetDlgItemTextW(hw, IDC_MW_SHIMPORT_ERROR_EDIT, msg.c_str());
+    }
+}
+
+// ─── Headless import (IPC) ───────────────────────────────────────────────
+// Loads a shader_import .json, converts all passes GLSL→HLSL, applies to engine.
+// Returns a status string for the pipe response.  Does NOT require the window
+// to be open — works entirely on local ShaderPass vectors.
+
+std::wstring ShaderImportWindow::ImportFromFile(const wchar_t* path) {
+    // ── 1. Load JSON ────────────────────────────────────────────────────
+    JsonValue root = JsonLoadFile(path);
+    if (!root.isObject())
+        return L"ERROR|Failed to load JSON file";
+
+    std::wstring type = root[L"type"].asString(L"");
+    if (type != L"shader_import")
+        return L"ERROR|Not a shader_import JSON (type=" + type + L")";
+
+    // ── 2. Build passes from JSON ───────────────────────────────────────
+    m_passes.clear();
+    const auto& passes = root[L"passes"];
+    for (size_t i = 0; i < passes.size(); i++) {
+        const auto& p = passes.at(i);
+        ShaderPass sp;
+        sp.name = p[L"name"].asString(L"Image");
+        std::wstring wGlsl = p[L"glsl"].asString(L"");
+        sp.glslSource.reserve(wGlsl.size());
+        for (wchar_t ch : wGlsl) {
+            if (ch < 128) sp.glslSource += (char)ch;
+            else sp.glslSource += '?';
+        }
+        sp.hlslOutput.clear();
+        if (p.has(L"notes")) {
+            std::wstring wNotes = p[L"notes"].asString(L"");
+            sp.notes.reserve(wNotes.size());
+            for (wchar_t ch : wNotes) {
+                if (ch < 128) sp.notes += (char)ch;
+                else sp.notes += '?';
+            }
+        }
+        if (p.has(L"channels")) {
+            const auto& ch = p[L"channels"];
+            auto parseChan = [](const JsonValue& v, int def) -> int {
+                if (v.isString()) {
+                    std::wstring s = v.asString(L"");
+                    if (s == L"self" || s == L"bufferA" || s == L"feedback") return CHAN_FEEDBACK;
+                    if (s == L"bufferB") return CHAN_BUFFER_B;
+                    if (s == L"bufferC") return CHAN_BUFFER_C;
+                    if (s == L"bufferD") return CHAN_BUFFER_D;
+                    if (s == L"noiseLQ") return CHAN_NOISE_LQ;
+                    if (s == L"noiseMQ") return CHAN_NOISE_MQ;
+                    if (s == L"noiseHQ") return CHAN_NOISE_HQ;
+                    if (s == L"noiseVolLQ") return CHAN_NOISEVOL_LQ;
+                    if (s == L"noiseVolHQ") return CHAN_NOISEVOL_HQ;
+                    if (s == L"image") return CHAN_IMAGE_PREV;
+                    if (s == L"audio") return CHAN_AUDIO;
+                    if (s == L"random") return CHAN_RANDOM_TEX;
+                    if (s == L"texture") return CHAN_TEXTURE_FILE;
+                }
+                return v.asInt(def);
+            };
+            sp.channels[0] = parseChan(ch[L"ch0"], CHAN_NOISE_LQ);
+            sp.channels[1] = parseChan(ch[L"ch1"], CHAN_NOISE_LQ);
+            sp.channels[2] = parseChan(ch[L"ch2"], CHAN_NOISE_MQ);
+            sp.channels[3] = parseChan(ch[L"ch3"], CHAN_NOISE_HQ);
+            for (int ci = 0; ci < 4; ci++) {
+                wchar_t key[16];
+                swprintf(key, 16, L"ch%d_path", ci);
+                std::wstring texPath = ch[key].asString(L"");
+                if (!texPath.empty()) {
+                    sp.channelTexPaths[ci] = texPath;
+                    if (sp.channels[ci] != CHAN_TEXTURE_FILE)
+                        sp.channels[ci] = CHAN_TEXTURE_FILE;
+                }
+            }
+            sp.channelsFromJSON = true;
+        }
+        m_passes.push_back(std::move(sp));
+    }
+
+    if (m_passes.empty())
+        m_passes.push_back({L"Image", "", ""});
+    else if (m_passes[0].name != L"Image")
+        m_passes.insert(m_passes.begin(), {L"Image", "", ""});
+
+    if (m_passes.size() > 1 && m_passes[0].channels[0] == CHAN_NOISE_LQ)
+        m_passes[0].channels[0] = CHAN_FEEDBACK;
+
+    for (auto& p : m_passes) {
+        if (p.name == L"Common") continue;
+        AnalyzeChannels(p, p.channelsFromJSON);
+    }
+
+    m_lastProjectPath = path;
+
+    // Log channel assignments
+    {
+        std::string diag = "SHADER_IMPORT: Channel assignments:\n";
+        for (auto& p : m_passes) {
+            if (p.name == L"Common") continue;
+            char line[256]; char name8[32];
+            WideCharToMultiByte(CP_ACP, 0, p.name.c_str(), -1, name8, 32, NULL, NULL);
+            sprintf_s(line, "  %s: ch0=%s ch1=%s ch2=%s ch3=%s (glsl=%d chars)\n",
+                name8,
+                kChannelSamplers[p.channels[0]], kChannelSamplers[p.channels[1]],
+                kChannelSamplers[p.channels[2]], kChannelSamplers[p.channels[3]],
+                (int)p.glslSource.size());
+            diag += line;
+        }
+        DebugLogA(diag.c_str());
+    }
+
+    // ── 3. Convert GLSL→HLSL (same logic as ConvertAndApply, minus UI) ──
+    std::string commonGlsl;
+    for (auto& p : m_passes) {
+        if (p.name == L"Common") {
+            commonGlsl = p.glslSource;
+            p.hlslOutput.clear();
+            break;
+        }
+    }
+
+    for (int i = (int)m_passes.size() - 1; i >= 0; i--) {
+        if (m_passes[i].name == L"Common") continue;
+        if (m_passes[i].glslSource.empty()) continue;
+        if (!commonGlsl.empty()) {
+            std::string saved = m_passes[i].glslSource;
+            m_passes[i].glslSource = commonGlsl + "\n" + saved;
+            m_passes[i].hlslOutput.clear();
+            ConvertGLSLtoHLSL(i);
+            m_passes[i].glslSource = saved;
+        } else {
+            m_passes[i].hlslOutput.clear();
+            ConvertGLSLtoHLSL(i);
+        }
+        if (m_passes[i].hlslOutput.empty()) {
+            char name8[32];
+            WideCharToMultiByte(CP_ACP, 0, m_passes[i].name.c_str(), -1, name8, 32, NULL, NULL);
+            std::wstring err = L"ERROR|GLSL conversion failed for pass: ";
+            err += m_passes[i].name;
+            std::string errMsg = "SHADER_IMPORT: conversion failed for pass ";
+            errMsg += name8;
+            DebugLogA(errMsg.c_str());
+            return err;
+        }
+    }
+
+    DebugLogA("SHADER_IMPORT: all passes converted successfully");
+
+    // ── 4. Apply to engine (same logic as ApplyShader, minus UI) ────────
+    Engine* p = m_pEngine;
+    std::string imageHlsl, bufAHlsl, bufBHlsl, bufCHlsl, bufDHlsl;
+    for (auto& pass : m_passes) {
+        if (pass.name == L"Image") imageHlsl = pass.hlslOutput;
+        else if (pass.name == L"Buffer A") bufAHlsl = pass.hlslOutput;
+        else if (pass.name == L"Buffer B") bufBHlsl = pass.hlslOutput;
+        else if (pass.name == L"Buffer C") bufCHlsl = pass.hlslOutput;
+        else if (pass.name == L"Buffer D") bufDHlsl = pass.hlslOutput;
+    }
+
+    if (imageHlsl.empty())
+        return L"ERROR|No Image HLSL after conversion";
+
+    strncpy_s(p->m_pState->m_szCompShadersText, MAX_SHADER_TEXT_LEN, imageHlsl.c_str(), _TRUNCATE);
+    p->m_pState->m_nCompPSVersion = MD2_PS_5_0;
+    p->m_pState->m_nMaxPSVersion = max(p->m_pState->m_nWarpPSVersion, (int)MD2_PS_5_0);
+
+    if (!bufAHlsl.empty()) {
+        strncpy_s(p->m_pState->m_szBufferAShadersText, MAX_SHADER_TEXT_LEN, bufAHlsl.c_str(), _TRUNCATE);
+        p->m_pState->m_nBufferAPSVersion = MD2_PS_5_0;
+    } else {
+        p->m_pState->m_szBufferAShadersText[0] = '\0';
+        p->m_pState->m_nBufferAPSVersion = 0;
+    }
+    if (!bufBHlsl.empty()) {
+        strncpy_s(p->m_pState->m_szBufferBShadersText, MAX_SHADER_TEXT_LEN, bufBHlsl.c_str(), _TRUNCATE);
+        p->m_pState->m_nBufferBPSVersion = MD2_PS_5_0;
+    } else {
+        p->m_pState->m_szBufferBShadersText[0] = '\0';
+        p->m_pState->m_nBufferBPSVersion = 0;
+    }
+    if (!bufCHlsl.empty()) {
+        strncpy_s(p->m_pState->m_szBufferCShadersText, MAX_SHADER_TEXT_LEN, bufCHlsl.c_str(), _TRUNCATE);
+        p->m_pState->m_nBufferCPSVersion = MD2_PS_5_0;
+    } else {
+        p->m_pState->m_szBufferCShadersText[0] = '\0';
+        p->m_pState->m_nBufferCPSVersion = 0;
+    }
+    if (!bufDHlsl.empty()) {
+        strncpy_s(p->m_pState->m_szBufferDShadersText, MAX_SHADER_TEXT_LEN, bufDHlsl.c_str(), _TRUNCATE);
+        p->m_pState->m_nBufferDPSVersion = MD2_PS_5_0;
+    } else {
+        p->m_pState->m_szBufferDShadersText[0] = '\0';
+        p->m_pState->m_nBufferDPSVersion = 0;
+    }
+
+    // Update preset description and current preset filename (used for screenshots, UI, etc.)
+    {
+        std::wstring desc = path;
+        size_t sl = desc.rfind(L'\\');
+        if (sl == std::wstring::npos) sl = desc.rfind(L'/');
+        if (sl != std::wstring::npos) desc = desc.substr(sl + 1);
+        size_t dot = desc.rfind(L'.');
+        if (dot != std::wstring::npos) desc = desc.substr(0, dot);
+        wcsncpy_s(p->m_pState->m_szDesc, desc.c_str(), _TRUNCATE);
+        wcsncpy_s(p->m_szCurrentPresetFile, desc.c_str(), _TRUNCATE);
+    }
+
+    // Propagate channel texture paths
+    for (int i = 0; i < 4; i++)
+        p->m_szChannelTexPath[i].clear();
+    for (auto& pass : m_passes) {
+        if (pass.name == L"Common") continue;
+        for (int i = 0; i < 4; i++) {
+            if (pass.channels[i] == CHAN_TEXTURE_FILE && !pass.channelTexPaths[i].empty())
+                p->m_szChannelTexPath[i] = pass.channelTexPaths[i];
+        }
+    }
+
+    // Activate Shadertoy pipeline
+    p->m_bShadertoyMode = true;
+    p->m_bLoadingShadertoyMode = true;
+    p->m_nShadertoyStartFrame = p->GetFrame();
+    p->m_nRecompileResult.store(1);
+    p->EnqueueRenderCmd(RenderCmd::RecompileCompShader);
+
+    int imgLen = (int)strlen(p->m_pState->m_szCompShadersText);
+    int bufALen = bufAHlsl.empty() ? 0 : (int)strlen(p->m_pState->m_szBufferAShadersText);
+    int bufBLen = bufBHlsl.empty() ? 0 : (int)strlen(p->m_pState->m_szBufferBShadersText);
+    int bufCLen = bufCHlsl.empty() ? 0 : (int)strlen(p->m_pState->m_szBufferCShadersText);
+    int bufDLen = bufDHlsl.empty() ? 0 : (int)strlen(p->m_pState->m_szBufferDShadersText);
+
+    wchar_t result[512];
+    swprintf(result, 512, L"OK|Compiling (Image:%d BufA:%d BufB:%d BufC:%d BufD:%d chars, %d passes)",
+        imgLen, bufALen, bufBLen, bufCLen, bufDLen, (int)m_passes.size());
+
+    DebugLogW((std::wstring(L"SHADER_IMPORT: ") + result).c_str());
+
+    // Update UI if window is open
+    if (m_hWnd) {
+        m_nSelectedPass = 0;
+        RebuildPassList();
+        SyncPassToEditor();
+        SyncChannelCombos();
+        SetDlgItemTextW(m_hWnd, IDC_MW_SHIMPORT_ERROR_EDIT, result + 3);  // skip "OK|"
+    }
+
+    return result;
+}
+
+// ─── Headless GLSL import (IPC) ──────────────────────────────────────────
+// Takes raw GLSL source for a single Image pass, converts to HLSL, optionally
+// applies to the engine.  Returns status + HLSL (or error) via pipe.
+
+std::wstring ShaderImportWindow::ImportFromGLSL(const std::string& glsl, bool applyToEngine) {
+    if (glsl.empty())
+        return L"ERROR|Empty GLSL source";
+
+    // Set up single Image pass
+    m_passes.clear();
+    ShaderPass sp;
+    sp.name = L"Image";
+    sp.glslSource = glsl;
+    sp.channels[0] = CHAN_NOISE_LQ;
+    sp.channels[1] = CHAN_NOISE_LQ;
+    sp.channels[2] = CHAN_NOISE_MQ;
+    sp.channels[3] = CHAN_NOISE_HQ;
+    AnalyzeChannels(sp, false);
+    m_passes.push_back(std::move(sp));
+
+    m_nSelectedPass = 0;
+
+    // Log channel assignments
+    {
+        std::string diag = "SHADER_GLSL: ch0=";
+        diag += kChannelSamplers[m_passes[0].channels[0]];
+        diag += " ch1="; diag += kChannelSamplers[m_passes[0].channels[1]];
+        diag += " ch2="; diag += kChannelSamplers[m_passes[0].channels[2]];
+        diag += " ch3="; diag += kChannelSamplers[m_passes[0].channels[3]];
+        DebugLogA(diag.c_str());
+    }
+
+    // Convert
+    m_passes[0].hlslOutput.clear();
+    ConvertGLSLtoHLSL(0);
+
+    if (m_passes[0].hlslOutput.empty())
+        return L"ERROR|GLSL conversion failed (check debug.log for details)";
+
+    int hlslLen = (int)m_passes[0].hlslOutput.size();
+
+    if (!applyToEngine) {
+        // Return the HLSL without applying
+        wchar_t hdr[128];
+        swprintf(hdr, 128, L"OK|Converted (%d chars HLSL)\n", hlslLen);
+        std::wstring result = hdr;
+        // Append HLSL as wide string
+        for (char c : m_passes[0].hlslOutput)
+            result += (wchar_t)(unsigned char)c;
+        return result;
+    }
+
+    // Apply to engine (same as ImportFromFile apply section)
+    Engine* p = m_pEngine;
+    const std::string& imageHlsl = m_passes[0].hlslOutput;
+
+    strncpy_s(p->m_pState->m_szCompShadersText, MAX_SHADER_TEXT_LEN, imageHlsl.c_str(), _TRUNCATE);
+    p->m_pState->m_nCompPSVersion = MD2_PS_5_0;
+    p->m_pState->m_nMaxPSVersion = max(p->m_pState->m_nWarpPSVersion, (int)MD2_PS_5_0);
+    p->m_pState->m_szBufferAShadersText[0] = '\0';
+    p->m_pState->m_szBufferBShadersText[0] = '\0';
+    p->m_pState->m_szBufferCShadersText[0] = '\0';
+    p->m_pState->m_szBufferDShadersText[0] = '\0';
+
+    wcsncpy_s(p->m_pState->m_szDesc, L"IPC_GLSL", _TRUNCATE);
+
+    for (int i = 0; i < 4; i++)
+        p->m_szChannelTexPath[i].clear();
+
+    p->m_bShadertoyMode = true;
+    p->m_bLoadingShadertoyMode = true;
+    p->m_nShadertoyStartFrame = p->GetFrame();
+    p->m_nRecompileResult.store(1);
+    p->EnqueueRenderCmd(RenderCmd::RecompileCompShader);
+
+    int storedLen = (int)strlen(p->m_pState->m_szCompShadersText);
+    wchar_t result[256];
+    swprintf(result, 256, L"OK|Compiling (%d chars HLSL from %d chars GLSL)", storedLen, (int)glsl.size());
+    DebugLogW((std::wstring(L"SHADER_GLSL: ") + result).c_str());
+
+    if (m_hWnd) {
+        m_nSelectedPass = 0;
+        RebuildPassList();
+        SyncPassToEditor();
+        SyncChannelCombos();
+        SetDlgItemTextW(m_hWnd, IDC_MW_SHIMPORT_ERROR_EDIT, result + 3);
+    }
+
+    return result;
+}
+
+// ─── Headless save as .milk3 (IPC) ───────────────────────────────────────
+// Saves current passes to a .milk3 file at the given path.
+// Must have converted HLSL in m_passes (call ImportFromFile or ImportFromGLSL first).
+
+std::wstring ShaderImportWindow::SavePresetToFile(const wchar_t* path) {
+    if (m_passes.empty() || m_passes[0].hlslOutput.empty())
+        return L"ERROR|No HLSL to save (convert first)";
+
+    Engine* p = m_pEngine;
+    bool hasBufferA = false, hasBufferB = false, hasBufferC = false, hasBufferD = false, hasCommon = false;
+    std::string commonGlsl;
+    for (auto& pass : m_passes) {
+        if (pass.name == L"Buffer A" && !pass.hlslOutput.empty()) hasBufferA = true;
+        if (pass.name == L"Buffer B" && !pass.hlslOutput.empty()) hasBufferB = true;
+        if (pass.name == L"Buffer C" && !pass.hlslOutput.empty()) hasBufferC = true;
+        if (pass.name == L"Buffer D" && !pass.hlslOutput.empty()) hasBufferD = true;
+        if (pass.name == L"Common" && !pass.glslSource.empty()) {
+            hasCommon = true;
+            commonGlsl = pass.glslSource;
+        }
+    }
+
+    // Determine format from extension
+    std::wstring ext = path;
+    bool isMilk3 = (ext.size() >= 6 && _wcsicmp(ext.c_str() + ext.size() - 6, L".milk3") == 0);
+
+    if (isMilk3) {
+        JsonWriter w;
+        w.BeginObject();
+        w.Int(L"version", 1);
+        w.Bool(L"shadertoy", true);
+
+        std::wstring fname = std::filesystem::path(path).stem().wstring();
+        w.String(L"name", fname.c_str());
+
+        auto hlslToWide = [](const std::string& s) -> std::wstring {
+            std::wstring w;
+            w.reserve(s.size());
+            for (char c : s) {
+                if (c == LINEFEED_CONTROL_CHAR) w += L'\n';
+                else if ((unsigned char)c < 128) w += (wchar_t)c;
+                else w += L'?';
+            }
+            return w;
+        };
+
+        if (hasCommon) {
+            std::wstring wCommon(commonGlsl.begin(), commonGlsl.end());
+            w.String(L"common", wCommon.c_str());
+        }
+        for (auto& pass : m_passes) {
+            if (pass.name == L"Buffer A" && !pass.hlslOutput.empty())
+                w.String(L"bufferA", hlslToWide(pass.hlslOutput).c_str());
+            else if (pass.name == L"Buffer B" && !pass.hlslOutput.empty())
+                w.String(L"bufferB", hlslToWide(pass.hlslOutput).c_str());
+            else if (pass.name == L"Buffer C" && !pass.hlslOutput.empty())
+                w.String(L"bufferC", hlslToWide(pass.hlslOutput).c_str());
+            else if (pass.name == L"Buffer D" && !pass.hlslOutput.empty())
+                w.String(L"bufferD", hlslToWide(pass.hlslOutput).c_str());
+            else if (pass.name == L"Image" && !pass.hlslOutput.empty())
+                w.String(L"image", hlslToWide(pass.hlslOutput).c_str());
+        }
+
+        w.BeginObject(L"channels");
+        if (hasBufferA) {
+            w.BeginObject(L"bufferA");
+            w.String(L"iChannel0", L"self");
+            w.EndObject();
+        }
+        if (hasBufferB) {
+            w.BeginObject(L"bufferB");
+            w.String(L"iChannel0", L"self");
+            w.EndObject();
+        }
+        if (hasBufferC) {
+            w.BeginObject(L"bufferC");
+            w.String(L"iChannel0", L"self");
+            w.EndObject();
+        }
+        if (hasBufferD) {
+            w.BeginObject(L"bufferD");
+            w.String(L"iChannel0", L"self");
+            w.EndObject();
+        }
+        w.BeginObject(L"image");
+        w.String(L"iChannel0", hasBufferA ? L"bufferA" : L"self");
+        w.EndObject();
+        w.EndObject(); // channels
+        w.EndObject(); // root
+
+        if (w.SaveToFile(path))
+            return std::wstring(L"OK|Saved ") + path;
+        else
+            return std::wstring(L"ERROR|Failed to write ") + path;
+    } else {
+        // Legacy .milk save
+        auto tempState = std::make_unique<CState>();
+        tempState->Default(0xFFFFFFFF);
+        tempState->m_nCompPSVersion = MD2_PS_5_0;
+        tempState->m_nWarpPSVersion = 0;
+        tempState->m_nMaxPSVersion = MD2_PS_5_0;
+        tempState->m_nMinPSVersion = 0;
+
+        strncpy_s(tempState->m_szCompShadersText, MAX_SHADER_TEXT_LEN, m_passes[0].hlslOutput.c_str(), _TRUNCATE);
+        if (hasBufferA && m_passes.size() > 1) {
+            for (auto& pass : m_passes) {
+                if (pass.name == L"Buffer A") {
+                    strncpy_s(tempState->m_szBufferAShadersText, MAX_SHADER_TEXT_LEN, pass.hlslOutput.c_str(), _TRUNCATE);
+                    tempState->m_nBufferAPSVersion = MD2_PS_5_0;
+                    break;
+                }
+            }
+        }
+
+        if (tempState->Export(path))
+            return std::wstring(L"OK|Saved ") + path;
+        else
+            return std::wstring(L"ERROR|Failed to write ") + path;
     }
 }
 
