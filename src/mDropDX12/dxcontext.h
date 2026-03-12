@@ -161,6 +161,11 @@ public:
   UINT                               m_rtvSlotBaseline = 0;
   UINT                               m_srvSlotBaseline = 0;
 
+  // DXContext-level baselines set once in Init() — before font atlas / help texture.
+  // Used by ResetBufferAndFonts() to fully reclaim font atlas SRV slots on rebuild.
+  UINT                               m_rtvSlotInitBaseline = 0;
+  UINT                               m_srvSlotInitBaseline = 0;
+
   // Helpers for allocating descriptor slots
   D3D12_CPU_DESCRIPTOR_HANDLE AllocateRtv();   // returns CPU handle, bumps m_nextFreeRtvSlot
   D3D12_CPU_DESCRIPTOR_HANDLE AllocateSrvCpu(); // returns CPU handle at m_nextFreeSrvSlot

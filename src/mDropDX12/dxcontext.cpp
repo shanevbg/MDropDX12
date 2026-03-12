@@ -281,6 +281,12 @@ bool DXContext::Internal_Init(IDXGIFactory4* factory, HWND hwnd, int width, int 
     m_rtvSlotBaseline = m_nextFreeRtvSlot;
     m_srvSlotBaseline = m_nextFreeSrvSlot;
 
+    // DXContext-level baselines (before font atlas / help texture).
+    // EngineShell::AllocateDX9Stuff() will advance m_srvSlotBaseline past fonts;
+    // these let ResetBufferAndFonts() rewind all the way back to reclaim font atlas slots.
+    m_rtvSlotInitBaseline = m_nextFreeRtvSlot;
+    m_srvSlotInitBaseline = m_nextFreeSrvSlot;
+
     return true;
 }
 

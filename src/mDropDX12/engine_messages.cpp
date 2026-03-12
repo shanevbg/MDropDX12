@@ -2477,8 +2477,8 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
   }
   else if (wcsncmp(sMessage, L"CONFIG", 6) == 0) {
     ReadConfig();
-    // to update fonts
-    AllocateDX9Stuff();
+    // to update fonts — use ResetBufferAndFonts for proper SRV cleanup
+    ResetBufferAndFonts();
   }
   else if (wcsncmp(sMessage, L"SETTINGS", 8) == 0) {
     m_fTimeBetweenPresets = GetPrivateProfileFloatW(L"Settings", L"fTimeBetweenPresets", m_fTimeBetweenPresets, GetConfigIniFile());
