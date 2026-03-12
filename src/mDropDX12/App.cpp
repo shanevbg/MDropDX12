@@ -1735,7 +1735,13 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
   }
 
   case WM_MW_FULLSCREEN:
-    ToggleFullScreen(hWnd);
+    if (g_engine.m_bMirrorsActive) {
+      // Deactivate mirrors first, then enter fullscreen
+      g_engine.m_bMirrorsActive = false;
+      // Already fullscreen from mirror mode — stay fullscreen
+    } else {
+      ToggleFullScreen(hWnd);
+    }
     return 0;
 
   case WM_MW_WATERMARK:

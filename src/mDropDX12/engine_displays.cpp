@@ -401,6 +401,15 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
             }
         }
 
+        // Drain any pending messages on this thread before creating windows/swap chains.
+        // Without this, re-activation after DestroyWindow can deadlock in CreateSwapChainForHwnd
+        // because DXGI may SendMessage to the window and stall on unprocessed messages.
+        {
+            MSG msg;
+            while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+                DispatchMessage(&msg);
+        }
+
         out.monitorState = std::make_unique<MonitorMirrorState>();
         auto& ms = *out.monitorState;
 
