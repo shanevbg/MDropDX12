@@ -1080,6 +1080,7 @@ void ShaderImportWindow::ApplyShader() {
         size_t dot = desc.rfind(L'.');
         if (dot != std::wstring::npos) desc = desc.substr(0, dot);
         wcsncpy_s(p->m_pState->m_szDesc, desc.c_str(), _TRUNCATE);
+        wcsncpy_s(p->m_szCurrentPresetFile, desc.c_str(), _TRUNCATE);
     }
 
     // Propagate custom channel texture paths from all passes to Engine
@@ -5120,7 +5121,7 @@ std::wstring ShaderImportWindow::ImportFromFile(const wchar_t* path) {
         p->m_pState->m_nBufferDPSVersion = 0;
     }
 
-    // Update preset description
+    // Update preset description and current preset filename (used for screenshots, UI, etc.)
     {
         std::wstring desc = path;
         size_t sl = desc.rfind(L'\\');
@@ -5129,6 +5130,7 @@ std::wstring ShaderImportWindow::ImportFromFile(const wchar_t* path) {
         size_t dot = desc.rfind(L'.');
         if (dot != std::wstring::npos) desc = desc.substr(0, dot);
         wcsncpy_s(p->m_pState->m_szDesc, desc.c_str(), _TRUNCATE);
+        wcsncpy_s(p->m_szCurrentPresetFile, desc.c_str(), _TRUNCATE);
     }
 
     // Propagate channel texture paths
