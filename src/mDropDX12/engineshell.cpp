@@ -1589,14 +1589,30 @@ void EngineShell::DrawAndDisplay(int redraw) {
                   hr = pFrame->Initialize(nullptr);
                 if (SUCCEEDED(hr))
                   hr = pFrame->SetSize(screenshotWidth, screenshotHeight);
-                WICPixelFormatGUID pixelFormat = GUID_WICPixelFormat32bppRGBA;
+                // Backbuffer is R8G8B8A8_UNORM (RGBA in memory).
+                // WIC PNG encoder natively supports BGRA, not RGBA.
+                // SetPixelFormat silently converts RGBA→BGRA, then WritePixels
+                // interprets our RGBA bytes as BGRA — swapping red and blue.
+                // Fix: swap R↔B in the readback data and write as BGRA.
+                WICPixelFormatGUID pixelFormat = GUID_WICPixelFormat32bppBGRA;
                 if (SUCCEEDED(hr))
                   hr = pFrame->SetPixelFormat(&pixelFormat);
-                if (SUCCEEDED(hr))
+                if (SUCCEEDED(hr)) {
+                  // Swap R↔B channels (RGBA → BGRA) in-place
+                  BYTE* pixels = (BYTE*)pData;
+                  for (UINT row = 0; row < screenshotHeight; row++) {
+                    BYTE* rowPtr = pixels + row * screenshotLayout.Footprint.RowPitch;
+                    for (UINT x = 0; x < screenshotWidth; x++) {
+                      BYTE tmp = rowPtr[x * 4 + 0];       // R
+                      rowPtr[x * 4 + 0] = rowPtr[x * 4 + 2]; // R←B
+                      rowPtr[x * 4 + 2] = tmp;                // B←R
+                    }
+                  }
                   hr = pFrame->WritePixels(screenshotHeight,
                                            screenshotLayout.Footprint.RowPitch,
                                            screenshotLayout.Footprint.RowPitch * screenshotHeight,
                                            (BYTE*)pData);
+                }
                 if (SUCCEEDED(hr))
                   hr = pFrame->Commit();
                 if (SUCCEEDED(hr))

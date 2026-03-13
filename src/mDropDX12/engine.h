@@ -728,6 +728,7 @@ public:
   float   m_fStartTime;
   float   m_fPresetStartTime;
   bool    m_bPresetDiagLogged = false;
+  int     m_nDiagDisplayMode = 0;  // 0=normal, 1=show VS[0] raw, 2=show VS[1] raw
   float   m_fNextPresetTime;
   float   m_fSnapPoint;
   CState* m_pState;				// points to current CState

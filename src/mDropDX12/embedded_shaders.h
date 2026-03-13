@@ -195,14 +195,18 @@ float2 _safe_normalize(float2 x) { float d = dot(x,x); return d > 0 ? x * rsqrt(
 float3 _safe_normalize(float3 x) { float d = dot(x,x); return d > 0 ? x * rsqrt(d) : (float3)0; }
 float4 _safe_normalize(float4 x) { float d = dot(x,x); return d > 0 ? x * rsqrt(d) : (float4)0; }
 
-// NaN-safe sqrt: DX9 sqrt(negative) returns sqrt(abs(x)) on NVIDIA hardware;
-// DX12 returns NaN (IEEE 754). Using abs(x) matches DX9 NVIDIA behavior and
-// keeps the result finite (unlike max(0,x) which gives sqrt(0)=0 → division
-// by zero → infinity in expressions like 1/sqrt(x)).
-float  _safe_sqrt(float  x) { return sqrt(abs(x)); }
-float2 _safe_sqrt(float2 x) { return sqrt(abs(x)); }
-float3 _safe_sqrt(float3 x) { return sqrt(abs(x)); }
-float4 _safe_sqrt(float4 x) { return sqrt(abs(x)); }
+// NaN-safe sqrt: DX9 SM2.0 compiles sqrt(x) as x*rsq(x), where rsq = 1/sqrt(|x|).
+// For negative x this gives sign(x)*sqrt(|x|) — a NEGATIVE result. Expressions like
+// mus = .2/(sqrt(x)+.2) then produce negative mus, which UNORM clamps to 0.
+// Using abs(x) would always return positive sqrt, changing the sign of downstream
+// expressions and shifting feedback equilibrium (making presets too dark or bright).
+// Using max(0,x) returns 0, making mus=1.0 (too bright).
+// Correct emulation: sign(x)*sqrt(|x|) matches DX9's x*rsq(x) exactly.
+// For x=0: sign(0)=0, so result is 0 (no NaN, no division-by-zero risk from sqrt).
+float  _safe_sqrt(float  x) { return sign(x) * sqrt(abs(x)); }
+float2 _safe_sqrt(float2 x) { return sign(x) * sqrt(abs(x)); }
+float3 _safe_sqrt(float3 x) { return sign(x) * sqrt(abs(x)); }
+float4 _safe_sqrt(float4 x) { return sign(x) * sqrt(abs(x)); }
 
 // NaN-safe log: DX9 log(x<=0) returns a large negative; DX12 returns -inf or NaN.
 // Clamp to a tiny positive value to avoid -inf/NaN propagation.

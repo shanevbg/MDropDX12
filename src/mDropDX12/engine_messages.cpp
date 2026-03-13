@@ -2972,6 +2972,16 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     g_pipeServer.Send(L"SHUTTING_DOWN");
     PostMessage(GetPluginWindow(), WM_CLOSE, 0, 0);
   }
+  else if (wcsncmp(sMessage, L"DIAG_DISPLAY_MODE=", 18) == 0) {
+    // Toggle diagnostic display mode: 0=normal, 1=show VS[0] raw, 2=show VS[1] raw
+    int mode = _wtoi(sMessage + 18);
+    m_nDiagDisplayMode = (mode >= 0 && mode <= 2) ? mode : 0;
+    extern PipeServer g_pipeServer;
+    wchar_t resp[64];
+    swprintf_s(resp, L"DIAG_DISPLAY_MODE=%d", m_nDiagDisplayMode);
+    g_pipeServer.Send(resp);
+    DLOG_INFO("DIAG_DISPLAY_MODE set to %d", m_nDiagDisplayMode);
+  }
   else if (wcsncmp(sMessage, L"SET_AUDIO_GAIN=", 15) == 0) {
     float val = (float)_wtof(sMessage + 15);
     if (val <= 0.0f) val = 1.0f;

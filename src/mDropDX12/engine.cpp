@@ -2677,7 +2677,10 @@ int Engine::AllocateMyDX9Stuff() {
   if (m_lpDX && m_lpDX->m_device) {
     m_dx12VS[0] = m_lpDX->CreateRenderTargetTexture(m_nTexSizeX, m_nTexSizeY, DXGI_FORMAT_R8G8B8A8_UNORM);
     m_dx12VS[1] = m_lpDX->CreateRenderTargetTexture(m_nTexSizeX, m_nTexSizeY, DXGI_FORMAT_R8G8B8A8_UNORM);
-    // No binding blocks needed — per-frame bindings (UpdatePerFrameBindings) handle VS textures
+    // Per-frame bindings (UpdatePerFrameBindings) handle VS textures for normal rendering.
+    // Passthrough binding blocks needed for diagnostic display mode (DIAG_DISPLAY_MODE).
+    if (m_dx12VS[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12VS[0]);
+    if (m_dx12VS[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12VS[1]);
 
 #if (NUM_BLUR_TEX > 0)
     for (int i = 0; i < NUM_BLUR_TEX; i++) {

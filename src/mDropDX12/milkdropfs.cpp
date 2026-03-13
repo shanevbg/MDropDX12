@@ -2657,10 +2657,9 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       // Pass 0: old preset (opaque), cull tiles fully blended to new
       if (bOldUsesWarpShader && m_dx12OldWarpPSO) {
         cmdList->SetPipelineState(m_dx12OldWarpPSO.Get());
-        float fDecayOld = (float)(*m_pOldState->var_pf_decay);
-        D3DCOLOR cDecayOld = D3DCOLOR_RGBA_01(fDecayOld, fDecayOld, fDecayOld, 1);
+        // Custom shader: white vertices (shader handles decay internally)
         bindWarpShader(&m_OldShaders.warp, m_pOldState, m_lpDX->GetOldWarpBindingGpuHandle());
-        drawWarpMesh(cDecayOld, true, true);
+        drawWarpMesh(0xFFFFFFFF, true, true);
       } else if (!bOldUsesWarpShader) {
         // Old preset has no warp shader — use fallback PSO (texture * vertex color)
         cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
@@ -2676,10 +2675,9 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       // Pass 1: new preset (alpha blend), cull tiles fully old
       if (bNewUsesWarpShader && m_dx12WarpBlendPSO) {
         cmdList->SetPipelineState(m_dx12WarpBlendPSO.Get());
-        float fDecayNew = (float)(*m_pState->var_pf_decay);
-        D3DCOLOR cDecayNew = D3DCOLOR_RGBA_01(fDecayNew, fDecayNew, fDecayNew, 1);
+        // Custom shader: white vertices (shader handles decay internally)
         bindWarpShader(&m_shaders.warp, m_pState, m_lpDX->GetWarpBindingGpuHandle());
-        drawWarpMesh(cDecayNew, true, false);
+        drawWarpMesh(0xFFFFFFFF, true, false);
       } else if (!bNewUsesWarpShader) {
         // New preset has no warp shader — use fallback PSO with alpha blend
         // Note: PSO_TEXTURED_MYVERTEX doesn't have alpha blend, but for the non-shader
@@ -2713,11 +2711,19 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
 
       bindWarpShader(&m_shaders.warp, m_pState, m_lpDX->GetWarpBindingGpuHandle());
 
-      // Always pass per-frame decay via vertex color (like Milkwave DX9).
-      // Generated warp shaders multiply ret by _vDiffuse.xyz for decay.
+      // Milkwave behavior: WarpedBlit_NoShaders applies cDecay to vertex RGB
+      // (fixed-function modulate), but WarpedBlit_Shaders does NOT (vertices
+      // are white, shader handles decay itself via `ret *= decay`).
+      // Match this: only apply cDecay when using the fallback textured PSO.
       float fDecay = (float)(*m_pState->var_pf_decay);
-      D3DCOLOR cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
-      DLOG_VERBOSE("DIAG Warp decay: fDecay=%.4f cDecay=0x%08X hasPSO=%d", fDecay, cDecay, m_dx12WarpPSO ? 1 : 0);
+      D3DCOLOR cDecay;
+      if (m_dx12WarpPSO) {
+        // Custom warp shader: white vertices (shader handles decay internally)
+        cDecay = 0xFFFFFFFF;
+      } else {
+        // No custom shader: fallback PSO uses vertex color for decay modulation
+        cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
+      }
 
       drawWarpMesh(cDecay, false, false);
     }
@@ -2969,13 +2975,26 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       }
     } else {
       // ── No blend: single-pass comp (existing path) ──
-      if (m_dx12CompPSO) {
+      if (m_nDiagDisplayMode > 0) {
+        // Diagnostic: bypass comp shader, show raw VS[0] or VS[1] content
+        DX12Texture& diagTex = (m_nDiagDisplayMode == 1) ? m_dx12VS[0] : m_dx12VS[1];
+        m_lpDX->TransitionResource(diagTex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+        BYTE zeros[256] = {};
+        D3D12_GPU_VIRTUAL_ADDRESS cbAddr = m_lpDX->UploadConstantBuffer(zeros, 256);
+        if (cbAddr)
+          cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
+        cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetBindingBlockGpuHandle(diagTex));
+        drawCompQuad(0xFF);
+      } else if (m_dx12CompPSO) {
         cmdList->SetPipelineState(m_dx12CompPSO.Get());
+        bindCompShader(&m_shaders.comp, m_pState, m_lpDX->GetCompBindingGpuHandle());
+        drawCompQuad(0xFF);
       } else {
         cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+        bindCompShader(&m_shaders.comp, m_pState, m_lpDX->GetCompBindingGpuHandle());
+        drawCompQuad(0xFF);
       }
-      bindCompShader(&m_shaders.comp, m_pState, m_lpDX->GetCompBindingGpuHandle());
-      drawCompQuad(0xFF);
     }
   }
 
