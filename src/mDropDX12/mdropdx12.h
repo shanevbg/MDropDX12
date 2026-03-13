@@ -3,12 +3,10 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <string>
 #include <ctime>
 
 #include <windows.h>
-
-#include <direct.h>
-#include <string>
 #include <dbghelp.h>
 
 // Win RT

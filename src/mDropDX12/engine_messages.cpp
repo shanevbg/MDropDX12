@@ -2956,6 +2956,12 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     extern PipeServer g_pipeServer;
     g_pipeServer.Send(buf);
   }
+  else if (wcsncmp(sMessage, L"CLEAR_LOGS", 10) == 0) {
+    // Delete all files in the log/ directory and re-open debug.log
+    DebugLogClearAll();
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(L"LOGS_CLEARED");
+  }
   else if (wcsncmp(sMessage, L"SET_AUDIO_GAIN=", 15) == 0) {
     float val = (float)_wtof(sMessage + 15);
     if (val <= 0.0f) val = 1.0f;
@@ -2973,6 +2979,60 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     extern float mdropdx12_audio_sensitivity;
     wchar_t buf[128];
     swprintf_s(buf, L"AUDIO_GAIN=%.2f|effective=%.2f", m_fAudioSensitivity, mdropdx12_audio_sensitivity);
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(buf);
+  }
+  else if (wcsncmp(sMessage, L"GET_RENDER_DIAG", 15) == 0) {
+    // Dump rendering diagnostic values for comparing with Milkwave
+    float blur_min[3], blur_max[3];
+    GetSafeBlurMinMax(m_pState, blur_min, blur_max);
+    float fscale0 = 1.0f / (blur_max[0] - blur_min[0]);
+    float fbias0 = -blur_min[0] * fscale0;
+    float fscale1 = 0, fbias1 = 0, fscale2 = 0, fbias2 = 0;
+    if (blur_max[0] - blur_min[0] > 0.0001f) {
+      float t_min1 = (blur_min[1] - blur_min[0]) / (blur_max[0] - blur_min[0]);
+      float t_max1 = (blur_max[1] - blur_min[0]) / (blur_max[0] - blur_min[0]);
+      if (t_max1 - t_min1 > 0.0001f) {
+        fscale1 = 1.0f / (t_max1 - t_min1);
+        fbias1 = -t_min1 * fscale1;
+      }
+    }
+    if (blur_max[1] - blur_min[1] > 0.0001f) {
+      float t_min2 = (blur_min[2] - blur_min[1]) / (blur_max[1] - blur_min[1]);
+      float t_max2 = (blur_max[2] - blur_min[1]) / (blur_max[1] - blur_min[1]);
+      if (t_max2 - t_min2 > 0.0001f) {
+        fscale2 = 1.0f / (t_max2 - t_min2);
+        fbias2 = -t_min2 * fscale2;
+      }
+    }
+    float decay = m_pState->var_pf_decay ? (float)*m_pState->var_pf_decay : 0;
+    float gamma = m_pState->var_pf_gamma ? (float)*m_pState->var_pf_gamma : 0;
+    float echo_alpha = m_pState->var_pf_echo_alpha ? (float)*m_pState->var_pf_echo_alpha : 0;
+    float echo_zoom = m_pState->var_pf_echo_zoom ? (float)*m_pState->var_pf_echo_zoom : 0;
+    wchar_t buf[1024];
+    swprintf_s(buf, 1024,
+      L"RENDER_DIAG"
+      L"|blur_min0=%.6f|blur_max0=%.6f|blur_min1=%.6f|blur_max1=%.6f|blur_min2=%.6f|blur_max2=%.6f"
+      L"|fscale0=%.4f|fbias0=%.4f|fscale1=%.4f|fbias1=%.4f|fscale2=%.4f|fbias2=%.4f"
+      L"|nHighestBlur=%d|decay=%.6f|gamma=%.4f|echo_alpha=%.4f|echo_zoom=%.4f"
+      L"|q1=%.6f|q2=%.6f|q3=%.6f|q4=%.6f|q5=%.6f|q6=%.6f|q7=%.6f|q8=%.6f"
+      L"|bass_att=%.6f|mid_att=%.6f|treb_att=%.6f"
+      L"|bass_imm=%.6f|mid_imm=%.6f|treb_imm=%.6f"
+      L"|warpPSVer=%d|compPSVer=%d",
+      blur_min[0], blur_max[0], blur_min[1], blur_max[1], blur_min[2], blur_max[2],
+      fscale0, fbias0, fscale1, fbias1, fscale2, fbias2,
+      m_nHighestBlurTexUsedThisFrame, decay, gamma, echo_alpha, echo_zoom,
+      m_pState->var_pf_q[0] ? (float)*m_pState->var_pf_q[0] : 0.f,
+      m_pState->var_pf_q[1] ? (float)*m_pState->var_pf_q[1] : 0.f,
+      m_pState->var_pf_q[2] ? (float)*m_pState->var_pf_q[2] : 0.f,
+      m_pState->var_pf_q[3] ? (float)*m_pState->var_pf_q[3] : 0.f,
+      m_pState->var_pf_q[4] ? (float)*m_pState->var_pf_q[4] : 0.f,
+      m_pState->var_pf_q[5] ? (float)*m_pState->var_pf_q[5] : 0.f,
+      m_pState->var_pf_q[6] ? (float)*m_pState->var_pf_q[6] : 0.f,
+      m_pState->var_pf_q[7] ? (float)*m_pState->var_pf_q[7] : 0.f,
+      m_sound.avg[0][0], m_sound.avg[0][1], m_sound.avg[0][2],
+      mysound.imm[0], mysound.imm[1], mysound.imm[2],
+      m_pState->m_nWarpPSVersion, m_pState->m_nCompPSVersion);
     extern PipeServer g_pipeServer;
     g_pipeServer.Send(buf);
   }

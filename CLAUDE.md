@@ -41,7 +41,10 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the MilkDrop2 music visualizer en
 ## Error Handling
 
 - C++: `try/catch` for `std::exception`; SEH for low-level exceptions
-- Logging via `mdropdx12.LogInfo()`, `mdropdx12.LogException()`, etc.
+- Logging via `DebugLogA()`/`DebugLogW()` from utility.h (level-gated: 0=Off, 1=Error, 2=Warn, 3=Info, 4=Verbose)
+- All logs and diagnostic files go to `log/` subdirectory (created by `DebugLogInit`)
+- Diagnostic file helpers: `DebugLogDiagWrite()`, `DebugLogDiagAppend()`, `DebugLogDiagOpen()`, `DebugLogDiagTruncate()`, `DebugLogDiagPath()`
+- `DebugLogClearAll()` deletes all files in `log/` and re-opens debug.log fresh
 - `settings.ini`: `LogLevel=2` for verbose logging
 
 ## Key Features (current: v2.1.0)

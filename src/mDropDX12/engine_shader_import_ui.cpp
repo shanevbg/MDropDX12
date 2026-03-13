@@ -959,7 +959,9 @@ LRESULT ShaderImportWindow::DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
             if (!compOK) diagNames[diagCount++] = L"comp";
             for (int di = 0; di < diagCount; di++) {
                 wchar_t errPath[MAX_PATH];
-                swprintf(errPath, MAX_PATH, L"%lsdiag_%ls_shader_error.txt", p->m_szBaseDir, diagNames[di]);
+                wchar_t diagName[64];
+                swprintf_s(diagName, L"diag_%ls_shader_error.txt", diagNames[di]);
+                DebugLogDiagPath(diagName, errPath, MAX_PATH);
                 FILE* f = _wfopen(errPath, L"r");
                 if (f) {
                     char buf[8192] = {};
@@ -4707,10 +4709,10 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
 
     // Dump converter output for diagnostics (Verbose only)
     if (DLOG_DIAG_ENABLED()) {
-        wchar_t diagPath[MAX_PATH];
         const wchar_t* passTag = (passIdx == 0) ? L"image" : L"bufferA";
-        swprintf(diagPath, MAX_PATH, L"%lsdiag_converter_%ls.txt", m_pEngine->m_szBaseDir, passTag);
-        FILE* f = _wfopen(diagPath, L"w");
+        wchar_t diagName[64];
+        swprintf_s(diagName, L"diag_converter_%ls.txt", passTag);
+        FILE* f = DebugLogDiagOpen(diagName, L"w");
         if (f) {
             // Include project name so diag files aren't confused with regular presets
             std::string projName;

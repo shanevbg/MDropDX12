@@ -394,6 +394,21 @@ server.tool(
   }
 );
 
+// Tool: Clear all log files
+server.tool(
+  'mdrop_clear_logs',
+  'Delete all files in the log/ directory and re-open debug.log. Useful for clearing stale diagnostics before a fresh test.',
+  {},
+  async () => {
+    try {
+      const response = await send('CLEAR_LOGS', true);
+      return { content: [{ type: 'text', text: response || 'Logs cleared' }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
+    }
+  }
+);
+
 // Tool: Shader import (load JSON, convert GLSL→HLSL, apply)
 server.tool(
   'mdrop_shader_import',

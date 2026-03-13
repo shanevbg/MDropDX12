@@ -1939,11 +1939,7 @@ void mdrop::Engine::RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList)
 
   // Truncate binding diagnostics file on first Shadertoy frame (Verbose only)
   if (DLOG_DIAG_ENABLED() && stFrame == 0) {
-    wchar_t diagPath[MAX_PATH];
-    swprintf(diagPath, MAX_PATH, L"%sdiag_bindings.txt", m_szBaseDir);
-    FILE* fp = nullptr;
-    _wfopen_s(&fp, diagPath, L"w");
-    if (fp) fclose(fp);
+    DebugLogDiagTruncate(L"diag_bindings.txt");
   }
 
   // One-time diagnostics on first Shadertoy frame
@@ -7239,10 +7235,7 @@ void mdrop::Engine::BuildBindingSlots(CShaderParams* params, const DX12Texture& 
   }
   // Diagnostic dump for Shadertoy binding verification (Verbose only)
   if (DLOG_DIAG_ENABLED() && m_bShadertoyMode && !m_bPresetDiagLogged) {
-    wchar_t diagPath[MAX_PATH];
-    swprintf(diagPath, MAX_PATH, L"%sdiag_bindings.txt", m_szBaseDir);
-    FILE* fp = nullptr;
-    _wfopen_s(&fp, diagPath, L"a");
+    FILE* fp = DebugLogDiagOpen(L"diag_bindings.txt", L"a");
     if (fp) {
       fprintf(fp, "Binding: fb=%s(%u) bufB=%s(%u) bufC=%s(%u) bufD=%s(%u)\n",
               feedbackTex && feedbackTex->IsValid() ? "OK" : "no",

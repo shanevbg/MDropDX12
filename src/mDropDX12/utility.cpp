@@ -798,16 +798,21 @@ void* GetTextResource(UINT id, int no_fallback) {
 static FILE* g_debugLogFile = nullptr;
 static CRITICAL_SECTION g_debugLogCS;
 static bool g_debugLogReady = false;
+static wchar_t g_debugLogDir[MAX_PATH] = {}; // log/ subdirectory path
 int g_debugLogLevel = LOG_INFO; // default: show errors + warnings + info
 int g_debugLogOutput = LOG_OUTPUT_BOTH; // default: file + OutputDebugString
 
 void DebugLogInit(const wchar_t* baseDir) {
   InitializeCriticalSection(&g_debugLogCS);
 
+  // Create log subdirectory and store path for diag helpers
+  swprintf_s(g_debugLogDir, MAX_PATH, L"%slog\\", baseDir);
+  CreateDirectoryW(g_debugLogDir, NULL); // OK if already exists
+
   wchar_t logPath[MAX_PATH];
   wchar_t prevPath[MAX_PATH];
-  swprintf_s(logPath, MAX_PATH, L"%sdebug.log", baseDir);
-  swprintf_s(prevPath, MAX_PATH, L"%sdebug.prev.log", baseDir);
+  swprintf_s(logPath, MAX_PATH, L"%sdebug.log", g_debugLogDir);
+  swprintf_s(prevPath, MAX_PATH, L"%sdebug.prev.log", g_debugLogDir);
 
   // Rotate: delete old prev, rename current → prev
   DeleteFileW(prevPath);
@@ -918,4 +923,78 @@ void DebugLogAFmt(int level, const char* fmt, ...) {
   _vsnprintf_s(buf, _countof(buf), _TRUNCATE, fmt, args);
   va_end(args);
   DebugLogA(buf, level);
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic file helpers — all files go to the log/ subdirectory.
+// ---------------------------------------------------------------------------
+
+const wchar_t* DebugLogDiagPath(const wchar_t* diagName, wchar_t* buf, size_t bufLen) {
+  swprintf_s(buf, bufLen, L"%s%s", g_debugLogDir, diagName);
+  return buf;
+}
+
+void DebugLogDiagWrite(const wchar_t* diagName, const char* content) {
+  wchar_t path[MAX_PATH];
+  DebugLogDiagPath(diagName, path, MAX_PATH);
+  FILE* f = nullptr;
+  _wfopen_s(&f, path, L"w");
+  if (f) { fputs(content, f); fclose(f); }
+}
+
+void DebugLogDiagAppend(const wchar_t* diagName, const char* content) {
+  wchar_t path[MAX_PATH];
+  DebugLogDiagPath(diagName, path, MAX_PATH);
+  FILE* f = nullptr;
+  _wfopen_s(&f, path, L"a");
+  if (f) { fputs(content, f); fclose(f); }
+}
+
+void DebugLogDiagTruncate(const wchar_t* diagName) {
+  wchar_t path[MAX_PATH];
+  DebugLogDiagPath(diagName, path, MAX_PATH);
+  FILE* f = nullptr;
+  _wfopen_s(&f, path, L"w");
+  if (f) fclose(f);
+}
+
+FILE* DebugLogDiagOpen(const wchar_t* diagName, const wchar_t* mode) {
+  wchar_t path[MAX_PATH];
+  DebugLogDiagPath(diagName, path, MAX_PATH);
+  FILE* f = nullptr;
+  _wfopen_s(&f, path, mode);
+  return f;
+}
+
+void DebugLogClearAll() {
+  if (!g_debugLogDir[0]) return;
+
+  // Delete all files in the log directory
+  wchar_t pattern[MAX_PATH];
+  swprintf_s(pattern, MAX_PATH, L"%s*", g_debugLogDir);
+  WIN32_FIND_DATAW fd;
+  HANDLE hFind = FindFirstFileW(pattern, &fd);
+  if (hFind == INVALID_HANDLE_VALUE) return;
+  do {
+    if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+    wchar_t filePath[MAX_PATH];
+    swprintf_s(filePath, MAX_PATH, L"%s%s", g_debugLogDir, fd.cFileName);
+    DeleteFileW(filePath);
+  } while (FindNextFileW(hFind, &fd));
+  FindClose(hFind);
+
+  // Re-open debug.log fresh
+  EnterCriticalSection(&g_debugLogCS);
+  if (g_debugLogFile) { fclose(g_debugLogFile); g_debugLogFile = nullptr; }
+  wchar_t logPath[MAX_PATH];
+  swprintf_s(logPath, MAX_PATH, L"%sdebug.log", g_debugLogDir);
+  g_debugLogFile = _wfopen(logPath, L"w, ccs=UTF-8");
+  if (g_debugLogFile) {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    fwprintf(g_debugLogFile, L"=== MDropDX12 debug log cleared %04d-%02d-%02d %02d:%02d:%02d ===\n",
+             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    fflush(g_debugLogFile);
+  }
+  LeaveCriticalSection(&g_debugLogCS);
 }

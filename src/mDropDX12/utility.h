@@ -115,12 +115,22 @@ void DebugLogWFmt(int level, const wchar_t* fmt, ...);
 void DebugLogAFmt(const char* fmt, ...);
 void DebugLogAFmt(int level, const char* fmt, ...);
 
+// Diagnostic file helpers — all files written to log/ subdirectory
+const wchar_t* DebugLogDiagPath(const wchar_t* diagName, wchar_t* buf, size_t bufLen);
+void  DebugLogDiagWrite(const wchar_t* diagName, const char* content);    // truncate + write
+void  DebugLogDiagAppend(const wchar_t* diagName, const char* content);   // append
+void  DebugLogDiagTruncate(const wchar_t* diagName);                      // clear file
+FILE* DebugLogDiagOpen(const wchar_t* diagName, const wchar_t* mode);     // open for streaming
+void  DebugLogClearAll();                                                  // delete all log files
+
 // Level-gated logging macros — skip ALL formatting when level is suppressed
 #define DLOG_ERROR(fmt, ...)   do { if (g_debugLogLevel >= LOG_ERROR)   DebugLogAFmt(LOG_ERROR, fmt, __VA_ARGS__); } while(0)
 #define DLOG_WARN(fmt, ...)    do { if (g_debugLogLevel >= LOG_WARN)    DebugLogAFmt(LOG_WARN, fmt, __VA_ARGS__); } while(0)
 #define DLOG_INFO(fmt, ...)    do { if (g_debugLogLevel >= LOG_INFO)    DebugLogAFmt(LOG_INFO, fmt, __VA_ARGS__); } while(0)
 #define DLOG_VERBOSE(fmt, ...) do { if (g_debugLogLevel >= LOG_VERBOSE) DebugLogAFmt(LOG_VERBOSE, fmt, __VA_ARGS__); } while(0)
 
+#define DLOGW_ERROR(fmt, ...)   do { if (g_debugLogLevel >= LOG_ERROR)   DebugLogWFmt(LOG_ERROR, fmt, __VA_ARGS__); } while(0)
+#define DLOGW_WARN(fmt, ...)    do { if (g_debugLogLevel >= LOG_WARN)    DebugLogWFmt(LOG_WARN, fmt, __VA_ARGS__); } while(0)
 #define DLOGW_INFO(fmt, ...)    do { if (g_debugLogLevel >= LOG_INFO)    DebugLogWFmt(LOG_INFO, fmt, __VA_ARGS__); } while(0)
 #define DLOGW_VERBOSE(fmt, ...) do { if (g_debugLogLevel >= LOG_VERBOSE) DebugLogWFmt(LOG_VERBOSE, fmt, __VA_ARGS__); } while(0)
 

@@ -3449,7 +3449,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
     }
     wcscpy_s(g_engine.m_szBaseDir, MAX_PATH, baseDir.c_str());
 
-    // Initialize debug log (rotates debug.log → debug.prev.log)
+    // Initialize debug log (creates log/ subdir, rotates debug.log → debug.prev.log)
     DebugLogInit(g_engine.m_szBaseDir);
     DebugLogSetLevel(g_engine.m_LogLevel); // apply INI log level immediately
 

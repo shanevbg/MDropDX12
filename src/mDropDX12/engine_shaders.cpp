@@ -95,9 +95,7 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
   // Diagnostic file for Shadertoy sampler debugging (Verbose only)
   FILE* fpDiag = nullptr;
   if (DLOG_DIAG_ENABLED() && (g_engine.m_bLoadingShadertoyMode || g_engine.m_bShadertoyMode)) {
-    wchar_t diagPath[MAX_PATH];
-    swprintf(diagPath, MAX_PATH, L"%sdiag_cacheparams.txt", g_engine.m_szBaseDir);
-    _wfopen_s(&fpDiag, diagPath, L"a");
+    fpDiag = DebugLogDiagOpen(L"diag_cacheparams.txt", L"a");
     if (fpDiag) fprintf(fpDiag, "=== CacheParams: %u constants ===\n", d.Constants);
   }
 
@@ -734,11 +732,7 @@ bool Engine::RecompilePShader(const char* szShadersText, PShaderInfo* si, int sh
 bool Engine::LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompileOnly) {
   // Truncate diagnostic file at start of each shader load (Verbose only)
   if (DLOG_DIAG_ENABLED() && m_bLoadingShadertoyMode && !bCompileOnly) {
-    wchar_t diagPath[MAX_PATH];
-    swprintf(diagPath, MAX_PATH, L"%sdiag_cacheparams.txt", m_szBaseDir);
-    FILE* fp = nullptr;
-    _wfopen_s(&fp, diagPath, L"w");
-    if (fp) fclose(fp);
+    DebugLogDiagTruncate(L"diag_cacheparams.txt");
   }
   if (m_nMaxPSVersion <= 0) {
     DebugLogA("DX12: LoadShaders: m_nMaxPSVersion <= 0, skipping", LOG_VERBOSE);
@@ -1702,9 +1696,9 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         // Write D3DCompile error to diagnostic file for Shader Import window
         if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
           const char* typeName = szDiagName ? szDiagName : (shaderType == SHADER_COMP ? "comp" : "warp");
-          char errPath[MAX_PATH];
-          sprintf(errPath, "%lsdiag_%s_shader_error.txt", m_szBaseDir, typeName);
-          FILE* ef = fopen(errPath, "w");
+          wchar_t diagName[64];
+          swprintf_s(diagName, L"diag_%hs_shader_error.txt", typeName);
+          FILE* ef = DebugLogDiagOpen(diagName, L"w");
           if (ef) {
             fprintf(ef, "// DIAG: type=%s profile=%s shaderLen=%d preset=%ls\n",
                     typeName, szProfile, len,
@@ -1730,14 +1724,12 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
     // Clear stale error file on successful compilation
     if (shaderType == SHADER_COMP || shaderType == SHADER_WARP) {
       const char* typeName = szDiagName ? szDiagName : (shaderType == SHADER_COMP ? "comp" : "warp");
-      char errPath[MAX_PATH];
-      sprintf(errPath, "%lsdiag_%s_shader_error.txt", m_szBaseDir, typeName);
-      FILE* ef = fopen(errPath, "w");
-      if (ef) {
-        fprintf(ef, "// OK: type=%s len=%d preset=%ls\n",
+      wchar_t diagName[64];
+      swprintf_s(diagName, L"diag_%hs_shader_error.txt", typeName);
+      char header[256];
+      sprintf_s(header, "// OK: type=%s len=%d preset=%ls\n",
                 typeName, len, m_pState ? m_pState->m_szDesc : L"(unknown)");
-        fclose(ef);
-      }
+      DebugLogDiagWrite(diagName, header);
     }
 
     if (m_ShaderCaching) {
@@ -1794,8 +1786,8 @@ void Engine::GenWarpPShaderText(char* szShaderText, float decay, bool bWrap) {
   p += sprintf(p, "    // sample previous frame%c", LF);
   p += sprintf(p, "    ret = tex2D( sampler%ls_main, uv ).xyz;%c", bWrap ? L"" : L"_fc", LF);
   p += sprintf(p, "    %c", LF);
-  p += sprintf(p, "    // darken over time (vertex color carries per-frame decay, matching DX9 fixed-function)%c", LF);
-  p += sprintf(p, "    ret *= _vDiffuse.xyz;%c", LF);
+  p += sprintf(p, "    // darken (decay) over time%c", LF);
+  p += sprintf(p, "    ret *= %.2f; //or try: ret -= 0.004;%c", decay, LF);
   p += sprintf(p, "}%c", LF);
 }
 
