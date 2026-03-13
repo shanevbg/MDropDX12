@@ -1,6 +1,6 @@
-# MDropDX12 v2.0.0
+# MDropDX12 v2.1.0
 
-Major milestone release. MDropDX12 2.0 marks the point where the engine has been fully rebuilt on DirectX 12 with a comprehensive feature set that goes well beyond the original MilkDrop2 visualizer.
+Major milestone release. MDropDX12 2.1 marks the point where the engine has been fully rebuilt on DirectX 12 with a comprehensive feature set that goes well beyond the original MilkDrop2 visualizer.
 
 Special thanks to [IkeC](https://github.com/IkeC) for all his hard work on [Milkwave](https://github.com/IkeC/Milkwave) — the inspiration, testing, feedback, and collaboration that made this project possible.
 
