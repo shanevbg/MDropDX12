@@ -378,6 +378,7 @@
     <ClCompile Include="engine_shader_import_ui.cpp" />
     <ClCompile Include="engine_presets_ui.cpp" />
     <ClCompile Include="engine_sprites_ui.cpp" />
+    <ClCompile Include="engine_script_ui.cpp" />
     <ClCompile Include="engine_remote_ui.cpp" />
     <ClCompile Include="engine_visual_ui.cpp" />
     <ClCompile Include="engine_colors_ui.cpp" />
