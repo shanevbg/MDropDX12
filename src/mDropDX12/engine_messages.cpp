@@ -9,6 +9,7 @@
 #include "engine_helpers.h"
 #include "tool_window.h"
 #include "pipe_server.h"
+#include "audio_capture.h"
 #include <thread>
 #include "utility.h"
 #include "AutoCharFn.h"
@@ -3000,11 +3001,15 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
       L"AUDIO_DIAG|gain=%.2f|effective=%.2f|ampL=%.2f|ampR=%.2f"
       L"|bass=%.3f|mid=%.3f|treb=%.3f"
       L"|bass_att=%.3f|mid_att=%.3f|treb_att=%.3f"
+      L"|bass_imm=%.6f|mid_imm=%.6f|treb_imm=%.6f"
+      L"|bass_avg=%.6f|mid_avg=%.6f|treb_avg=%.6f"
       L"|pcm_min=%d|pcm_max=%d|pcm_samples=%d,%d,%d,%d,%d",
       m_fAudioSensitivity, mdropdx12_audio_sensitivity,
       mdropdx12_amp_left, mdropdx12_amp_right,
       mysound.imm_rel[0], mysound.imm_rel[1], mysound.imm_rel[2],
-      mysound.avg_rel[0], mysound.avg_rel[1], mysound.avg_rel[2],
+      m_sound.avg[0][0], m_sound.avg[0][1], m_sound.avg[0][2],
+      m_sound.imm[0][0], m_sound.imm[0][1], m_sound.imm[0][2],
+      m_sound.avg[0][0], m_sound.avg[0][1], m_sound.avg[0][2],
       pcmMin, pcmMax, pcm0, pcm1, pcm2, pcm3, pcm4);
     extern PipeServer g_pipeServer;
     g_pipeServer.Send(buf);
@@ -3240,13 +3245,10 @@ void Engine::DoCustomSoundAnalysis() {
   memcpy(mysound.fWave[0], m_sound.fWaveform[0], sizeof(float) * 576);
   memcpy(mysound.fWave[1], m_sound.fWaveform[1], sizeof(float) * 576);
 
-  // do our own [UN-NORMALIZED] fft
+  // do our own [UN-NORMALIZED] fft — use float circular buffer (matches Milkwave)
   float fWaveLeft[576];
   float fWaveRight[576];
-  for (int i = 0; i < 576; i++) {
-    fWaveLeft[i] = m_sound.fWaveform[0][i]; //left channel
-    fWaveRight[i] = m_sound.fWaveform[1][i]; //right channel
-  }
+  GetAudioBufFloat(fWaveLeft, fWaveRight, 576);
 
   memset(mysound.fSpecLeft, 0, sizeof(float) * MY_FFT_SAMPLES);
   memset(mysound.fSpecRight, 0, sizeof(float) * MY_FFT_SAMPLES);

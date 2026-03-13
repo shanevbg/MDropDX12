@@ -29,6 +29,8 @@ static void AudioErr(LPCWSTR format, ...) {
 std::mutex pcmLpbMutex;
 unsigned char pcmLeftLpb[SAMPLE_SIZE_LPB];
 unsigned char pcmRightLpb[SAMPLE_SIZE_LPB];
+float pcmLeftFloatLpb[SAMPLE_SIZE_LPB];
+float pcmRightFloatLpb[SAMPLE_SIZE_LPB];
 bool pcmBufDrained = false;
 signed int pcmLen = 0;
 signed int pcmPos = 0;
@@ -41,6 +43,8 @@ void ResetAudioBuf() {
   std::unique_lock<std::mutex> lock(pcmLpbMutex);
   memset(pcmLeftLpb, 128, SAMPLE_SIZE_LPB);
   memset(pcmRightLpb, 128, SAMPLE_SIZE_LPB);
+  memset(pcmLeftFloatLpb, 0, sizeof(pcmLeftFloatLpb));
+  memset(pcmRightFloatLpb, 0, sizeof(pcmRightFloatLpb));
   pcmBufDrained = false;
   pcmLen = 0;
 }
@@ -68,6 +72,35 @@ void GetAudioBuf(unsigned char* pWaveL, unsigned char* pWaveR, int SamplesCount)
     for (int i = 0; i < SamplesCount; i++) {
       pWaveL[i % SamplesCount] = pcmLeftLpb[(pcmPos + i) % SAMPLE_SIZE_LPB];
       pWaveR[i % SamplesCount] = pcmRightLpb[(pcmPos + i) % SAMPLE_SIZE_LPB];
+    }
+  }
+}
+
+void GetAudioBufFloat(float* pWaveL, float* pWaveR, int SamplesCount) {
+  std::unique_lock<std::mutex> lock(pcmLpbMutex);
+  static int consecutiveReads = 0;
+  static int lastPcmPos = pcmPos;
+
+  if (pcmPos == lastPcmPos) {
+    consecutiveReads++;
+  }
+  else {
+    consecutiveReads = 0;
+    lastPcmPos = pcmPos;
+  }
+
+  if ((pcmLen < SamplesCount) || (consecutiveReads > 3)) {
+    memset(pWaveL, 0, SamplesCount * sizeof(float));
+    memset(pWaveR, 0, SamplesCount * sizeof(float));
+    if (consecutiveReads > 3)
+      pcmBufDrained = true;
+  }
+  else {
+    for (int i = 0; i < SamplesCount; i++) {
+      // Match the legacy waveform amplitude domain used by the FFT path:
+      // old m_sound.fWaveform samples were roughly in [-128..127].
+      pWaveL[i % SamplesCount] = pcmLeftFloatLpb[(pcmPos + i) % SAMPLE_SIZE_LPB] * 128.0f;
+      pWaveR[i % SamplesCount] = pcmRightFloatLpb[(pcmPos + i) % SAMPLE_SIZE_LPB] * 128.0f;
     }
   }
 }
@@ -106,6 +139,27 @@ int8_t GetChannelSample(const BYTE* pData, int BlockOffset, int ChannelOffset, c
   }
 }
 
+// Float version — returns [-1..+1] with full precision (matches Milkwave's GetChannelSampleFloat)
+static float GetChannelSampleFloat(const BYTE* pData, int BlockOffset, int ChannelOffset, const bool bInt16) {
+  u_type sample;
+  sample.IntVar = 0;
+  sample.Bytes[0] = pData[BlockOffset + ChannelOffset + 0];
+  sample.Bytes[1] = pData[BlockOffset + ChannelOffset + 1];
+  if (!bInt16) {
+    sample.Bytes[2] = pData[BlockOffset + ChannelOffset + 2];
+    sample.Bytes[3] = pData[BlockOffset + ChannelOffset + 3];
+    if (sample.FltVar >= 1.0f) return 1.0f;
+    if (sample.FltVar <= -1.0f) return -1.0f;
+    return sample.FltVar;
+  }
+  float v = (float)((int16_t)sample.IntVar) / 32768.0f;
+  if (v >= 1.0f) return 1.0f;
+  if (v <= -1.0f) return -1.0f;
+  return v;
+}
+
+// Matches Milkwave's SetAudioBuf — sums as floats, converts to uint8 at the end.
+// Previous MDropDX12 code converted to int8 first (losing precision), then summed integers.
 void SetAudioBuf(const BYTE* pData, const UINT32 nNumFramesToRead, const WAVEFORMATEX* pwfx, const bool bInt16) {
   std::unique_lock<std::mutex> lock(pcmLpbMutex);
 
@@ -131,8 +185,8 @@ void SetAudioBuf(const BYTE* pData, const UINT32 nNumFramesToRead, const WAVEFOR
   }
 
   for (int i = start; i < len; i++, n++) {
-    int32_t sumLeft = 0;
-    int32_t sumRight = 0;
+    float sumLeft = 0.0f;
+    float sumRight = 0.0f;
 
     for (int j = 0; j < downsampleRatio; j++) {
       int inputIndex = i * downsampleRatio + j;
@@ -140,25 +194,29 @@ void SetAudioBuf(const BYTE* pData, const UINT32 nNumFramesToRead, const WAVEFOR
 
       int blockOffset = inputIndex * pwfx->nBlockAlign;
 
-      int8_t sampleLeft = 0;
+      float sampleLeft = 0.0f;
       if (pData && pwfx->nChannels >= 1) {
-        sampleLeft = GetChannelSample(pData, blockOffset, 0, bInt16);
+        sampleLeft = GetChannelSampleFloat(pData, blockOffset, 0, bInt16);
       }
       sumLeft += sampleLeft;
 
-      int8_t sampleRight = sampleLeft;
+      float sampleRight = sampleLeft;
       if (pData && pwfx->nChannels >= 2) {
-        sampleRight = GetChannelSample(pData, blockOffset, pwfx->wBitsPerSample / 8, bInt16);
+        sampleRight = GetChannelSampleFloat(pData, blockOffset, pwfx->wBitsPerSample / 8, bInt16);
       }
       sumRight += sampleRight;
     }
 
-    float gain = mdropdx12_audio_sensitivity * mdropdx12_amp_left;
-    int leftVal = (int)(sumLeft / downsampleRatio * gain) + 128;
-    float gainR = mdropdx12_audio_sensitivity * mdropdx12_amp_right;
-    int rightVal = (int)(sumRight / downsampleRatio * gainR) + 128;
-    pcmLeftLpb[(pcmPos + n) % SAMPLE_SIZE_LPB] = (unsigned char)(leftVal < 0 ? 0 : (leftVal > 255 ? 255 : leftVal));
-    pcmRightLpb[(pcmPos + n) % SAMPLE_SIZE_LPB] = (unsigned char)(rightVal < 0 ? 0 : (rightVal > 255 ? 255 : rightVal));
+    float avgLeft = sumLeft / downsampleRatio * mdropdx12_audio_sensitivity * mdropdx12_amp_left;
+    float avgRight = sumRight / downsampleRatio * mdropdx12_audio_sensitivity * mdropdx12_amp_right;
+    if (avgLeft > 1.0f) avgLeft = 1.0f;
+    if (avgLeft < -1.0f) avgLeft = -1.0f;
+    if (avgRight > 1.0f) avgRight = 1.0f;
+    if (avgRight < -1.0f) avgRight = -1.0f;
+    pcmLeftFloatLpb[(pcmPos + n) % SAMPLE_SIZE_LPB] = avgLeft;
+    pcmRightFloatLpb[(pcmPos + n) % SAMPLE_SIZE_LPB] = avgRight;
+    pcmLeftLpb[(pcmPos + n) % SAMPLE_SIZE_LPB] = (uint8_t)(FltToInt(avgLeft) + 128);
+    pcmRightLpb[(pcmPos + n) % SAMPLE_SIZE_LPB] = (uint8_t)(FltToInt(avgRight) + 128);
   }
 
   pcmBufDrained = false;
