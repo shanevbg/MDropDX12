@@ -1441,21 +1441,14 @@ void Engine::MyReadConfig() {
   m_bEnablePresetStartup = GetPrivateProfileBoolW(L"Settings", L"bEnablePresetStartup", m_bEnablePresetStartup, pIni);
   m_bEnableAudioCapture = GetPrivateProfileBoolW(L"Settings", L"bEnableAudioCapture", m_bEnableAudioCapture, pIni);
   m_bEnableD2DText = GetPrivateProfileBoolW(L"Settings", L"bEnableD2DText", m_bEnableD2DText, pIni);
+  // AudioSensitivity: fixed gain multiplier (1.0 = passthrough, matching Milkwave).
+  // No adaptive normalization — presets are tuned to raw WASAPI levels.
   m_fAudioSensitivity = GetPrivateProfileFloatW(L"Milkwave", L"AudioSensitivity", m_fAudioSensitivity, pIni);
-  if (m_fAudioSensitivity < -2.0f) m_fAudioSensitivity = -2.0f;
+  if (m_fAudioSensitivity <= 0.0f || m_fAudioSensitivity == -1.0f)
+    m_fAudioSensitivity = 1.0f;  // migrate old "Auto" (-1) setting to passthrough
+  if (m_fAudioSensitivity < 0.1f) m_fAudioSensitivity = 0.1f;
   if (m_fAudioSensitivity > 256.0f) m_fAudioSensitivity = 256.0f;
-  if (m_fAudioSensitivity <= -1.0f) {
-    // -1 = improved adaptive (average-tracking, preserves transients)
-    // -2 = legacy adaptive (peak-tracking, compresses transients)
-    mdropdx12_audio_adaptive = true;
-    mdropdx12_audio_sensitivity = m_fAudioSensitivity;  // pass through so FltToInt can distinguish
-  } else {
-    mdropdx12_audio_adaptive = false;
-    if (m_fAudioSensitivity < 0.5f) m_fAudioSensitivity = 0.5f;
-    mdropdx12_audio_sensitivity = m_fAudioSensitivity;
-  }
-  DLOG_INFO("AudioSensitivity: %.2f, adaptive=%d, gain=%.2f",
-    m_fAudioSensitivity, (int)mdropdx12_audio_adaptive, mdropdx12_audio_sensitivity);
+  mdropdx12_audio_sensitivity = m_fAudioSensitivity;
   m_bEnablePresetStartupSavingOnClose = GetPrivateProfileBoolW(L"Settings", L"bEnablePresetStartupSavingOnClose", m_bEnablePresetStartupSavingOnClose, pIni);
 
   m_bAutoLockPresetWhenNoMusic = GetPrivateProfileBoolW(L"Settings", L"bAutoLockPresetWhenNoMusic", m_bAutoLockPresetWhenNoMusic, pIni);

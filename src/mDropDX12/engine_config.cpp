@@ -30,7 +30,7 @@ void Engine::GetSettingValueString(int id, wchar_t* buf, int bufLen) {
   switch (id) {
   case SET_PRESET_DIR:       lstrcpynW(buf, m_szPresetDir, bufLen); break;
   case SET_AUDIO_DEVICE:     lstrcpynW(buf, m_szAudioDevice, bufLen); break;
-  case SET_AUDIO_SENSITIVITY: swprintf(buf, m_fAudioSensitivity == -1.0f ? L"Auto" : L"%.1f", m_fAudioSensitivity); break;
+  case SET_AUDIO_SENSITIVITY: swprintf(buf, L"%.1f", m_fAudioSensitivity); break;
   case SET_BLEND_TIME:       swprintf(buf, L"%.1f s", m_fBlendTimeAuto); break;
   case SET_TIME_BETWEEN:     swprintf(buf, L"%.0f s", m_fTimeBetweenPresets); break;
   case SET_HARD_CUTS:        lstrcpyW(buf, m_bHardCutsDisabled ? L"yes" : L"no"); break;
@@ -100,15 +100,8 @@ void Engine::AdjustSetting(int id, int direction) {
   if (*pFloat < s.fMin) *pFloat = s.fMin;
   if (*pFloat > s.fMax) *pFloat = s.fMax;
   if (id == SET_AUDIO_SENSITIVITY) {
-    // Snap past the unusable range between -1 and 0.5
-    if (m_fAudioSensitivity > -1.0f && m_fAudioSensitivity < 0.5f)
-      m_fAudioSensitivity = (direction > 0) ? 0.5f : -1.0f;
-    if (m_fAudioSensitivity == -1.0f) {
-      mdropdx12_audio_adaptive = true;
-    } else {
-      mdropdx12_audio_adaptive = false;
-      mdropdx12_audio_sensitivity = m_fAudioSensitivity;
-    }
+    if (m_fAudioSensitivity < 0.1f) m_fAudioSensitivity = 0.1f;
+    mdropdx12_audio_sensitivity = m_fAudioSensitivity;
   }
   SaveSettingToINI(id);
 }

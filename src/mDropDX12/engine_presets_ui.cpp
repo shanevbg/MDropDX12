@@ -733,19 +733,10 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         switch (id) {
         case IDC_MW_AUDIO_SENS: {
             p->m_fAudioSensitivity = (float)_wtof(buf);
-            if (p->m_fAudioSensitivity < -2) p->m_fAudioSensitivity = -2;
+            if (p->m_fAudioSensitivity < 0.1f) p->m_fAudioSensitivity = 0.1f;
             if (p->m_fAudioSensitivity > 256) p->m_fAudioSensitivity = 256;
-            extern bool mdropdx12_audio_adaptive;
             extern float mdropdx12_audio_sensitivity;
-            if (p->m_fAudioSensitivity <= -1.0f) {
-                // -1 = improved adaptive, -2 = legacy adaptive
-                mdropdx12_audio_adaptive = true;
-                mdropdx12_audio_sensitivity = p->m_fAudioSensitivity;
-            } else {
-                mdropdx12_audio_adaptive = false;
-                if (p->m_fAudioSensitivity < 0.5f) p->m_fAudioSensitivity = 0.5f;
-                mdropdx12_audio_sensitivity = p->m_fAudioSensitivity;
-            }
+            mdropdx12_audio_sensitivity = p->m_fAudioSensitivity;
             p->SaveSettingToINI(SET_AUDIO_SENSITIVITY);
             return 0;
         }

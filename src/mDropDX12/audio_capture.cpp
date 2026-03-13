@@ -36,12 +36,6 @@ signed int pcmPos = 0;
 float mdropdx12_amp_left = 1.0f;
 float mdropdx12_amp_right = 1.0f;
 float mdropdx12_audio_sensitivity = 1.0f;
-bool  mdropdx12_audio_adaptive = false;
-
-// Adaptive audio normalization state
-static float s_adaptivePeak = 0.1f;   // legacy: peak tracker (instant attack, slow decay)
-static float s_adaptiveAvg  = 0.01f;  // new: running average of |sample| (slow adaptation)
-static float s_adaptiveGain = 1.0f;
 
 void ResetAudioBuf() {
   std::unique_lock<std::mutex> lock(pcmLpbMutex);
@@ -78,45 +72,13 @@ void GetAudioBuf(unsigned char* pWaveL, unsigned char* pWaveR, int SamplesCount)
   }
 }
 
+// Float-to-int8 conversion — matches Milkwave's audiobuf.cpp.
+// WASAPI float [-1..+1] → int8 [-128..+127], with optional fixed gain.
+// No adaptive normalization: Milkwave passes audio through with no gain/AGC,
+// and presets are tuned to that level. Any adaptive normalization compresses
+// dynamics and changes how presets react to music.
 int8_t FltToInt(float flt) {
-  static int s_diagCount = 0;
-  float gain;
-  if (mdropdx12_audio_adaptive) {
-    float absFlt = fabsf(flt);
-
-    if (mdropdx12_audio_sensitivity <= -2.0f) {
-      // Legacy adaptive: instant peak attack, slow decay.
-      // Targets 10% of float range. Compresses transients aggressively.
-      if (absFlt > s_adaptivePeak)
-        s_adaptivePeak = absFlt;
-      else
-        s_adaptivePeak *= 0.99998f;
-      gain = 0.10f / (s_adaptivePeak > 0.0001f ? s_adaptivePeak : 0.0001f);
-      if (gain < 0.1f)  gain = 0.1f;
-      if (gain > 8.0f)  gain = 8.0f;
-    } else {
-      // Improved adaptive (-1): tracks average level, not peak.
-      // Slow adaptation preserves beat transients for better beat detection.
-      // Targets 20% of float range for average level (~25 counts in int8).
-      // This leaves headroom for 4x transients before clipping (25→100 counts),
-      // preserving the imm_rel ratio dynamics that presets depend on.
-      // alpha ~= 1.4s half-life at 48kHz (slow enough to not compress beats)
-      const float alpha = 0.00001f;
-      s_adaptiveAvg += (absFlt - s_adaptiveAvg) * alpha;
-      gain = 0.20f / (s_adaptiveAvg > 0.0001f ? s_adaptiveAvg : 0.0001f);
-      if (gain < 0.1f)  gain = 0.1f;
-      if (gain > 64.0f) gain = 64.0f;
-    }
-    s_adaptiveGain = gain;
-  } else {
-    gain = mdropdx12_audio_sensitivity;
-  }
-  flt *= gain;
-  if (++s_diagCount >= 48000) {
-    DLOG_VERBOSE("[AudioDiag] adaptive=%d gain=%.3f avg=%.5f peak=%.5f flt_out=%.4f",
-      (int)mdropdx12_audio_adaptive, gain, s_adaptiveAvg, s_adaptivePeak, flt);
-    s_diagCount = 0;
-  }
+  flt *= mdropdx12_audio_sensitivity;
   if (flt >= 1.0f)  return +127;
   if (flt < -1.0f)  return -128;
   return (int8_t)(flt * 128);

@@ -1063,15 +1063,9 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       switch (id) {
       case IDC_MW_AUDIO_SENS:
         p->m_fAudioSensitivity = (float)_wtof(buf);
-        if (p->m_fAudioSensitivity < -1) p->m_fAudioSensitivity = -1;
+        if (p->m_fAudioSensitivity < 0.1f) p->m_fAudioSensitivity = 0.1f;
         if (p->m_fAudioSensitivity > 256) p->m_fAudioSensitivity = 256;
-        if (p->m_fAudioSensitivity == -1.0f) {
-          mdropdx12_audio_adaptive = true;
-        } else {
-          mdropdx12_audio_adaptive = false;
-          if (p->m_fAudioSensitivity < 0.5f) p->m_fAudioSensitivity = 0.5f;
-          mdropdx12_audio_sensitivity = p->m_fAudioSensitivity;
-        }
+        mdropdx12_audio_sensitivity = p->m_fAudioSensitivity;
         p->SaveSettingToINI(SET_AUDIO_SENSITIVITY);
         return 0;
       case IDC_MW_BLEND_TIME:

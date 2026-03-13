@@ -573,7 +573,7 @@ public:
   int			m_nCustMsgsSpawned;
   bool    m_bEnablePresetStartup;
   bool    m_bEnableAudioCapture = true;
-  float   m_fAudioSensitivity = -1.0f;  // -1 = adaptive auto-normalize (default); 0.5–256 = fixed gain multiplier
+  float   m_fAudioSensitivity = 1.0f;   // fixed gain multiplier (1.0 = passthrough, matching Milkwave)
   bool    m_bEnablePresetStartupSavingOnClose = true;
   bool    m_bAutoLockPresetWhenNoMusic;
   bool    m_bScreenDependentRenderMode;
