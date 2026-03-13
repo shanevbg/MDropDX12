@@ -213,6 +213,7 @@ ACTION=ApplyWorkspaceLayout
 |-----|-------------|
 | `ToggleFullscreen` | Toggle fullscreen |
 | `ToggleStretch` | Toggle multi-monitor stretch/mirror |
+| `MirrorWatermark` | Toggle mirror watermark mode (all displays, low opacity, click-through) |
 | `AlwaysOnTop` | Toggle always on top |
 | `TransparencyMode` | Toggle transparency (F12) |
 | `BlackMode` | Toggle black mode |
@@ -433,6 +434,22 @@ Signal commands use the `SIGNAL|` prefix and are processed directly by the pipe 
 | `SIGNAL\|SET_INPUTMIX_OPACITY=N` | Set input mix opacity (0-100) |
 | `SIGNAL\|SET_INPUTMIX_LUMAKEY=threshold\|softness` | Set luma key (0-255 each, or -1 to disable) |
 | `SIGNAL\|SET_INPUTMIX_ONTOP=0\|1` | Set input mix layer order (1 = overlay, 0 = background) |
+| `SIGNAL\|FULLSCREEN` | Toggle fullscreen (deactivates mirrors first if active) |
+| `SIGNAL\|WATERMARK` | Toggle single-window watermark mode (borderless FS + click-through + low opacity) |
+| `SIGNAL\|BORDERLESS_FS` | Toggle borderless fullscreen |
+| `SIGNAL\|STRETCH` | Toggle multi-monitor stretch |
+| `SIGNAL\|MIRROR` | Toggle mirror mode (fullscreen + mirrors on all displays) |
+| `SIGNAL\|MIRROR_WM` | Toggle mirror watermark mode (all displays, low opacity, click-through) |
+
+### Mirror / Display Control
+
+| Command | Response | Description |
+|---------|----------|-------------|
+| `DIAG_MIRRORS` | `MIRRORS\|active=...\|render_on=...\|mon0=...` | Dump comprehensive mirror state: active flag, render monitor, per-monitor config (enabled, opacity, click-through, skip, display rect, swap chain size, window rect, visibility) |
+| `SET_MIRROR_OPACITY=<1-100>` | `MIRROR_OPACITY=<N>` | Set opacity for all monitor mirrors |
+| `SET_MIRROR_CLICKTHRU=<0\|1>` | `MIRROR_CLICKTHRU=<N>` | Set click-through for all monitor mirrors |
+| `MOVE_TO_DISPLAY=<N>` | `MOVED_TO=<device>` | Move render window to center of display N (1-based index into monitor list) |
+| `SET_WINDOW=<x>,<y>,<w>,<h>` | `WINDOW=(<x>,<y>)-(<x2>,<y2>) <w>x<h>` | Set render window position and size. Use w=0,h=0 to move without resizing |
 
 ### Audio
 
@@ -517,6 +534,14 @@ WAVE|COLORR=255|COLORG=128|COLORB=0|ALPHA=0.8|MODE=2|PUSHX=0.1|PUSHY=-0.1|ZOOM=1
 | Command | Description |
 |---------|-------------|
 | `TRACK\|artist=X\|title=Y\|album=Z` | Update displayed track info (from Milkwave Remote) |
+
+**Outgoing**: When the current track changes, MDropDX12 broadcasts a `TRACK|` message to all connected pipe clients:
+
+```text
+TRACK|artist=Artist Name|title=Song Title|album=Album Name|artwork=C:\path\to\cover.jpg
+```
+
+This allows external tools to receive track info updates in real time.
 
 ### Window (IPC)
 

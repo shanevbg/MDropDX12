@@ -1,5 +1,48 @@
 # MDropDX12 Changelog
 
+## v2.1.0 (2026-03-13)
+
+Stability and IPC release focused on multi-display mirror modes, watermark mode robustness, and expanded Named Pipe commands.
+
+### Bug Fixes
+
+- **Fix watermark mirror -> regular mirror transition**: Switching from mirror watermark to regular mirror mode via hotkey left mirrors at 30% opacity with click-through enabled, causing visual hang. New `ExitMirrorWatermark()` helper properly restores render window state (opacity, click-through, always-on-top, position) and resets mirror configs from all toggle paths (hotkeys, IPC signals, Alt+S, Alt+Enter, window reset)
+- **Fix WindowOpacity persisting watermark value to INI**: Watermark mode's 0.30 opacity leaked into `settings.ini` on save/exit, persisting across restarts. Watermark handlers now write pre-watermark opacity to INI immediately on entry; the general INI save routine skips `fOpacity` when in any watermark mode
+- **Fix window position persisting to wrong monitor during watermark**: `SaveWindowSizeAndPosition()` now skips when in watermark mode (the render window is temporarily on a different monitor at full size)
+- **Fix render monitor excluded from display list**: The render window's monitor was completely removed from `m_displayOutputs` during enumeration. Now included with `bSkippedSameMonitor` flag for dynamic runtime filtering in `SendToDisplayOutputs()` — all monitors appear in DIAG and Displays window
+- **Fix display config lost on re-enumeration**: Monitor configs (enabled, fullscreen, opacity, click-through) are now saved and restored across `EnumDisplayMonitors` calls, matched by display rect with device name fallback
+- **Fix mirror activation prompt blocking message loop**: Removed the blocking `MessageBox` prompt from `TryActivateMirrors()` — auto-enables all monitors when none are configured (the "Don't ask" checkbox made this the default anyway)
+- **Fix mirror swap chain init race**: Added `WaitForGpu()` before `CreateSwapChainForHwnd` to prevent driver failures from in-flight render commands
+- **Fix SRV descriptor heap overflow on window resize and font rebuild**
+- **Fix border-only shape rendering and improve adaptive audio gain**
+- **Fix always-on-top setting not persisting through restarts**
+- **Fix preset lists, message autoshrink, and deferred startup save**
+- **Fix IPC signal handlers for FULLSCREEN, WATERMARK, BORDERLESS_FS, STRETCH, MIRROR**
+
+### New Features
+
+- **Mirror Watermark mode**: New button in Displays window + `MirrorWatermark` hotkey action + `SIGNAL|MIRROR_WM` IPC command. Puts the visualizer on all displays simultaneously with low opacity and click-through for desktop overlay use
+- **Hotkey reset moved to Hotkeys window only**: Reset to Defaults now requires confirmation dialog and is only available in the Hotkeys window (no longer in Settings)
+- **TRACK| outgoing IPC message**: Broadcasts current track info (artist, title, album, artwork path) to all connected pipe clients when track changes
+- **New IPC commands**: `DIAG_MIRRORS` (comprehensive mirror state dump), `SET_MIRROR_OPACITY=N`, `SET_MIRROR_CLICKTHRU=0|1`, `MOVE_TO_DISPLAY=N`, `SET_WINDOW=x,y,w,h`, `SIGNAL|MIRROR_WM`
+- **Display profile save/load**: Save and restore complete display output configurations as JSON files
+- **Improved mirror logging**: Detailed init/skip/error logging for mirror window creation with device names
+
+### IPC / Pipe Changes
+
+- `SIGNAL|FULLSCREEN` — deactivates mirrors first, then toggles fullscreen
+- `SIGNAL|MIRROR` — toggle mirror mode with proper watermark cleanup
+- `SIGNAL|MIRROR_WM` — toggle mirror watermark mode (all displays, low opacity, click-through)
+- `SIGNAL|WATERMARK` — toggle single-window watermark mode
+- `SIGNAL|BORDERLESS_FS` — toggle borderless fullscreen
+- `SIGNAL|STRETCH` — toggle multi-monitor stretch
+- `DIAG_MIRRORS` — dump full mirror state (active, render monitor, per-monitor config, swap chain sizes, window rects)
+- `SET_MIRROR_OPACITY=<1-100>` — set opacity for all monitor mirrors
+- `SET_MIRROR_CLICKTHRU=<0|1>` — set click-through for all monitor mirrors
+- `MOVE_TO_DISPLAY=<N>` — move render window to center of display N (1-based)
+- `SET_WINDOW=<x>,<y>,<w>,<h>` — set render window position and size
+- `TRACK|artist=...|title=...|album=...|artwork=...` — outgoing broadcast on track change
+
 ## v2.0.0 (2026-03-12)
 
 Major milestone release. MDropDX12 2.0 marks the point where the engine has been fully rebuilt on DirectX 12 with a comprehensive feature set that goes well beyond the original MilkDrop2 visualizer.
