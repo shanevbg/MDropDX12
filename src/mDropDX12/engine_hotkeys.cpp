@@ -141,6 +141,7 @@ void Engine::ResetHotkeyDefaults()
     HK_DEF(i++, HK_OPEN_COLORS,     0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Colors",           L"OpenColors");
     HK_DEF(i++, HK_OPEN_CONTROLLER, 0,                    0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Controller",       L"OpenController");
     HK_DEF(i++, HK_OPEN_ANNOTATIONS,0,                    0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Annotations",      L"OpenAnnotations");
+    HK_DEF(i++, HK_OPEN_SCRIPT,    0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Script",           L"OpenScript");
     HK_DEF(i++, HK_POLL_TRACK_INFO, 0,                     0,            HKSCOPE_LOCAL, HKCAT_MEDIA, L"Poll Track Info",       L"PollTrackInfo");
     HK_DEF(i++, HK_MIRROR_WATERMARK,0,                    0,            HKSCOPE_LOCAL, HKCAT_WINDOW,L"Mirror Watermark",      L"MirrorWatermark");
 
@@ -813,6 +814,9 @@ bool Engine::DispatchHotkeyAction(int actionId)
         return true;
     case HK_OPEN_ANNOTATIONS:
         OpenAnnotationsWindow();
+        return true;
+    case HK_OPEN_SCRIPT:
+        OpenScriptWindow();
         return true;
     case HK_POLL_TRACK_INFO:
         if (hRender) PostMessage(hRender, WM_MW_HOTKEY_ACTION, (WPARAM)actionId, 0);

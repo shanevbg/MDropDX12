@@ -141,6 +141,7 @@ enum HotkeyAction : int {
     HK_OPEN_COLORS,               // (unbound) — open Colors window
     HK_OPEN_CONTROLLER,           // (unbound) — open Controller window
     HK_OPEN_ANNOTATIONS,          // (unbound) — open Annotations window
+    HK_OPEN_SCRIPT,               // (unbound) — open Script window
     HK_POLL_TRACK_INFO,           // Middle Mouse — force track info poll
     HK_MIRROR_WATERMARK,          // (unbound) — toggle mirror watermark mode
 
