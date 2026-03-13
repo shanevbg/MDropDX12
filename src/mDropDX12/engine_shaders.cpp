@@ -1703,6 +1703,42 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
     replaceTex2D("sampler_fc_main", "_samp_lc");  // LINEAR+CLAMP
     replaceTex2D("sampler_pc_main", "_samp_pc");  // POINT+CLAMP
     replaceTex2D("sampler_pw_main", "_samp_pw");  // POINT+WRAP
+    // Noise/volume/random textures with non-default addressing modes.
+    // Presets use sampler_pw_*, sampler_fc_*, sampler_pc_* prefixes to override
+    // the default LINEAR+WRAP filtering/addressing. Without these replacements,
+    // tex2D() falls through to the _samp_lw macro (LINEAR+WRAP), causing e.g.
+    // point-filtered noise to appear smoothed/blurred ("glow" artifacts).
+    replaceTex2D("sampler_pw_noise_lq",      "_samp_pw");  // POINT+WRAP
+    replaceTex2D("sampler_pw_noise_lq_lite", "_samp_pw");
+    replaceTex2D("sampler_pw_noise_mq",      "_samp_pw");
+    replaceTex2D("sampler_pw_noise_hq",      "_samp_pw");
+    replaceTex2D("sampler_pw_noisevol_lq",   "_samp_pw");
+    replaceTex2D("sampler_pw_noisevol_hq",   "_samp_pw");
+    replaceTex2D("sampler_fc_noise_lq",      "_samp_lc");  // LINEAR+CLAMP
+    replaceTex2D("sampler_fc_noise_lq_lite", "_samp_lc");
+    replaceTex2D("sampler_fc_noise_mq",      "_samp_lc");
+    replaceTex2D("sampler_fc_noise_hq",      "_samp_lc");
+    replaceTex2D("sampler_fc_noisevol_lq",   "_samp_lc");
+    replaceTex2D("sampler_fc_noisevol_hq",   "_samp_lc");
+    replaceTex2D("sampler_pc_noise_lq",      "_samp_pc");  // POINT+CLAMP
+    replaceTex2D("sampler_pc_noise_lq_lite", "_samp_pc");
+    replaceTex2D("sampler_pc_noise_mq",      "_samp_pc");
+    replaceTex2D("sampler_pc_noise_hq",      "_samp_pc");
+    replaceTex2D("sampler_pc_noisevol_lq",   "_samp_pc");
+    replaceTex2D("sampler_pc_noisevol_hq",   "_samp_pc");
+    // Random textures (rand00..rand03) with prefixed addressing
+    replaceTex2D("sampler_pw_rand00",  "_samp_pw");
+    replaceTex2D("sampler_pw_rand01",  "_samp_pw");
+    replaceTex2D("sampler_pw_rand02",  "_samp_pw");
+    replaceTex2D("sampler_pw_rand03",  "_samp_pw");
+    replaceTex2D("sampler_fc_rand00",  "_samp_lc");
+    replaceTex2D("sampler_fc_rand01",  "_samp_lc");
+    replaceTex2D("sampler_fc_rand02",  "_samp_lc");
+    replaceTex2D("sampler_fc_rand03",  "_samp_lc");
+    replaceTex2D("sampler_pc_rand00",  "_samp_pc");
+    replaceTex2D("sampler_pc_rand01",  "_samp_pc");
+    replaceTex2D("sampler_pc_rand02",  "_samp_pc");
+    replaceTex2D("sampler_pc_rand03",  "_samp_pc");
     replaceTex2D("sampler_blur1",   "_samp_lc");  // blur = LINEAR+CLAMP
     replaceTex2D("sampler_blur2",   "_samp_lc");
     replaceTex2D("sampler_blur3",   "_samp_lc");
