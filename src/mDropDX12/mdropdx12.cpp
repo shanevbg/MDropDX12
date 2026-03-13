@@ -124,11 +124,11 @@ void MDropDX12::LogDebug(const wchar_t* info) {
 }
 
 void MDropDX12::LogInfo(std::wstring info) {
-  DebugLogW(info.c_str(), LOG_INFO);
+  DebugLogW(info.c_str(), LOG_WARN);
 }
 
 void MDropDX12::LogInfo(const wchar_t* info) {
-  DebugLogW(info, LOG_INFO);
+  DebugLogW(info, LOG_WARN);
 }
 
 void MDropDX12::LogException(const wchar_t* context, const std::exception& e, bool showMessage) {
