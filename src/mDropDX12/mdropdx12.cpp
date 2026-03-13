@@ -1,6 +1,5 @@
 #include "mdropdx12.h"
-#include <locale>
-#include <codecvt>
+#include "utility.h"
 
 MDropDX12::MDropDX12() {}
 
@@ -117,100 +116,42 @@ bool MDropDX12::SaveThumbnailToFile(const winrt::Windows::Media::Control::Global
 }
 
 void MDropDX12::LogDebug(std::wstring info) {
-  if (logLevel < 3) return;
-  LogInfo(info.c_str());
+  DebugLogW(info.c_str(), LOG_VERBOSE);
 }
 
 void MDropDX12::LogDebug(const wchar_t* info) {
-  if (logLevel < 3) return;
-  LogInfo(info);
+  DebugLogW(info, LOG_VERBOSE);
 }
 
 void MDropDX12::LogInfo(std::wstring info) {
-  LogInfo(info.c_str());
+  DebugLogW(info.c_str(), LOG_INFO);
 }
 
 void MDropDX12::LogInfo(const wchar_t* info) {
-  if (logLevel < 2) return;
-
-  // Ensure the "log" directory exists
-  const char* logDir = "log";
-  if (_mkdir(logDir) != 0 && errno != EEXIST) {
-    std::cerr << "Failed to create or access log directory: " << logDir << std::endl;
-    return;
-  }
-
-  // Get the current timestamp
-  std::time_t now = std::time(nullptr);
-  std::tm localTime;
-  localtime_s(&localTime, &now);
-
-  char datestring[20];
-  char timestring[20];
-
-  std::strftime(datestring, sizeof(datestring), "%Y-%m-%d", &localTime);
-  std::strftime(timestring, sizeof(timestring), "%H:%M:%S", &localTime);
-
-  // Construct the log file path
-  std::ostringstream logFilePath;
-  logFilePath << logDir << "\\" << datestring << ".visualizer.info.log";
-
-  // Open the log file in append mode
-  std::ofstream logFile(logFilePath.str(), std::ios::app);
-  if (logFile.is_open()) {
-    // Convert wchar_t* to UTF-8 std::string
-    std::wstring ws(info);
-    std::wstring_convert<std::codecvt_utf8<wchar_t>> conv;
-    std::string utf8info = conv.to_bytes(ws);
-
-    logFile << timestring << "> " << utf8info << std::endl;
-    logFile.close();
-  }
-  else {
-    std::cerr << "Failed to open log file: " << logFilePath.str() << std::endl;
-  }
+  DebugLogW(info, LOG_INFO);
 }
 
 void MDropDX12::LogException(const wchar_t* context, const std::exception& e, bool showMessage) {
 
   if (logLevel < 1) return;
 
-  std::wstring ws(context);
-  std::wstring info = L"caught exception: ";
-  info += ws;
-  LogInfo(info.c_str());
+  DebugLogWFmt(LOG_ERROR, L"caught exception: %s: %S", context, e.what());
 
-  std::string exceptionMessage = e.what();
-
-  // Ensure the "log" directory exists  
-  const char* logDir = "log";
-  if (_mkdir(logDir) != 0 && errno != EEXIST) {
-    std::cerr << "Failed to create or access log directory: " << logDir << std::endl;
-    return;
-  }
-
-  // Get the current timestamp
+  // Write detailed stack trace to a separate error log file
+  wchar_t diagName[64];
   std::time_t now = std::time(nullptr);
   std::tm localTime;
   localtime_s(&localTime, &now);
-
   char timestamp[20];
   std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d_%H-%M-%S", &localTime);
+  swprintf_s(diagName, L"diag_%S_error", timestamp);
 
-  // Construct the log file path
-  std::ostringstream logFilePath;
-  logFilePath << logDir << "\\" << timestamp << ".visualizer.error.log";
-
-  // Write the exception details to the log file
-  std::ofstream logFile(logFilePath.str());
-  if (logFile.is_open()) {
-    std::wstring_convert<std::codecvt_utf8<wchar_t>> conv;
-    std::string utf8info = conv.to_bytes(ws);
-
-    logFile << "Exception occurred: " << utf8info << "\n" << exceptionMessage << std::endl;
+  FILE* f = DebugLogDiagOpen(diagName, L"w");
+  if (f) {
+    fprintf(f, "Exception occurred: %S\n%s\n", context, e.what());
 
     // Capture and log the stack trace
-    logFile << "\nStack trace:\n";
+    fprintf(f, "\nStack trace:\n");
     HANDLE process = GetCurrentProcess();
     SymInitialize(process, NULL, TRUE);
 
@@ -218,30 +159,22 @@ void MDropDX12::LogException(const wchar_t* context, const std::exception& e, bo
     USHORT frames = CaptureStackBackTrace(0, 64, stack, NULL);
 
     SYMBOL_INFO* symbol = (SYMBOL_INFO*)malloc(sizeof(SYMBOL_INFO) + 256 * sizeof(char));
-    if (symbol == NULL) {
-      logFile << "Failed to allocate memory for SYMBOL_INFO." << std::endl;
-      SymCleanup(process);
-      return;
-    }
-    symbol->MaxNameLen = 255;
-    symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+    if (symbol) {
+      symbol->MaxNameLen = 255;
+      symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
 
-    for (USHORT i = 0; i < frames; i++) {
-      SymFromAddr(process, (DWORD64)(stack[i]), 0, symbol);
-      logFile << frames - i - 1 << ": " << symbol->Name << " - 0x" << std::hex << symbol->Address << std::dec << "\n";
+      for (USHORT i = 0; i < frames; i++) {
+        SymFromAddr(process, (DWORD64)(stack[i]), 0, symbol);
+        fprintf(f, "%d: %s - 0x%llx\n", frames - i - 1, symbol->Name, (unsigned long long)symbol->Address);
+      }
+      free(symbol);
     }
-
-    free(symbol);
     SymCleanup(process);
-
-    logFile.close();
-  }
-  else {
-    std::cerr << "Failed to open log file: " << logFilePath.str() << std::endl;
+    fclose(f);
   }
 
   if (showMessage) {
-    // Show a message box with the error details
+    std::string exceptionMessage = e.what();
     std::wstring message = L"An unexpected error occurred:\n\n";
     message += std::wstring(exceptionMessage.begin(), exceptionMessage.end());
     message += L"\n\nDetails have been written to the log directory. Please open an issue on GitHub if the problem persists.\n\nPress Ctrl+O in the Remote to restart Visualizer.";

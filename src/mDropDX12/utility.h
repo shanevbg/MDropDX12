@@ -129,6 +129,8 @@ void  DebugLogClearAll();                                                  // de
 #define DLOG_INFO(fmt, ...)    do { if (g_debugLogLevel >= LOG_INFO)    DebugLogAFmt(LOG_INFO, fmt, __VA_ARGS__); } while(0)
 #define DLOG_VERBOSE(fmt, ...) do { if (g_debugLogLevel >= LOG_VERBOSE) DebugLogAFmt(LOG_VERBOSE, fmt, __VA_ARGS__); } while(0)
 
+#define DLOGW_ERROR(fmt, ...)   do { if (g_debugLogLevel >= LOG_ERROR)   DebugLogWFmt(LOG_ERROR, fmt, __VA_ARGS__); } while(0)
+#define DLOGW_WARN(fmt, ...)    do { if (g_debugLogLevel >= LOG_WARN)    DebugLogWFmt(LOG_WARN, fmt, __VA_ARGS__); } while(0)
 #define DLOGW_INFO(fmt, ...)    do { if (g_debugLogLevel >= LOG_INFO)    DebugLogWFmt(LOG_INFO, fmt, __VA_ARGS__); } while(0)
 #define DLOGW_VERBOSE(fmt, ...) do { if (g_debugLogLevel >= LOG_VERBOSE) DebugLogWFmt(LOG_VERBOSE, fmt, __VA_ARGS__); } while(0)
 

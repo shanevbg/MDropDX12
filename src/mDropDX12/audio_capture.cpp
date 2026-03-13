@@ -830,17 +830,13 @@ static HRESULT GetBufferWithRetry(
       hr = attemptHr;
     }
 
-    // Log AFTER __try/__except
-    if (pMDropDX12) {
-      wchar_t buf[256];
-      if (hadSeh) {
-        swprintf_s(buf, L"GetBufferWithRetry: attempt %d SEH exception 0x%08x (pAudioCaptureClient=%p, vtable=%p)",
-          attempt + 1, sehCode, pAudioCaptureClient, vtablePtr);
-      } else {
-        swprintf_s(buf, L"GetBufferWithRetry: attempt %d hr=0x%08x (pData=%p, frames=%u, flags=0x%08x)",
-          attempt + 1, hr, pDataResult, framesResult, flagsResult);
-      }
-      pMDropDX12->LogInfo(buf);
+    // Log AFTER __try/__except — only at verbose level or on error/retry
+    if (hadSeh) {
+      DLOGW_ERROR(L"GetBufferWithRetry: attempt %d SEH exception 0x%08x (pAudioCaptureClient=%p, vtable=%p)",
+        attempt + 1, sehCode, pAudioCaptureClient, vtablePtr);
+    } else {
+      DLOGW_VERBOSE(L"GetBufferWithRetry: attempt %d hr=0x%08x (pData=%p, frames=%u, flags=0x%08x)",
+        attempt + 1, hr, pDataResult, framesResult, flagsResult);
     }
 
     if (!hadSeh && SUCCEEDED(hr) && (pDataResult != nullptr || (flagsResult & AUDCLNT_BUFFERFLAGS_SILENT))) {
@@ -848,20 +844,11 @@ static HRESULT GetBufferWithRetry(
     }
 
     if (attempt == kMaxRetries - 1) {
-      AudioErr(L"GetBufferWithRetry: failed after %d attempts, hr=0x%08x", kMaxRetries, hr);
-      if (pMDropDX12) {
-        wchar_t buf[256];
-        swprintf_s(buf, L"GetBufferWithRetry: FAILED after %d attempts, hr=0x%08x", kMaxRetries, hr);
-        pMDropDX12->LogInfo(buf);
-      }
+      DLOGW_ERROR(L"GetBufferWithRetry: FAILED after %d attempts, hr=0x%08x", kMaxRetries, hr);
       break;
     }
 
-    if (pMDropDX12) {
-      wchar_t buf[128];
-      swprintf_s(buf, L"GetBufferWithRetry: attempt %d failed, backing off %d ms", attempt + 1, backoffMs);
-      pMDropDX12->LogDebug(buf);
-    }
+    DLOGW_WARN(L"GetBufferWithRetry: attempt %d failed, backing off %d ms", attempt + 1, backoffMs);
     Sleep(backoffMs);
     backoffMs = backoffMs * 2;
   }
