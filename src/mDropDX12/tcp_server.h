@@ -12,6 +12,12 @@
 
 enum class TcpAuthState { Unauthenticated, Pending, Authenticated };
 
+struct AuthorizedDevice {
+    std::string id;
+    std::string name;
+    std::string dateAdded; // YYYY-MM-DD
+};
+
 struct TcpClientConnection {
     SOCKET socket = INVALID_SOCKET;
     TcpAuthState authState = TcpAuthState::Unauthenticated;
@@ -48,6 +54,13 @@ public:
     bool IsRunning() const { return m_running.load(); }
     int GetPort() const { return m_port; }
 
+    void LoadAuthorizedDevices(const std::wstring& iniPath);
+    void SaveAuthorizedDevices(const std::wstring& iniPath);
+    bool IsDeviceAuthorized(const std::string& deviceId) const;
+    void AddAuthorizedDevice(const std::string& id, const std::string& name);
+    void RemoveAuthorizedDevice(const std::string& id);
+    std::vector<AuthorizedDevice> GetAuthorizedDevices() const;
+
 private:
     void AcceptNewClients();
     void ReadFromClients();
@@ -66,6 +79,9 @@ private:
     std::mutex m_clientsMutex;
     MessageHandler m_onMessage;
     AuthRequestHandler m_onAuthRequest;
+
+    std::vector<AuthorizedDevice> m_authorizedDevices;
+    std::wstring m_iniPath;
 
     static constexpr int RECV_BUFFER_SIZE = 65536;
     static constexpr ULONGLONG CLIENT_TIMEOUT_MS = 60000;

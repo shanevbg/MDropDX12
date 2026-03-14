@@ -270,3 +270,101 @@ void TcpServer::DisconnectDevice(const std::string& deviceId) {
         }
     }
 }
+
+void TcpServer::LoadAuthorizedDevices(const std::wstring& iniPath) {
+    m_iniPath = iniPath;
+    m_authorizedDevices.clear();
+
+    wchar_t countBuf[32] = {};
+    GetPrivateProfileStringW(L"AuthorizedDevices", L"count", L"0", countBuf, 32, iniPath.c_str());
+    int count = _wtoi(countBuf);
+
+    for (int i = 0; i < count; ++i) {
+        wchar_t keyBuf[64];
+        wchar_t valBuf[512];
+
+        swprintf(keyBuf, 64, L"device%d_id", i);
+        GetPrivateProfileStringW(L"AuthorizedDevices", keyBuf, L"", valBuf, 512, iniPath.c_str());
+        std::wstring wId(valBuf);
+
+        swprintf(keyBuf, 64, L"device%d_name", i);
+        GetPrivateProfileStringW(L"AuthorizedDevices", keyBuf, L"", valBuf, 512, iniPath.c_str());
+        std::wstring wName(valBuf);
+
+        swprintf(keyBuf, 64, L"device%d_added", i);
+        GetPrivateProfileStringW(L"AuthorizedDevices", keyBuf, L"", valBuf, 512, iniPath.c_str());
+        std::wstring wAdded(valBuf);
+
+        if (wId.empty()) continue;
+
+        AuthorizedDevice dev;
+        dev.id      = WideToUtf8(wId);
+        dev.name    = WideToUtf8(wName);
+        dev.dateAdded = WideToUtf8(wAdded);
+        m_authorizedDevices.push_back(std::move(dev));
+    }
+}
+
+void TcpServer::SaveAuthorizedDevices(const std::wstring& iniPath) {
+    wchar_t countBuf[32];
+    swprintf(countBuf, 32, L"%d", (int)m_authorizedDevices.size());
+    WritePrivateProfileStringW(L"AuthorizedDevices", L"count", countBuf, iniPath.c_str());
+
+    for (int i = 0; i < (int)m_authorizedDevices.size(); ++i) {
+        const auto& dev = m_authorizedDevices[i];
+        wchar_t keyBuf[64];
+
+        swprintf(keyBuf, 64, L"device%d_id", i);
+        WritePrivateProfileStringW(L"AuthorizedDevices", keyBuf, Utf8ToWide(dev.id).c_str(), iniPath.c_str());
+
+        swprintf(keyBuf, 64, L"device%d_name", i);
+        WritePrivateProfileStringW(L"AuthorizedDevices", keyBuf, Utf8ToWide(dev.name).c_str(), iniPath.c_str());
+
+        swprintf(keyBuf, 64, L"device%d_added", i);
+        WritePrivateProfileStringW(L"AuthorizedDevices", keyBuf, Utf8ToWide(dev.dateAdded).c_str(), iniPath.c_str());
+    }
+}
+
+bool TcpServer::IsDeviceAuthorized(const std::string& deviceId) const {
+    for (const auto& dev : m_authorizedDevices) {
+        if (dev.id == deviceId) return true;
+    }
+    return false;
+}
+
+void TcpServer::AddAuthorizedDevice(const std::string& id, const std::string& name) {
+    // Replace if already present, otherwise append
+    for (auto& dev : m_authorizedDevices) {
+        if (dev.id == id) {
+            dev.name = name;
+            if (!m_iniPath.empty()) SaveAuthorizedDevices(m_iniPath);
+            return;
+        }
+    }
+
+    SYSTEMTIME st{};
+    GetLocalTime(&st);
+    char dateBuf[16];
+    sprintf(dateBuf, "%04d-%02d-%02d", st.wYear, st.wMonth, st.wDay);
+
+    AuthorizedDevice dev;
+    dev.id        = id;
+    dev.name      = name;
+    dev.dateAdded = dateBuf;
+    m_authorizedDevices.push_back(std::move(dev));
+
+    if (!m_iniPath.empty()) SaveAuthorizedDevices(m_iniPath);
+}
+
+void TcpServer::RemoveAuthorizedDevice(const std::string& id) {
+    auto it = std::remove_if(m_authorizedDevices.begin(), m_authorizedDevices.end(),
+        [&](const AuthorizedDevice& dev) { return dev.id == id; });
+    if (it != m_authorizedDevices.end()) {
+        m_authorizedDevices.erase(it, m_authorizedDevices.end());
+        if (!m_iniPath.empty()) SaveAuthorizedDevices(m_iniPath);
+    }
+}
+
+std::vector<AuthorizedDevice> TcpServer::GetAuthorizedDevices() const {
+    return m_authorizedDevices;
+}
