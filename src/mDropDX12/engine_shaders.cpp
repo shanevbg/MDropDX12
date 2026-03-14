@@ -1448,6 +1448,26 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // (the include file was already stripped of comments)
   StripComments(&szShaderText[shaderStartPos]);
 
+  // Replace "i = I_MAX;" break hack with real "break;" — the hack was used by
+  // Milkwave's transpiler for SM2.0 compatibility, but SM3.0+ supports break natively.
+  // The hack can cause incorrect loop behavior with some D3DCompile optimization paths.
+  {
+    char* search = &szShaderText[shaderStartPos];
+    while ((search = strstr(search, "i = I_MAX")) != NULL) {
+      // Find the semicolon
+      char* semi = strchr(search, ';');
+      if (semi) {
+        int len = (int)(semi - search + 1);
+        memset(search, ' ', len);
+        memcpy(search, "break;", 6);
+        search = semi + 1;
+      } else {
+        break;
+      }
+    }
+  }
+
+
   // Strip DX9-style "sampler sampler_randNN;" declarations from preset text.
   // The include already declares "Texture2D sampler_randNN;" — having both
   // causes a redefinition error (sampler = SamplerState in SM5.0).
