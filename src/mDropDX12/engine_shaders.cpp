@@ -1928,6 +1928,20 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
       DebugLogDiagWrite(diagName, header);
     }
 
+    // Bytecode disassembly dump (verbose level only, for diagnosing SM5.0 codegen)
+    if (g_debugLogLevel >= LOG_VERBOSE && pShaderByteCode &&
+        (shaderType == SHADER_COMP || shaderType == SHADER_WARP)) {
+      ID3DBlob* pDisasm = nullptr;
+      if (SUCCEEDED(D3DDisassemble(pShaderByteCode->GetBufferPointer(),
+                                    pShaderByteCode->GetBufferSize(), 0, nullptr, &pDisasm)) && pDisasm) {
+        const char* typeName = szDiagName ? szDiagName : (shaderType == SHADER_COMP ? "comp" : "warp");
+        wchar_t diagName[64];
+        swprintf_s(diagName, L"diag_asm_%hs.txt", typeName);
+        DebugLogDiagWrite(diagName, (const char*)pDisasm->GetBufferPointer());
+        pDisasm->Release();
+      }
+    }
+
     if (m_ShaderCaching) {
       SaveShaderBytecodeToFile(pShaderByteCode, checksum, &szProfile[0]);
     }
