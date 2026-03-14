@@ -1,0 +1,37 @@
+name: Sync to Public Repo
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Remove private files
+        run: |
+          rm -rf tools/
+          rm -f .mcp.json
+          rm -f CLAUDE.md
+          rm -rf .claude/
+          rm -f .github/workflows/sync-public.yml
+          rm -f .github/copilot-instructions.md
+
+      - name: Clean .gitignore for public
+        run: |
+          sed -i '/^# Tools.*$/d' .gitignore
+          sed -i '/^tools\/mdrop-mcp\/node_modules\/$/d' .gitignore
+
+      - name: Push to public repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "sync: update from private repo" --allow-empty
+          git remote add public https://x-access-token:${{ secrets.PUBLIC_REPO_PAT }}@github.com/shanevbg/MDropDX12.git
+          git push public main --force
