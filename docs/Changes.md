@@ -1,5 +1,29 @@
 # MDropDX12 Changelog
 
+## v2.2.0 (2026-03-14)
+
+Preset rendering accuracy release. Fixes long-standing math and shader issues that caused many presets to render darker, incorrectly filtered, or visually different compared to the reference Milkwave Visualizer.
+
+Special thanks to [IkeC](https://github.com/IkeC) for all his brilliant work on [Milkwave](https://github.com/IkeC/Milkwave) — the reference visualizer, testing feedback, and tireless collaboration that continues to drive MDropDX12 forward.
+
+### Preset Rendering Fixes
+
+- **Fix sqrt() emulation to match DX9 hardware behavior**: DX9 compiles `sqrt(x)` as `x * rsq(x)`, which returns `sign(x) * sqrt(|x|)` for negative inputs — a negative value that UNORM render targets clamp to zero. MDropDX12's previous `_safe_sqrt` used `sqrt(abs(x))`, returning positive values for negative inputs and shifting the feedback equilibrium brighter in some presets and darker in others. Now uses `sign(x) * sqrt(abs(x))` to match DX9 exactly. Fixes darkness/brightness issues across many presets with complex feedback loops.
+- **Fix sampler addressing for prefixed noise/random textures**: Presets using `sampler_pw_noise_lq`, `sampler_fc_noise_hq`, `sampler_pc_rand00`, and other `pw_`/`fc_`/`pc_` prefixed samplers were falling through to the default LINEAR+WRAP sampler instead of their intended POINT+WRAP, LINEAR+CLAMP, or POINT+CLAMP modes. Added 36 `replaceTex2D` entries covering all prefixed variants of noise, noisevol, and random textures. Fixes excessive glow, incorrect texture filtering, and visual artifacts in presets like "martin - push ax".
+- **Fix vertex decay color applied to custom warp shader presets**: Milkwave's `WarpedBlit_Shaders` passes white (0xFFFFFFFF) vertices when a custom warp shader is active — the shader handles decay internally. MDropDX12 was incorrectly always applying the `cDecay` vertex color, causing premature darkening. Custom warp shader presets now receive white vertices; non-shader presets continue to use cDecay for fallback decay modulation.
+- **Add NaN-safe shader intrinsics for DX12 IEEE 754 compliance**: DX12 follows strict IEEE 754 where `sqrt(negative) = NaN`, `tan(pole) = inf`, `inf * 0 = NaN`, and `pow(negative, fraction) = NaN`. DX9 NVIDIA hardware deviates — `sqrt(neg) = sqrt(|x|)`, `inf * 0 → 0`, etc. Added safe wrappers (`_safe_sqrt`, `_safe_tan`, `_safe_pow`, `_safe_asin`, `_safe_acos`, `_safe_normalize`) that are `#define`-redirected before preset shader code. Prevents NaN propagation through the feedback loop which caused persistent black holes.
+- **Fix comp vertex shader uv_orig binding**: The comp and warp vertex shaders now use separate TEXCOORD0/1/2 inputs matching the `g_MyVertexLayout` input element descriptor, correctly passing `uv`, `uv_orig`, and `rad_ang` as independent float2 values.
+
+### Other Fixes
+
+- **Fix screenshot red/blue channel swap**: WIC PNG encoder's `SetPixelFormat` silently changes RGBA to BGRA, then `WritePixels` misinterprets the RGBA backbuffer data. Screenshots now swap R↔B in the readback buffer before writing as BGRA.
+- **Increase default ToolWindow font size**: Default increased from 16px to 20px, maximum from 24px to 32px for better readability on high-DPI displays.
+
+### Diagnostics
+
+- Added `DIAG_DISPLAY_MODE` IPC command for raw render target inspection (0=normal, 1=VS[0], 2=VS[1])
+- Shader text dump diagnostics for warp and comp shaders
+
 ## v2.1.0 (2026-03-13)
 
 Stability and IPC release focused on multi-display mirror modes, watermark mode robustness, and expanded Named Pipe commands.
