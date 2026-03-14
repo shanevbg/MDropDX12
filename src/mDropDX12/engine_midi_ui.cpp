@@ -110,10 +110,9 @@ void MidiWindow::UpdateListViewRow(int idx)
   SendMessageW(m_hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
 
   // Column 2: Label
-  wchar_t wLabel[64];
-  MultiByteToWideChar(CP_UTF8, 0, row.szLabel, -1, wLabel, 64);
+  std::wstring wLabel = UTF8ToWide(row.szLabel);
   lvi.iSubItem = 2;
-  lvi.pszText = wLabel;
+  lvi.pszText = (LPWSTR)wLabel.c_str();
   SendMessageW(m_hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lvi);
 
   // Column 3: Ch
@@ -144,10 +143,10 @@ void MidiWindow::UpdateListViewRow(int idx)
 
   // Column 7: Action
   const wchar_t* actionStr = L"";
-  wchar_t wAction[256];
+  std::wstring wActionStr;
   if (row.actionType == MIDI_TYPE_BUTTON) {
-    MultiByteToWideChar(CP_UTF8, 0, row.szActionText, -1, wAction, 256);
-    actionStr = wAction;
+    wActionStr = UTF8ToWide(row.szActionText);
+    actionStr = wActionStr.c_str();
   } else if (row.actionType == MIDI_TYPE_KNOB) {
     actionStr = KnobActionName(row.knobAction);
   }
@@ -172,9 +171,8 @@ void MidiWindow::UpdateEditControls(int sel)
 
   // Label
   if (m_hLabelEdit) {
-    wchar_t wLabel[64];
-    MultiByteToWideChar(CP_UTF8, 0, row.szLabel, -1, wLabel, 64);
-    SetWindowTextW(m_hLabelEdit, valid ? wLabel : L"");
+    std::wstring wLabel = UTF8ToWide(row.szLabel);
+    SetWindowTextW(m_hLabelEdit, valid ? wLabel.c_str() : L"");
     EnableWindow(m_hLabelEdit, valid);
   }
 
@@ -192,9 +190,8 @@ void MidiWindow::UpdateEditControls(int sel)
     PopulateActionCombo(row.actionType);
   if (m_hActionCombo) {
     if (row.actionType == MIDI_TYPE_BUTTON) {
-      wchar_t wAction[256];
-      MultiByteToWideChar(CP_UTF8, 0, row.szActionText, -1, wAction, 256);
-      SetWindowTextW(m_hActionCombo, wAction);
+      std::wstring wAction = UTF8ToWide(row.szActionText);
+      SetWindowTextW(m_hActionCombo, wAction.c_str());
     } else if (row.actionType == MIDI_TYPE_KNOB) {
       // Find matching knob action in combo
       int count = (int)SendMessage(m_hActionCombo, CB_GETCOUNT, 0, 0);
@@ -238,7 +235,8 @@ void MidiWindow::SaveEditControls()
   if (m_hLabelEdit) {
     wchar_t wLabel[64] = {};
     GetWindowTextW(m_hLabelEdit, wLabel, 64);
-    WideCharToMultiByte(CP_UTF8, 0, wLabel, -1, row.szLabel, sizeof(row.szLabel), NULL, NULL);
+    std::string utf8 = WideToUTF8(wLabel);
+    strncpy_s(row.szLabel, utf8.c_str(), sizeof(row.szLabel) - 1);
   }
 
   // Type
@@ -254,7 +252,8 @@ void MidiWindow::SaveEditControls()
     if (row.actionType == MIDI_TYPE_BUTTON) {
       wchar_t wAction[256] = {};
       GetWindowTextW(m_hActionCombo, wAction, 256);
-      WideCharToMultiByte(CP_UTF8, 0, wAction, -1, row.szActionText, sizeof(row.szActionText), NULL, NULL);
+      std::string utf8 = WideToUTF8(wAction);
+      strncpy_s(row.szActionText, utf8.c_str(), sizeof(row.szActionText) - 1);
     } else if (row.actionType == MIDI_TYPE_KNOB) {
       int cbSel = (int)SendMessage(m_hActionCombo, CB_GETCURSEL, 0, 0);
       if (cbSel >= 0)
@@ -326,11 +325,10 @@ void MidiWindow::PopulateActionCombo(MidiActionType type)
     std::vector<std::string> userActions;
     m_pEngine->LoadMidiDefaultActions(userActions);
     for (auto& a : userActions) {
-      wchar_t wa[256];
-      MultiByteToWideChar(CP_UTF8, 0, a.c_str(), -1, wa, 256);
+      std::wstring wa = UTF8ToWide(a);
       // Don't add duplicates
-      if (SendMessageW(m_hActionCombo, CB_FINDSTRINGEXACT, -1, (LPARAM)wa) == CB_ERR)
-        SendMessageW(m_hActionCombo, CB_ADDSTRING, 0, (LPARAM)wa);
+      if (SendMessageW(m_hActionCombo, CB_FINDSTRINGEXACT, -1, (LPARAM)wa.c_str()) == CB_ERR)
+        SendMessageW(m_hActionCombo, CB_ADDSTRING, 0, (LPARAM)wa.c_str());
     }
   }
   else if (type == MIDI_TYPE_KNOB) {

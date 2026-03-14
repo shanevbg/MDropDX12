@@ -435,15 +435,7 @@ DWORD WINAPI LoopbackCaptureThreadFunction(LPVOID pContext) {
         } catch (const std::exception& e) {
           pArgs->pMDropDX12->LogException(L"LoopbackCaptureThreadFunction: rethrown std::exception", e, true);
         } catch (const wchar_t* ws) {
-          std::string msg;
-          if (ws) {
-            int size = WideCharToMultiByte(CP_UTF8, 0, ws, -1, nullptr, 0, nullptr, nullptr);
-            if (size > 0) {
-              msg.resize(size - 1);
-              WideCharToMultiByte(CP_UTF8, 0, ws, -1, &msg[0], size, nullptr, nullptr);
-            }
-          }
-          else { msg = "(null)"; }
+          std::string msg = ws ? WideToUTF8(ws) : "(null)";
           std::runtime_error re(msg);
           pArgs->pMDropDX12->LogException(L"LoopbackCaptureThreadFunction: non-std exception (wchar_t*)", re, true);
         } catch (const char* cs) {

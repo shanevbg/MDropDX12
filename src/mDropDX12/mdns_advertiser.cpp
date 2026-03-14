@@ -1,4 +1,5 @@
 #include "mdns_advertiser.h"
+#include "utility.h"
 #include <string>
 
 // DnsServiceRegister / DnsServiceDeRegister are available on Windows 10 1803+.
@@ -33,22 +34,50 @@ static bool LoadDnsFunctions() {
     return s_Construct && s_Register && s_DeRegister && s_Free;
 }
 
-static std::wstring Utf8ToWide(const std::string& s) {
-    if (s.empty()) return {};
-    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
-    if (n <= 0) return {};
-    std::wstring result(n - 1, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &result[0], n);
-    return result;
-}
+// Uses UTF8ToWide() from utility.h
 
 static VOID WINAPI RegisterCallback(DWORD, PVOID, PDNS_SERVICE_INSTANCE) {}
 
+void MdnsAdvertiser::BeaconLoop(std::string serviceName, int tcpPort, int pid) {
+    SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock == INVALID_SOCKET) return;
+
+    // Enable broadcast
+    BOOL bcast = TRUE;
+    setsockopt(sock, SOL_SOCKET, SO_BROADCAST, (const char*)&bcast, sizeof(bcast));
+
+    sockaddr_in broadcastAddr{};
+    broadcastAddr.sin_family = AF_INET;
+    broadcastAddr.sin_port = htons(MILKWAVE_BEACON_PORT);
+    broadcastAddr.sin_addr.s_addr = INADDR_BROADCAST;
+
+    // Beacon payload: "MDROP_BEACON|<name>|<tcpPort>|<pid>"
+    char beacon[256];
+    snprintf(beacon, sizeof(beacon), "MDROP_BEACON|%s|%d|%d", serviceName.c_str(), tcpPort, pid);
+    int beaconLen = (int)strlen(beacon);
+
+    while (m_beaconRunning.load()) {
+        sendto(sock, beacon, beaconLen, 0, (sockaddr*)&broadcastAddr, sizeof(broadcastAddr));
+        // Sleep 3 seconds but check for stop every 100ms
+        for (int i = 0; i < 30 && m_beaconRunning.load(); i++)
+            Sleep(100);
+    }
+    closesocket(sock);
+}
+
 bool MdnsAdvertiser::Register(const std::string& serviceName, int port, int pid) {
     if (m_registered) Unregister();
-    if (!LoadDnsFunctions()) return false;
 
-    std::wstring instanceName = Utf8ToWide(serviceName) + L"._milkwave._tcp.local";
+    // Start UDP broadcast beacon (always works)
+    m_beaconRunning.store(true);
+    m_beaconThread = std::thread(&MdnsAdvertiser::BeaconLoop, this, serviceName, port, pid);
+
+    if (!LoadDnsFunctions()) {
+        m_registered = true;
+        return true; // Beacon alone is fine
+    }
+
+    std::wstring instanceName = UTF8ToWide(serviceName) + L"._milkwave._tcp.local";
 
     wchar_t pidBuf[32];
     swprintf_s(pidBuf, L"%d", pid);

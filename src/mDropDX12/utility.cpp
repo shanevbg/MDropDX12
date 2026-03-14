@@ -31,6 +31,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <math.h>
 #include <locale.h>
 #include <stdio.h>
+#include <string>
 #include <windows.h>
 #ifdef _DEBUG
 #define D3D_DEBUG_INFO  // declare this before including d3d9.h
@@ -343,7 +344,7 @@ void GetDesktopFolder(char* szDesktopFolder) // should be MAX_PATH len.
   szDesktopFolder[0] = 0;
   ITEMIDLIST pidl;
   ZeroMemory(&pidl, sizeof(pidl));
-  if (!SHGetPathFromIDList(&pidl, szDesktopFolder))
+  if (!SHGetPathFromIDListA(&pidl, szDesktopFolder))
     szDesktopFolder[0] = 0;
 }
 
@@ -370,7 +371,7 @@ void ExecutePidl(LPITEMIDLIST pidl, char* szPathAndFile, char* szWorkingDirector
   for (int verb_pass = 0; verb_pass < 2; verb_pass++) {
     for (int ntry = 0; ntry < 3; ntry++) {
       for (int context_pass = 0; context_pass < 2; context_pass++) {
-        SHELLEXECUTEINFO sei = { sizeof(sei) };
+        SHELLEXECUTEINFOA sei = { sizeof(sei) };
         sei.hwnd = hWnd;
         sei.fMask = SEE_MASK_FLAG_NO_UI;
         if (context_pass == 1)
@@ -393,7 +394,7 @@ void ExecutePidl(LPITEMIDLIST pidl, char* szPathAndFile, char* szWorkingDirector
           sei.lpFile = szFilename2;
         }
 
-        if (ShellExecuteEx(&sei))
+        if (ShellExecuteExA(&sei))
           return;
       }
     }
@@ -568,7 +569,7 @@ BOOL DoExplorerMenu(HWND hwnd, LPITEMIDLIST pidlMain, POINT point) {
           ici.cbSize = sizeof(CMINVOKECOMMANDINFO);
           //ici.fMask           = 0;
           ici.hwnd = hwnd;
-          ici.lpVerb = MAKEINTRESOURCE(nCmd - 1);
+          ici.lpVerb = MAKEINTRESOURCEA(nCmd - 1);
           //ici.lpParameters    = NULL;
           //ici.lpDirectory     = NULL;
           ici.nShow = SW_SHOWNORMAL;
@@ -708,20 +709,20 @@ void FindDesktopWindows(HWND* desktop_progman, HWND* desktopview_wnd, HWND* list
   *desktopview_wnd = NULL;
   *listview_wnd = NULL;
 
-  *desktop_progman = FindWindow(NULL, ("Program Manager"));
+  *desktop_progman = FindWindowW(NULL, L"Program Manager");
   if (*desktop_progman == NULL) {
     //MessageBox(NULL, "Unable to get the handle to the Program Manager.", "Fatal error", MB_OK|MB_ICONERROR);
     return;
   }
 
-  *desktopview_wnd = FindWindowEx(*desktop_progman, NULL, "SHELLDLL_DefView", NULL);
+  *desktopview_wnd = FindWindowExW(*desktop_progman, NULL, L"SHELLDLL_DefView", NULL);
   if (*desktopview_wnd == NULL) {
     //MessageBox(NULL, "Unable to get the handle to the desktopview.", "Fatal error", MB_OK|MB_ICONERROR);
     return;
   }
 
   // Thanks ef_ef_ef@yahoo.com for pointing out this works in NT 4 and not the way I did it originally.
-  *listview_wnd = FindWindowEx(*desktopview_wnd, NULL, "SysListView32", NULL);
+  *listview_wnd = FindWindowExW(*desktopview_wnd, NULL, L"SysListView32", NULL);
   if (*listview_wnd == NULL) {
     //MessageBox(NULL, "Unable to get the handle to the folderview.", "Fatal error", MB_OK|MB_ICONERROR);
     return;
@@ -739,10 +740,10 @@ int GetDesktopIconSize() {
   DWORD type;
   HKEY key;
 
-  if (ERROR_SUCCESS == RegOpenKeyEx(HKEY_CURRENT_USER, "Control Panel\\Desktop\\WindowMetrics", 0, KEY_READ, &key)) {
-    if (ERROR_SUCCESS == RegQueryValueEx(key, "Shell Icon Size", NULL, &type, (unsigned char*)buf, &len) &&
+  if (ERROR_SUCCESS == RegOpenKeyExW(HKEY_CURRENT_USER, L"Control Panel\\Desktop\\WindowMetrics", 0, KEY_READ, &key)) {
+    if (ERROR_SUCCESS == RegQueryValueExW(key, L"Shell Icon Size", NULL, &type, (unsigned char*)buf, &len) &&
       type == REG_SZ) {
-      int x = _atoi_l((char*)buf, g_use_C_locale);
+      int x = _wtoi_l((wchar_t*)buf, g_use_C_locale);
       if (x > 0 && x <= 128)
         ret = x;
     }
@@ -782,8 +783,8 @@ bool ReadCBValue(HWND hwnd, DWORD ctrl_id, int* pRetValue) {
 void* GetTextResource(UINT id, int no_fallback) {
   void* data = 0;
   HINSTANCE hinst = api_orig_hinstance;
-  HRSRC rsrc = FindResource(hinst, MAKEINTRESOURCE(id), "TEXT");
-  if (!rsrc && !no_fallback) rsrc = FindResource((hinst = api_orig_hinstance), MAKEINTRESOURCE(id), "TEXT");
+  HRSRC rsrc = FindResourceW(hinst, MAKEINTRESOURCEW(id), L"TEXT");
+  if (!rsrc && !no_fallback) rsrc = FindResourceW((hinst = api_orig_hinstance), MAKEINTRESOURCEW(id), L"TEXT");
   if (rsrc) {
     HGLOBAL resourceHandle = LoadResource(hinst, rsrc);
     data = LockResource(resourceHandle);
@@ -997,4 +998,35 @@ void DebugLogClearAll() {
     fflush(g_debugLogFile);
   }
   LeaveCriticalSection(&g_debugLogCS);
+}
+
+// UTF-8 <-> Wide string conversion helpers
+std::wstring UTF8ToWide(const char* utf8) {
+  if (!utf8 || !utf8[0])
+    return std::wstring();
+  int len = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, nullptr, 0);
+  if (len <= 0)
+    return std::wstring();
+  std::wstring result(len - 1, L'\0'); // len includes null terminator
+  MultiByteToWideChar(CP_UTF8, 0, utf8, -1, &result[0], len);
+  return result;
+}
+
+std::wstring UTF8ToWide(const std::string& utf8) {
+  return UTF8ToWide(utf8.c_str());
+}
+
+std::string WideToUTF8(const wchar_t* wide) {
+  if (!wide || !wide[0])
+    return std::string();
+  int len = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
+  if (len <= 0)
+    return std::string();
+  std::string result(len - 1, '\0'); // len includes null terminator
+  WideCharToMultiByte(CP_UTF8, 0, wide, -1, &result[0], len, nullptr, nullptr);
+  return result;
+}
+
+std::string WideToUTF8(const std::wstring& wide) {
+  return WideToUTF8(wide.c_str());
 }

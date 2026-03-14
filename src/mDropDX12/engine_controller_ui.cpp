@@ -78,9 +78,7 @@ void ControllerWindow::DoBuildControls() {
 
     // Populate with current JSON text
     {
-      int wLen = MultiByteToWideChar(CP_ACP, 0, p->m_szControllerJSONText.c_str(), (int)p->m_szControllerJSONText.size(), NULL, 0);
-      std::wstring wJson(wLen, L'\0');
-      MultiByteToWideChar(CP_ACP, 0, p->m_szControllerJSONText.c_str(), (int)p->m_szControllerJSONText.size(), &wJson[0], wLen);
+      std::wstring wJson = UTF8ToWide(p->m_szControllerJSONText);
       SetWindowTextW(hJsonEdit, wJson.c_str());
     }
     y += editH + gap;
@@ -128,9 +126,7 @@ LRESULT ControllerWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) 
         int len = GetWindowTextLengthW(hEdit);
         std::wstring wText(len + 1, L'\0');
         GetWindowTextW(hEdit, &wText[0], len + 1);
-        int cbNeeded = WideCharToMultiByte(CP_ACP, 0, wText.c_str(), len, NULL, 0, NULL, NULL);
-        p->m_szControllerJSONText.resize(cbNeeded);
-        WideCharToMultiByte(CP_ACP, 0, wText.c_str(), len, &p->m_szControllerJSONText[0], cbNeeded, NULL, NULL);
+        p->m_szControllerJSONText = WideToUTF8(wText.c_str());
         p->ParseControllerJSON(p->m_szControllerJSONText);
       }
     }
@@ -155,10 +151,7 @@ LRESULT ControllerWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) 
   if (id == IDC_MW_CTRL_DEFAULTS && code == BN_CLICKED) {
     HWND hEdit = GetDlgItem(hWnd, IDC_MW_CTRL_JSON_EDIT);
     if (hEdit) {
-      std::string def = p->GetDefaultControllerJSON();
-      int wLen = MultiByteToWideChar(CP_ACP, 0, def.c_str(), (int)def.size(), NULL, 0);
-      std::wstring wDef(wLen, L'\0');
-      MultiByteToWideChar(CP_ACP, 0, def.c_str(), (int)def.size(), &wDef[0], wLen);
+      std::wstring wDef = UTF8ToWide(p->GetDefaultControllerJSON());
       SetWindowTextW(hEdit, wDef.c_str());
     }
     return 0;
@@ -171,9 +164,7 @@ LRESULT ControllerWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) 
       int len = GetWindowTextLengthW(hEdit);
       std::wstring wText(len + 1, L'\0');
       GetWindowTextW(hEdit, &wText[0], len + 1);
-      int cbNeeded = WideCharToMultiByte(CP_ACP, 0, wText.c_str(), len, NULL, 0, NULL, NULL);
-      std::string text(cbNeeded, '\0');
-      WideCharToMultiByte(CP_ACP, 0, wText.c_str(), len, &text[0], cbNeeded, NULL, NULL);
+      std::string text = WideToUTF8(wText.c_str());
       p->SaveControllerJSON(text);
     }
     return 0;
@@ -184,10 +175,7 @@ LRESULT ControllerWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) 
     p->LoadControllerJSON();
     HWND hEdit = GetDlgItem(hWnd, IDC_MW_CTRL_JSON_EDIT);
     if (hEdit) {
-      const std::string& s = p->m_szControllerJSONText;
-      int wLen = MultiByteToWideChar(CP_ACP, 0, s.c_str(), (int)s.size(), NULL, 0);
-      std::wstring wJson(wLen, L'\0');
-      MultiByteToWideChar(CP_ACP, 0, s.c_str(), (int)s.size(), &wJson[0], wLen);
+      std::wstring wJson = UTF8ToWide(p->m_szControllerJSONText);
       SetWindowTextW(hEdit, wJson.c_str());
     }
     return 0;

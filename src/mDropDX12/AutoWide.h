@@ -3,7 +3,7 @@
 #ifdef WIN32
 #include <windows.h>
 
-inline wchar_t* AutoWideDup(const char* convert, UINT codePage = CP_ACP) {
+inline wchar_t* AutoWideDup(const char* convert, UINT codePage = CP_UTF8) {
   wchar_t* wide = 0;
   if (!convert)
     return 0;
@@ -22,7 +22,7 @@ inline wchar_t* AutoWideDup(const char* convert, UINT codePage = CP_ACP) {
 
 class AutoWide {
 public:
-  AutoWide(const char* convert, UINT codePage = CP_ACP) : wide(0) {
+  AutoWide(const char* convert, UINT codePage = CP_UTF8) : wide(0) {
     wide = AutoWideDup(convert, codePage);
   }
   ~AutoWide() {

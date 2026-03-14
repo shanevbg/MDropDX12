@@ -3286,13 +3286,7 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
   else if (wcsncmp(sMessage, L"DEAUTH_DEVICE|", 14) == 0) {
     extern TcpServer g_tcpServer;
     extern PipeServer g_pipeServer;
-    std::string deviceId;
-    const wchar_t* idW = sMessage + 14;
-    int len = WideCharToMultiByte(CP_UTF8, 0, idW, -1, NULL, 0, NULL, NULL);
-    if (len > 1) {
-      deviceId.resize(len - 1);
-      WideCharToMultiByte(CP_UTF8, 0, idW, -1, &deviceId[0], len, NULL, NULL);
-    }
+    std::string deviceId = WideToUTF8(sMessage + 14);
     g_tcpServer.RemoveAuthorizedDevice(deviceId);
     g_tcpServer.DisconnectDevice(deviceId);
     g_tcpServer.SaveAuthorizedDevices(GetConfigIniFile());
@@ -3304,16 +3298,12 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     auto devices = g_tcpServer.GetAuthorizedDevices();
     std::wstring response = L"DEVICES";
     for (auto& d : devices) {
-      wchar_t nameW[256] = {}, idW[256] = {}, dateW[64] = {};
-      MultiByteToWideChar(CP_UTF8, 0, d.id.c_str(), -1, idW, 256);
-      MultiByteToWideChar(CP_UTF8, 0, d.name.c_str(), -1, nameW, 256);
-      MultiByteToWideChar(CP_UTF8, 0, d.dateAdded.c_str(), -1, dateW, 64);
       response += L"|id=";
-      response += idW;
+      response += UTF8ToWide(d.id);
       response += L",name=";
-      response += nameW;
+      response += UTF8ToWide(d.name);
       response += L",added=";
-      response += dateW;
+      response += UTF8ToWide(d.dateAdded);
     }
     g_pipeServer.Send(response);
   }

@@ -123,7 +123,8 @@ typedef struct {
   int		nCursorPos;
   int		nSelAnchorPos;		// -1 if no selection made
   int 	bOvertypeMode;
-  wchar_t	szText[48000];
+  wchar_t	szText[48000];      // wide string editing (filenames, user text)
+  char	szCode[96000];      // narrow code editing (shader/equation ASCII code)
   wchar_t	szPrompt[512];
   wchar_t	szToolTip[512];
   char	szClipboard[48000];

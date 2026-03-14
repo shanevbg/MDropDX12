@@ -275,13 +275,13 @@ BOOL CALLBACK GetWindowNames(HWND h, LPARAM l) {
   if (h == NULL)
     return FALSE;
 
-  char search_window_name[MAX_PATH];
+  wchar_t search_window_name[MAX_PATH];
 
   if (IsWindow(h) && IsWindowVisible(h)) {
-    GetWindowTextA(h, search_window_name, MAX_PATH);
+    GetWindowTextW(h, search_window_name, MAX_PATH);
     if (search_window_name[0]) {
       // Does the search window name contain "MDropDX12 Visualizer" ?
-      if (strstr(search_window_name, "MDropDX12 Visualizer") != NULL) {
+      if (wcsstr(search_window_name, L"MDropDX12 Visualizer") != NULL) {
         nBeatDrops++;
       }
     }
@@ -2923,7 +2923,7 @@ static int StartAudioCaptureThread(HINSTANCE instance, int nestingLevel) {
     if (!pMMDevice) {
       hr = GetDefaultLoopbackDevice(&pMMDevice, deviceDisplayName);
       if (FAILED(hr)) {
-        MessageBoxA(NULL, "Could not find any suitable audio devices!", "MDropDX12 Error", MB_OK | MB_ICONERROR);
+        MessageBoxW(NULL, L"Could not find any suitable audio devices!", L"MDropDX12 Error", MB_OK | MB_ICONERROR);
         return -__LINE__;
       }
       bIsRenderDevice = true;
@@ -3139,13 +3139,8 @@ unsigned __stdcall DoSetup(void* param) {
         line.erase(0, 3);
       }
 
-      // Convert UTF-8 to wide string properly
-      std::wstring wLine;
-      if (!line.empty()) {
-        int size_needed = MultiByteToWideChar(CP_UTF8, 0, &line[0], (int)line.size(), NULL, 0);
-        wLine.resize(size_needed);
-        MultiByteToWideChar(CP_UTF8, 0, &line[0], (int)line.size(), &wLine[0], size_needed);
-      }
+      // Convert UTF-8 to wide string
+      std::wstring wLine = UTF8ToWide(line);
 
       // Trim whitespace
       wLine.erase(0, wLine.find_first_not_of(L" \t"));

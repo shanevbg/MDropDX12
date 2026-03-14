@@ -694,8 +694,8 @@ bool Engine::LaunchSprite(int nSpriteNum, int nSlot) {
       else
         sprintf(szLineName, "code_%d", line);
 
-      GetPrivateProfileString(sectionA, szLineName, "~!@#$", szTemp, 8192, AutoCharFn(m_szImgIniFile));	// fixme
-      len = lstrlen(szTemp);
+      GetPrivateProfileStringA(sectionA, szLineName, "~!@#$", szTemp, 8192, AutoCharFn(m_szImgIniFile));	// fixme
+      len = lstrlenA(szTemp);
 
       if ((strcmp(szTemp, "~!@#$") == 0) ||		// if the key was missing,
         (len >= 8191 - char_pos - 1))			// or if we're out of space

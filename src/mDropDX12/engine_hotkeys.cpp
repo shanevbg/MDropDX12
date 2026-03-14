@@ -958,9 +958,7 @@ bool Engine::DispatchHotkeyAction(int actionId)
                     return true;
                 }
                 if (uh.type == USER_HK_SCRIPT) {
-                    char narrow[512];
-                    WideCharToMultiByte(CP_UTF8, 0, uh.command.c_str(), -1, narrow, 512, NULL, NULL);
-                    ExecuteControllerCommand(std::string(narrow));
+                    ExecuteControllerCommand(WideToUTF8(uh.command));
                 } else {
                     LaunchOrFocusApp(uh.command);
                 }

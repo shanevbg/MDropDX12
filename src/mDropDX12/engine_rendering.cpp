@@ -656,7 +656,7 @@ void Engine::MyRenderUI(
         );
 
       lstrcpyW(buf, m_waitstring.szText);
-      lstrcpyA(bufA, (char*)m_waitstring.szText);
+      lstrcpyA(bufA, m_waitstring.szCode);
 
       int temp_cursor_pos = m_waitstring.nCursorPos;
       int temp_anchor_pos = m_waitstring.nSelAnchorPos;
@@ -801,7 +801,7 @@ void Engine::MyRenderUI(
             sprintf(buf2, "   %sX", &bufA[start]); // put a final 'X' instead of ' ' b/c CALCRECT returns w==0 if string is entirely whitespace!
             RECT r2 = rect;
             r2.bottom = 4096;
-            m_text.DrawTextA(GetFont(SIMPLE_FONT), buf2, -1, &r2, DT_CALCRECT /*| DT_WORDBREAK*/, 0xFFFFFFFF, false);
+            m_text.DrawText(GetFont(SIMPLE_FONT), buf2, -1, &r2, DT_CALCRECT /*| DT_WORDBREAK*/, 0xFFFFFFFF, false);
             int h = r2.bottom - r2.top;
             ypixels += h;
             bufA[pos] = ch;
@@ -857,7 +857,7 @@ void Engine::MyRenderUI(
             DWORD color = MENU_COLOR;
             if (m_waitstring.nCursorPos >= start && m_waitstring.nCursorPos <= pos)
               color = MENU_HILITE_COLOR;
-            rect.top += m_text.DrawTextA(GetFont(SIMPLE_FONT), buf2, -1, &rect, 0/*DT_WORDBREAK*/, color, false);
+            rect.top += m_text.DrawText(GetFont(SIMPLE_FONT), buf2, -1, &rect, 0/*DT_WORDBREAK*/, color, false);
             bufA[pos] = ch;
 
             if (rect.top > rect.bottom)

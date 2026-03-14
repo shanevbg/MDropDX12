@@ -64,8 +64,9 @@ void    GetDesktopFolder(char* szDesktopFolder); // should be MAX_PATH len.
 
 #include <shlobj.h>
 #include <list>
+#include <string>
 
-BOOL    DoExplorerMenu(HWND hwnd, LPCTSTR pszPath, POINT point);
+BOOL    DoExplorerMenu(HWND hwnd, const wchar_t* pszPath, POINT point);
 BOOL    DoExplorerMenu(HWND hwnd, LPITEMIDLIST pidl, POINT point);
 UINT    GetItemCount(LPITEMIDLIST pidl);
 LPITEMIDLIST GetNextItem(LPITEMIDLIST pidl);
@@ -136,5 +137,11 @@ void  DebugLogClearAll();                                                  // de
 
 // True when diagnostic files (diag_*.txt) should be written
 #define DLOG_DIAG_ENABLED() (g_debugLogLevel >= LOG_VERBOSE)
+
+// UTF-8 <-> Wide string conversion helpers
+std::wstring UTF8ToWide(const char* utf8);
+std::wstring UTF8ToWide(const std::string& utf8);
+std::string  WideToUTF8(const wchar_t* wide);
+std::string  WideToUTF8(const std::wstring& wide);
 
 #endif

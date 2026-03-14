@@ -1,4 +1,5 @@
 #include "tcp_server.h"
+#include "utility.h"
 #include <algorithm>
 
 thread_local TcpClientConnection* g_respondingTcpClient = nullptr;
@@ -155,28 +156,14 @@ void TcpServer::ProcessFrames(TcpClientConnection& client) {
         }
 
         // Convert to wide and dispatch
-        std::wstring wide = Utf8ToWide(utf8);
+        std::wstring wide = UTF8ToWide(utf8);
         if (!wide.empty() && m_onMessage) {
             m_onMessage(client, wide);
         }
     }
 }
 
-std::string TcpServer::WideToUtf8(const std::wstring& wide) {
-    if (wide.empty()) return {};
-    int len = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), (int)wide.size(), nullptr, 0, nullptr, nullptr);
-    std::string utf8(len, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), (int)wide.size(), &utf8[0], len, nullptr, nullptr);
-    return utf8;
-}
-
-std::wstring TcpServer::Utf8ToWide(const std::string& utf8) {
-    if (utf8.empty()) return {};
-    int len = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int)utf8.size(), nullptr, 0);
-    std::wstring wide(len, 0);
-    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int)utf8.size(), &wide[0], len);
-    return wide;
-}
+// WideToUtf8 / Utf8ToWide — now use free functions from utility.h (UTF8ToWide / WideToUTF8)
 
 void TcpServer::SendRaw(SOCKET sock, const uint8_t* data, int len) {
     u_long blocking = 0;
@@ -200,11 +187,11 @@ void TcpServer::SendTo(TcpClientConnection& client, const std::string& utf8Messa
 }
 
 void TcpServer::SendTo(TcpClientConnection& client, const std::wstring& message) {
-    SendTo(client, WideToUtf8(message));
+    SendTo(client, WideToUTF8(message));
 }
 
 void TcpServer::Broadcast(const std::wstring& message) {
-    std::string utf8 = WideToUtf8(message);
+    std::string utf8 = WideToUTF8(message);
     std::lock_guard<std::mutex> lock(m_clientsMutex);
     for (auto& c : m_clients) {
         if (c.authState == TcpAuthState::Authenticated) {
@@ -298,9 +285,9 @@ void TcpServer::LoadAuthorizedDevices(const std::wstring& iniPath) {
         if (wId.empty()) continue;
 
         AuthorizedDevice dev;
-        dev.id      = WideToUtf8(wId);
-        dev.name    = WideToUtf8(wName);
-        dev.dateAdded = WideToUtf8(wAdded);
+        dev.id      = WideToUTF8(wId);
+        dev.name    = WideToUTF8(wName);
+        dev.dateAdded = WideToUTF8(wAdded);
         m_authorizedDevices.push_back(std::move(dev));
     }
 }
@@ -315,13 +302,13 @@ void TcpServer::SaveAuthorizedDevices(const std::wstring& iniPath) {
         wchar_t keyBuf[64];
 
         swprintf(keyBuf, 64, L"device%d_id", i);
-        WritePrivateProfileStringW(L"AuthorizedDevices", keyBuf, Utf8ToWide(dev.id).c_str(), iniPath.c_str());
+        WritePrivateProfileStringW(L"AuthorizedDevices", keyBuf, UTF8ToWide(dev.id).c_str(), iniPath.c_str());
 
         swprintf(keyBuf, 64, L"device%d_name", i);
-        WritePrivateProfileStringW(L"AuthorizedDevices", keyBuf, Utf8ToWide(dev.name).c_str(), iniPath.c_str());
+        WritePrivateProfileStringW(L"AuthorizedDevices", keyBuf, UTF8ToWide(dev.name).c_str(), iniPath.c_str());
 
         swprintf(keyBuf, 64, L"device%d_added", i);
-        WritePrivateProfileStringW(L"AuthorizedDevices", keyBuf, Utf8ToWide(dev.dateAdded).c_str(), iniPath.c_str());
+        WritePrivateProfileStringW(L"AuthorizedDevices", keyBuf, UTF8ToWide(dev.dateAdded).c_str(), iniPath.c_str());
     }
 }
 

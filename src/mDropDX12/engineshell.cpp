@@ -180,7 +180,7 @@ extern int g_nHelpLineCount;
 // LJ DEBUG
 static int bdn = 0;
 static BOOL CALLBACK GetWindowNames(HWND h, LPARAM l) {
-  char search_window_name[MAX_PATH];
+  wchar_t search_window_name[MAX_PATH];
 
   if (h == NULL) {
     printf("GetWindowNames - null handle\n");
@@ -188,12 +188,9 @@ static BOOL CALLBACK GetWindowNames(HWND h, LPARAM l) {
   }
 
   if (IsWindow(h) && IsWindowVisible(h)) {
-    GetWindowTextA(h, search_window_name, MAX_PATH);
+    GetWindowTextW(h, search_window_name, MAX_PATH);
     if (search_window_name[0]) {
-      // printf("GetWindowNames - %s (%x)\n", search_window_name, h);
-      // Does the search window name contain "MDropDX12" ?
-      if (strstr(search_window_name, "MDropDX12 Visualizer") != NULL) {
-        // printf("Found BeatDrop (%d)\n", bdn);
+      if (wcsstr(search_window_name, L"MDropDX12 Visualizer") != NULL) {
         bdn++;
       }
     }
@@ -443,7 +440,7 @@ int EngineShell::InitVJStuff_DX9_REMOVED(RECT* pClientRect) {
       rect.bottom += upper_left_corner.y + 32;
     }
 
-    WNDCLASS wc = { 0 };
+    WNDCLASSW wc = { 0 };
     wc.lpfnWndProc = VJModeWndProc;				// our window procedure
     wc.hInstance = GetInstance();	// hInstance of DLL
     wc.hIcon = LoadIcon(GetInstance(), MAKEINTRESOURCE(IDI_ENGINE_ICON));
@@ -453,7 +450,7 @@ int EngineShell::InitVJStuff_DX9_REMOVED(RECT* pClientRect) {
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
 
-    if (!RegisterClass(&wc)) {
+    if (!RegisterClassW(&wc)) {
       MessageBoxW(NULL, wasabiApiLangString(IDS_ERROR_REGISTERING_WINDOW_CLASS_FOR_TEXT_WINDOW),
         wasabiApiLangString(IDS_MILKDROP_ERROR, title, 64),
         MB_OK | MB_SETFOREGROUND | MB_TOPMOST);
@@ -470,24 +467,21 @@ int EngineShell::InitVJStuff_DX9_REMOVED(RECT* pClientRect) {
     // to show the number of BeatDrop instances.
     // Copy this number to the VJ text window title
     // The render window handle is already saved
-    char consoletitle[64];
-    strcpy_s(consoletitle, 64, TEXT_WINDOW_CLASSNAME); // Default is the class name re-used
-    char temp[64];
-    int nc = GetWindowTextA(m_hRenderWnd, temp, 64);
+    wchar_t consoletitle[64];
+    wcscpy_s(consoletitle, 64, TEXT_WINDOW_CLASSNAME); // Default is the class name re-used
+    wchar_t temp[64];
+    int nc = GetWindowTextW(m_hRenderWnd, temp, 64);
     // The return value is the number of characters
     // Default is "MDropDX12 Visualizer" (20 chars)
-    // (see Milkdrop2PcmVisualzer.cpp)
     if (nc > 20) {
       // Get the _01 - _02 etc.. appended for multiple instances
-      std::string str1 = temp;
-      std::string str2 = str1.substr(20);
-      // Append to the text window title
-      strcat_s(consoletitle, 64, str2.c_str());
+      std::wstring suffix = std::wstring(temp).substr(20);
+      wcscat_s(consoletitle, 64, suffix.c_str());
     }
     // =====================================
 
     // Create the text window
-    m_hTextWnd = CreateWindowEx(
+    m_hTextWnd = CreateWindowExW(
       0,
       TEXT_WINDOW_CLASSNAME,				// our window class name
       // SPOUT
@@ -599,7 +593,7 @@ void EngineShell::CleanUpVJStuff() {
 
     if (m_bTextWindowClassRegistered) {
       //dumpmsg("Finish: unregistering text window class");
-      UnregisterClass(TEXT_WINDOW_CLASSNAME, GetInstance()); // unregister window class
+      UnregisterClassW(TEXT_WINDOW_CLASSNAME, GetInstance()); // unregister window class
       m_bTextWindowClassRegistered = false;
       //dumpmsg("Finish: text window class unregistered");
     }
@@ -1024,7 +1018,7 @@ int EngineShell::PluginPreInitialize(HWND hWinampWnd, HINSTANCE hWinampInstance)
   wcscpy(m_szPluginsDirPath, m_szExeDir);
 
   swprintf(m_szConfigIniFile, L"%s%s", m_szPluginsDirPath, INIFILE);
-  lstrcpyn(m_szConfigIniFileA, AutoCharFn(m_szConfigIniFile), MAX_PATH);
+  lstrcpynA(m_szConfigIniFileA, AutoCharFn(m_szConfigIniFile), MAX_PATH);
 
   // PRIVATE CONFIG PANEL SETTINGS
   // m_multisample_* removed in DX12 migration (MSAA configured via PSO instead)
@@ -1189,15 +1183,15 @@ void EngineShell::ReadConfig() {
   //GUID m_adapter_guid_desktop
   //GUID m_adapter_guid_windowed
   char str[256];
-  GetPrivateProfileString("settings", "adapter_guid_fullscreen", "", str, sizeof(str) - 1, m_szConfigIniFileA);
+  GetPrivateProfileStringA("settings", "adapter_guid_fullscreen", "", str, sizeof(str) - 1, m_szConfigIniFileA);
   TextToGuid(str, &m_adapter_guid_fullscreen);
-  GetPrivateProfileString("settings", "adapter_guid_desktop", "", str, sizeof(str) - 1, m_szConfigIniFileA);
+  GetPrivateProfileStringA("settings", "adapter_guid_desktop", "", str, sizeof(str) - 1, m_szConfigIniFileA);
   TextToGuid(str, &m_adapter_guid_desktop);
-  GetPrivateProfileString("settings", "adapter_guid_windowed", "", str, sizeof(str) - 1, m_szConfigIniFileA);
+  GetPrivateProfileStringA("settings", "adapter_guid_windowed", "", str, sizeof(str) - 1, m_szConfigIniFileA);
   TextToGuid(str, &m_adapter_guid_windowed);
-  GetPrivateProfileString("settings", "adapter_devicename_fullscreen", "", m_adapter_devicename_fullscreen, sizeof(m_adapter_devicename_fullscreen) - 1, m_szConfigIniFileA);
-  GetPrivateProfileString("settings", "adapter_devicename_desktop", "", m_adapter_devicename_desktop, sizeof(m_adapter_devicename_desktop) - 1, m_szConfigIniFileA);
-  GetPrivateProfileString("settings", "adapter_devicename_windowed", "", m_adapter_devicename_windowed, sizeof(m_adapter_devicename_windowed) - 1, m_szConfigIniFileA);
+  GetPrivateProfileStringA("settings", "adapter_devicename_fullscreen", "", m_adapter_devicename_fullscreen, sizeof(m_adapter_devicename_fullscreen) - 1, m_szConfigIniFileA);
+  GetPrivateProfileStringA("settings", "adapter_devicename_desktop", "", m_adapter_devicename_desktop, sizeof(m_adapter_devicename_desktop) - 1, m_szConfigIniFileA);
+  GetPrivateProfileStringA("settings", "adapter_devicename_windowed", "", m_adapter_devicename_windowed, sizeof(m_adapter_devicename_windowed) - 1, m_szConfigIniFileA);
 
   // FONTS
   READ_FONT(0);
@@ -1269,14 +1263,14 @@ void EngineShell::WriteConfig() {
   //GUID m_adapter_guid_windowed
   char str[256];
   GuidToText(&m_adapter_guid_fullscreen, str, sizeof(str));
-  WritePrivateProfileString("settings", "adapter_guid_fullscreen", str, m_szConfigIniFileA);
+  WritePrivateProfileStringA("settings", "adapter_guid_fullscreen", str, m_szConfigIniFileA);
   GuidToText(&m_adapter_guid_desktop, str, sizeof(str));
-  WritePrivateProfileString("settings", "adapter_guid_desktop", str, m_szConfigIniFileA);
+  WritePrivateProfileStringA("settings", "adapter_guid_desktop", str, m_szConfigIniFileA);
   GuidToText(&m_adapter_guid_windowed, str, sizeof(str));
-  WritePrivateProfileString("settings", "adapter_guid_windowed", str, m_szConfigIniFileA);
-  WritePrivateProfileString("settings", "adapter_devicename_fullscreen", m_adapter_devicename_fullscreen, m_szConfigIniFileA);
-  WritePrivateProfileString("settings", "adapter_devicename_desktop", m_adapter_devicename_desktop, m_szConfigIniFileA);
-  WritePrivateProfileString("settings", "adapter_devicename_windowed", m_adapter_devicename_windowed, m_szConfigIniFileA);
+  WritePrivateProfileStringA("settings", "adapter_guid_windowed", str, m_szConfigIniFileA);
+  WritePrivateProfileStringA("settings", "adapter_devicename_fullscreen", m_adapter_devicename_fullscreen, m_szConfigIniFileA);
+  WritePrivateProfileStringA("settings", "adapter_devicename_desktop", m_adapter_devicename_desktop, m_szConfigIniFileA);
+  WritePrivateProfileStringA("settings", "adapter_devicename_windowed", m_adapter_devicename_windowed, m_szConfigIniFileA);
 
   // FONTS
   WRITE_FONT(0);

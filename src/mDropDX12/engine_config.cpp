@@ -421,7 +421,7 @@ void Engine::SetAudioDeviceDisplayName(const wchar_t* displayName, bool isRender
 
 bool Engine::CheckDX9DLL() {
   // Try to load the DLL manually
-  HMODULE hD3DX = LoadLibrary(TEXT("D3DX9_43.dll"));
+  HMODULE hD3DX = LoadLibraryW(L"D3DX9_43.dll");
 
   if (!hD3DX) {
     ShowDirectXMissingMessage();
@@ -465,11 +465,11 @@ bool Engine::CheckForDirectX9c() {
 }
 
 void Engine::ShowDirectXMissingMessage() {
-  if (MessageBoxA(NULL,
-    "Could not initialize DirectX 9.\n\nPlease install the DirectX End-User Legacy Runtimes.\n\nOpen Download-Website now?",
-    "MDropDX12 Visualizer", MB_YESNO | MB_SETFOREGROUND | MB_TOPMOST) == IDYES) {
+  if (MessageBoxW(NULL,
+    L"Could not initialize DirectX 9.\n\nPlease install the DirectX End-User Legacy Runtimes.\n\nOpen Download-Website now?",
+    L"MDropDX12 Visualizer", MB_YESNO | MB_SETFOREGROUND | MB_TOPMOST) == IDYES) {
     // open website in browser
-    ShellExecuteA(NULL, "open", "https://www.microsoft.com/en-us/download/details.aspx?id=35", NULL, NULL, SW_SHOWNORMAL);
+    ShellExecuteW(NULL, L"open", L"https://www.microsoft.com/en-us/download/details.aspx?id=35", NULL, NULL, SW_SHOWNORMAL);
   }
 }
 

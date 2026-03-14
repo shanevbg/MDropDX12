@@ -70,8 +70,7 @@ private:
     void SendRaw(SOCKET sock, const uint8_t* data, int len);
     void CheckTimeouts();
 
-    static std::string WideToUtf8(const std::wstring& wide);
-    static std::wstring Utf8ToWide(const std::string& utf8);
+    // UTF-8 conversion: use free functions UTF8ToWide() / WideToUTF8() from utility.h
 
     SOCKET m_listenSocket = INVALID_SOCKET;
     int m_port = 9270;

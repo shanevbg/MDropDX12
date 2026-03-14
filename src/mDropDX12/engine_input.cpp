@@ -700,7 +700,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
       if ((wParam >= ' ' && wParam <= 'z') || wParam == '{' || wParam == '}') {
         int len;
         if (m_waitstring.bDisplayAsCode)
-          len = lstrlenA((char*)m_waitstring.szText);
+          len = lstrlenA(m_waitstring.szCode);
         else
           len = lstrlenW(m_waitstring.szText);
 
@@ -737,11 +737,11 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
               // overtype mode
               for (int rep = 0; rep < nRepeat; rep++) {
                 if (m_waitstring.nCursorPos == len) {
-                  lstrcatA((char*)m_waitstring.szText, buf);
+                  lstrcatA(m_waitstring.szCode, buf);
                   len++;
                 }
                 else {
-                  char* ptr = (char*)m_waitstring.szText;
+                  char* ptr = m_waitstring.szCode;
                   *(ptr + m_waitstring.nCursorPos) = buf[0];
                 }
                 m_waitstring.nCursorPos++;
@@ -749,7 +749,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
             }
             else {
               // insert mode:
-              char* ptr = (char*)m_waitstring.szText;
+              char* ptr = m_waitstring.szCode;
               for (int rep = 0; rep < nRepeat; rep++) {
                 for (int i = len; i >= m_waitstring.nCursorPos; i--)
                   *(ptr + i + 1) = *(ptr + i);
@@ -1099,7 +1099,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
         case VK_HOME:	m_waitstring.nCursorPos = 0;	return 0; // we processed (or absorbed) the key
         case VK_END:
           if (m_waitstring.bDisplayAsCode) {
-            m_waitstring.nCursorPos = lstrlenA((char*)m_waitstring.szText);
+            m_waitstring.nCursorPos = lstrlenA(m_waitstring.szCode);
           }
           else {
             m_waitstring.nCursorPos = lstrlenW(m_waitstring.szText);
@@ -1135,7 +1135,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
         case VK_RIGHT:
           for (int rep = 0; rep < nRepeat; rep++) {
             if (m_waitstring.bDisplayAsCode) {
-              if (m_waitstring.nCursorPos < (int)lstrlenA((char*)m_waitstring.szText))
+              if (m_waitstring.nCursorPos < (int)lstrlenA(m_waitstring.szCode))
                 m_waitstring.nCursorPos++;
             }
             else {
@@ -1170,7 +1170,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
           else if (m_waitstring.nCursorPos > 0) {
             int len;
             if (m_waitstring.bDisplayAsCode) {
-              len = lstrlenA((char*)m_waitstring.szText);
+              len = lstrlenA(m_waitstring.szCode);
             }
             else {
               len = lstrlenW(m_waitstring.szText);
@@ -1186,7 +1186,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
             }
 
             if (m_waitstring.bDisplayAsCode) {
-              char* ptr = (char*)m_waitstring.szText;
+              char* ptr = m_waitstring.szCode;
               for (int i = 0; i < copy_chars; i++)
                 *(ptr + dst_pos + i) = *(ptr + src_pos + i);
             }
@@ -1204,8 +1204,8 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
           }
           else {
             if (m_waitstring.bDisplayAsCode) {
-              int len = lstrlenA((char*)m_waitstring.szText);
-              char* ptr = (char*)m_waitstring.szText;
+              int len = lstrlenA(m_waitstring.szCode);
+              char* ptr = m_waitstring.szCode;
               for (int i = m_waitstring.nCursorPos; i <= len - nRepeat; i++)
                 *(ptr + i) = *(ptr + i + nRepeat);
             }
@@ -1289,8 +1289,8 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
               if (m_waitstring.nSelAnchorPos != -1)
                 WaitString_NukeSelection();
 
-              int len = lstrlenA((char*)m_waitstring.szText);
-              char* ptr = (char*)m_waitstring.szText;
+              int len = lstrlenA(m_waitstring.szCode);
+              char* ptr = m_waitstring.szCode;
               if (len + 1 < m_waitstring.nMaxLen) {
                 // insert a linefeed.  Use CTRL+return to accept changes in this case.
                 for (int pos = len + 1; pos > m_waitstring.nCursorPos; pos--)
@@ -1463,7 +1463,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
         if (GetFocus() == GetPluginWindow()) {
           if (!IsBorderlessFullscreen(GetPluginWindow())) {
             bool isShiftPressed = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-            if (isShiftPressed || MessageBoxA(GetPluginWindow(), "Close MDropDX12 Visualizer?\n\n(You may also use SHIFT+ESC or RIGHT+LEFT MOUSE BUTTON\nto close without confirmation)", "MDropDX12 Visualizer", MB_YESNO | MB_TOPMOST) == IDYES) {
+            if (isShiftPressed || MessageBoxW(GetPluginWindow(), L"Close MDropDX12 Visualizer?\n\n(You may also use SHIFT+ESC or RIGHT+LEFT MOUSE BUTTON\nto close without confirmation)", L"MDropDX12 Visualizer", MB_YESNO | MB_TOPMOST) == IDYES) {
               PostMessage(hWnd, WM_CLOSE, 0, 0);
             }
             return 0;
@@ -1906,12 +1906,12 @@ void Engine::WaitString_NukeSelection() {
     // nuke selection.  note: start & end are INCLUSIVE.
     int start = (m_waitstring.nCursorPos < m_waitstring.nSelAnchorPos) ? m_waitstring.nCursorPos : m_waitstring.nSelAnchorPos;
     int end = (m_waitstring.nCursorPos > m_waitstring.nSelAnchorPos) ? m_waitstring.nCursorPos - 1 : m_waitstring.nSelAnchorPos - 1;
-    int len = (m_waitstring.bDisplayAsCode ? lstrlenA((char*)m_waitstring.szText) : lstrlenW(m_waitstring.szText));
+    int len = (m_waitstring.bDisplayAsCode ? lstrlenA(m_waitstring.szCode) : lstrlenW(m_waitstring.szText));
     int how_far_to_shift = end - start + 1;
     int num_chars_to_shift = len - end;		// includes NULL char
 
     if (m_waitstring.bDisplayAsCode) {
-      char* ptr = (char*)m_waitstring.szText;
+      char* ptr = m_waitstring.szCode;
       for (int i = 0; i < num_chars_to_shift; i++)
         *(ptr + start + i) = *(ptr + start + i + how_far_to_shift);
     }
@@ -1943,7 +1943,7 @@ void Engine::WaitString_Copy() {
     int chars_to_copy = end - start + 1;
 
     if (m_waitstring.bDisplayAsCode) {
-      char* ptr = (char*)m_waitstring.szText;
+      char* ptr = m_waitstring.szCode;
       for (int i = 0; i < chars_to_copy; i++)
         m_waitstring.szClipboard[i] = *(ptr + start + i);
       m_waitstring.szClipboard[chars_to_copy] = 0;
@@ -1985,7 +1985,7 @@ void Engine::WaitString_Paste() {
     int chars_to_insert;
 
     if (m_waitstring.bDisplayAsCode) {
-      len = lstrlenA((char*)m_waitstring.szText);
+      len = lstrlenA(m_waitstring.szCode);
       chars_to_insert = lstrlenA(m_waitstring.szClipboard);
     }
     else {
@@ -2005,7 +2005,7 @@ void Engine::WaitString_Paste() {
 
     int i;
     if (m_waitstring.bDisplayAsCode) {
-      char* ptr = (char*)m_waitstring.szText;
+      char* ptr = m_waitstring.szCode;
       for (i = len; i >= m_waitstring.nCursorPos; i--)
         *(ptr + i + chars_to_insert) = *(ptr + i);
       for (i = 0; i < chars_to_insert; i++)
@@ -2024,7 +2024,7 @@ void Engine::WaitString_Paste() {
 void Engine::WaitString_SeekLeftWord() {
   // move to beginning of prior word
   if (m_waitstring.bDisplayAsCode) {
-    char* ptr = (char*)m_waitstring.szText;
+    char* ptr = m_waitstring.szCode;
     while (m_waitstring.nCursorPos > 0 &&
       !IsAlphanumericChar(*(ptr + m_waitstring.nCursorPos - 1)))
       m_waitstring.nCursorPos--;
@@ -2050,9 +2050,9 @@ void Engine::WaitString_SeekRightWord() {
   //testing  lotsa   stuff
 
   if (m_waitstring.bDisplayAsCode) {
-    int len = lstrlenA((char*)m_waitstring.szText);
+    int len = lstrlenA(m_waitstring.szCode);
 
-    char* ptr = (char*)m_waitstring.szText;
+    char* ptr = m_waitstring.szCode;
     while (m_waitstring.nCursorPos < len &&
       IsAlphanumericChar(*(ptr + m_waitstring.nCursorPos)))
       m_waitstring.nCursorPos++;
@@ -2077,7 +2077,7 @@ void Engine::WaitString_SeekRightWord() {
 int Engine::WaitString_GetCursorColumn() {
   if (m_waitstring.bDisplayAsCode) {
     int column = 0;
-    char* ptr = (char*)m_waitstring.szText;
+    char* ptr = m_waitstring.szCode;
     while (m_waitstring.nCursorPos - column - 1 >= 0 &&
       *(ptr + m_waitstring.nCursorPos - column - 1) != LINEFEED_CONTROL_CHAR)
       column++;
@@ -2094,7 +2094,7 @@ int	Engine::WaitString_GetLineLength() {
   int line_length = 0;
 
   if (m_waitstring.bDisplayAsCode) {
-    char* ptr = (char*)m_waitstring.szText;
+    char* ptr = m_waitstring.szCode;
     while (*(ptr + line_start + line_length) != 0 &&
       *(ptr + line_start + line_length) != LINEFEED_CONTROL_CHAR)
       line_length++;
@@ -2126,7 +2126,7 @@ void Engine::WaitString_SeekDownOneLine() {
   int column = g_engine.WaitString_GetCursorColumn();
   int newpos = m_waitstring.nCursorPos;
 
-  char* ptr = (char*)m_waitstring.szText;
+  char* ptr = m_waitstring.szCode;
   while (*(ptr + newpos) != 0 && *(ptr + newpos) != LINEFEED_CONTROL_CHAR)
     newpos++;
 

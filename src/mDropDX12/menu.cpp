@@ -364,7 +364,10 @@ void CMilkMenu::OnWaitStringAccept(wchar_t* szNewString) {
   assert(pItem->m_type == MENUITEMTYPE_STRING);
 
   // apply the edited string
-  lstrcpyW((wchar_t*)(addr), szNewString);
+  if (g_engine.m_waitstring.bDisplayAsCode)
+    lstrcpyA((char*)(addr), g_engine.m_waitstring.szCode);
+  else
+    lstrcpyW((wchar_t*)(addr), szNewString);
 
   // if user gave us a callback function pointer, call it now
   if (pItem->m_pCallbackFn) {
@@ -506,12 +509,11 @@ LRESULT CMilkMenu::HandleKeydown(HWND hwnd, UINT message, WPARAM wParam, LPARAM 
           g_engine.m_waitstring.bDisplayAsCode = true;
           g_engine.m_waitstring.nSelAnchorPos = -1;
           g_engine.m_waitstring.nMaxLen = pItem->m_wParam ? pItem->m_wParam : 8190;
-          g_engine.m_waitstring.nMaxLen = min(g_engine.m_waitstring.nMaxLen, sizeof(g_engine.m_waitstring.szText) - 16);
-          //lstrcpyW(g_engine.m_waitstring.szText, (wchar_t *)addr);
-          lstrcpyA((char*)g_engine.m_waitstring.szText, (char*)addr);
+          g_engine.m_waitstring.nMaxLen = min(g_engine.m_waitstring.nMaxLen, (int)sizeof(g_engine.m_waitstring.szCode) - 16);
+          lstrcpyA(g_engine.m_waitstring.szCode, (char*)addr);
           swprintf(g_engine.m_waitstring.szPrompt, wasabiApiLangString(IDS_ENTER_THE_NEW_STRING), pItem->m_szName);
           lstrcpyW(g_engine.m_waitstring.szToolTip, pItem->m_szToolTip);
-          g_engine.m_waitstring.nCursorPos = (int)strlen/*wcslen*/((char*)g_engine.m_waitstring.szText);
+          g_engine.m_waitstring.nCursorPos = (int)strlen(g_engine.m_waitstring.szCode);
           if (pItem->m_nLastCursorPos < g_engine.m_waitstring.nCursorPos)
             g_engine.m_waitstring.nCursorPos = pItem->m_nLastCursorPos;
           break;

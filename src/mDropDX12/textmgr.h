@@ -98,6 +98,10 @@ public:
 
   // Text drawing — queues entries; actual rendering happens in DrawNow().
   // DT_CALCRECT calls are handled immediately via glyph metrics measurement.
+  // Note: #undef DrawText to prevent Win32 macro from clobbering our method names
+#ifdef DrawText
+#undef DrawText
+#endif
   int  DrawText(void* pFont, char* szText, RECT* pRect, DWORD flags, DWORD color, bool bBlackBox, DWORD boxColor = 0xFF000000);
   int  DrawText(void* pFont, char* szText, int len, RECT* pRect, DWORD flags, DWORD color, bool bBox, DWORD boxColor = 0xFF000000) {
     return DrawTextW(pFont, AutoWide(szText), pRect, flags, color, bBox, boxColor);

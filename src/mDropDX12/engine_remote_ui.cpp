@@ -225,15 +225,15 @@ void RemoteWindow::DoBuildControls() {
 
       col.pszText = (LPWSTR)L"Device Name";
       col.cx = MulDiv(tabRW * 40, 1, 100);
-      ListView_InsertColumn(hList, 0, &col);
+      SendMessageW(hList, LVM_INSERTCOLUMNW, 0, (LPARAM)&col);
 
       col.pszText = (LPWSTR)L"Device ID";
       col.cx = MulDiv(tabRW * 35, 1, 100);
-      ListView_InsertColumn(hList, 1, &col);
+      SendMessageW(hList, LVM_INSERTCOLUMNW, 1, (LPARAM)&col);
 
       col.pszText = (LPWSTR)L"Date Added";
       col.cx = MulDiv(tabRW * 25, 1, 100);
-      ListView_InsertColumn(hList, 2, &col);
+      SendMessageW(hList, LVM_INSERTCOLUMNW, 2, (LPARAM)&col);
 
       py += listH + gap;
     }
@@ -435,7 +435,7 @@ LRESULT RemoteWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     HWND hList = GetDlgItem(hWnd, IDC_MW_TCP_DEVICE_LIST);
     if (!hList) return 0;
 
-    int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+    int sel = (int)SendMessageW(hList, LVM_GETNEXTITEM, -1, LVNI_SELECTED);
     if (sel < 0) return 0;
 
     // Get the device ID from column 1
@@ -446,11 +446,10 @@ LRESULT RemoteWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     item.iSubItem = 1;
     item.pszText = deviceIdW;
     item.cchTextMax = 256;
-    ListView_GetItem(hList, &item);
+    SendMessageW(hList, LVM_GETITEMW, 0, (LPARAM)&item);
 
     // Convert wide to narrow for the API
-    char deviceId[256] = {};
-    WideCharToMultiByte(CP_UTF8, 0, deviceIdW, -1, deviceId, 256, NULL, NULL);
+    std::string deviceId = WideToUTF8(deviceIdW);
 
     g_tcpServer.RemoveAuthorizedDevice(deviceId);
     g_tcpServer.DisconnectDevice(deviceId);
@@ -555,31 +554,30 @@ void RemoteWindow::RefreshDeviceList() {
   HWND hList = GetDlgItem(m_hWnd, IDC_MW_TCP_DEVICE_LIST);
   if (!hList) return;
 
-  ListView_DeleteAllItems(hList);
+  SendMessageW(hList, LVM_DELETEALLITEMS, 0, 0);
 
   auto devices = g_tcpServer.GetAuthorizedDevices();
   for (int i = 0; i < (int)devices.size(); i++) {
     // Convert narrow strings to wide
-    wchar_t nameW[256] = {}, idW[256] = {}, dateW[64] = {};
-    MultiByteToWideChar(CP_UTF8, 0, devices[i].name.c_str(), -1, nameW, 256);
-    MultiByteToWideChar(CP_UTF8, 0, devices[i].id.c_str(), -1, idW, 256);
-    MultiByteToWideChar(CP_UTF8, 0, devices[i].dateAdded.c_str(), -1, dateW, 64);
+    std::wstring nameW = UTF8ToWide(devices[i].name);
+    std::wstring idW = UTF8ToWide(devices[i].id);
+    std::wstring dateW = UTF8ToWide(devices[i].dateAdded);
 
     LVITEMW item = {};
     item.mask = LVIF_TEXT;
     item.iItem = i;
     item.iSubItem = 0;
-    item.pszText = nameW;
-    ListView_InsertItem(hList, &item);
+    item.pszText = (LPWSTR)nameW.c_str();
+    SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&item);
 
     LVITEMW sub = {};
     sub.mask = LVIF_TEXT;
     sub.iItem = i;
     sub.iSubItem = 1;
-    sub.pszText = idW;
+    sub.pszText = (LPWSTR)idW.c_str();
     SendMessageW(hList, LVM_SETITEMTEXTW, i, (LPARAM)&sub);
     sub.iSubItem = 2;
-    sub.pszText = dateW;
+    sub.pszText = (LPWSTR)dateW.c_str();
     SendMessageW(hList, LVM_SETITEMTEXTW, i, (LPARAM)&sub);
   }
 }

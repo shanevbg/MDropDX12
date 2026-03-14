@@ -2020,7 +2020,7 @@ int Engine::AllocateMyNonDx9Stuff() {
   bSuccess = ReadFileToString(L"data\\include.fx", m_szShaderIncludeText, sizeof(m_szShaderIncludeText) - 4, false);
   if (!bSuccess) return false;
   StripComments(m_szShaderIncludeText);
-  m_nShaderIncludeTextLen = lstrlen(m_szShaderIncludeText);
+  m_nShaderIncludeTextLen = lstrlenA(m_szShaderIncludeText);
   bSuccess |= ReadFileToString(L"data\\warp_vs.fx", m_szDefaultWarpVShaderText, sizeof(m_szDefaultWarpVShaderText), true);
   if (!bSuccess) return false;
   bSuccess |= ReadFileToString(L"data\\warp_ps.fx", m_szDefaultWarpPShaderText, sizeof(m_szDefaultWarpPShaderText), true);
