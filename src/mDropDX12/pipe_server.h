@@ -54,6 +54,9 @@ public:
     // Get the full exe path of the last connected client (empty if never connected)
     const wchar_t* GetLastClientExePath() const { return m_szLastClientExePath; }
 
+    // Parse SIGNAL| messages into PostMessage calls (public for LaunchMessage routing)
+    bool DispatchSignal(const wchar_t* signal);
+
 private:
     static unsigned __stdcall ServerThread(void* pParam);
     static unsigned __stdcall ClientThread(void* pParam);
@@ -62,9 +65,6 @@ private:
 
     // Parse incoming pipe messages and dispatch to the target window
     void DispatchMessage(const wchar_t* message, size_t len);
-
-    // Parse SIGNAL| messages into PostMessage calls
-    bool DispatchSignal(const wchar_t* signal);
 
     // Move client from active to finished list (called by handler on disconnect)
     void RemoveClient(PipeClientContext* ctx);

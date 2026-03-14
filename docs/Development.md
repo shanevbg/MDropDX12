@@ -457,7 +457,7 @@ MDropDX12 uses Named Pipe IPC (`\\.\pipe\Milkwave_<PID>`) for communication with
 
 ### TCP Server
 
-The TCP server (`tcp_server.cpp`) provides network-based remote control, complementing the local Named Pipe. It uses the same `LaunchMessage()` dispatch for commands.
+The TCP server (`tcp_server.cpp`) provides network-based remote control for LAN clients. It handles only TCP-specific concerns (framing, authentication, connection management) and forwards all commands through the same IPC dispatch path as the Named Pipe.
 
 - **Port**: 9270 (default, configurable via INI)
 - **Framing**: 4-byte little-endian length prefix + UTF-8 payload
@@ -466,7 +466,12 @@ The TCP server (`tcp_server.cpp`) provides network-based remote control, complem
 - **Limits**: 16 concurrent clients, 60-second inactivity timeout, 64KB receive buffer
 - **mDNS**: Service advertised as `_milkwave._tcp` for automatic discovery
 
-After authentication, clients send the same commands as Named Pipe (minus the `SIGNAL|` prefix — TCP commands go directly through `LaunchMessage()`).
+**Command routing** (App.cpp `onMessage` handler): TCP does NOT process commands itself — it forwards them to the existing IPC path:
+
+- `SIGNAL|*` messages → `g_pipeServer.DispatchSignal()` (same as Named Pipe)
+- All other messages → `PostMessage(WM_MW_IPC_MESSAGE)` → `LaunchMessage()` (same as Named Pipe)
+
+After authentication, clients send the exact same commands and signals as Named Pipe clients. TCP is a transport layer, not a command handler.
 
 ### mDNS and UDP Beacon
 

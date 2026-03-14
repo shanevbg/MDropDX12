@@ -2104,6 +2104,13 @@ LPCWSTR ConvertToLPCWSTR(const std::wstring& wstr) {
 }
 
 void Engine::LaunchMessage(wchar_t* sMessage) {
+  // Route SIGNAL| commands through pipe server dispatch (PostMessage to render window)
+  if (wcsncmp(sMessage, L"SIGNAL|", 7) == 0) {
+    extern PipeServer g_pipeServer;
+    g_pipeServer.DispatchSignal(sMessage + 7);
+    return;
+  }
+
   if (wcsncmp(sMessage, L"MSG|", 4) == 0) {
 
     std::wstring message(sMessage + 4); // Remove "MSG|"

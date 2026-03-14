@@ -2683,7 +2683,7 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
         // onMessage handler
         [hwnd](TcpClientConnection& client, const std::wstring& msg) {
           g_respondingTcpClient = &client;
-          // Dispatch same as pipe: heap-copy and PostMessage
+          // Forward all commands through IPC dispatch (LaunchMessage handles everything)
           wchar_t* copy = (wchar_t*)malloc((msg.size() + 1) * sizeof(wchar_t));
           if (copy) {
             wcscpy_s(copy, msg.size() + 1, msg.c_str());
