@@ -1,26 +1,25 @@
-# MDropDX12 v2.2.0
+# MDropDX12 v2.3.0
 
-Preset rendering accuracy release. Fixes long-standing math and shader issues that caused many presets to render darker, incorrectly filtered, or visually different compared to the reference Milkwave Visualizer.
+Shader compatibility and rendering completeness release. Fixes preset rendering failures, adds missing DX12 motion vector rendering, and improves shader compilation compatibility for complex raymarching presets.
 
 Special thanks to [IkeC](https://github.com/IkeC) for all his brilliant work on [Milkwave](https://github.com/IkeC/Milkwave) — the reference visualizer, testing feedback, and tireless collaboration that continues to drive MDropDX12 forward.
 
 ## Preset Rendering Fixes
 
-- **Fix sqrt() emulation to match DX9 hardware behavior**: DX9 compiles `sqrt(x)` as `x * rsq(x)`, returning `sign(x) * sqrt(|x|)` for negative inputs. The previous `_safe_sqrt` used `sqrt(abs(x))`, shifting feedback equilibria and causing darkness/brightness issues across many presets with complex feedback loops. Now matches DX9 exactly.
-- **Fix sampler addressing for prefixed noise/random textures**: Presets using `sampler_pw_*`, `sampler_fc_*`, `sampler_pc_*` prefixed samplers were falling through to the default LINEAR+WRAP sampler instead of POINT+WRAP, LINEAR+CLAMP, or POINT+CLAMP. Added 36 `replaceTex2D` entries for all prefixed noise, noisevol, and random texture variants. Fixes excessive glow and incorrect filtering in affected presets.
-- **Fix vertex decay color for custom warp shader presets**: Custom warp shader presets now receive white vertices (shader handles decay internally), matching Milkwave's `WarpedBlit_Shaders` behavior. Previously the `cDecay` vertex color was incorrectly applied, causing premature darkening.
-- **Add NaN-safe shader intrinsics for DX12 IEEE 754 compliance**: DX12 strict IEEE 754 math produces NaN where DX9 NVIDIA hardware returned finite values. Safe wrappers (`_safe_sqrt`, `_safe_tan`, `_safe_pow`, `_safe_asin`, `_safe_acos`, `_safe_normalize`) prevent NaN propagation through the feedback loop.
-- **Fix comp vertex shader uv_orig binding**: Warp and comp vertex shaders now use separate TEXCOORD0/1/2 inputs matching the vertex layout descriptor.
+- **Fix `_safe_sqrt` to return always-positive values**: Changed from `sign(x)*sqrt(abs(x))` to `sqrt(abs(x))`, matching DX9 SM3.0 native sqrt behavior. The sign-preserving form created singularities in presets like "martin - axon3" where `sqrt(negative_uv)+offset` crossed zero, producing infinity that blew out to white through the feedback loop.
+- **Implement DX12 motion vector rendering**: Ported `DrawMotionVectors()` to DX12 using `PSO_LINE_ALPHABLEND_WFVERTEX`. Motion vectors are now drawn into VS[0] before the warp pass, entering the feedback loop as persistent colored traces. Fixes presets like "Illusion & Rovastar - Clouded Bottle" which appeared too dark because their motion vector lines (the primary light source) were missing.
+- **Fix `[loop]` attribute injection for shader compatibility**: Inject `[loop]` only on `while` loops (raymarching constructs), not `for` loops. Small fixed-count `for` loops caused `error X3531` when marked `[loop]` because the compiler insists on unrolling them. Fixes "LamersAss - The Vortex 2077rmx" and "lara - Flexi ate a magical broccoli" presets which had black screens.
 
-## Other Fixes
+## Shader Compilation Improvements
 
-- **Fix screenshot red/blue channel swap**: WIC PNG encoder silently reinterprets RGBA as BGRA. Screenshots now correctly swap R↔B before writing.
-- **Increase default ToolWindow font size**: Default 16px → 20px, max 24px → 32px for better readability on high-DPI displays.
+- **Add `D3DCOMPILE_PARTIAL_PRECISION` flag**: Hints to the SM5.0 compiler that lower precision is acceptable, nudging instruction selection closer to SM3.0 hardware behavior for complex raymarching presets.
+- **Add `D3DCOMPILE_PREFER_FLOW_CONTROL` flag**: Hints compiler to prefer dynamic branching over predication, reinforcing `[loop]` injection for SM3.0-like codegen in branching shaders.
+- **Fix D3DXCompileShader flag passthrough**: All caller flags now pass through to D3DCompile instead of only mapping DEBUG and SKIPVALIDATION.
+- **Replace `i = I_MAX` break hack with native `break`**: SM3.0+ supports break natively; the transpiler hack caused incorrect loop behavior with some D3DCompile optimization paths.
 
 ## Diagnostics
 
-- Added `DIAG_DISPLAY_MODE` IPC command for raw render target inspection
-- Shader text dump diagnostics for warp and comp shaders
+- **Bytecode disassembly dump**: At verbose log level, writes SM5.0 instruction listing to `log/diag_asm_warp.txt` / `log/diag_asm_comp.txt` via `D3DDisassemble()` for diagnosing codegen differences.
 
 ## Installation
 

@@ -2,7 +2,7 @@
 
 MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geisswerks.com/milkdrop/) visualizer engine, with GPU-accelerated text rendering, an in-app settings UI, and broad preset compatibility improvements. Works with [Milkwave](https://github.com/IkeC/Milkwave) Remote via Named Pipe IPC for extended control (messaging, wave manipulation, screenshots, and more).
 
-**Current version: 2.2.0** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
+**Current version: 2.3.0** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
 
 [**Click here**](https://github.com/shanevbg/MDropDX12/releases/latest) to get the latest version.
 
@@ -114,9 +114,9 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geiss
 | \[/\] | X push +/- | ✅ |
 | {/} | Y push +/- | ✅ |
 | </> | Rotation +/- | ✅ |
-| P/p | Video echo alpha +/- | ❌ Video echo not implemented in DX12 |
-| Q/q | Video echo zoom +/- | ❌ Video echo not implemented in DX12 |
-| F/f | Video echo orientation | ❌ Video echo not implemented in DX12 |
+| P/p | Video echo alpha +/- | ✅ (non-shader presets via auto-gen comp) |
+| Q/q | Video echo zoom +/- | ✅ (non-shader presets via auto-gen comp) |
+| F/f | Video echo orientation | ✅ (non-shader presets via auto-gen comp) |
 
 ### Audio & Settings
 

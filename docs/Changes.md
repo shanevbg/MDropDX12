@@ -1,5 +1,25 @@
 # MDropDX12 Changelog
 
+## v2.3.0 (2026-03-14)
+
+Shader compatibility and rendering completeness release.
+
+### Preset Rendering Fixes
+
+- **Fix `_safe_sqrt` to return always-positive values**: Changed from `sign(x)*sqrt(abs(x))` to `sqrt(abs(x))`, matching DX9 SM3.0 native sqrt behavior. The sign-preserving form created singularities in presets where `sqrt(negative)+offset` crossed zero, producing infinity through the feedback loop. Fixes "martin - axon3" (blown out white) and similar presets.
+- **Implement DX12 motion vector rendering**: New `DX12_DrawMotionVectors()` draws motion vector lines into VS[0] before the warp pass using `PSO_LINE_ALPHABLEND_WFVERTEX`. Fixes presets like "Illusion & Rovastar - Clouded Bottle" which appeared too dark because their motion vector lines were missing.
+- **Fix `[loop]` attribute injection**: Only inject `[loop]` on `while` loops (raymarching constructs), not `for` loops. Small fixed-count `for` loops caused `error X3531` when marked `[loop]`. Fixes black-screen failures in several MilkDrop2077 presets.
+
+### Shader Compilation Improvements
+
+- Add `D3DCOMPILE_PARTIAL_PRECISION` and `D3DCOMPILE_PREFER_FLOW_CONTROL` flags for SM3.0-like codegen
+- Fix D3DXCompileShader flag passthrough (all caller flags now reach D3DCompile)
+- Replace `i = I_MAX` break hack with native `break` statement
+
+### Diagnostics
+
+- Bytecode disassembly dump at verbose log level (`log/diag_asm_*.txt`) via `D3DDisassemble()`
+
 ## v2.2.0 (2026-03-14)
 
 Preset rendering accuracy release. Fixes long-standing math and shader issues that caused many presets to render darker, incorrectly filtered, or visually different compared to the reference Milkwave Visualizer.
