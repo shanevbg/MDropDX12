@@ -9,6 +9,7 @@
 #include "engine_helpers.h"
 #include "tool_window.h"
 #include "pipe_server.h"
+#include "tcp_server.h"
 #include "audio_capture.h"
 #include <thread>
 #include "utility.h"
@@ -3281,6 +3282,40 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
       pcmMin, pcmMax, pcm0, pcm1, pcm2, pcm3, pcm4);
     extern PipeServer g_pipeServer;
     g_pipeServer.Send(buf);
+  }
+  else if (wcsncmp(sMessage, L"DEAUTH_DEVICE|", 14) == 0) {
+    extern TcpServer g_tcpServer;
+    extern PipeServer g_pipeServer;
+    std::string deviceId;
+    const wchar_t* idW = sMessage + 14;
+    int len = WideCharToMultiByte(CP_UTF8, 0, idW, -1, NULL, 0, NULL, NULL);
+    if (len > 1) {
+      deviceId.resize(len - 1);
+      WideCharToMultiByte(CP_UTF8, 0, idW, -1, &deviceId[0], len, NULL, NULL);
+    }
+    g_tcpServer.RemoveAuthorizedDevice(deviceId);
+    g_tcpServer.DisconnectDevice(deviceId);
+    g_tcpServer.SaveAuthorizedDevices(GetConfigIniFile());
+    g_pipeServer.Send(L"DEAUTH_OK");
+  }
+  else if (wcscmp(sMessage, L"LIST_DEVICES") == 0) {
+    extern TcpServer g_tcpServer;
+    extern PipeServer g_pipeServer;
+    auto devices = g_tcpServer.GetAuthorizedDevices();
+    std::wstring response = L"DEVICES";
+    for (auto& d : devices) {
+      wchar_t nameW[256] = {}, idW[256] = {}, dateW[64] = {};
+      MultiByteToWideChar(CP_UTF8, 0, d.id.c_str(), -1, idW, 256);
+      MultiByteToWideChar(CP_UTF8, 0, d.name.c_str(), -1, nameW, 256);
+      MultiByteToWideChar(CP_UTF8, 0, d.dateAdded.c_str(), -1, dateW, 64);
+      response += L"|id=";
+      response += idW;
+      response += L",name=";
+      response += nameW;
+      response += L",added=";
+      response += dateW;
+    }
+    g_pipeServer.Send(response);
   }
   else {
     // Fallback: treat as pipe-chained script command (NEXT, PREV, LOCK,
