@@ -1092,6 +1092,7 @@ static void ExitMirrorWatermark(HWND hWnd, bool bKeepMirrorsActive = false) {
     g_engine.m_bMirrorsActive = false;
 
   g_engine.m_bMirrorWatermarkActive = false;
+  g_engine.m_szWatermarkRenderDevice[0] = L'\0';
   g_engine.SaveDisplayOutputSettings();
   g_engine.RefreshDisplaysTab();
   g_engine.AddNotification(L"Mirror watermark OFF");
@@ -1924,6 +1925,9 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     // Phase 2 (wParam=1): activate mirrors (deferred so fullscreen resize completes first)
 
     if (!g_engine.m_bMirrorWatermarkActive && wParam == 0) {
+      // Re-enumerate displays to ensure fresh monitor rects/device names
+      g_engine.EnumerateDisplayOutputs();
+
       // Save render window state
       mirrorWM_prevMirrorsActive = g_engine.m_bMirrorsActive;
       mirrorWM_prevOpacity = g_engine.fOpacity;
@@ -1939,6 +1943,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
       {
         RECT bestRect = {};
         long bestArea = 0;
+        wchar_t bestDevice[32] = {};
         for (auto& out : g_engine.m_displayOutputs) {
           if (out.config.type != DisplayOutputType::Monitor) continue;
           RECT rc = out.config.rcMonitor;
@@ -1948,6 +1953,7 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
           if (area > bestArea) {
             bestArea = area;
             bestRect = rc;
+            wcscpy_s(bestDevice, out.config.szDeviceName);
           }
         }
         if (bestArea > 0) {
@@ -1963,6 +1969,9 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
               bestRect.right - bestRect.left,
               bestRect.bottom - bestRect.top,
               SWP_FRAMECHANGED | SWP_NOACTIVATE);
+          // Store target device name for deterministic skip detection —
+          // MonitorFromWindow() can return wrong results during window transitions
+          wcscpy_s(g_engine.m_szWatermarkRenderDevice, bestDevice);
         }
       }
       // Overwrite the restore values so exiting fullscreen returns to the original

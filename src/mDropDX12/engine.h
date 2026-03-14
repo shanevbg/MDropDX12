@@ -461,6 +461,7 @@ public:
   bool m_bMirrorClassRegistered = false;
   bool m_bMirrorsActive = false;       // Displays tab button; always starts off
   bool m_bMirrorWatermarkActive = false; // True while in mirror watermark mode (App.cpp manages)
+  wchar_t m_szWatermarkRenderDevice[32] = {}; // Device name of the display render moved to (for deterministic skip)
   bool m_bWatermarkActive = false;       // True while in single-window watermark mode (App.cpp manages)
   bool m_bMirrorModeForAltS = false;   // When true, ALT-S activates mirrors+fullscreen instead of stretch
   bool m_bMirrorPromptDisabled = false; // Skip "no mirrors enabled" prompt; auto-enable all

@@ -2872,19 +2872,40 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     g_pipeServer.Send(response.c_str());
   }
   else if (wcsncmp(sMessage, L"SET_MIRROR_OPACITY=", 19) == 0) {
-    // Set opacity for all monitor mirrors.  Format: SET_MIRROR_OPACITY=<1-100>
-    int val = _wtoi(sMessage + 19);
+    // Set opacity for monitor mirrors.
+    // Format: SET_MIRROR_OPACITY=<1-100>         (all monitors)
+    //         SET_MIRROR_OPACITY=<N>,<1-100>      (DISPLAY N by device name, e.g. \\.\DISPLAY1 = 1)
+    const wchar_t* args = sMessage + 19;
+    const wchar_t* comma = wcschr(args, L',');
+    int displayNum = -1; // -1 = all
+    int val;
+    if (comma) {
+      displayNum = _wtoi(args);  // DISPLAY number from device name
+      val = _wtoi(comma + 1);
+    } else {
+      val = _wtoi(args);
+    }
     if (val < 1) val = 1;
     if (val > 100) val = 100;
-    for (auto& out : m_displayOutputs)
-      if (out.config.type == DisplayOutputType::Monitor)
-        out.config.nOpacity = val;
+    for (auto& out : m_displayOutputs) {
+      if (out.config.type != DisplayOutputType::Monitor) continue;
+      if (displayNum > 0) {
+        // Match by DISPLAY number in device name (e.g. \\.\DISPLAY2 → 2)
+        wchar_t target[32];
+        swprintf_s(target, L"\\\\.\\DISPLAY%d", displayNum);
+        if (wcscmp(out.config.szDeviceName, target) != 0) continue;
+      }
+      out.config.nOpacity = val;
+    }
     m_bMirrorStylesDirty.store(true);
     SaveDisplayOutputSettings();
     RefreshDisplaysTab();
     extern PipeServer g_pipeServer;
     wchar_t buf[64];
-    swprintf_s(buf, L"MIRROR_OPACITY=%d", val);
+    if (displayNum > 0)
+      swprintf_s(buf, L"MIRROR_OPACITY=%d,%d", displayNum, val);
+    else
+      swprintf_s(buf, L"MIRROR_OPACITY=%d", val);
     g_pipeServer.Send(buf);
   }
   else if (wcsncmp(sMessage, L"SET_MIRROR_CLICKTHRU=", 21) == 0) {

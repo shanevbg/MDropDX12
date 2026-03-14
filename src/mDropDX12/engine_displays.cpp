@@ -391,20 +391,27 @@ void Engine::InitDisplayOutput(DisplayOutput& out)
             DebugLogA(logBuf, LOG_WARN);
         }
 
-        // Safety: don't mirror the monitor hosting the render window
-        if (m_lpDX->GetHwnd()) {
-            HMONITOR hRenderMon = MonitorFromWindow(m_lpDX->GetHwnd(), MONITOR_DEFAULTTONEAREST);
-            if (hRenderMon) {
-                MONITORINFOEXW mi = { sizeof(mi) };
-                if (GetMonitorInfoW(hRenderMon, &mi) &&
-                    wcscmp(mi.szDevice, out.config.szDeviceName) == 0) {
-                    char logBuf[256];
-                    sprintf(logBuf, "InitDisplayOutput: Skipping %ls — render window's monitor\n",
-                        out.config.szDeviceName);
-                    DebugLogA(logBuf, LOG_WARN);
-                    out.bSkippedSameMonitor = true;
-                    return;
+        // Safety: don't mirror the monitor hosting the render window.
+        // In watermark mode, use the stored target device name for deterministic detection.
+        {
+            wchar_t renderDevice[32] = {};
+            if (m_bMirrorWatermarkActive && m_szWatermarkRenderDevice[0]) {
+                wcscpy_s(renderDevice, m_szWatermarkRenderDevice);
+            } else if (m_lpDX->GetHwnd()) {
+                HMONITOR hRenderMon = MonitorFromWindow(m_lpDX->GetHwnd(), MONITOR_DEFAULTTONEAREST);
+                if (hRenderMon) {
+                    MONITORINFOEXW mi = { sizeof(mi) };
+                    if (GetMonitorInfoW(hRenderMon, &mi))
+                        wcscpy_s(renderDevice, mi.szDevice);
                 }
+            }
+            if (renderDevice[0] && wcscmp(renderDevice, out.config.szDeviceName) == 0) {
+                char logBuf[256];
+                sprintf(logBuf, "InitDisplayOutput: Skipping %ls — render window's monitor\n",
+                    out.config.szDeviceName);
+                DebugLogA(logBuf, LOG_WARN);
+                out.bSkippedSameMonitor = true;
+                return;
             }
         }
 
@@ -676,15 +683,34 @@ void Engine::SendToDisplayOutputs()
     // Dynamically re-check which monitor the render window is on.
     // If the render window moved, clear stale skip flags and mark the new monitor.
     if (m_bMirrorsActive && m_lpDX->GetHwnd()) {
-        HMONITOR hRenderMon = MonitorFromWindow(m_lpDX->GetHwnd(), MONITOR_DEFAULTTONEAREST);
-        MONITORINFOEXW rmi = { sizeof(rmi) };
-        bool gotInfo = hRenderMon && GetMonitorInfoW(hRenderMon, &rmi);
+        // In watermark mode, use the stored target device name — MonitorFromWindow()
+        // can return wrong results during window transitions, causing inconsistent skips
+        wchar_t renderDevice[32] = {};
+        if (m_bMirrorWatermarkActive && m_szWatermarkRenderDevice[0]) {
+            wcscpy_s(renderDevice, m_szWatermarkRenderDevice);
+        } else {
+            HMONITOR hRenderMon = MonitorFromWindow(m_lpDX->GetHwnd(), MONITOR_DEFAULTTONEAREST);
+            MONITORINFOEXW rmi = { sizeof(rmi) };
+            if (hRenderMon && GetMonitorInfoW(hRenderMon, &rmi))
+                wcscpy_s(renderDevice, rmi.szDevice);
+        }
+        bool gotDevice = renderDevice[0] != L'\0';
+        RECT renderRect;
+        GetWindowRect(m_lpDX->GetHwnd(), &renderRect);
+        static wchar_t lastDetected[32] = {};
+        if (gotDevice && wcscmp(lastDetected, renderDevice) != 0) {
+            DLOG_INFO("Mirror skip: render at (%d,%d)-(%d,%d), device=%ls%ls",
+                renderRect.left, renderRect.top, renderRect.right, renderRect.bottom,
+                renderDevice, m_bMirrorWatermarkActive ? L" (watermark)" : L"");
+            wcscpy_s(lastDetected, renderDevice);
+        }
         for (auto& out : m_displayOutputs) {
             if (out.config.type != DisplayOutputType::Monitor || !out.config.bEnabled)
                 continue;
-            bool isRenderMon = gotInfo && wcscmp(rmi.szDevice, out.config.szDeviceName) == 0;
+            bool isRenderMon = gotDevice && wcscmp(renderDevice, out.config.szDeviceName) == 0;
             if (isRenderMon && !out.bSkippedSameMonitor) {
                 // Render window moved TO this monitor — skip it and destroy its mirror
+                DLOG_INFO("Mirror skip: marking %ls as render monitor (skipping)", out.config.szDeviceName);
                 out.bSkippedSameMonitor = true;
                 if (out.monitorState) {
                     m_lpDX->WaitForGpu();
@@ -692,6 +718,7 @@ void Engine::SendToDisplayOutputs()
                 }
             } else if (!isRenderMon && out.bSkippedSameMonitor) {
                 // Render window moved AWAY — clear skip so mirror can be created
+                DLOG_INFO("Mirror skip: clearing skip for %ls (render moved away)", out.config.szDeviceName);
                 out.bSkippedSameMonitor = false;
             }
         }
