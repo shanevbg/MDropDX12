@@ -200,13 +200,15 @@ float4 _safe_normalize(float4 x) { float d = dot(x,x); return d > 0 ? x * rsqrt(
 // mus = .2/(sqrt(x)+.2) then produce negative mus, which UNORM clamps to 0.
 // Using abs(x) would always return positive sqrt, changing the sign of downstream
 // expressions and shifting feedback equilibrium (making presets too dark or bright).
-// Using max(0,x) returns 0, making mus=1.0 (too bright).
-// Correct emulation: sign(x)*sqrt(|x|) matches DX9's x*rsq(x) exactly.
-// For x=0: sign(0)=0, so result is 0 (no NaN, no division-by-zero risk from sqrt).
-float  _safe_sqrt(float  x) { return sign(x) * sqrt(abs(x)); }
-float2 _safe_sqrt(float2 x) { return sign(x) * sqrt(abs(x)); }
-float3 _safe_sqrt(float3 x) { return sign(x) * sqrt(abs(x)); }
-float4 _safe_sqrt(float4 x) { return sign(x) * sqrt(abs(x)); }
+// DX9 NVIDIA: sqrt(neg) returns sqrt(abs(x)) — always positive.
+// sign(x)*sqrt(|x|) was wrong: returns NEGATIVE for negative inputs,
+// creating singularities in presets like axon3 (sqrt(uv6.y)+.2 crosses zero).
+// Using max(0,x) returns 0, making 1/sqrt(0)=inf (also bad).
+// Correct emulation: sqrt(abs(x)) — always positive, matches DX9 NVIDIA.
+float  _safe_sqrt(float  x) { return sqrt(abs(x)); }
+float2 _safe_sqrt(float2 x) { return sqrt(abs(x)); }
+float3 _safe_sqrt(float3 x) { return sqrt(abs(x)); }
+float4 _safe_sqrt(float4 x) { return sqrt(abs(x)); }
 
 // NaN-safe log: DX9 log(x<=0) returns a large negative; DX12 returns -inf or NaN.
 // Clamp to a tiny positive value to avoid -inf/NaN propagation.

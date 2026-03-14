@@ -748,12 +748,9 @@ inline HRESULT D3DXCompileShader(
     if (ppErrorMsgs)     *ppErrorMsgs     = nullptr;
     if (ppConstantTable) *ppConstantTable = nullptr;
 
-    // Map legacy flags to D3DCOMPILE flags
-    UINT compileFlags = D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
-    if (Flags & D3DXSHADER_DEBUG)
-        compileFlags |= D3DCOMPILE_DEBUG;
-    if (Flags & D3DXSHADER_SKIPVALIDATION)
-        compileFlags |= D3DCOMPILE_SKIP_VALIDATION;
+    // Map legacy flags to D3DCOMPILE flags — pass through all caller flags
+    // and ensure backwards compatibility is always set
+    UINT compileFlags = Flags | D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
 
     const char* sm5Profile = MapToSM5Profile(pProfile);
 
