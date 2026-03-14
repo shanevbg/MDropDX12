@@ -1468,6 +1468,35 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   }
 
 
+  // Inject [loop] attribute before for/while loops in preset shaders.
+  // SM3.0 hardware couldn't unroll 100+ iteration loops; SM5.0 may attempt
+  // partial unrolling which changes codegen and floating-point accumulation.
+  // [loop] forces dynamic branching, producing results closer to SM3.0 behavior.
+  {
+    char* p = &szShaderText[shaderStartPos];
+    while (*p) {
+      // Match 'for' or 'while' keyword: preceded by non-alnum, followed by space or '('
+      bool isFor = (p[0] == 'f' && p[1] == 'o' && p[2] == 'r' && (p[3] == ' ' || p[3] == '('));
+      bool isWhile = (p[0] == 'w' && p[1] == 'h' && p[2] == 'i' && p[3] == 'l' && p[4] == 'e' && (p[5] == ' ' || p[5] == '('));
+      if (isFor || isWhile) {
+        // Check preceding character is not alphanumeric (avoid matching "transform", etc.)
+        bool prevOk = (p == &szShaderText[shaderStartPos]) ||
+                       (!isalnum((unsigned char)*(p - 1)) && *(p - 1) != '_');
+        // Check [loop] not already present
+        bool alreadyHasLoop = (p >= &szShaderText[shaderStartPos] + 6) &&
+                               (strncmp(p - 6, "[loop]", 6) == 0 || strncmp(p - 7, "[loop] ", 7) == 0);
+        if (prevOk && !alreadyHasLoop) {
+          // Insert "[loop] " before the keyword
+          lstrcpyA(temp, p);
+          memcpy(p, "[loop] ", 7);
+          lstrcpyA(p + 7, temp);
+          p += 7; // skip past inserted text
+        }
+      }
+      p++;
+    }
+  }
+
   // Strip DX9-style "sampler sampler_randNN;" declarations from preset text.
   // The include already declares "Texture2D sampler_randNN;" — having both
   // causes a redefinition error (sampler = SamplerState in SM5.0).

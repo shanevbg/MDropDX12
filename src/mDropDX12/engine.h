@@ -1533,6 +1533,7 @@ public:
   int         GetNextFreeSupertextIndex();
   void        DoCustomSoundAnalysis();
   void        DrawMotionVectors();
+  void        DX12_DrawMotionVectors();
 
   bool        LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompileOnly);
   void        UvToMathSpace(float u, float v, float* rad, float* ang);
