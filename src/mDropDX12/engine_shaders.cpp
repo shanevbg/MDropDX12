@@ -1301,6 +1301,143 @@ static void FixShadowedBuiltins(char* szShaderText) {
   free(tmp);
 }
 
+// Preprocessor: rename local variables that shadow user-defined functions.
+// GLSL allows `vec2 R2D = uv * R2D(100.);` where R2D is both a function and local variable.
+// HLSL rejects this with X3005: "identifier represents a variable, not a function".
+// We scan for function definitions, then rename variable-use occurrences of the same name.
+static void FixShadowedUserFunctions(char* szShaderText) {
+  auto isIdentChar = [](char c) -> bool {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+  };
+
+  // Type keywords that can precede a function definition or variable declaration
+  static const char* types[] = {
+    "float4x4", "float4x3", "float3x4", "float3x3", "float2x2",
+    "float4", "float3", "float2", "float",
+    "half4", "half3", "half2", "half",
+    "int4", "int3", "int2", "int",
+    "uint4", "uint3", "uint2", "uint",
+    "double4", "double3", "double2", "double",
+    "void", "bool",
+  };
+  auto isTypeKeyword = [&](const char* p) -> bool {
+    for (auto& t : types) {
+      int tlen = (int)strlen(t);
+      if (!strncmp(p, t, tlen) && !isalnum((unsigned char)p[tlen]) && p[tlen] != '_')
+        return true;
+    }
+    return false;
+  };
+
+  int srcLen = (int)strlen(szShaderText);
+
+  // Phase 1: collect user-defined function names.
+  // Pattern: typeKeyword whitespace identifier '(' — where identifier is NOT a known keyword.
+  struct FuncName { char name[128]; int len; };
+  FuncName funcNames[64];
+  int nFuncs = 0;
+
+  for (const char* s = szShaderText; *s && nFuncs < 64; s++) {
+    if (!isTypeKeyword(s)) continue;
+    const char* afterType = s;
+    while (*afterType && isIdentChar(*afterType)) afterType++;
+    if (*afterType != ' ' && *afterType != '\t' && *afterType != '\n' && *afterType != '\r') continue;
+    while (*afterType == ' ' || *afterType == '\t' || *afterType == '\n' || *afterType == '\r') afterType++;
+    // Read identifier
+    const char* idStart = afterType;
+    while (isIdentChar(*afterType)) afterType++;
+    int idLen = (int)(afterType - idStart);
+    if (idLen == 0 || idLen >= 127) continue;
+    // Must be followed by '('
+    const char* afterId = afterType;
+    while (*afterId == ' ' || *afterId == '\t') afterId++;
+    if (*afterId != '(') continue;
+    // Skip common keywords that look like functions but aren't
+    if (idLen == 2 && !strncmp(idStart, "if", 2)) continue;
+    if (idLen == 3 && !strncmp(idStart, "for", 3)) continue;
+    if (idLen == 5 && !strncmp(idStart, "while", 5)) continue;
+    // Check it's not already a built-in (handled by FixShadowedBuiltins)
+    // Store the name
+    char funcName[128];
+    memcpy(funcName, idStart, idLen);
+    funcName[idLen] = 0;
+    // Deduplicate
+    bool dup = false;
+    for (int i = 0; i < nFuncs; i++) {
+      if (funcNames[i].len == idLen && !strcmp(funcNames[i].name, funcName)) { dup = true; break; }
+    }
+    if (!dup) {
+      memcpy(funcNames[nFuncs].name, funcName, idLen + 1);
+      funcNames[nFuncs].len = idLen;
+      nFuncs++;
+    }
+  }
+
+  if (nFuncs == 0) return;
+
+  // Phase 2: for each function name, check if it's also used as a variable
+  char* tmp = (char*)malloc(srcLen + 32768);
+  if (!tmp) return;
+
+  for (int fi = 0; fi < nFuncs; fi++) {
+    const char* name = funcNames[fi].name;
+    int nameLen = funcNames[fi].len;
+
+    // Check if this name is also declared as a variable (type name without '(' after)
+    bool shadowed = false;
+    for (const char* s = szShaderText; *s; s++) {
+      if (!isTypeKeyword(s)) continue;
+      const char* afterType = s;
+      while (*afterType && isIdentChar(*afterType)) afterType++;
+      if (*afterType != ' ' && *afterType != '\t' && *afterType != '\n' && *afterType != '\r') continue;
+      while (*afterType == ' ' || *afterType == '\t' || *afterType == '\n' || *afterType == '\r') afterType++;
+      if (strncmp(afterType, name, nameLen) == 0 && !isIdentChar(afterType[nameLen])) {
+        const char* afterName = afterType + nameLen;
+        while (*afterName == ' ' || *afterName == '\t') afterName++;
+        if (*afterName != '(') {
+          shadowed = true;
+          break;
+        }
+      }
+    }
+
+    if (!shadowed) continue;
+
+    DLOG_INFO("FixShadowedUserFunctions: renaming variable '%s' -> '_mw_%s'", name, name);
+
+    // Rename non-function-call occurrences (same logic as FixShadowedBuiltins)
+    int wi = 0;
+    for (int i = 0; i < srcLen; ) {
+      if (strncmp(&szShaderText[i], name, nameLen) == 0 &&
+          (i == 0 || !isIdentChar(szShaderText[i - 1])) &&
+          !isIdentChar(szShaderText[i + nameLen])) {
+        const char* after = &szShaderText[i + nameLen];
+        while (*after == ' ' || *after == '\t') after++;
+        if (*after == '(') {
+          // Function call or definition — keep original name
+          memcpy(&tmp[wi], name, nameLen);
+          wi += nameLen;
+          i += nameLen;
+        } else {
+          // Variable reference — rename to _mw_<name>
+          memcpy(&tmp[wi], "_mw_", 4);
+          wi += 4;
+          memcpy(&tmp[wi], name, nameLen);
+          wi += nameLen;
+          i += nameLen;
+        }
+      } else {
+        tmp[wi++] = szShaderText[i++];
+      }
+    }
+    tmp[wi] = 0;
+    memcpy(szShaderText, tmp, wi + 1);
+    srcLen = wi;
+  }
+
+  free(tmp);
+}
+
 bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char* szProfile,
   LPD3DXCONSTANTTABLE* ppConstTable, void** ppShader, int shaderType, bool bHardErrors, bool compileOnly,
   LPD3DXBUFFER* ppBytecodeOut, const char* szDiagName) {
@@ -1630,6 +1767,9 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
 
   // Fix variables that shadow HLSL built-in functions (e.g. float2 pow = ...)
   FixShadowedBuiltins(szShaderText);
+
+  // Fix variables that shadow user-defined functions (e.g. float2 R2D = mul(uv, R2D(...)))
+  FixShadowedUserFunctions(szShaderText);
 
   // Fix self-referencing variable redeclarations (e.g. float3 ret1 = ret1;)
   FixSelfRedeclarations(szShaderText);

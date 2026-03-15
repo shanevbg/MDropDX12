@@ -49,9 +49,9 @@ This is a comp shader preset with 3D raymarched tunnel geometry. Both renderers 
 | --------- | -------- |
 | ![MDropDX12](images/comparison/04_shadow_party_mdrop.jpg) | ![Milkwave](images/comparison/04_shadow_party_milkwave.jpg) |
 
-MDropDX12 renders completely black. Milkwave shows the intended output: a raymarched scene of reflective green-to-yellow spheres in a recursive lattice with specular highlights and ambient occlusion. This is likely a shader compilation failure or missing texture binding on DX12 — the comp shader may use features that fail silently.
+Both render the raymarched scene of reflective green-to-yellow spheres in a recursive lattice with specular highlights and ambient occlusion. The sphere geometry, color gradients, and lattice structure match. Previously rendered black on MDropDX12 due to HLSL error X3005 — a local variable `R2D` shadowed a user-defined function of the same name (valid in GLSL, not HLSL). Fixed by `FixShadowedUserFunctions` in engine_shaders.cpp.
 
-**Verdict:** Broken on MDropDX12 — black screen.
+**Verdict:** Visually equivalent (fixed).
 
 ### 5. Illusion & Rovastar - Clouded Bottle
 
@@ -132,7 +132,7 @@ Both render the hypnotic double spiral with concentric rings in green, pink/red,
 | 1 | Martin - blue haze | Equivalent |
 | 2 | BrainStain - re entry | **Different** — MDropDX12 much brighter |
 | 3 | balkhan + IkeC - Tunnel Cylinders | Equivalent |
-| 4 | Marex + IkeC - Shadow Party Shader Jam 2025 | **Broken** — black on MDropDX12 |
+| 4 | Marex + IkeC - Shadow Party Shader Jam 2025 | Equivalent (fixed — was black, X3005 variable/function shadow) |
 | 5 | Illusion & Rovastar - Clouded Bottle | Equivalent |
 | 6 | martin - deep blue | Equivalent |
 | 7 | martin - push ax | Equivalent |
@@ -141,4 +141,4 @@ Both render the hypnotic double spiral with concentric rings in green, pink/red,
 | 10 | martin - axon3 | Equivalent |
 | 11 | Zylot - Spiral (Hypnotic) Phat Double Spiral Mix | Equivalent |
 
-**9 of 11 presets** render equivalently. Two presets show differences: one brightness/feedback divergence (#2) and one black-screen shader failure (#4).
+**10 of 11 presets** render equivalently. One preset (#2) shows a brightness/feedback divergence. Preset #4 was fixed — variable shadowing a user-defined function caused HLSL error X3005.
