@@ -62,3 +62,13 @@ MDropDX12 renders completely black. Milkwave shows the intended output: a raymar
 Both render the same dark scene with green waveform threads crossing in an X-pattern. The wave line density, color (dark green), and crossing geometry are consistent. MDropDX12 shows slightly more blue tint in some threads; Milkwave's lines appear marginally denser. The overall composition and mood match.
 
 **Verdict:** Visually equivalent.
+
+### 6. martin - deep blue
+
+| MDropDX12 | Milkwave |
+| --------- | -------- |
+| ![MDropDX12](images/comparison/06_deep_blue_mdrop.jpg) | ![Milkwave](images/comparison/06_deep_blue_milkwave.jpg) |
+
+Both render deep-sea organic tentacle/tube structures against a dark navy background with matching cyan-green edge glow and internal blue shading. The tube shapes, branching patterns, and color gradients are consistent. Milkwave's tubes appear slightly thicker due to different window resolution at capture time.
+
+**Verdict:** Visually equivalent.
