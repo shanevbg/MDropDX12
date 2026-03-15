@@ -3405,6 +3405,7 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
 
   // Release Spout wrapped backbuffers before render targets are destroyed
   SpoutReleaseWraps();
+  ReleaseDisplayOutputWraps();
 
   // One funky thing here: if we're switching between fullscreen and windowed,
   //  or doing any other thing that causes all this stuff to get reloaded in a second,

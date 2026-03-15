@@ -593,6 +593,24 @@ void Engine::DestroyDisplayOutput(DisplayOutput& out)
     }
 }
 
+void Engine::ReleaseDisplayOutputWraps()
+{
+    for (auto& out : m_displayOutputs) {
+        if (out.spoutState) {
+            auto& ss = *out.spoutState;
+            for (int n = 0; n < DXC_FRAME_COUNT; n++) {
+                if (ss.wrappedBackBuffers[n]) {
+                    ss.wrappedBackBuffers[n]->Release();
+                    ss.wrappedBackBuffers[n] = nullptr;
+                }
+            }
+            ss.sender.CloseDirectX12();
+            ss.bReady = false;
+            out.spoutState.reset();
+        }
+    }
+}
+
 void Engine::DestroyAllDisplayOutputs()
 {
     for (auto& out : m_displayOutputs)
