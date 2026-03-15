@@ -52,3 +52,13 @@ This is a comp shader preset with 3D raymarched tunnel geometry. Both renderers 
 MDropDX12 renders completely black. Milkwave shows the intended output: a raymarched scene of reflective green-to-yellow spheres in a recursive lattice with specular highlights and ambient occlusion. This is likely a shader compilation failure or missing texture binding on DX12 — the comp shader may use features that fail silently.
 
 **Verdict:** Broken on MDropDX12 — black screen.
+
+### 5. Illusion & Rovastar - Clouded Bottle
+
+| MDropDX12 | Milkwave |
+| --------- | -------- |
+| ![MDropDX12](images/comparison/05_clouded_bottle_mdrop.jpg) | ![Milkwave](images/comparison/05_clouded_bottle_milkwave.jpg) |
+
+Both render the same dark scene with green waveform threads crossing in an X-pattern. The wave line density, color (dark green), and crossing geometry are consistent. MDropDX12 shows slightly more blue tint in some threads; Milkwave's lines appear marginally denser. The overall composition and mood match.
+
+**Verdict:** Visually equivalent.
