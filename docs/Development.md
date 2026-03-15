@@ -446,6 +446,10 @@ MDropDX12 uses Named Pipe IPC (`\\.\pipe\Milkwave_<PID>`) for communication with
    | `COL_BRIGHTNESS=-1.0-1.0` | Set brightness |
    | `FFT_ATTACK=value` | Set FFT attack |
    | `FFT_DECAY=value` | Set FFT decay |
+   | `SET_DEVICE_VOLUME=0.0-1.0` | Set Windows device volume |
+   | `GET_DEVICE_VOLUME` | Query device volume and mute state |
+   | `SET_DEVICE_MUTE=0\|1` | Set device mute state |
+   | `TOGGLE_DEVICE_MUTE` | Toggle device mute |
    | `SHADER_IMPORT=path` | Import shader from file |
    | `GET_RENDER_DIAG` | Get render diagnostics |
    | `GET_AUDIO_DIAG` | Get audio diagnostics |

@@ -860,3 +860,72 @@ static HRESULT GetBufferWithRetry(
 
   return hr;
 }
+
+// ===========================================================================
+// Device volume control via IAudioEndpointVolume
+// ===========================================================================
+
+// Helper: resolve the current audio device using the same logic as StartAudioCaptureThread
+static HRESULT ResolveCurrentDevice(LPCWSTR szDeviceName, int nDeviceType, IMMDevice** ppDevice) {
+  *ppDevice = nullptr;
+  HRESULT hr = S_OK;
+  std::wstring displayName;
+
+  if (szDeviceName && szDeviceName[0]) {
+    if (nDeviceType == 0 || nDeviceType == 1)
+      hr = GetSpecificAudioDevice(szDeviceName, ppDevice, false, displayName);
+    if (!*ppDevice && (nDeviceType == 0 || nDeviceType == 2))
+      hr = GetSpecificAudioDevice(szDeviceName, ppDevice, true, displayName);
+  }
+  if (!*ppDevice)
+    hr = GetDefaultLoopbackDevice(ppDevice, displayName);
+
+  return *ppDevice ? S_OK : hr;
+}
+
+HRESULT GetDeviceVolume(LPCWSTR szDeviceName, int nDeviceType, float* pVolume, BOOL* pMuted) {
+  IMMDevice* pDevice = nullptr;
+  HRESULT hr = ResolveCurrentDevice(szDeviceName, nDeviceType, &pDevice);
+  if (FAILED(hr) || !pDevice) return hr;
+  ReleaseOnExit releaseDevice(pDevice);
+
+  IAudioEndpointVolume* pVolCtrl = nullptr;
+  hr = pDevice->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, (void**)&pVolCtrl);
+  if (FAILED(hr)) return hr;
+  ReleaseOnExit releaseVol(pVolCtrl);
+
+  if (pVolume) hr = pVolCtrl->GetMasterVolumeLevelScalar(pVolume);
+  if (SUCCEEDED(hr) && pMuted) hr = pVolCtrl->GetMute(pMuted);
+  return hr;
+}
+
+HRESULT SetDeviceVolume(LPCWSTR szDeviceName, int nDeviceType, float volume) {
+  if (volume < 0.0f) volume = 0.0f;
+  if (volume > 1.0f) volume = 1.0f;
+
+  IMMDevice* pDevice = nullptr;
+  HRESULT hr = ResolveCurrentDevice(szDeviceName, nDeviceType, &pDevice);
+  if (FAILED(hr) || !pDevice) return hr;
+  ReleaseOnExit releaseDevice(pDevice);
+
+  IAudioEndpointVolume* pVolCtrl = nullptr;
+  hr = pDevice->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, (void**)&pVolCtrl);
+  if (FAILED(hr)) return hr;
+  ReleaseOnExit releaseVol(pVolCtrl);
+
+  return pVolCtrl->SetMasterVolumeLevelScalar(volume, nullptr);
+}
+
+HRESULT SetDeviceMute(LPCWSTR szDeviceName, int nDeviceType, BOOL muted) {
+  IMMDevice* pDevice = nullptr;
+  HRESULT hr = ResolveCurrentDevice(szDeviceName, nDeviceType, &pDevice);
+  if (FAILED(hr) || !pDevice) return hr;
+  ReleaseOnExit releaseDevice(pDevice);
+
+  IAudioEndpointVolume* pVolCtrl = nullptr;
+  hr = pDevice->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, (void**)&pVolCtrl);
+  if (FAILED(hr)) return hr;
+  ReleaseOnExit releaseVol(pVolCtrl);
+
+  return pVolCtrl->SetMute(muted, nullptr);
+}

@@ -1748,8 +1748,18 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
             // MilkDrop3 does NOT apply gamma_adj or B/D/S/I for custom comp shader presets.
             // gamma_adj is only used in ShowToUser_NoShaders path (no custom comp shader).
             // shiftHSV is an MDropDX12 addition for colshift; early-exits when colshift values are 0.
-            char szLastLine[] = "    _return_value = float4(shiftHSV(ret.xyz), _vDiffuse.w);";
-            sprintf(p, " %s\n}\n", szLastLine);
+            //
+            // Warp decay: DX9 applied decay via fixed-function texture stage modulate
+            // (D3DTSS_COLOROP = D3DTOP_MODULATE, D3DTSS_COLORARG1 = D3DTA_DIFFUSE) which
+            // multiplied shader output by vertex color. In DX12, we inject this into the
+            // shader body. Auto-gen warp (GenWarpPShaderText) already includes decay;
+            // custom warp shaders do not — they relied on the fixed-function multiply.
+            if (shaderType == SHADER_WARP) {
+              sprintf(p, "    ret.xyz *= _vDiffuse.rgb;\n"
+                         "    _return_value = float4(shiftHSV(ret.xyz), _vDiffuse.w);\n}\n");
+            } else {
+              sprintf(p, " %s\n}\n", "    _return_value = float4(shiftHSV(ret.xyz), _vDiffuse.w);");
+            }
           }
         }
       }
@@ -2137,9 +2147,8 @@ void Engine::GenWarpPShaderText(char* szShaderText, bool bWrap) {
 
   p += sprintf(p, "    // sample previous frame%c", LF);
   p += sprintf(p, "    ret = tex2D( sampler%ls_main, uv ).xyz;%c", bWrap ? L"" : L"_fc", LF);
-  p += sprintf(p, "    %c", LF);
-  p += sprintf(p, "    // darken (decay) over time - per-frame value via vertex color%c", LF);
-  p += sprintf(p, "    ret *= _vDiffuse.r;%c", LF);
+  // Decay is applied in the output wrapper (ret *= _vDiffuse.rgb) for ALL warp shaders,
+  // matching DX9's fixed-function texture stage modulate. Don't duplicate it here.
   p += sprintf(p, "}%c", LF);
 }
 

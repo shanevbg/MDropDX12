@@ -461,6 +461,10 @@ Signal commands use the `SIGNAL|` prefix and are processed directly by the pipe 
 | `DEVICE=OUT\|name` | Switch to output device (loopback) |
 | `FFT_ATTACK=N` | FFT attack smoothing (0.0-1.0) |
 | `FFT_DECAY=N` | FFT decay smoothing (0.0-1.0) |
+| `SET_DEVICE_VOLUME=N` | Set Windows device volume (0.0-1.0). Responds with `DEVICE_VOLUME=N\|muted=0\|1` |
+| `GET_DEVICE_VOLUME` | Query current device volume and mute state. Responds with `DEVICE_VOLUME=N\|muted=0\|1` |
+| `SET_DEVICE_MUTE=0\|1` | Mute (1) or unmute (0) the audio device. Responds with `DEVICE_MUTE=0\|1` |
+| `TOGGLE_DEVICE_MUTE` | Toggle device mute state. Responds with `DEVICE_MUTE=0\|1` |
 
 ### Visual Parameters
 

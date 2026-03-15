@@ -158,7 +158,9 @@ bool DX12CreatePipelines(ID3D12Device* device, ID3D12RootSignature* rootSig,
     if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
 
     // PSO: Textured SPRITEVERTEX + additive blend (textured custom shapes)
-    // DX9 has no separate alpha blend — alpha uses same factors as color.
+    // DX9 used X8R8G8B8 render targets (no alpha channel). DX12 uses R8G8B8A8_UNORM,
+    // so shapes must NOT write alpha — otherwise alpha < 1.0 accumulates in the feedback
+    // loop and darkens the scene (BrainStain bug). Write mask = RGB only matches DX9.
     psoDesc.BlendState.RenderTarget[0].BlendEnable           = TRUE;
     psoDesc.BlendState.RenderTarget[0].SrcBlend              = D3D12_BLEND_SRC_ALPHA;
     psoDesc.BlendState.RenderTarget[0].DestBlend             = D3D12_BLEND_ONE;
@@ -166,7 +168,7 @@ bool DX12CreatePipelines(ID3D12Device* device, ID3D12RootSignature* rootSig,
     psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha         = D3D12_BLEND_SRC_ALPHA;
     psoDesc.BlendState.RenderTarget[0].DestBlendAlpha        = D3D12_BLEND_ONE;
     psoDesc.BlendState.RenderTarget[0].BlendOpAlpha          = D3D12_BLEND_OP_ADD;
-    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE;
     hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_ADDITIVE_SPRITEVERTEX]));
     if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
 
@@ -179,7 +181,7 @@ bool DX12CreatePipelines(ID3D12Device* device, ID3D12RootSignature* rootSig,
             psoDesc.PS = { clampPsBlob->GetBufferPointer(), clampPsBlob->GetBufferSize() };
 
             // PSO: Textured SPRITEVERTEX + alpha blend + clamp sampler
-            // DX9 has no separate alpha blend — alpha uses same factors as color.
+            // RGB-only write mask: DX9 X8R8G8B8 had no alpha channel.
             psoDesc.BlendState.RenderTarget[0].BlendEnable  = TRUE;
             psoDesc.BlendState.RenderTarget[0].SrcBlend     = D3D12_BLEND_SRC_ALPHA;
             psoDesc.BlendState.RenderTarget[0].DestBlend    = D3D12_BLEND_INV_SRC_ALPHA;
@@ -187,6 +189,7 @@ bool DX12CreatePipelines(ID3D12Device* device, ID3D12RootSignature* rootSig,
             psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha  = D3D12_BLEND_SRC_ALPHA;
             psoDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
             psoDesc.BlendState.RenderTarget[0].BlendOpAlpha   = D3D12_BLEND_OP_ADD;
+            psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE;
             hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_TEXTURED_CLAMP_SPRITEVERTEX]));
             if (FAILED(hr)) { clampPsBlob->Release(); texVsBlob->Release(); texPsBlob->Release(); return false; }
 
@@ -203,6 +206,8 @@ bool DX12CreatePipelines(ID3D12Device* device, ID3D12RootSignature* rootSig,
     }
 
     // PSO: Textured SPRITEVERTEX + premultiplied alpha blend (GDI text overlay)
+    // Restore RGBA write mask for text/UI PSOs that draw to the backbuffer.
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
     psoDesc.BlendState.RenderTarget[0].SrcBlend      = D3D12_BLEND_ONE;
     psoDesc.BlendState.RenderTarget[0].DestBlend      = D3D12_BLEND_INV_SRC_ALPHA;
     psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha  = D3D12_BLEND_ONE;
@@ -226,14 +231,17 @@ bool DX12CreatePipelines(ID3D12Device* device, ID3D12RootSignature* rootSig,
     hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_DARKEN_SPRITEVERTEX]));
     if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
 
-    // PSO: Textured SPRITEVERTEX + SrcAlpha/InvSrcAlpha (standard alpha blend, for sprites)
-    // DX9 has no separate alpha blend — alpha uses same factors as color.
+    // PSO: Textured SPRITEVERTEX + SrcAlpha/InvSrcAlpha (shapes + sprites)
+    // RGB-only write mask: DX9 X8R8G8B8 had no alpha channel. Without this,
+    // shapes write alpha < 1.0 into VS[1], which compounds through the feedback
+    // loop and darkens the scene (BrainStain bug).
     psoDesc.BlendState.RenderTarget[0].SrcBlend       = D3D12_BLEND_SRC_ALPHA;
     psoDesc.BlendState.RenderTarget[0].DestBlend       = D3D12_BLEND_INV_SRC_ALPHA;
     psoDesc.BlendState.RenderTarget[0].BlendOp         = D3D12_BLEND_OP_ADD;
     psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha   = D3D12_BLEND_SRC_ALPHA;
     psoDesc.BlendState.RenderTarget[0].DestBlendAlpha  = D3D12_BLEND_INV_SRC_ALPHA;
     psoDesc.BlendState.RenderTarget[0].BlendOpAlpha    = D3D12_BLEND_OP_ADD;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE;
     hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_ALPHABLEND_SPRITEVERTEX]));
     if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
 

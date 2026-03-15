@@ -5,8 +5,8 @@
 
 #define MDROP_VERSION_MAJOR  2
 #define MDROP_VERSION_MINOR  4
-#define MDROP_VERSION_PATCH  0
-#define MDROP_VERSION_STR    "2.4.0"
-#define MDROP_VERSION_STRW   L"2.4.0"
+#define MDROP_VERSION_PATCH  1
+#define MDROP_VERSION_STR    "2.4.1"
+#define MDROP_VERSION_STRW   L"2.4.1"
 
 #endif

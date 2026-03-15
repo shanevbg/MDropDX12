@@ -2561,7 +2561,9 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     // Clear VS[1] to black before warp mesh draws.
     // Prevents stale pixels from the ping-pong swap persisting if the mesh
     // doesn't cover every texel (rounding, edge cases).
-    float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    // Alpha=1.0: DX9 used X8R8G8B8 (no alpha). Keep alpha at 1.0 so shapes/waves
+    // that sample VS don't pick up transparent pixels.
+    float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
     cmdList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 
     SetViewportAndScissor(cmdList, m_nTexSizeX, m_nTexSizeY);
@@ -2828,14 +2830,11 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       // Auto-gen warp shaders use vDiffuse.r for per-frame decay (vertex color).
       // Fallback PSO (no shader) also uses vertex color for decay modulation.
       float fDecay = (float)(*m_pState->var_pf_decay);
-      D3DCOLOR cDecay;
-      if (m_dx12WarpPSO && !m_pState->m_bAutoGenWarpShader) {
-        // Custom warp shader: white vertices (shader handles decay internally)
-        cDecay = 0xFFFFFFFF;
-      } else {
-        // Auto-gen or fallback: per-frame decay via vertex color
-        cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
-      }
+      // Decay is applied via vertex color for ALL warp shaders (custom and auto-gen).
+      // DX9 applied decay via fixed-function texture stage modulate (D3DTOP_MODULATE
+      // × D3DTA_DIFFUSE) AFTER the pixel shader — the shader never handled it internally.
+      // DX12 equivalent: output wrapper multiplies ret by _vDiffuse.rgb.
+      D3DCOLOR cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
 
       drawWarpMesh(cDecay, false, false);
     }
