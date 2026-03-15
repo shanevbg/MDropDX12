@@ -112,3 +112,33 @@ Both render the fractal tree with autumn-colored leaves (orange-brown to yellow-
 Both render dark, iridescent organic neural/axon structures with flowing tentacle shapes, chromatic highlights (red, cyan, yellow, purple), and a deep biological aesthetic. The rendering style, color palette, and organic distortion are consistent. Exact frame content differs due to chaotic per-frame animation, but the visual quality and complexity match.
 
 **Verdict:** Visually equivalent.
+
+### 11. Zylot - Spiral (Hypnotic) Phat Double Spiral Mix
+
+| MDropDX12 | Milkwave |
+| --------- | -------- |
+| ![MDropDX12](images/comparison/11_spiral_hypnotic_mdrop.jpg) | ![Milkwave](images/comparison/11_spiral_hypnotic_milkwave.jpg) |
+
+Both render the hypnotic double spiral with concentric rings in green, pink/red, and dark tones. The spiral geometry, color banding, and fine-line texture within the rings are identical. The warp-driven rotation and color distribution match precisely.
+
+**Verdict:** Visually equivalent.
+
+---
+
+## Summary
+
+| # | Preset | Result |
+|---|--------|--------|
+| 1 | Martin - blue haze | Equivalent |
+| 2 | BrainStain - re entry | **Different** — MDropDX12 much brighter |
+| 3 | balkhan + IkeC - Tunnel Cylinders | Equivalent |
+| 4 | Marex + IkeC - Shadow Party Shader Jam 2025 | **Broken** — black on MDropDX12 |
+| 5 | Illusion & Rovastar - Clouded Bottle | Equivalent |
+| 6 | martin - deep blue | Equivalent |
+| 7 | martin - push ax | Equivalent |
+| 8 | shifter - escape the worm (Eo.S. + Phat mix) | Equivalent |
+| 9 | Flexi - oldschool tree | Equivalent |
+| 10 | martin - axon3 | Equivalent |
+| 11 | Zylot - Spiral (Hypnotic) Phat Double Spiral Mix | Equivalent |
+
+**9 of 11 presets** render equivalently. Two presets show differences: one brightness/feedback divergence (#2) and one black-screen shader failure (#4).
