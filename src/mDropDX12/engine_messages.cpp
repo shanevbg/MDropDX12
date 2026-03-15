@@ -3058,7 +3058,7 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     if (val > 256.0f) val = 256.0f;
     m_fAudioSensitivity = val;
     extern float mdropdx12_audio_sensitivity;
-    mdropdx12_audio_sensitivity = (val <= 1.0f) ? 1.0f : val;
+    mdropdx12_audio_sensitivity = val;
     SaveSettingToINI(SET_AUDIO_SENSITIVITY);
     wchar_t buf[128];
     swprintf_s(buf, L"AUDIO_GAIN=%.2f|effective=%.2f", m_fAudioSensitivity, mdropdx12_audio_sensitivity);
@@ -3070,6 +3070,57 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     wchar_t buf[128];
     swprintf_s(buf, L"AUDIO_GAIN=%.2f|effective=%.2f", m_fAudioSensitivity, mdropdx12_audio_sensitivity);
     extern PipeServer g_pipeServer;
+    g_pipeServer.Send(buf);
+  }
+  else if (wcsncmp(sMessage, L"SET_DEVICE_VOLUME=", 18) == 0) {
+    float vol = (float)_wtof(sMessage + 18);
+    HRESULT hr = SetDeviceVolume(m_szAudioDevice, m_nAudioDeviceRequestType, vol);
+    extern PipeServer g_pipeServer;
+    if (SUCCEEDED(hr)) {
+      float curVol = 0; BOOL muted = FALSE;
+      GetDeviceVolume(m_szAudioDevice, m_nAudioDeviceRequestType, &curVol, &muted);
+      wchar_t buf[128];
+      swprintf_s(buf, L"DEVICE_VOLUME=%.2f|muted=%d", curVol, (int)muted);
+      g_pipeServer.Send(buf);
+    } else {
+      wchar_t buf[128];
+      swprintf_s(buf, L"DEVICE_VOLUME_ERROR=0x%08x", (unsigned)hr);
+      g_pipeServer.Send(buf);
+    }
+  }
+  else if (wcsncmp(sMessage, L"GET_DEVICE_VOLUME", 17) == 0) {
+    float curVol = 0; BOOL muted = FALSE;
+    HRESULT hr = GetDeviceVolume(m_szAudioDevice, m_nAudioDeviceRequestType, &curVol, &muted);
+    extern PipeServer g_pipeServer;
+    wchar_t buf[128];
+    if (SUCCEEDED(hr))
+      swprintf_s(buf, L"DEVICE_VOLUME=%.2f|muted=%d", curVol, (int)muted);
+    else
+      swprintf_s(buf, L"DEVICE_VOLUME_ERROR=0x%08x", (unsigned)hr);
+    g_pipeServer.Send(buf);
+  }
+  else if (wcsncmp(sMessage, L"SET_DEVICE_MUTE=", 16) == 0) {
+    int mute = _wtoi(sMessage + 16);
+    HRESULT hr = SetDeviceMute(m_szAudioDevice, m_nAudioDeviceRequestType, mute ? TRUE : FALSE);
+    extern PipeServer g_pipeServer;
+    wchar_t buf[128];
+    if (SUCCEEDED(hr))
+      swprintf_s(buf, L"DEVICE_MUTE=%d", mute ? 1 : 0);
+    else
+      swprintf_s(buf, L"DEVICE_MUTE_ERROR=0x%08x", (unsigned)hr);
+    g_pipeServer.Send(buf);
+  }
+  else if (wcsncmp(sMessage, L"TOGGLE_DEVICE_MUTE", 18) == 0) {
+    float curVol = 0; BOOL muted = FALSE;
+    HRESULT hr = GetDeviceVolume(m_szAudioDevice, m_nAudioDeviceRequestType, &curVol, &muted);
+    if (SUCCEEDED(hr))
+      hr = SetDeviceMute(m_szAudioDevice, m_nAudioDeviceRequestType, muted ? FALSE : TRUE);
+    extern PipeServer g_pipeServer;
+    wchar_t buf[128];
+    if (SUCCEEDED(hr))
+      swprintf_s(buf, L"DEVICE_MUTE=%d", muted ? 0 : 1);
+    else
+      swprintf_s(buf, L"DEVICE_MUTE_ERROR=0x%08x", (unsigned)hr);
     g_pipeServer.Send(buf);
   }
   else if (wcsncmp(sMessage, L"GET_RENDER_DIAG", 15) == 0) {

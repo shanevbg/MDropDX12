@@ -76,44 +76,64 @@ function sendPipeMessage(pipePath, message, expectResponse = false) {
   return new Promise((resolve, reject) => {
     const client = net.connect(pipePath, () => {
       // Send as UTF-16LE with null terminator
-      const buf = Buffer.from(message + '\0', 'utf16le');
-      client.write(buf);
+      const sendBuf = Buffer.from(message + '\0', 'utf16le');
+      client.write(sendBuf);
 
       if (!expectResponse) {
-        // Give the pipe a moment to flush, then close
-        setTimeout(() => {
-          client.end();
-          resolve('OK');
-        }, 50);
+        // Pipe is message-mode — write completes atomically, minimal flush needed
+        setTimeout(() => { client.end(); resolve('OK'); }, 10);
         return;
       }
 
-      // Collect response data
-      const chunks = [];
+      // Collect response data — resolve on null-terminator (UTF-16LE \0\0)
+      let recvBuf = Buffer.alloc(0);
       let timer = null;
 
       const finish = () => {
         if (timer) clearTimeout(timer);
         client.end();
-        const data = Buffer.concat(chunks);
-        // Decode UTF-16LE response, strip nulls
-        const text = data.toString('utf16le').replace(/\0/g, '');
+        // Decode UTF-16LE, strip null terminators
+        const text = recvBuf.toString('utf16le').replace(/\0/g, '');
         resolve(text);
       };
 
       client.on('data', (chunk) => {
-        chunks.push(chunk);
-        // Reset timer on each data chunk (responses come in bursts)
+        recvBuf = Buffer.concat([recvBuf, chunk]);
+        // Check for null terminator: two zero bytes at a UTF-16 boundary
+        if (recvBuf.length >= 2) {
+          const last2 = recvBuf.readUInt16LE(recvBuf.length - 2);
+          if (last2 === 0) {
+            // Complete message received — resolve immediately
+            finish();
+            return;
+          }
+        }
+        // Fallback timer in case response has no null terminator (legacy)
         if (timer) clearTimeout(timer);
-        timer = setTimeout(finish, 300);
+        timer = setTimeout(finish, 150);
       });
 
-      // If no data within 1s, resolve with empty
-      timer = setTimeout(finish, 1000);
+      // Safety timeout if no data at all
+      timer = setTimeout(finish, 500);
     });
 
     client.on('error', (err) => {
       reject(new Error(`Pipe connection failed: ${err.message}`));
+    });
+  });
+}
+
+// Send multiple fire-and-forget messages on a single connection (avoids per-message connect overhead)
+function sendPipeBatch(pipePath, messages) {
+  return new Promise((resolve, reject) => {
+    const client = net.connect(pipePath, () => {
+      for (const msg of messages) {
+        client.write(Buffer.from(msg + '\0', 'utf16le'));
+      }
+      setTimeout(() => { client.end(); resolve('OK'); }, 10);
+    });
+    client.on('error', (err) => {
+      reject(new Error(`Pipe batch failed: ${err.message}`));
     });
   });
 }
@@ -402,13 +422,16 @@ server.tool(
   }
 );
 
+// ── Comparison output directory ──
+const comparisonDir = path.resolve(__dirname, '../comparison');
+
 // Helper: resize a capture image for Claude using ImageMagick
-// Returns { data: base64, mimeType } or null on failure
-function resizeForClaude(filePath, maxDim = 800) {
+// Returns { data: base64, mimeType } for inline use, or null on failure
+function resizeForClaude(filePath, maxDim = 800, quality = 85) {
   try {
     const tmpPath = filePath.replace(/\.png$/i, '_claude.jpg');
     execSync(
-      `magick "${filePath}" -resize ${maxDim}x${maxDim}> -quality 85 "${tmpPath}"`,
+      `magick "${filePath}" -resize ${maxDim}x${maxDim}^> -quality ${quality} "${tmpPath}"`,
       { timeout: 10000 }
     );
     const data = fs.readFileSync(tmpPath).toString('base64');
@@ -421,6 +444,20 @@ function resizeForClaude(filePath, maxDim = 800) {
       return { data, mimeType: 'image/png' };
     } catch { return null; }
   }
+}
+
+// Helper: downsize a capture to the comparison directory (no base64, disk only)
+// Returns the output file path, or null on failure
+function downsizeTo(filePath, outName, maxDim = 800, quality = 80) {
+  try {
+    if (!fs.existsSync(comparisonDir)) fs.mkdirSync(comparisonDir, { recursive: true });
+    const outPath = path.join(comparisonDir, outName);
+    execSync(
+      `magick "${filePath}" -resize ${maxDim}x${maxDim}^> -quality ${quality} "${outPath}"`,
+      { timeout: 10000 }
+    );
+    return outPath;
+  } catch { return null; }
 }
 
 // Helper: wait for a specific file to appear on disk (for deferred DX12 captures)
@@ -511,6 +548,36 @@ server.tool(
       if (attack !== undefined) { await send(`FFT_ATTACK=${attack}`); results.push(`attack=${attack}`); }
       if (decay !== undefined) { await send(`FFT_DECAY=${decay}`); results.push(`decay=${decay}`); }
       return { content: [{ type: 'text', text: results.length ? `Set FFT: ${results.join(', ')}` : 'No parameters specified' }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
+    }
+  }
+);
+
+// Tool: Get or set Windows device volume and mute
+server.tool(
+  'mdrop_set_volume',
+  'Get or set the Windows system volume and mute state of the audio device MDropDX12 is capturing from',
+  {
+    volume: z.number().min(0).max(1).optional().describe('Volume level 0.0-1.0. Omit to leave unchanged.'),
+    mute: z.boolean().optional().describe('Mute state. Omit to leave unchanged.'),
+  },
+  async ({ volume, mute }) => {
+    try {
+      const results = [];
+      if (volume !== undefined) {
+        const resp = await send(`SET_DEVICE_VOLUME=${volume}`, true);
+        results.push(resp || `volume=${volume}`);
+      }
+      if (mute !== undefined) {
+        const resp = await send(`SET_DEVICE_MUTE=${mute ? 1 : 0}`, true);
+        results.push(resp || `mute=${mute}`);
+      }
+      if (volume === undefined && mute === undefined) {
+        const resp = await send('GET_DEVICE_VOLUME', true);
+        return { content: [{ type: 'text', text: resp || 'Unknown' }] };
+      }
+      return { content: [{ type: 'text', text: results.join(', ') }] };
     } catch (err) {
       return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
     }
@@ -757,18 +824,16 @@ server.tool(
         }
       }
 
-      // Load preset on both simultaneously if specified
+      // Load preset on both simultaneously if specified (single connection per pipe)
       if (preset) {
-        // Resolve bare filename to full path using each visualizer's preset directory
-        const [mdropPreset, milkwavePreset] = await Promise.all([
-          resolvePresetPath(preset, mdropPipe.path),
-          resolvePresetPath(preset, milkwavePipe.path),
-        ]);
+        // Resolve bare filename using MDropDX12's preset dir — use the SAME path for both
+        const resolvedPreset = await resolvePresetPath(preset, mdropPipe.path);
+        const presetCmd = `PRESET=${resolvedPreset}`;
         await Promise.all([
-          sendPipeMessage(mdropPipe.path, `PRESET=${mdropPreset}`),
-          sendPipeMessage(milkwavePipe.path, `PRESET=${milkwavePreset}`),
+          sendPipeBatch(mdropPipe.path, [presetCmd]),
+          sendPipeBatch(milkwavePipe.path, [presetCmd]),
         ]);
-        results.push({ type: 'text', text: `Loaded "${preset}" on both visualizers\n  MDropDX12: ${mdropPreset}\n  Milkwave: ${milkwavePreset}` });
+        results.push({ type: 'text', text: `Loaded "${preset}" on both visualizers\n  Path: ${resolvedPreset}` });
 
         // Wait for preset to settle
         const waitMs = ((delay || 2) * 1000);
@@ -780,35 +845,46 @@ server.tool(
         sendPipeMessage(mdropPipe.path, 'STATE', true).catch(e => `(error: ${e.message})`),
         sendPipeMessage(milkwavePipe.path, 'STATE', true).catch(e => `(error: ${e.message})`),
       ]);
-      results.push({ type: 'text', text: `--- MDropDX12 State ---\n${mdropState}` });
-      results.push({ type: 'text', text: `--- Milkwave Visualizer State ---\n${milkwaveState}` });
+      // Truncate state text to avoid bloating the response
+      const maxStateLen = 1000;
+      const truncState = (s) => s.length > maxStateLen ? s.slice(0, maxStateLen) + '\n...(truncated)' : s;
+      results.push({ type: 'text', text: `--- MDropDX12 State ---\n${truncState(mdropState)}` });
+      results.push({ type: 'text', text: `--- Milkwave Visualizer State ---\n${truncState(milkwaveState)}` });
 
       // Capture from both simultaneously — each responds with CAPTURE_PATH=<full path>
-      const captureResults = [];
       const targets = [
-        { pipe: mdropPipe, label: 'MDropDX12' },
-        { pipe: milkwavePipe, label: 'Milkwave Visualizer' },
+        { pipe: mdropPipe, label: 'MDropDX12', tag: 'mdrop' },
+        { pipe: milkwavePipe, label: 'Milkwave Visualizer', tag: 'milkwave' },
       ];
       const captures = await Promise.all(targets.map(async (t) => {
         const result = await captureWithPath(t.pipe.path).catch(e => ({ error: e.message }));
         return { ...t, ...result };
       }));
 
+      // Generate timestamp for comparison filenames
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const presetSlug = preset
+        ? path.basename(preset, path.extname(preset)).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40)
+        : 'current';
+
+      const compFiles = [];
       for (const c of captures) {
         if (c.filePath) {
-          const img = resizeForClaude(c.filePath);
-          captureResults.push({ type: 'text', text: `--- ${c.label} (PID ${c.pipe.pid}) ---` });
-          if (img) {
-            captureResults.push({ type: 'image', data: img.data, mimeType: img.mimeType });
+          const outName = `${ts}_${presetSlug}_${c.tag}.jpg`;
+          const outPath = downsizeTo(c.filePath, outName, 800, 80);
+          if (outPath) {
+            compFiles.push(`  ${c.label}: ${outPath}`);
           } else {
-            captureResults.push({ type: 'text', text: `(failed to read ${c.filePath})` });
+            compFiles.push(`  ${c.label}: downsize failed (original: ${c.filePath})`);
           }
         } else {
-          captureResults.push({ type: 'text', text: `${c.label}: ${c.error || 'capture failed'}` });
+          compFiles.push(`  ${c.label}: ${c.error || 'capture failed'}`);
         }
       }
 
-      return { content: [...results, ...captureResults] };
+      results.push({ type: 'text', text: `Comparison saved to ${comparisonDir}:\n${compFiles.join('\n')}\n\nUse the Read tool on the .jpg files to view them.` });
+
+      return { content: [...results] };
     } catch (err) {
       return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
     }
@@ -818,15 +894,41 @@ server.tool(
 // Tool: Raw command (escape hatch)
 server.tool(
   'mdrop_command',
-  'Send a raw IPC command to the visualizer (advanced)',
+  'Send a raw IPC command to the visualizer (advanced). Use target="all" to send to both MDropDX12 and Milkwave simultaneously (e.g. SET_AUDIO_GAIN=2.0).',
   {
-    command: z.string().describe('Raw pipe command (e.g. "SIGNAL|NEXT_PRESET", "OPACITY=0.5")'),
+    command: z.string().describe('Raw pipe command (e.g. "SIGNAL|NEXT_PRESET", "SET_AUDIO_GAIN=2.0")'),
     expect_response: z.boolean().optional().describe('Whether to wait for a response (default: false)'),
+    target: z.enum(['auto', 'all', 'mdrop', 'milkwave']).optional().default('auto')
+      .describe('Target: "auto" (default, prefers MDropDX12), "all" (both), "mdrop", or "milkwave"'),
   },
-  async ({ command, expect_response }) => {
+  async ({ command, expect_response, target }) => {
     try {
-      const response = await send(command, expect_response ?? false);
-      return { content: [{ type: 'text', text: response || 'Command sent' }] };
+      if (target === 'all') {
+        const allPipes = discoverPipes('all');
+        if (allPipes.length === 0) {
+          return { content: [{ type: 'text', text: 'No running visualizers found' }] };
+        }
+        const results = [];
+        for (const pipe of allPipes) {
+          const isMdrop = pipe.exe.toLowerCase().includes('mdropdx12');
+          const label = isMdrop ? 'MDropDX12' : 'Milkwave';
+          try {
+            const response = await sendPipeMessage(pipe.path, command, expect_response ?? false);
+            results.push(`${label}: ${response || 'OK'}`);
+          } catch (err) {
+            results.push(`${label}: error - ${err.message}`);
+          }
+        }
+        return { content: [{ type: 'text', text: results.join('\n') }] };
+      } else {
+        // Single target: use discoverPipes with target filter
+        const pipes = discoverPipes(target === 'auto' ? 'auto' : target);
+        if (pipes.length === 0) {
+          return { content: [{ type: 'text', text: `No ${target} visualizer found` }] };
+        }
+        const response = await sendPipeMessage(pipes[0].path, command, expect_response ?? false);
+        return { content: [{ type: 'text', text: response || 'Command sent' }] };
+      }
     } catch (err) {
       return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
     }

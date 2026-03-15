@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
+#include <endpointvolume.h>
 #include <avrt.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <mutex>
@@ -165,6 +166,14 @@ extern float mdropdx12_audio_sensitivity;  // fixed gain multiplier (default 1.0
 
 HRESULT GetDefaultLoopbackDevice(IMMDevice** ppMMDevice, std::wstring& displayName);
 HRESULT GetSpecificAudioDevice(LPCWSTR szName, IMMDevice** ppMMDevice, bool bRenderDevices, std::wstring& displayName);
+
+// ---------------------------------------------------------------------------
+// Device volume control (IAudioEndpointVolume)
+// ---------------------------------------------------------------------------
+
+HRESULT GetDeviceVolume(LPCWSTR szDeviceName, int nDeviceType, float* pVolume, BOOL* pMuted);
+HRESULT SetDeviceVolume(LPCWSTR szDeviceName, int nDeviceType, float volume);
+HRESULT SetDeviceMute(LPCWSTR szDeviceName, int nDeviceType, BOOL muted);
 
 // ---------------------------------------------------------------------------
 // Loopback capture thread (from loopback-capture.h)
