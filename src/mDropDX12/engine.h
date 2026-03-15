@@ -573,7 +573,7 @@ public:
   float		m_fTimeBetweenRandomCustomMsgs;
   int			m_nSongTitlesSpawned;
   int			m_nCustMsgsSpawned;
-  bool    m_bEnablePresetStartup;
+  bool    m_bEnablePresetStartup = true;
   bool    m_bEnableAudioCapture = true;
   float   m_fAudioSensitivity = 1.0f;   // 1.0 = passthrough (default), >1 = manual gain boost
   bool    m_bEnablePresetStartupSavingOnClose = true;
