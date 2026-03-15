@@ -1200,9 +1200,12 @@ void Engine::MyPreInitialize() {
   m_nMaxBytes = 2000000000;
 
 #ifdef _DEBUG
-  m_dwShaderFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
+  m_dwShaderFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY
+                  | D3DCOMPILE_PARTIAL_PRECISION | D3DCOMPILE_PREFER_FLOW_CONTROL;
 #else
-  m_dwShaderFlags = D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
+  m_dwShaderFlags = D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY
+                  | D3DCOMPILE_PARTIAL_PRECISION    // Hint: lower precision OK (closer to SM3.0 hardware)
+                  | D3DCOMPILE_PREFER_FLOW_CONTROL; // Hint: prefer dynamic branching (SM3.0 couldn't predicate)
 #endif
   //m_pFragmentLinker = NULL;
   //m_pCompiledFragments = NULL;

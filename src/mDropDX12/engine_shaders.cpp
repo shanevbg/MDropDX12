@@ -1448,6 +1448,53 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // (the include file was already stripped of comments)
   StripComments(&szShaderText[shaderStartPos]);
 
+  // Replace "i = I_MAX;" break hack with real "break;" — the hack was used by
+  // Milkwave's transpiler for SM2.0 compatibility, but SM3.0+ supports break natively.
+  // The hack can cause incorrect loop behavior with some D3DCompile optimization paths.
+  {
+    char* search = &szShaderText[shaderStartPos];
+    while ((search = strstr(search, "i = I_MAX")) != NULL) {
+      // Find the semicolon
+      char* semi = strchr(search, ';');
+      if (semi) {
+        int len = (int)(semi - search + 1);
+        memset(search, ' ', len);
+        memcpy(search, "break;", 6);
+        search = semi + 1;
+      } else {
+        break;
+      }
+    }
+  }
+
+
+  // Inject [loop] attribute before 'while' loops in preset shaders.
+  // SM3.0 hardware couldn't unroll 100+ iteration loops; SM5.0 may attempt
+  // partial unrolling which changes codegen and floating-point accumulation.
+  // [loop] forces dynamic branching, producing results closer to SM3.0 behavior.
+  // NOTE: Only 'while' loops — NOT 'for' loops. Small fixed-count for loops
+  // (e.g. for(int i=0;i<3;i++)) cause error X3531 if marked [loop] because
+  // the compiler insists on unrolling them. Raymarchers use while() loops.
+  {
+    char* p = &szShaderText[shaderStartPos];
+    while (*p) {
+      bool isWhile = (p[0] == 'w' && p[1] == 'h' && p[2] == 'i' && p[3] == 'l' && p[4] == 'e' && (p[5] == ' ' || p[5] == '('));
+      if (isWhile) {
+        bool prevOk = (p == &szShaderText[shaderStartPos]) ||
+                       (!isalnum((unsigned char)*(p - 1)) && *(p - 1) != '_');
+        bool alreadyHasLoop = (p >= &szShaderText[shaderStartPos] + 6) &&
+                               (strncmp(p - 6, "[loop]", 6) == 0 || strncmp(p - 7, "[loop] ", 7) == 0);
+        if (prevOk && !alreadyHasLoop) {
+          lstrcpyA(temp, p);
+          memcpy(p, "[loop] ", 7);
+          lstrcpyA(p + 7, temp);
+          p += 7;
+        }
+      }
+      p++;
+    }
+  }
+
   // Strip DX9-style "sampler sampler_randNN;" declarations from preset text.
   // The include already declares "Texture2D sampler_randNN;" — having both
   // causes a redefinition error (sampler = SamplerState in SM5.0).
@@ -1751,9 +1798,9 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // Dump assembled shader text to file for diagnostics (Verbose only)
   if (DLOG_DIAG_ENABLED() && (shaderType == SHADER_COMP || shaderType == SHADER_WARP)) {
     const char* typeName = szDiagName ? szDiagName : (shaderType == SHADER_COMP ? "comp" : "warp");
-    char dumpPath[MAX_PATH];
-    sprintf(dumpPath, "%lsdiag_%s_shader.txt", m_szBaseDir, typeName);
-    FILE* f = fopen(dumpPath, "w");
+    wchar_t diagName[64];
+    swprintf_s(diagName, L"diag_%hs_shader.txt", typeName);
+    FILE* f = DebugLogDiagOpen(diagName, L"w");
     if (f) {
       fprintf(f, "// DIAG: type=%s profile=%s len=%d preset=%ls\n",
               typeName, szProfile, lstrlenA(szShaderText),
@@ -1879,6 +1926,20 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
       DebugLogDiagWrite(diagName, header);
     }
 
+    // Bytecode disassembly dump (verbose level only, for diagnosing SM5.0 codegen)
+    if (g_debugLogLevel >= LOG_VERBOSE && pShaderByteCode &&
+        (shaderType == SHADER_COMP || shaderType == SHADER_WARP)) {
+      ID3DBlob* pDisasm = nullptr;
+      if (SUCCEEDED(D3DDisassemble(pShaderByteCode->GetBufferPointer(),
+                                    pShaderByteCode->GetBufferSize(), 0, nullptr, &pDisasm)) && pDisasm) {
+        const char* typeName = szDiagName ? szDiagName : (shaderType == SHADER_COMP ? "comp" : "warp");
+        wchar_t diagName[64];
+        swprintf_s(diagName, L"diag_asm_%hs.txt", typeName);
+        DebugLogDiagWrite(diagName, (const char*)pDisasm->GetBufferPointer());
+        pDisasm->Release();
+      }
+    }
+
     if (m_ShaderCaching) {
       SaveShaderBytecodeToFile(pShaderByteCode, checksum, &szProfile[0]);
     }
@@ -1919,8 +1980,12 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   return true;
 }
 
-void Engine::GenWarpPShaderText(char* szShaderText, float decay, bool bWrap) {
+void Engine::GenWarpPShaderText(char* szShaderText, bool bWrap) {
   // find the pixel shader body and replace it with custom code.
+  // NOTE: decay is applied via vDiffuse.r (vertex color) which carries the
+  // per-frame decay value. This allows per_frame code to override decay
+  // dynamically (e.g. "decay = 0.92;"). DX9 used fixed-function vertex
+  // color multiply for non-shader presets; this is the DX12 equivalent.
 
   lstrcpyA(szShaderText, m_szDefaultWarpPShaderText);
   char LF = LINEFEED_CONTROL_CHAR;
@@ -1933,8 +1998,8 @@ void Engine::GenWarpPShaderText(char* szShaderText, float decay, bool bWrap) {
   p += sprintf(p, "    // sample previous frame%c", LF);
   p += sprintf(p, "    ret = tex2D( sampler%ls_main, uv ).xyz;%c", bWrap ? L"" : L"_fc", LF);
   p += sprintf(p, "    %c", LF);
-  p += sprintf(p, "    // darken (decay) over time%c", LF);
-  p += sprintf(p, "    ret *= %.2f; //or try: ret -= 0.004;%c", decay, LF);
+  p += sprintf(p, "    // darken (decay) over time - per-frame value via vertex color%c", LF);
+  p += sprintf(p, "    ret *= _vDiffuse.r;%c", LF);
   p += sprintf(p, "}%c", LF);
 }
 

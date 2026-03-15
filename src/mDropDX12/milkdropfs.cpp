@@ -1384,6 +1384,107 @@ void mdrop::Engine::DrawMotionVectors() {
   }
 }
 
+void mdrop::Engine::DX12_DrawMotionVectors() {
+  // DX12 port of DrawMotionVectors() — draws motion vector lines into VS[0]
+  // before the warp pass so they enter the feedback loop.
+  if ((float)*m_pState->var_pf_mv_a < 0.001f)
+    return;
+  if (!m_lpDX || !m_lpDX->m_commandList)
+    return;
+
+  int nX = (int)(*m_pState->var_pf_mv_x);
+  int nY = (int)(*m_pState->var_pf_mv_y);
+  float dx = (float)*m_pState->var_pf_mv_x - nX;
+  float dy = (float)*m_pState->var_pf_mv_y - nY;
+  if (nX > 64) { nX = 64; dx = 0; }
+  if (nY > 48) { nY = 48; dy = 0; }
+  if (nX <= 0 || nY <= 0)
+    return;
+
+  float dx2 = (float)(*m_pState->var_pf_mv_dx);
+  float dy2 = (float)(*m_pState->var_pf_mv_dy);
+  float len_mult = (float)*m_pState->var_pf_mv_l;
+  if (dx < 0) dx = 0;
+  if (dy < 0) dy = 0;
+  if (dx > 1) dx = 1;
+  if (dy > 1) dy = 1;
+  float inv_texsize = 1.0f / (float)m_nTexSizeX;
+  float min_len = 1.0f * inv_texsize;
+
+  WFVERTEX v[(64 + 1) * 2];
+  ZeroMemory(v, sizeof(WFVERTEX) * (64 + 1) * 2);
+  v[0].Diffuse = D3DCOLOR_RGBA_01(
+    (float)*m_pState->var_pf_mv_r, (float)*m_pState->var_pf_mv_g,
+    (float)*m_pState->var_pf_mv_b, (float)*m_pState->var_pf_mv_a);
+  for (int x = 1; x < (nX + 1) * 2; x++)
+    v[x].Diffuse = v[0].Diffuse;
+
+  auto* cmdList = m_lpDX->m_commandList.Get();
+
+  // Set up VS[0] as render target for motion vector drawing
+  m_lpDX->TransitionResource(m_dx12VS[0], D3D12_RESOURCE_STATE_RENDER_TARGET);
+  D3D12_CPU_DESCRIPTOR_HANDLE rtv = m_lpDX->GetRtvCpuHandle(m_dx12VS[0]);
+  cmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+  SetViewportAndScissor(cmdList, m_nTexSizeX, m_nTexSizeY);
+
+  // Root signature + PSO for alpha-blended line drawing
+  ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
+  cmdList->SetDescriptorHeaps(1, heaps);
+  cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
+  cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_LINE_ALPHABLEND_WFVERTEX].Get());
+
+  for (int y = 0; y < nY; y++) {
+    float fy = (y + 0.25f) / (float)(nY + dy + 0.25f - 1.0f);
+    fy -= dy2;
+
+    if (fy > 0.0001f && fy < 0.9999f) {
+      int n = 0;
+      for (int x = 0; x < nX; x++) {
+        float fx = (x + 0.25f) / (float)(nX + dx + 0.25f - 1.0f);
+        fx += dx2;
+
+        if (fx > 0.0001f && fx < 0.9999f) {
+          float fx2, fy2;
+          ReversePropagatePoint(fx, fy, &fx2, &fy2);
+
+          // Enforce minimum trail lengths
+          {
+            float ddx = (fx2 - fx);
+            float ddy = (fy2 - fy);
+            ddx *= len_mult;
+            ddy *= len_mult;
+            float len = sqrtf(ddx * ddx + ddy * ddy);
+
+            if (len > min_len) {
+              // keep as-is
+            } else if (len > 0.00000001f) {
+              len = min_len / len;
+              ddx *= len;
+              ddy *= len;
+            } else {
+              ddx = min_len;
+              ddy = min_len;
+            }
+
+            fx2 = fx + ddx;
+            fy2 = fy + ddy;
+          }
+
+          v[n].x = fx * 2.0f - 1.0f;
+          v[n].y = fy * 2.0f - 1.0f;
+          v[n + 1].x = fx2 * 2.0f - 1.0f;
+          v[n + 1].y = fy2 * 2.0f - 1.0f;
+
+          n += 2;
+        }
+      }
+
+      if (n > 0)
+        m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_LINELIST, v, n, sizeof(WFVERTEX));
+    }
+  }
+}
+
 /*
 void mdrop::Engine::UpdateSongInfo()
 {
@@ -2441,6 +2542,10 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
     }
   }
 
+  // ── Motion vectors: draw into VS0 BEFORE warp (enters feedback loop) ──
+  // DX9 draws these at milkdropfs.cpp line 1059, before warp reads VS0.
+  DX12_DrawMotionVectors();
+
   // Feedback ping-pong indices (used by warp bindings, Buffer A pass, and comp pass)
   int fbRead = m_nFeedbackIdx;
   int fbWrite = 1 - m_nFeedbackIdx;
@@ -2657,9 +2762,13 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       // Pass 0: old preset (opaque), cull tiles fully blended to new
       if (bOldUsesWarpShader && m_dx12OldWarpPSO) {
         cmdList->SetPipelineState(m_dx12OldWarpPSO.Get());
-        // Custom shader: white vertices (shader handles decay internally)
         bindWarpShader(&m_OldShaders.warp, m_pOldState, m_lpDX->GetOldWarpBindingGpuHandle());
-        drawWarpMesh(0xFFFFFFFF, true, true);
+        if (m_pOldState->m_bAutoGenWarpShader) {
+          float fDecay = (float)(*m_pOldState->var_pf_decay);
+          drawWarpMesh(D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1), true, true);
+        } else {
+          drawWarpMesh(0xFFFFFFFF, true, true); // Custom shader: white vertices
+        }
       } else if (!bOldUsesWarpShader) {
         // Old preset has no warp shader — use fallback PSO (texture * vertex color)
         cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
@@ -2675,9 +2784,13 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       // Pass 1: new preset (alpha blend), cull tiles fully old
       if (bNewUsesWarpShader && m_dx12WarpBlendPSO) {
         cmdList->SetPipelineState(m_dx12WarpBlendPSO.Get());
-        // Custom shader: white vertices (shader handles decay internally)
         bindWarpShader(&m_shaders.warp, m_pState, m_lpDX->GetWarpBindingGpuHandle());
-        drawWarpMesh(0xFFFFFFFF, true, false);
+        if (m_pState->m_bAutoGenWarpShader) {
+          float fDecay = (float)(*m_pState->var_pf_decay);
+          drawWarpMesh(D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1), true, false);
+        } else {
+          drawWarpMesh(0xFFFFFFFF, true, false); // Custom shader: white vertices
+        }
       } else if (!bNewUsesWarpShader) {
         // New preset has no warp shader — use fallback PSO with alpha blend
         // Note: PSO_TEXTURED_MYVERTEX doesn't have alpha blend, but for the non-shader
@@ -2711,17 +2824,16 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
 
       bindWarpShader(&m_shaders.warp, m_pState, m_lpDX->GetWarpBindingGpuHandle());
 
-      // Milkwave behavior: WarpedBlit_NoShaders applies cDecay to vertex RGB
-      // (fixed-function modulate), but WarpedBlit_Shaders does NOT (vertices
-      // are white, shader handles decay itself via `ret *= decay`).
-      // Match this: only apply cDecay when using the fallback textured PSO.
+      // Custom warp shaders handle decay internally (white vertices).
+      // Auto-gen warp shaders use vDiffuse.r for per-frame decay (vertex color).
+      // Fallback PSO (no shader) also uses vertex color for decay modulation.
       float fDecay = (float)(*m_pState->var_pf_decay);
       D3DCOLOR cDecay;
-      if (m_dx12WarpPSO) {
+      if (m_dx12WarpPSO && !m_pState->m_bAutoGenWarpShader) {
         // Custom warp shader: white vertices (shader handles decay internally)
         cDecay = 0xFFFFFFFF;
       } else {
-        // No custom shader: fallback PSO uses vertex color for decay modulation
+        // Auto-gen or fallback: per-frame decay via vertex color
         cDecay = D3DCOLOR_RGBA_01(fDecay, fDecay, fDecay, 1);
       }
 
@@ -2872,9 +2984,12 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f },
       { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f }
     };
-    // For comp shader presets: always apply shade at full strength (fShaderAmount=1).
-    // For non-shader presets: only apply if fShaderAmount > 0, blended with white.
-    float fShaderAmount = (m_pState->m_nCompPSVersion > 0)
+    // For custom comp shader presets: always apply shade at full strength (fShaderAmount=1).
+    // For auto-gen comp (non-shader presets): use the preset's fShader value, blended with white.
+    // m_nCompPSVersion > 0 is true for BOTH custom and auto-gen, so use m_bAutoGenCompShader
+    // to distinguish. DX9 ShowToUser_NoShaders uses fShader directly; ShowToUser_Shaders forces 1.0.
+    bool bCustomCompShader = (m_pState->m_nCompPSVersion > 0) && !m_pState->m_bAutoGenCompShader;
+    float fShaderAmount = bCustomCompShader
         ? 1.0f : m_pState->m_fShader.eval(GetTime());
     if (fShaderAmount > 0.001f) {
       for (int i = 0; i < 4; i++) {

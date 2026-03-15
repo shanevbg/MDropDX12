@@ -2646,8 +2646,19 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
   else if (wcsncmp(sMessage, L"CAPTURE", 7) == 0) {
     DebugLogW(L"[CAPTURE] Message received");
     mdropdx12->LogInfo(L"CAPTURE message received, calling CaptureScreenshot()");
-    CaptureScreenshot();
-    DebugLogW(L"[CAPTURE] CaptureScreenshot() returned");
+    wchar_t filename[MAX_PATH];
+    if (CaptureScreenshotWithFilename(filename, MAX_PATH)) {
+      // Respond with full path so MCP can read the file directly
+      wchar_t response[MAX_PATH + 32];
+      swprintf_s(response, MAX_PATH + 32, L"CAPTURE_PATH=%s", m_screenshotPath);
+      extern PipeServer g_pipeServer;
+      g_pipeServer.Send(response);
+      DLOGW_INFO(L"[CAPTURE] Queued screenshot: %s", m_screenshotPath);
+    } else {
+      extern PipeServer g_pipeServer;
+      g_pipeServer.Send(L"CAPTURE_PATH=ERROR");
+      DebugLogW(L"[CAPTURE] CaptureScreenshotWithFilename failed");
+    }
   }
   else if (wcsncmp(sMessage, L"FFT_ATTACK=", 11) == 0) {
     m_fFFTAttackGlobal = (float)_wtof(sMessage + 11);
@@ -2984,8 +2995,8 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     const wchar_t* names[] = { L"Off", L"Error", L"Warn", L"Info", L"Verbose" };
     int lvl = g_debugLogLevel;
     if (lvl < 0) lvl = 0; if (lvl > 4) lvl = 4;
-    wchar_t buf[64];
-    swprintf_s(buf, L"LOGLEVEL=%d|%s", lvl, names[lvl]);
+    wchar_t buf[512];
+    swprintf_s(buf, L"LOGLEVEL=%d|%s|LOGDIR=%s", lvl, names[lvl], DebugLogGetDir());
     extern PipeServer g_pipeServer;
     g_pipeServer.Send(buf);
   }
@@ -2994,6 +3005,36 @@ void Engine::LaunchMessage(wchar_t* sMessage) {
     DebugLogClearAll();
     extern PipeServer g_pipeServer;
     g_pipeServer.Send(L"LOGS_CLEARED");
+  }
+  else if (wcsncmp(sMessage, L"DUMP_SHADER", 11) == 0) {
+    // Dump current comp and warp shader text to diag files for debugging
+    extern PipeServer g_pipeServer;
+    int nDumped = 0;
+    if (m_pState && m_pState->m_szCompShadersText[0]) {
+      wchar_t diagName[64];
+      swprintf_s(diagName, L"diag_comp_shader.txt");
+      FILE* f = DebugLogDiagOpen(diagName, L"w");
+      if (f) {
+        fprintf(f, "// DIAG: DUMP_SHADER comp preset=%ls\n", m_pState->m_szDesc);
+        fputs(m_pState->m_szCompShadersText, f);
+        fclose(f);
+        nDumped++;
+      }
+    }
+    if (m_pState && m_pState->m_szWarpShadersText[0]) {
+      wchar_t diagName[64];
+      swprintf_s(diagName, L"diag_warp_shader.txt");
+      FILE* f = DebugLogDiagOpen(diagName, L"w");
+      if (f) {
+        fprintf(f, "// DIAG: DUMP_SHADER warp preset=%ls\n", m_pState->m_szDesc);
+        fputs(m_pState->m_szWarpShadersText, f);
+        fclose(f);
+        nDumped++;
+      }
+    }
+    wchar_t resp[256];
+    swprintf_s(resp, L"DUMP_SHADER|files=%d|dir=%s", nDumped, DebugLogGetDir());
+    g_pipeServer.Send(resp);
   }
   else if (wcsncmp(sMessage, L"SHUTDOWN", 8) == 0) {
     // Clean shutdown via WM_CLOSE — saves settings, stops render thread, exits

@@ -119,6 +119,8 @@ void Engine::ResetHotkeyDefaults()
     HK_DEF(i++, HK_SHOW_FPS,          0,                     VK_F5,        HKSCOPE_LOCAL, HKCAT_WINDOW, L"Show FPS",              L"ShowFPS");
     HK_DEF(i++, HK_SHOW_RATING,       0,                     VK_F6,        HKSCOPE_LOCAL, HKCAT_WINDOW, L"Show Rating",           L"ShowRating");
     HK_DEF(i++, HK_SHOW_SHADER_HELP,  0,                     VK_F9,        HKSCOPE_LOCAL, HKCAT_WINDOW, L"Shader Help",           L"ShowShaderHelp");
+    HK_DEF(i++, HK_WATERMARK,        0,                     0,            HKSCOPE_LOCAL, HKCAT_WINDOW, L"Watermark",             L"Watermark");
+    HK_DEF(i++, HK_MIRROR_WATERMARK, 0,                     0,            HKSCOPE_LOCAL, HKCAT_WINDOW, L"Mirror Watermark",      L"MirrorWatermark");
 
     // ── Tools ──
     HK_DEF(i++, HK_OPEN_SETTINGS,     0,                     VK_F8,        HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Settings",         L"OpenSettings");
@@ -143,7 +145,6 @@ void Engine::ResetHotkeyDefaults()
     HK_DEF(i++, HK_OPEN_ANNOTATIONS,0,                    0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Annotations",      L"OpenAnnotations");
     HK_DEF(i++, HK_OPEN_SCRIPT,    0,                     0,            HKSCOPE_LOCAL, HKCAT_TOOLS, L"Open Script",           L"OpenScript");
     HK_DEF(i++, HK_POLL_TRACK_INFO, 0,                     0,            HKSCOPE_LOCAL, HKCAT_MEDIA, L"Poll Track Info",       L"PollTrackInfo");
-    HK_DEF(i++, HK_MIRROR_WATERMARK,0,                    0,            HKSCOPE_LOCAL, HKCAT_WINDOW,L"Mirror Watermark",      L"MirrorWatermark");
 
     // ── Shader/Effects ──
     HK_DEF(i++, HK_INJECT_EFFECT_CYCLE, 0,                   VK_F11,       HKSCOPE_LOCAL, HKCAT_SHADER, L"Inject Effect Cycle",  L"InjectEffectCycle");
@@ -823,6 +824,9 @@ bool Engine::DispatchHotkeyAction(int actionId)
         return true;
     case HK_MIRROR_WATERMARK:
         if (hRender) PostMessage(hRender, WM_MW_MIRROR_WM, 0, 0);
+        return true;
+    case HK_WATERMARK:
+        if (hRender) PostMessage(hRender, WM_MW_WATERMARK, 0, 0);
         return true;
 
     // ── Shader/Effects ──

@@ -123,6 +123,7 @@ void  DebugLogDiagAppend(const wchar_t* diagName, const char* content);   // app
 void  DebugLogDiagTruncate(const wchar_t* diagName);                      // clear file
 FILE* DebugLogDiagOpen(const wchar_t* diagName, const wchar_t* mode);     // open for streaming
 void  DebugLogClearAll();                                                  // delete all log files
+const wchar_t* DebugLogGetDir();                                              // get log/ directory path
 
 // Level-gated logging macros — skip ALL formatting when level is suppressed
 #define DLOG_ERROR(fmt, ...)   do { if (g_debugLogLevel >= LOG_ERROR)   DebugLogAFmt(LOG_ERROR, fmt, __VA_ARGS__); } while(0)

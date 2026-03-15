@@ -679,6 +679,7 @@ void CState::Default(DWORD ApplyFlags) {
   if (ApplyFlags & STATE_WARP) {
     m_szWarpShadersText[0] = 0;
     m_nWarpPSVersion = 0;
+    m_bAutoGenWarpShader = false;
   }
 
   // comp shader
@@ -1416,11 +1417,12 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
     }
     if (!m_szWarpShadersText[0]) {
       DebugLogA("DIAG Import warp: EMPTY - falling back to GenWarpPShaderText", LOG_VERBOSE);
-      g_engine.GenWarpPShaderText(m_szWarpShadersText, m_fDecay.eval(-1), m_bTexWrap);
+      g_engine.GenWarpPShaderText(m_szWarpShadersText, m_bTexWrap);
       // DX12: pre-MilkDrop2 presets need a compiled warp PSO for per-frame decay.
       // DX9 applied decay via vertex color multiply in the fixed-function pipeline.
-      // Set PS version so the generated shader text gets compiled.
+      // Auto-gen shader uses vDiffuse.r for decay; per-frame value passed via vertex color.
       nWarpPSVersionInFile = MD2_PS_2_0;
+      m_bAutoGenWarpShader = true;
     }
     m_nWarpPSVersion = nWarpPSVersionInFile;
   }
@@ -1498,8 +1500,10 @@ bool CState::Import(const wchar_t* szIniFile, float fTime, CState* pOldState, DW
 }
 
 void CState::GenDefaultWarpShader() {
-  if (m_nWarpPSVersion > 0)
-    g_engine.GenWarpPShaderText(m_szWarpShadersText, m_fDecay.eval(-1), m_bTexWrap);
+  if (m_nWarpPSVersion > 0) {
+    g_engine.GenWarpPShaderText(m_szWarpShadersText, m_bTexWrap);
+    m_bAutoGenWarpShader = true;
+  }
 }
 void CState::GenDefaultCompShader() {
   if (m_nCompPSVersion > 0)

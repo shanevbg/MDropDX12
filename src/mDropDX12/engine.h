@@ -1236,7 +1236,7 @@ public:
   char        m_szBlurVS[32768];
   char        m_szBlurPSX[32768];
   char        m_szBlurPSY[32768];
-  void        GenWarpPShaderText(char* szShaderText, float decay, bool bWrap);
+  void        GenWarpPShaderText(char* szShaderText, bool bWrap);
   void        GenCompPShaderText(char* szShaderText, float brightness, float ve_alpha, float ve_zoom, int ve_orient, float hue_shader, bool bBrighten, bool bDarken, bool bSolarize, bool bInvert);
 
   //====[ 2. methods added: ]=====================================================================================
@@ -1533,6 +1533,7 @@ public:
   int         GetNextFreeSupertextIndex();
   void        DoCustomSoundAnalysis();
   void        DrawMotionVectors();
+  void        DX12_DrawMotionVectors();
 
   bool        LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompileOnly);
   void        UvToMathSpace(float u, float v, float* rad, float* ang);

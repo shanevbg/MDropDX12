@@ -1000,6 +1000,10 @@ void DebugLogClearAll() {
   LeaveCriticalSection(&g_debugLogCS);
 }
 
+const wchar_t* DebugLogGetDir() {
+  return g_debugLogDir;
+}
+
 // UTF-8 <-> Wide string conversion helpers
 std::wstring UTF8ToWide(const char* utf8) {
   if (!utf8 || !utf8[0])

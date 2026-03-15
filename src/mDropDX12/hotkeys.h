@@ -144,6 +144,7 @@ enum HotkeyAction : int {
     HK_OPEN_SCRIPT,               // (unbound) — open Script window
     HK_POLL_TRACK_INFO,           // Middle Mouse — force track info poll
     HK_MIRROR_WATERMARK,          // (unbound) — toggle mirror watermark mode
+    HK_WATERMARK,                 // (unbound) — toggle clickthrough/watermark mode
 
     HK_COUNT  // = number of built-in actions + 1 (HK_NONE)
 };

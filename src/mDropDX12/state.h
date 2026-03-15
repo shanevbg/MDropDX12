@@ -277,6 +277,7 @@ public:
   int                 m_nWarpPSVersion;  // 0 = milkdrop 1 era (no PS), 2 = ps_2_0, 3 = ps_3_0
   int                 m_nCompPSVersion;  // 0 = milkdrop 1 era (no PS), 2 = ps_2_0, 3 = ps_3_0
   bool                m_bAutoGenCompShader; // true if comp shader was auto-generated (no [comp_shader] section)
+  bool                m_bAutoGenWarpShader; // true if warp shader was auto-generated (no [warp_shader] section)
   float				m_fRating;		// 0..5
   // post-processing:
   CBlendableFloat		m_fGammaAdj;	// +0 -> +1.0 (double), +2.0 (triple)...
