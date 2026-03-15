@@ -478,6 +478,7 @@ public:
   void InitDisplayOutput(DisplayOutput& out);
   void DestroyDisplayOutput(DisplayOutput& out);
   void DestroyAllDisplayOutputs();
+  void ReleaseDisplayOutputWraps();
   void ResizeMirrorSwapChain(MonitorMirrorState& ms, int newW, int newH);
   void SendToDisplayOutputs() override;
   void RefreshDisplaysTab();

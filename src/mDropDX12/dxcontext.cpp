@@ -620,6 +620,16 @@ bool DXContext::ResizeSwapChain(int newWidth, int newHeight)
         sprintf(buf, "DX12: ResizeBuffers FAILED hr=0x%08X deviceRemovedReason=0x%08X",
                 (unsigned)hr, (unsigned)devReason);
         DebugLogA(buf, LOG_ERROR);
+
+        // Restore command infrastructure so the render loop doesn't crash
+        // accessing null objects while recovery is pending.
+        CreateRtvsForSwapChain();
+        for (UINT i = 0; i < DXC_FRAME_COUNT; i++)
+            m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[i]));
+        m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+            m_commandAllocators[m_frameIndex].Get(), nullptr, IID_PPV_ARGS(&m_commandList));
+        if (m_commandList) m_commandList->Close();
+
         m_lastErr = DXC_ERR_RESIZEFAILED;
         return false;
     }
