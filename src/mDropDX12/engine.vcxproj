@@ -289,10 +289,6 @@
     <Manifest>
       <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
     </Manifest>
-    <Manifest />
-    <Manifest>
-      <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
-    </Manifest>
   </ItemDefinitionGroup>
   <!-- ============== Debug|x64 ============== -->
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
