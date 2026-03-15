@@ -92,3 +92,13 @@ Both render a 3D voxel cityscape / cube matrix with rainbow color gradients (gre
 Both render the worm-tunnel perspective with colored block walls (blue/purple on left, teal/green on right) and a central triangular waveform shape with spiral trail. The block mosaic pattern, color gradients, and tunnel depth are consistent. Camera position differs slightly due to animation timing.
 
 **Verdict:** Visually equivalent.
+
+### 9. Flexi - oldschool tree
+
+| MDropDX12 | Milkwave |
+| --------- | -------- |
+| ![MDropDX12](images/comparison/09_oldschool_tree_mdrop.jpg) | ![Milkwave](images/comparison/09_oldschool_tree_milkwave.jpg) |
+
+Both render the fractal tree with autumn-colored leaves (orange-brown to yellow-green gradient, left to right) against a black background with concentric ring ripples emanating from center. The leaf geometry, branching structure, trunk, and internal tile patterns are identical. Audio-reactive ring ripples match in spacing and intensity.
+
+**Verdict:** Visually equivalent.
