@@ -1,0 +1,1033 @@
+# MDropDX12 Changelog
+
+## v2.6.0 (2026-03-18)
+
+Shader compatibility, rendering quality, and .milk2 blend improvements.
+
+### New Features
+
+- **Anisotropic Filtering** (Visual window): 16x anisotropic filtering toggle for linear DX12 samplers. Off by default.
+
+### Preset Rendering Fixes
+
+- **Safe division for DX9 compatibility**: `_safe_denom()` wrapper prevents NaN from `0/0` in shader bodies (DX9 returns 0, DX12 returns NaN).
+- **Initialize comp quad Diffuse**: Fixed uninitialized vertex diffuse color on fullscreen comp quad.
+
+### .milk2 Blend Improvements
+
+- **Fixed wipe patterns**: `blending_pattern=horizontal` and `blending_pattern=vertical` in `.milk2` files now use dedicated fixed-position wipe shaders.
+
+### MCP Server
+
+- Auto-launch MDropDX12 and black frame retry in compare tool
+- END_BATCH sentinel for instant multi-message pipe responses
+- MilkDrop 3 pipe classification fix (exe name with space)
+- Compare window positioning via pipe STATE
+
+## v2.5.0 (2026-03-17)
+
+Rendering accuracy, quality controls, and stability release.
+
+### Preset Rendering Fixes
+
+- **NaN-safe atan2**: `atan2(0, 0)` returns NaN on DX12 (DX9 NVIDIA returns 0). Added `_safe_atan2(y, x)` wrapper that prevents NaN at the origin — fixes persistent black holes in tunnel/radial presets.
+- **Safe denominator intrinsics**: Added `_safe_normalize()` overloads that guard against zero-length vectors, preventing NaN propagation in raymarching and particle presets.
+- **Fix message SIZE parameter**: Messages with explicit `SIZE=N` parameter now respect the specified size instead of always autosizing.
+
+### New Features
+
+- **Mesh Size control** (Visual window): Slider to adjust warp/shape mesh vertex density (8–192, step 8). Previously only changeable via `settings.ini`.
+- **Texture Precision control** (Visual window): Combo box to select internal render target bit depth — 8-bit, 16-bit float, or 32-bit float. Previously only changeable via `settings.ini`.
+- **Media key routing**: Media keys route through `keybd_event` for system-level handling.
+- **Windows volume control via IPC**: `SET_VOLUME` / `GET_VOLUME` / `SET_MUTE` / `GET_MUTE` IPC commands.
+- **Audio gain attenuation**: Audio sensitivity can now be set below 1.0 (previously clamped to 1.0 minimum).
+
+### Stability Fixes
+
+- **Fix resize crash** (PR #32): Restore DX12 command infrastructure after `ResizeBuffers` failure.
+- **Fix display output cleanup**: Release display mirror Spout wrapped backbuffers during device cleanup.
+- **Fix preset startup default** (PR #31): `m_bEnablePresetStartup` defaults to `true` for fresh installs.
+
+### MCP Server
+
+- BeatDrop pipe discovery support
+- Capture path included in response
+- Null-terminator framing fix for reliable message parsing
+
+## v2.4.0 (2026-03-15)
+
+Preset compatibility and visual accuracy release. Fixes two rendering bugs that caused presets to render differently from the reference Milkwave Visualizer, and adds a visual comparison document with side-by-side screenshots.
+
+### Preset Rendering Fixes
+
+- **Fix alpha blend feedback amplification in textured shapes**: SPRITEVERTEX PSOs used `SrcBlendAlpha=ONE` instead of `SRC_ALPHA`, causing textured shapes to write excess alpha that compounded through the feedback loop. DX9 has no separate alpha blend (`D3DRS_SEPARATEALPHABLENDENABLE=FALSE`), so alpha uses the same factors as color. Fixes "BrainStain - re entry" and other presets with textured shapes appearing much brighter than reference.
+- **Fix HLSL variable shadowing user-defined functions**: Added `FixShadowedUserFunctions()` to rename local variables that reuse user-defined function names (valid in GLSL, rejected by HLSL with error X3005). The existing `FixShadowedBuiltins` only handled intrinsic functions. Fixes "Marex + IkeC - Shadow Party Shader Jam 2025" rendering as black screen.
+
+### Documentation
+
+- **Visual comparison document**: New `docs/comparison.md` with side-by-side screenshots of 11 presets rendered on both MDropDX12 and Milkwave Visualizer. All 11 presets now render equivalently.
+
+## v2.3.0 (2026-03-14)
+
+Shader compatibility and rendering completeness release.
+
+### Preset Rendering Fixes
+
+- **Fix `_safe_sqrt` to return always-positive values**: Changed from `sign(x)*sqrt(abs(x))` to `sqrt(abs(x))`, matching DX9 SM3.0 native sqrt behavior. The sign-preserving form created singularities in presets where `sqrt(negative)+offset` crossed zero, producing infinity through the feedback loop. Fixes "martin - axon3" (blown out white) and similar presets.
+- **Implement DX12 motion vector rendering**: New `DX12_DrawMotionVectors()` draws motion vector lines into VS[0] before the warp pass using `PSO_LINE_ALPHABLEND_WFVERTEX`. Fixes presets like "Illusion & Rovastar - Clouded Bottle" which appeared too dark because their motion vector lines were missing.
+- **Fix `[loop]` attribute injection**: Only inject `[loop]` on `while` loops (raymarching constructs), not `for` loops. Small fixed-count `for` loops caused `error X3531` when marked `[loop]`. Fixes black-screen failures in several MilkDrop2077 presets.
+
+### Shader Compilation Improvements
+
+- Add `D3DCOMPILE_PARTIAL_PRECISION` and `D3DCOMPILE_PREFER_FLOW_CONTROL` flags for SM3.0-like codegen
+- Fix D3DXCompileShader flag passthrough (all caller flags now reach D3DCompile)
+- Replace `i = I_MAX` break hack with native `break` statement
+
+### Diagnostics
+
+- Bytecode disassembly dump at verbose log level (`log/diag_asm_*.txt`) via `D3DDisassemble()`
+
+## v2.2.0 (2026-03-14)
+
+Preset rendering accuracy release. Fixes long-standing math and shader issues that caused many presets to render darker, incorrectly filtered, or visually different compared to the reference Milkwave Visualizer.
+
+Special thanks to [IkeC](https://github.com/IkeC) for all his brilliant work on [Milkwave](https://github.com/IkeC/Milkwave) — the reference visualizer, testing feedback, and tireless collaboration that continues to drive MDropDX12 forward.
+
+### Preset Rendering Fixes
+
+- **Fix sqrt() emulation to match DX9 hardware behavior**: DX9 compiles `sqrt(x)` as `x * rsq(x)`, which returns `sign(x) * sqrt(|x|)` for negative inputs — a negative value that UNORM render targets clamp to zero. MDropDX12's previous `_safe_sqrt` used `sqrt(abs(x))`, returning positive values for negative inputs and shifting the feedback equilibrium brighter in some presets and darker in others. Now uses `sign(x) * sqrt(abs(x))` to match DX9 exactly. Fixes darkness/brightness issues across many presets with complex feedback loops.
+- **Fix sampler addressing for prefixed noise/random textures**: Presets using `sampler_pw_noise_lq`, `sampler_fc_noise_hq`, `sampler_pc_rand00`, and other `pw_`/`fc_`/`pc_` prefixed samplers were falling through to the default LINEAR+WRAP sampler instead of their intended POINT+WRAP, LINEAR+CLAMP, or POINT+CLAMP modes. Added 36 `replaceTex2D` entries covering all prefixed variants of noise, noisevol, and random textures. Fixes excessive glow, incorrect texture filtering, and visual artifacts in presets like "martin - push ax".
+- **Fix vertex decay color applied to custom warp shader presets**: Milkwave's `WarpedBlit_Shaders` passes white (0xFFFFFFFF) vertices when a custom warp shader is active — the shader handles decay internally. MDropDX12 was incorrectly always applying the `cDecay` vertex color, causing premature darkening. Custom warp shader presets now receive white vertices; non-shader presets continue to use cDecay for fallback decay modulation.
+- **Add NaN-safe shader intrinsics for DX12 IEEE 754 compliance**: DX12 follows strict IEEE 754 where `sqrt(negative) = NaN`, `tan(pole) = inf`, `inf * 0 = NaN`, and `pow(negative, fraction) = NaN`. DX9 NVIDIA hardware deviates — `sqrt(neg) = sqrt(|x|)`, `inf * 0 → 0`, etc. Added safe wrappers (`_safe_sqrt`, `_safe_tan`, `_safe_pow`, `_safe_asin`, `_safe_acos`, `_safe_normalize`) that are `#define`-redirected before preset shader code. Prevents NaN propagation through the feedback loop which caused persistent black holes.
+- **Fix comp vertex shader uv_orig binding**: The comp and warp vertex shaders now use separate TEXCOORD0/1/2 inputs matching the `g_MyVertexLayout` input element descriptor, correctly passing `uv`, `uv_orig`, and `rad_ang` as independent float2 values.
+
+### Other Fixes
+
+- **Fix screenshot red/blue channel swap**: WIC PNG encoder's `SetPixelFormat` silently changes RGBA to BGRA, then `WritePixels` misinterprets the RGBA backbuffer data. Screenshots now swap R↔B in the readback buffer before writing as BGRA.
+- **Increase default ToolWindow font size**: Default increased from 16px to 20px, maximum from 24px to 32px for better readability on high-DPI displays.
+
+### Diagnostics
+
+- Added `DIAG_DISPLAY_MODE` IPC command for raw render target inspection (0=normal, 1=VS[0], 2=VS[1])
+- Shader text dump diagnostics for warp and comp shaders
+
+## v2.1.0 (2026-03-13)
+
+Stability and IPC release focused on multi-display mirror modes, watermark mode robustness, and expanded Named Pipe commands.
+
+### Bug Fixes
+
+- **Fix watermark mirror -> regular mirror transition**: Switching from mirror watermark to regular mirror mode via hotkey left mirrors at 30% opacity with click-through enabled, causing visual hang. New `ExitMirrorWatermark()` helper properly restores render window state (opacity, click-through, always-on-top, position) and resets mirror configs from all toggle paths (hotkeys, IPC signals, Alt+S, Alt+Enter, window reset)
+- **Fix WindowOpacity persisting watermark value to INI**: Watermark mode's 0.30 opacity leaked into `settings.ini` on save/exit, persisting across restarts. Watermark handlers now write pre-watermark opacity to INI immediately on entry; the general INI save routine skips `fOpacity` when in any watermark mode
+- **Fix window position persisting to wrong monitor during watermark**: `SaveWindowSizeAndPosition()` now skips when in watermark mode (the render window is temporarily on a different monitor at full size)
+- **Fix render monitor excluded from display list**: The render window's monitor was completely removed from `m_displayOutputs` during enumeration. Now included with `bSkippedSameMonitor` flag for dynamic runtime filtering in `SendToDisplayOutputs()` — all monitors appear in DIAG and Displays window
+- **Fix display config lost on re-enumeration**: Monitor configs (enabled, fullscreen, opacity, click-through) are now saved and restored across `EnumDisplayMonitors` calls, matched by display rect with device name fallback
+- **Fix mirror activation prompt blocking message loop**: Removed the blocking `MessageBox` prompt from `TryActivateMirrors()` — auto-enables all monitors when none are configured (the "Don't ask" checkbox made this the default anyway)
+- **Fix mirror swap chain init race**: Added `WaitForGpu()` before `CreateSwapChainForHwnd` to prevent driver failures from in-flight render commands
+- **Fix SRV descriptor heap overflow on window resize and font rebuild**
+- **Fix border-only shape rendering and improve adaptive audio gain**
+- **Fix always-on-top setting not persisting through restarts**
+- **Fix preset lists, message autoshrink, and deferred startup save**
+- **Fix IPC signal handlers for FULLSCREEN, WATERMARK, BORDERLESS_FS, STRETCH, MIRROR**
+
+### New Features
+
+- **Mirror Watermark mode**: New button in Displays window + `MirrorWatermark` hotkey action + `SIGNAL|MIRROR_WM` IPC command. Puts the visualizer on all displays simultaneously with low opacity and click-through for desktop overlay use
+- **Hotkey reset moved to Hotkeys window only**: Reset to Defaults now requires confirmation dialog and is only available in the Hotkeys window (no longer in Settings)
+- **TRACK| outgoing IPC message**: Broadcasts current track info (artist, title, album, artwork path) to all connected pipe clients when track changes
+- **New IPC commands**: `DIAG_MIRRORS` (comprehensive mirror state dump), `SET_MIRROR_OPACITY=N`, `SET_MIRROR_CLICKTHRU=0|1`, `MOVE_TO_DISPLAY=N`, `SET_WINDOW=x,y,w,h`, `SIGNAL|MIRROR_WM`
+- **Display profile save/load**: Save and restore complete display output configurations as JSON files
+- **Improved mirror logging**: Detailed init/skip/error logging for mirror window creation with device names
+
+### IPC / Pipe Changes
+
+- `SIGNAL|FULLSCREEN` — deactivates mirrors first, then toggles fullscreen
+- `SIGNAL|MIRROR` — toggle mirror mode with proper watermark cleanup
+- `SIGNAL|MIRROR_WM` — toggle mirror watermark mode (all displays, low opacity, click-through)
+- `SIGNAL|WATERMARK` — toggle single-window watermark mode
+- `SIGNAL|BORDERLESS_FS` — toggle borderless fullscreen
+- `SIGNAL|STRETCH` — toggle multi-monitor stretch
+- `DIAG_MIRRORS` — dump full mirror state (active, render monitor, per-monitor config, swap chain sizes, window rects)
+- `SET_MIRROR_OPACITY=<1-100>` — set opacity for all monitor mirrors
+- `SET_MIRROR_CLICKTHRU=<0|1>` — set click-through for all monitor mirrors
+- `MOVE_TO_DISPLAY=<N>` — move render window to center of display N (1-based)
+- `SET_WINDOW=<x>,<y>,<w>,<h>` — set render window position and size
+- `TRACK|artist=...|title=...|album=...|artwork=...` — outgoing broadcast on track change
+
+## v2.0.0 (2026-03-12)
+
+Major milestone release. MDropDX12 2.0 marks the point where the engine has been fully rebuilt on DirectX 12 with a comprehensive feature set that goes well beyond the original MilkDrop2 visualizer.
+
+Special thanks to [IkeC](https://github.com/IkeC) for all his hard work on [Milkwave](https://github.com/IkeC/Milkwave) — the inspiration, testing, feedback, and collaboration that made this project possible.
+
+### Shadertoy Import & GLSL->HLSL Converter
+
+- Full Shadertoy rendering pipeline with `.milk3` JSON preset format
+- Multi-pass rendering: Buffer A -> Buffer B -> Buffer C -> Buffer D -> Image, with Common shared code
+- SM5.0 (`ps_5_0`) shader compilation for all Shadertoy presets
+- FLOAT32 ping-pong feedback buffers for temporal accumulation effects
+- Comprehensive GLSL->HLSL converter handling matrices, structs, vector comparisons, array params, over-specified constructors, and more
+- Shader Import window with two-panel editor, per-pass channel combos, Convert & Apply, and Save .milk3 export
+- Channel auto-detection: self-feedback, audio, noise textures, and JSON channel names
+- Shadertoy-compatible `iMouse`, `iDate`, `iResolution`, `iTime`, `iChannel0–3` uniforms
+- sRGB gamma correction for Shadertoy-accurate color output
+- 17+ converter fixes since initial release (variable shadowing, matrix chains, precision strips, texture bias, and more)
+
+### Named Pipe IPC
+
+- Replaced WM_COPYDATA / hidden window IPC with Named Pipes (`\\.\pipe\Milkwave_<PID>`)
+- PID-based discovery eliminates fragile window-title matching
+- Multi-instance pipe server: concurrent client connections (Milkwave Remote + MCP simultaneously)
+- Duplex message-mode communication with non-blocking outgoing messages
+- 32 of 34 Milkwave commands handled natively
+- Signal messages (`SIGNAL|NAME=VALUE`) for extensible event notification
+- MCP server (`tools/mdrop-mcp/`) for AI-assisted visualizer control
+
+### ToolWindow System
+
+- 20+ standalone windows running on their own threads with independent always-on-top, sticky positions, and tab memory
+- Windows: Visual, Colors, Controller, Displays, Song Info, Hotkeys, MIDI, Presets, Sprites, Messages, Remote, Script, Shader Import, Video Effects, VFX Profiles, Text Animations, Button Board, Workspace Layout, Error Display, Annotations
+- Dark-themed popup context menus using uxtheme dark mode APIs
+- ModalDialog base class for themed popup dialogs with shared font/theme/DPI support
+
+### Configurable Hotkeys & Input
+
+- Dedicated Hotkeys window (Ctrl+F7) with per-binding local/global scope
+- Mouse button bindings (Left, Right, Middle, X1, X2)
+- Dynamic Script and Launch App hotkey slots with unlimited entries
+- Conflict detection and Reset to Defaults
+- Native MIDI input with 50 mapping slots, learn mode, button/knob actions
+- Game controller support with JSON config and IPC command binding
+
+### Preset Annotations
+
+- Persistent per-preset ratings (0-5), flags (favorite/error/skip/broken), notes
+- Auto-captured shader error text in `presets.json`
+- Annotations ToolWindow with filter, import, scan, and detail dialogs
+- Right-click context menu on Presets window
+
+### Video & Display
+
+- Native webcam and video file input mixing (background/overlay compositing with luma key)
+- Spout video input mixing via D3D11On12
+- Video Effects window with transform, color, and audio-reactive controls
+- VFX JSON profiles for saving/loading effect presets
+- Monitor mirroring with per-display opacity, click-through, and safety controls
+- Workspace Layout window for tiling tool windows across the screen
+- Two-pass shader blending for preset transitions
+
+### Audio & FFT
+
+- FFT EQ smoothing with configurable attack/decay and peak hold
+- Audio texture 512x2 R32_FLOAT (smoothed spectrum + peak values)
+- Shader functions: `get_fft()`, `get_fft_hz()`, `get_fft_peak()`, `get_fft_peak_hz()`
+- Separate clean FFT for shader audio texture (Hann³ window, no EQ)
+
+### UI & Settings
+
+- In-app Settings window (F8) with tri-mode theme (Dark/Light/Follow System)
+- 5-tab UI (General, Tools, System, Files, About) with preset browser and resource viewer
+- Button Board with slot images, hotkeys, JSON layouts, drag-drop
+- Text Animations window with DX12 warped text, color/font pickers, animation profiles
+- Cover art sprite system with IPC signal
+- File association registration for .milk/.milk2 (Settings -> About, no admin required)
+- Command-line preset loading (double-click .milk/.milk2/.milk3 in Explorer)
+- Welcome window with first-run setup options
+
+### Fixed Issues (since v1.0)
+
+- Fixed fullscreen black rendering for dot-based presets (DX12 point size emulation)
+- Fixed dark/incorrect blur presets (removed DX9 half-texel UV offsets)
+- Fixed non-shader preset rendering (comp shader binding, shape alpha blend, warp decay)
+- Fixed pre-MilkDrop2 preset rendering (clamp sampler, Y-flip)
+- Fixed ns-eel2 `regNN * regNN` multiply bug (optimizer treated different regs as identical)
+- Fixed `ps_2_a` silently dropping texture bindings on complex shaders (raised to ps_3_0 minimum)
+- Fixed comp shader reading post-warp darkened texture instead of pre-warp input
+- Fixed TDR crash when disabling mirror outputs (GPU flush before resource release)
+- Fixed HUD text overflow on portrait/large displays
+- Fixed render hang on display mode switching (swap chain recovery)
+- Fixed mirror window deadlock (cross-thread message pumping)
+- Fixed global hotkeys not dispatching most actions
+- Fixed `sampler_rand` black screen and random texture directory search
+- Fixed GLSL converter: variable shadowing, matrix chains, precision strips, texture bias, out param zero-init, over-specified constructors, reserved keywords, and many more
+- Fixed channel auto-detection: temporal reprojection false positives, audio heuristic overrides
+- Fixed screenshot filename using previous preset name after shader import
+- Fixed notification overlay persisting across preset changes
+
+## v1.7.7 (2026-03-11)
+
+### Rendering Fixes
+
+- Fixed fullscreen black rendering for dot-based presets — DX12 custom wave dots were always 1px instead of emulating DX9 `D3DRS_POINTSIZE` (2-3px squares at high resolution). Sparse additive dots couldn't accumulate enough brightness in the feedback loop to overcome comp shader darken effects.
+- Fixed dark/incorrect rendering for blur-dependent presets (e.g., Flexi) — removed leftover DX9 half-texel UV offsets from blur shaders that shifted blur by 1 texel, compounding through the feedback loop
+- Fixed non-shader preset rendering — auto-gen comp shader now correctly binds VS[1] (post-warp+shapes) instead of VS[0], and custom shapes use proper alpha blending PSO
+- Fixed comp shader reading post-warp darkened texture instead of pre-warp input for user-written comp shaders
+- Fixed pre-MilkDrop2 preset rendering — clamp sampler for non-wrapping textures, correct Y-flip, and proper warp decay via vertex diffuse color
+
+### Hotkeys & Input
+
+- Added separate Mirror and Stretch hotkey actions (unbound by default)
+- Fixed global hotkeys not dispatching most actions
+- Guard mirror prompt against re-entry with auto-accept after 5 seconds
+
+### Internal
+
+- Reduced ToolWindow boilerplate with macros, registry, and template helpers
+
+## v1.7.6 (2026-03-10)
+
+### Display Mode Stability
+
+- Fixed render hang when switching between mirroring and fullscreen — Present `E_FAIL` (0x80004005) now triggers automatic swap chain recovery after consecutive failures
+- Fixed `DXGI_PRESENT_ALLOW_TEARING` causing persistent `E_FAIL` during window state transitions — Present now retries without the tearing flag on failure
+- Fixed device recovery (TDR) never triggering after `DXGI_ERROR_DEVICE_REMOVED` — `m_lastErr` check was blocked by `m_ready` check running first
+- Fixed render window losing focus when switching between fullscreen, spanning, and mirroring display modes
+- Fixed mirror window deadlock — render thread now pumps messages for render-thread-owned windows (mirror windows) to prevent cross-thread `SendMessage` deadlock during `SetWindowPos` z-order changes
+- Fixed Alt+Enter while mirroring now disables mirrors and stays in single-monitor fullscreen instead of exiting to windowed mode
+
+### ToolWindows
+
+- ToolWindows opened via hotkey now appear above fullscreen/topmost render window using `AttachThreadInput` for reliable cross-thread `SetForegroundWindow`
+- ToolWindows created while render is topmost now inherit `WS_EX_TOPMOST` so they aren't hidden behind fullscreen render
+
+### Documentation
+
+- Restructured Manual.md: Settings window now documents 5 tabs (General, Tools, System, Files, About) with ToolWindows as a separate section
+- Added documentation for all ToolWindows including Controller, Error Display, Annotations, Workspace Layout, Video Effects, VFX Profiles, Button Board
+- Updated IPC protocol references from WM_COPYDATA to Named Pipes throughout docs
+- Added IPC commands reference section to Scripts.md
+- Fixed blur level count in Textures.md (6 -> 3)
+- Added presets.json to Install.md configuration files list
+
+## v1.7.5 (2026-03-10)
+
+### Preset Annotations
+
+- New persistent preset annotation system — per-preset ratings (0-5), flags (favorite/error/skip/broken), notes, and auto-captured shader error text stored in `presets.json`
+- Annotations ToolWindow with filterable ListView, detail dialogs, import from file, and scan loaded presets for `.milk` `fRatingThis` values
+- Import dialog shows side-by-side comparison of source vs current ratings/flags with selective import, merge, or bulk import options
+- Auto-flag presets with `PFLAG_ERROR` on shader compilation failure, capturing error text for later review
+- Random preset selection skips presets flagged as `PFLAG_SKIP` or `PFLAG_BROKEN`
+- Right-click context menu on Presets window with Toggle Favorite, Toggle Skip, Flag as Broken, Add Note, View Error, Clear Flags, and Rating submenu
+- Annotations accessible from Presets context menu ("Open Annotations...") and Tools tab in Settings
+
+### UI Infrastructure
+
+- Added `DoContextMenu` virtual method to ToolWindow base class — enables right-click context menus in any ToolWindow subclass
+- Dark-themed popup context menus using undocumented uxtheme dark mode APIs (`SetPreferredAppMode`, `AllowDarkModeForWindow`, `FlushMenuThemes`)
+- Cover art sprite system with Show Now button and IPC signal
+
+### Preset Transitions
+
+- Two-pass shader blending for DX12 preset transitions
+
+## v1.7.4 (2026-03-10)
+
+Special thanks to [IkeC](https://github.com/IkeC) and [_Incubo](https://github.com/OfficialIncubo) for testing and reporting issues.
+
+### Rendering
+
+- Fixed `sampler_rand` textures causing black screen — random texture was not bound when preset references `sampler_rand` without a corresponding texture file
+- Fixed random texture directory not searched when loading `sampler_rand` textures (only the preset's own directory was checked)
+- Fixed `tex2D` sampler mismatch when a space follows the opening parenthesis (e.g. `tex2D( sampler, uv)`) — sampler name was not extracted correctly
+- Fixed non-shader preset rendering: video echo, gamma adjustment, and hue rotation now work correctly for presets without comp shaders
+- Fixed `hue_shader` corner colors not applied to DX12 comp fullscreen quad (colors were black instead of interpolated)
+- Fixed warp mesh decay and blur texture scan (warp feedback was too aggressive, blur levels miscalculated)
+
+### Shader Infrastructure
+
+- Raised minimum pixel shader version to `ps_3_0` — fixes `ps_2_a` silently dropping texture bindings on complex shaders (e.g. Organic12-3d-2)
+- Normalized `tex2D` whitespace handling in shader text processing
+
+### Expression Evaluation
+
+- Fixed ns-eel2 `regNN * regNN` multiply bug — optimizer incorrectly treated `reg10*reg20` as `sqr(reg10)` due to cleared symbol names (bug exists in upstream WDL)
+
+### Preset Loading
+
+- `.milk2` preset loading is now asynchronous (non-blocking, same as `.milk` presets)
+
+### Diagnostics
+
+- Added EEL crash diagnostics with thread-local compile context tracking (`diag_eel_error.txt`)
+- Added shader text dump diagnostics (`diag_comp_shader.txt`, `diag_warp_shader.txt`)
+
+### Bootstrap
+
+- Removed automatic directory creation during bootstrap (prevents creating empty directories in unexpected locations)
+
+## v1.7.3 (2026-03-09)
+
+### Rendering
+
+- Fixed comp shader `rad`/`ang` per-pixel computation — presets using `(1-rad)` in comp shaders no longer render as black screen (fullscreen quad had `rad=1.0` hardcoded at all vertices; now computed per-pixel from UV coordinates with aspect correction)
+
+### Shader Infrastructure
+
+- Embedded (compiled) shaders are now always the primary source — disk `.fx` files no longer override the DX12-correct versions
+- Disk `.fx` user overrides are merged: `#define` directives override compiled defaults, and custom functions not in compiled are appended
+- Fixes `_samp_lc` / DX12 sampler errors when running from a directory with legacy DX9 `.fx` files (e.g. Milkwave)
+
+### Crash Diagnostics
+
+- SEH crash handler now writes full post-mortem diagnostics to `diag_seh_crash.txt` — register state (RAX-R15, RIP, EFLAGS), stack trace (StackWalk64 + SymFromAddr), exception details, and module resolution
+- EEL compile context tracking: thread-local RAII scope records which EEL expression phase/source/preset is being compiled, written to `diag_eel_error.txt` on crash
+
+## v1.7.2 (2026-03-09)
+
+### GLSL->HLSL Converter
+
+- Unified non-square matrix conversion to use mul-swap strategy (same as square matrices) — fixes `M[i]` indexing returning wrong vector type/size
+- Fixed audio channel auto-detection overriding JSON `CHAN_FEEDBACK` assignment — `texelFetch(iChannel, ivec2(x,0))` false positive
+- Fixed matrix-returning function chains across newlines (`M1(...)\n* M2(...)\n* v` now correctly wraps with nested `mul()`)
+- Fixed `matVar * (expr)` not converting parenthesized expressions to `mul()`
+- Added `point` to HLSL reserved keyword renaming (geometry shader primitive type)
+
+## v1.7.1 (2026-03-09)
+
+### FFT Accuracy
+
+- Added separate clean FFT (`m_fftShader`) with Hann³ window and no equalization for shader audio texture — fixes high frequencies being over-accentuated in EQ visualization presets
+- FFT for shader `get_fft()` / `get_fft_hz()` now matches Milkwave's scaling (0.00035f, noise gate 5e-5, visible floor 2.5e-4)
+- Beat detection FFT (`myfft`) unchanged — still uses equalization for accurate bass/mid/treb analysis
+
+### Shader Features
+
+- Added `iDate` support (`_c19`): `float4(year, month 0-11, day, seconds_since_midnight)` for wall clock time in shaders
+- Added `tex3Dlod` macro for 3D texture LOD sampling
+- GLSL converter now maps `iDate` to `_c19` instead of commenting it out as unsupported
+
+### Preset Name Display
+
+- Added "(Simple)" mode for preset name display — uses decorative font settings (adjustable size and color only, no animation effects)
+- Simple mode is now the default (`PresetNameAnimProfile=-3`)
+- Combo box in Text Animations window shows (Disabled) / (Simple) / (Random) / named profiles
+
+### Shadertoy Rendering
+
+- Supertexts (preset name, song title) and user sprites now render in Shadertoy (.milk3) render path
+
+### Preset Browser
+
+- Single-click on directory entries now navigates into/out of directories (previously required double-click)
+- `sampler_rand` stripping now only matches actual `Texture2D` declarations (prevents false positives when presets reference sampler by name only)
+
+### HUD Overlay
+
+- Song title on overlay auto-shrinks font when text exceeds available width
+
+### Stability
+
+- Suppressed "no presets found" error when a preset is already playing — fixes nag during preset list rebuild race
+- Animation profiles now persist to disk when Text Animations window is closed
+
+## v1.7.0 (2026-03-08)
+
+### FFT EQ Smoothing & Peak Hold
+
+- Added FFT smoothing with configurable attack/decay interpolation for shader `get_fft()` / `get_fft_peak()` functions
+- Audio texture upgraded to 512x2 R32_FLOAT: row 0 = smoothed FFT spectrum, row 1 = peak hold values
+- Peak hold algorithm: 30-frame hold then 0.97x per-frame decay
+- New shader helper functions in include.fx: `get_fft(pos)`, `get_fft_hz(freq)`, `get_fft_peak(pos)`, `get_fft_peak_hz(freq)`
+- `HAS_FFT_PEAK` define for conditional peak access in presets
+- `sampler_fft` alias for `sampler_audio` compatibility
+- Milkwave EQ visualization presets now work (e.g. IkeC - Equalizer.milk)
+
+### Milkwave Remote IPC
+
+- Handle `FFT_ATTACK=` and `FFT_DECAY=` IPC commands (0.0–1.0 range, clamped)
+- Report `FFTATTACK` and `FFTDECAY` values in status response to Remote
+- INI persistence for FFTAttack/FFTDecay defaults under `[Milkwave]` section
+
+### Bootstrap & First Run
+
+- Upgraded first-run dialog from MessageBox to TaskDialogIndirect with 4 command-link buttons
+- New "Copy settings from existing install" option: folder picker imports all .ini files from another MDropDX12 directory
+- Proper Common Controls v6 manifest activation (fixes ordinal 345 / TaskDialogIndirect crash)
+- PerMonitorV2 DPI awareness and Windows 10/11 compatibility declarations in manifest
+- Manifest now embedded via resource compiler (`1 RT_MANIFEST "manifest.xml"`)
+
+### Error Display Settings
+
+- New Error Display Settings ToolWindow for configuring shader error notification appearance
+- Normal and LOUD display modes with separate font size, duration, and color settings
+- Configurable error duration used across the codebase (replaces hardcoded values)
+- DPI-aware modal dialog sizing with BaseLayout for consistent metrics
+
+### Bug Fixes
+
+- Fixed DX9 caps garbage causing "PSVersion=0x2" shader model error on DX12 (hardcoded MD2_PS_3_0)
+- Fixed `blankDecl` stripping `sampler_audio` declaration needed by `get_fft()` shader functions
+- Fixed `UpdateAudioTexture()` not called in regular `RenderFrame()` path (only in Shadertoy path)
+- Fixed FFT scaling factor producing near-zero values (was 0.00035f from Milkwave Visualizer, now 2.0f for MDropDX12's FFT range)
+
+## v1.6.0 (2026-03-08)
+
+### Audio Reactivity
+
+- Fixed frequency band ranges in AnalyzeNewSound — restored original 200–11025 Hz range (was incorrectly changed to 20–20000 Hz, spreading energy across 10 octaves instead of 5.8 and using wrong FFT bin divisor)
+- Bass/mid/treb reactivity now matches Milkwave reference
+
+### Code Reorganization
+
+- Created `engine_midi.cpp` — MIDI persistence, device lifecycle, knob/button dispatch (extracted from engine_midi_ui.cpp)
+- Created `engine_sprites.cpp` — sprite lifecycle, INI I/O, property management (extracted from engine_messages.cpp and engine_settings_ui.cpp)
+- Created `engine_config.cpp` — settings persistence, theme, user defaults, folder picker, screenshots, Remote launch (extracted from engine_settings_ui.cpp and engine_messages.cpp)
+- Moved Spout output functions (OpenSender, SpoutReleaseWraps, ToggleSpout, SetSpoutFixedSize) from engine_messages.cpp to engine_displays.cpp
+- Promoted duplicated sprite helpers (FormatSpriteSection, FormatSpriteSectionA, MakeRelativeSpritePath) to inline functions in engine_helpers.h
+- Removed ~1,680 lines of duplicated/misplaced code from engine_messages.cpp (~515 lines), engine_settings_ui.cpp (~811 lines), engine_midi_ui.cpp (~332 lines)
+
+### Documentation
+
+- Added Coding Patterns section to docs/Development.md (file organization convention, where to put new code, shared helpers)
+- Added Common Pitfalls section (BS_OWNERDRAW controls, HWND_NOTOPMOST, wide strings, descriptor heap ordering, thread safety, sampler architecture, Shadertoy mode flags, IPC window titles)
+- Added DX12 Rendering Pipeline section (render target ping-pong, binding layout, key differences from DX9)
+
+### Bug Fixes
+
+- Fixed folder picker dialog opening behind PresetsWindow (now passes caller's HWND as owner)
+
+## v1.5.1 (2026-03-08)
+
+### Shader Pipeline
+
+- Rearchitected sampler registers: switched .milk/.milk2 pipeline from `sampler2D` (1 s-register per texture, 16 limit) to separated `Texture2D` + 4 shared `SamplerState` objects (LINEAR+WRAP, LINEAR+CLAMP, POINT+CLAMP, POINT+WRAP)
+- Textures now use t-registers (~128 limit), eliminating X4510 "maximum sampler register exceeded" errors on texture-heavy presets
+- Old preset code preserved via compatibility macros (`sampler2D`, `tex2D`, `tex2Dlod`, `tex2Dbias`)
+- Special-mode samplers (fc_main, pc_main, pw_main, blur) handled via text substitution in LoadShaderFromMemory
+- Root signature reduced from 16 to 4 static samplers; blur root signature shares main
+- Expanded texture binding arrays from 16 to 32 slots, descriptor table from 16 to 32 SRVs
+- SRV heap increased from 1280 to 2560 with overflow protection
+- Fixed `sampler_rand` redefinition errors (~20 presets) by stripping include declarations when preset declares its own
+- Fixed `line` keyword conflict (HLSL geometry shader keyword) by adding it to shadowed builtins list
+- Stripped Shadertoy-specific texture declarations for non-Shadertoy presets to avoid register pressure
+- Added `tex2Dbias` compatibility macro for presets using the DX9 intrinsic
+- Improved shader error logging: failures logged at LOG_ERROR with preset filename
+
+### ToolWindow System
+
+- Added ModalDialog base class for themed popup dialogs with shared font/theme/DPI support
+- Migrated all popup dialogs to ModalDialog (save preset, rename, delete, etc.)
+- Fixed all owner-draw checkbox/radio controls across all ToolWindow tabs — `BM_GETCHECK`/`IsDlgButtonChecked`/`CheckDlgButton` do not work with BS_OWNERDRAW controls
+- Affected controls: Sequential Preset Order, Hard Cuts Disabled, Preset Lock, Script Loop, Sprite flipx/flipy/burn, Video Effects mirror/invert/edge detect, VFX Profiles startup/save-on-close, MIDI Enable, Messages Autoplay
+- Added text shrink-to-fit for messages, song titles, and preset names
+- Added Animations tab to Message Overrides dialog
+- Fixed ToolWindow resize bugs
+
+### Debug Logging
+
+- Debug log now reports log level name when starting a new log and when the level is changed
+- Shader compilation failures now include the preset filename in the log message
+
+## v1.5.0 (2026-03-07)
+
+### Named Pipe IPC
+
+- Replaced WM_COPYDATA / hidden window IPC with Named Pipes (`\\.\pipe\Milkwave_<PID>`)
+- PID-based discovery eliminates fragile window-title matching — no more EnumWindows or FindWindow
+- Removed hidden 1x1 IPC window (IPCWindowThread, IPCWindowProc, g_szIPCWindowTitle)
+- Duplex message-mode pipe: visualizer can send messages back to Remote
+- Non-blocking outgoing messages via pipe write thread (replaces fire-and-forget SendMessage worker)
+- Second-instance forwarding rewritten: uses CreateToolhelp32Snapshot to find running instances, sends preset path over pipe
+- New files: `pipe_server.h`, `pipe_server.cpp` — self-contained PipeServer class with listen/read/write threads
+- Signal messages (`SIGNAL|NAME=VALUE`) replace PostMessage-based WM_USER+N signals
+- All existing text message formats unchanged (MSG|, PRESET=, WAVE|, STATE, SPOUT_SENDER=, etc.)
+- Configurable WM base offset via `PipeServer::Start(hwnd, wmIPCMessage, wmSignalBase)` for cross-project portability
+- Settings UI (Remote tab) updated to show pipe name and connection status instead of window titles
+- Pipe server tracks connected client exe path via `GetNamedPipeClientProcessId` for auto-launch
+- Removed: IPC worker thread, IPC hidden window, WM_MW_RESTART_IPC, g_szIPCWindowTitle, StartIPCThread/StopIPCThread
+
+### Animated Song Titles
+
+- DX12 warped text animation for song title rendering with selectable track info sources
+- Windows color picker and font picker dialogs (replaced raw R/G/B fields)
+- Color swatch click-to-open color picker
+- Export/Import for animation profiles
+- Custom preview text field in Text Animations window
+
+### Mouse Button Hotkeys
+
+- Left, Right, Middle, X1, and X2 mouse buttons can now be assigned as hotkey bindings
+- New "Mouse:" dropdown combo in the hotkey edit dialog (mutual exclusion with keyboard key)
+- Mouse button bindings are forced to local scope (RegisterHotKey does not support mouse buttons)
+- Added WM_XBUTTONDOWN handler for X1/X2 mouse button dispatch
+
+### Open Remote Action
+
+- New HK_OPEN_REMOTE hotkey action: finds and activates Milkwave Remote window, or launches it if not running
+- Searches for both "MDropDX12 Remote" and "Milkwave Remote" window titles
+- Remembers last pipe-connected Remote exe path across sessions (persisted to INI)
+- New HK_POLL_TRACK_INFO hotkey action: force immediate track info poll
+
+### .milk3 Preset Support
+
+- File dialogs (Open, Save As) now include `.milk3` filter alongside `.milk` and `.milk2`
+- Preset browser type filter updated: All / .milk / .milk2 / .milk3
+
+### Bootstrap
+
+- Self-bootstrap now prefers a `resources/` directory next to the exe over walking up parent directories
+- Prevents finding a stray `resources/data/` in an unrelated ancestor directory
+
+### Bug Fixes
+
+- Fixed upside-down sprites by re-enabling DX12 Y-flip (DX12 passthrough VS doesn't negate Y like DX9 OrthoLH)
+- Fixed resize/fullscreen triggering an unwanted next-preset transition
+- Fixed device recovery (TDR) reloading the same preset instead of skipping to next
+- Fixed C5208 build warnings (anonymous typedef struct with static const member)
+
+### Code
+
+- New files: `pipe_server.h`, `pipe_server.cpp` (Named Pipe IPC server)
+- New file: `engine_textanim_ui.cpp` (Text Animations window)
+- Removed ~200 lines of IPC window thread and worker thread code from App.cpp and engine_presets.cpp
+- Zero code warnings in Release build
+
+## v1.4.3 (2026-03-07)
+
+### ToolWindow Improvements
+
+- Radio button groups are now auto-toggled by the base class via `radioGroup` parameter on `CreateRadio()` — subclasses no longer need manual toggle boilerplate
+- Updated `docs/tool_window.md` with radio group auto-toggle documentation
+
+### Bug Fixes
+
+- Fixed Messages window checkboxes (Show Messages, Autoplay, Sequential, Autosize) always reading as unchecked — clicking "Show Messages" would silently disable messages
+- Fixed MIDI window Enable checkbox always reading as unchecked
+- Root cause: `IsDlgButtonChecked()` silently returns 0 for BS_OWNERDRAW controls; replaced with `IsChecked()`
+
+## v1.4.2 (2026-03-06)
+
+### Packaging
+
+- Portable zip now contains only the exe and README - the exe self-bootstraps all config files, directories, and defaults on first run
+- Removed bundled presets and textures from repository
+- Added `docs/Resources.md` with links to recommended preset collections
+- Featured IkeC's [Milkwave preset collection](https://github.com/IkeC/Milkwave/tree/main/Visualizer/resources) as the recommended starting point
+
+### Scripting
+
+- Added comprehensive scripting guide (`docs/Scripts.md`) covering all script commands, ACTION= dispatch, and examples
+- Added `ACTION=OpenWorkspaceLayout` hotkey action to open the Workspace Layout window
+- Added `ACTION=ApplyWorkspaceLayout` hotkey action to apply saved workspace layout with a single keypress
+- Workspace layout can now be triggered via script, hotkey binding, or Button Board action
+
+### Bug Fixes
+
+- Fixed owner-draw checkboxes always reading as unchecked in ToolWindows (base class auto-toggle)
+- Fixed light mode rendering: ToolWindow backgrounds and Button Board now use system colors
+- Fixed About tab showing hardcoded version instead of reading from `version.h`
+
+## v1.4 (2026-03-06)
+
+### Shadertoy Import (.milk3)
+
+- Added Shadertoy-compatible rendering pipeline with GLSL-to-HLSL converter
+- New `.milk3` JSON preset format supporting multi-pass shaders (Buffer A, Buffer B, Image, Common)
+- SM5.0 (`ps_5_0`) shader compilation for all Shadertoy presets
+- FLOAT32 ping-pong feedback buffers for temporal accumulation effects
+- sRGB gamma correction post-process for Shadertoy-accurate color output
+- Shadertoy-compatible `iMouse` input (pixel coords, left-click drag, button state via sign encoding)
+- Channel auto-detection: `iChannel0` maps to self-feedback or noise depending on shader context
+- Buffer A self-feedback detection via screen-space textureLod pattern matching
+- JSON channel import supports string names (`"self"`, `"bufferA"`, `"noiseLQ"`, `"audio"`, etc.)
+- Audio texture (512x2, R32_FLOAT) with FFT spectrum and PCM waveform rows
+- Noise textures (LQ/MQ/HQ) and 3D volume noise textures for Shadertoy compatibility
+
+### Shader Import Window
+
+- Two-panel Shader Import UI: pass listbox (left) with shader editor (right)
+- Multi-pass support: add/remove Buffer A, Buffer B, Common, and Image passes
+- Per-pass channel input combos (ch0–ch3) with auto-detection from GLSL source
+- Convert & Apply button: GLSL->HLSL conversion + live preview in one click
+- Save .milk3 button: export converted shaders as portable JSON presets
+- Automatic .milk3 name suggestion from Shadertoy project name
+- Comprehensive GLSL->HLSL converter handling matrices, structs, vector comparisons, array params, and more
+- Error display with scrollable output showing conversion and compilation diagnostics
+
+### Video Effects Window
+
+- Standalone Video Effects window with transform, color, and audio-reactive controls
+- Transform controls: scale, rotation, X/Y offset with real-time sliders
+- Color controls: brightness, contrast, saturation, hue shift
+- Audio-reactive mode: link visual parameters to bass/mid/treb audio bands
+- VFX JSON profiles: save/load effect presets as named JSON files
+- Startup preset mode selector: choose which VFX profile loads on startup
+
+### Workspace Layout Window
+
+- New Workspace Layout window for tiling tool windows across the screen
+- Two modes: corner (render in screen corner) or fullscreen on separate display
+- Corner picker (TL/TR/BL/BR) with render size slider (5–50%)
+- Display picker combo for multi-monitor fullscreen mode
+- Checkbox grid for selecting which tool windows to open and tile
+- Apply Layout button opens selected windows and arranges them in a grid
+- Reset to Defaults button restores default layout
+- Accessible from Welcome window and Settings -> About tab
+
+### ToolWindow System
+
+- Extracted Settings, Displays, Song Info, and Hotkeys windows into standalone ToolWindow subclasses running on their own threads
+- Each ToolWindow has independent always-on-top pin button, font synchronization, dark theme support, and sticky window positions
+- ToolWindows remember their last active tab between sessions
+- Displays tab split into Display Outputs and Video Input sub-tabs
+- Added Presets window, Sprites window, and Messages window as standalone ToolWindows
+- Added `IsChecked()` / `SetChecked()` helper methods to ToolWindow base class for owner-draw checkbox/radio state
+- Base class auto-toggles checkbox state on click (subclasses no longer need toggle boilerplate)
+- Comprehensive ToolWindow documentation at `docs/tool_window.md`
+
+### Welcome Window
+
+- First-run Welcome window with quick-start options
+- Browse for Resources folder, Open Shader Import, Open Settings, Setup Workspace Layout buttons
+- Appears automatically when no presets are found; can be dismissed
+
+### Configurable Hotkeys
+
+- Added dedicated Hotkeys window (Ctrl+F7) with ListView showing all configurable bindings
+- Hotkey capture control with Set/Clear buttons and per-binding local/global scope toggle
+- Local hotkeys work when the render window has focus; global hotkeys work system-wide via RegisterHotKey
+- Conflict detection automatically clears duplicate bindings when assigning a new hotkey
+- Reset to Defaults button restores original key assignments
+- Default shortcuts: Ctrl+F8 (Displays), Shift+Ctrl+F8 (Song Info), Ctrl+F7 (Hotkeys)
+
+### Theme System
+
+- Replaced boolean Dark Theme checkbox with tri-mode Theme selector: Dark, Light, Follow System
+- Follow System mode reads Windows AppsUseLightTheme registry key and auto-switches when the user changes their Windows theme (via WM_SETTINGCHANGE)
+- Light mode uses standard Windows system colors for all ToolWindows
+- Dark mode unchanged (dark green theme matching MilkVision)
+- Fixed light mode rendering: ToolWindow backgrounds, Button Board panel, and owner-draw controls now render correctly in light mode
+- DWM caption, border, and text colors properly reset when switching to Light mode
+
+### Video Input
+
+- Added native webcam capture via Windows Media Foundation (no external tools needed)
+- Added video file playback (MP4, AVI, WMV, MKV) with loop option
+- Unified Spout, webcam, and video file into a single Video Input system with shared compositing controls
+- All sources share the same pixel shader pipeline (luma key, opacity, background/overlay layer)
+- Video input sources auto-restore from saved settings on startup (lazy-init on first render frame)
+
+### Native MIDI Input
+
+- Added native MIDI input system with 50 mapping slots (Button/Knob actions)
+- MIDI window accessible from Settings -> System -> MIDI button, runs on its own ToolWindow thread
+- Device selector with Scan button, Enable checkbox, and configurable buffer delay
+- Learn mode: select a row, click Learn, then press a MIDI button or turn a knob to auto-assign
+- Button actions: NEXT, PREV, LOCK, RAND, HARDCUT, MASHUP, FULLSCREEN, STRETCH, SETTINGS, PRESETINFO, BLACKOUT, and all IPC commands
+- Knob actions: Hue, Saturation, Brightness, Intensity, Shift, Speed, FPS Factor, Quality, Opacity, Amp Left, Amp Right
+- JSON persistence (midi.json) with Save/Load/Defaults buttons
+
+### Button Board
+
+- Added per-slot image thumbnails (Set Image / Clear Image context menu, drag-drop image files onto slots)
+- Added per-slot hotkey bindings (modifiers, key, local/global scope) persisted in INI
+- Added RunScript and LaunchApp action types for button slots
+- Added JSON layout export/import (Save Layout / Load Layout in config menu)
+- Added Reset to Defaults with Milkwave Remote-style default layout (auto-populates on first run)
+- Added "Assign Action..." cascading submenu with all built-in actions organized by category
+- Shared ActionEditDialog used by both Button Board and Hotkeys windows
+- Button Board forwards all keyboard input to render window so VJ hotkeys work while Board has focus
+- Fixed Button Board using dark colors in light mode
+
+### Dynamic Script & Launch App Hotkeys
+
+- Replaced fixed Script (10) and Launch App (4) slots with unlimited dynamic entries
+- Click "+" button to add a Script Command or Launch App binding
+- Script commands support Browse button for script files (.txt, .bat, .cmd, .ps1)
+- Launch App entries launch or focus external programs (process enumeration + EnumWindows)
+- All editing consolidated into a single modal Edit dialog
+- INI format upgraded to Version 3
+
+### Settings UI
+
+- Added Tools tab with launcher buttons for all tool windows
+- Added pin icon button (top-right of tab header) to toggle Settings window always-on-top
+- Replaced "Enable" checkbox with source selector combo (None / Spout / Webcam / Video File)
+- Added webcam device selector with refresh button
+- Added video file browser with loop checkbox
+- About tab now shows version from single source of truth (`version.h`)
+- Added Workspace Layout button on About tab
+- Preset filter by type (All / .milk / .milk2) in preset browser
+
+### Version Management
+
+- Added `version.h` as single source of truth for app version number
+- Version defines used by About tab, `engine.rc` (FileVersion/ProductVersion), and all version references
+- Updated version from 1.3 to 1.4.0
+
+### Input & Control
+
+- Controller buttons can now bind any IPC command (e.g. `OPACITY=0.5`, `COL_HUE=0.3`, `PRESET=name.milk`)
+- Added CAPTURE, SPOUT, BLACKOUT named controller commands
+
+### IPC / Remote Control
+
+- Handled SPOUTINPUT= IPC command (Spout sender name, enable/disable via text protocol)
+- Handled WM_ENABLESPOUTMIX, WM_SETSPOUTSENDER direct messages from Milkwave Remote
+- Handled WM_SET_INPUTMIX_ONTOP, WM_SET_INPUTMIX_OPACITY, WM_SET_INPUTMIX_LUMAKEY direct messages
+- Fixed WM_ENABLESPOUTMIX incorrectly toggling Spout output instead of Spout input
+
+### Bug Fixes
+
+- Fixed owner-draw checkboxes always reading as unchecked (IsDlgButtonChecked doesn't work with BS_OWNERDRAW)
+- Fixed light mode: ToolWindow WM_ERASEBKGND now explicitly paints light background instead of relying on stale class brush
+- Fixed light mode: ButtonPanel defaults to system colors when not in dark mode
+- Fixed GLSL precision declaration causing shader compile failure
+- Fixed GLSL converter: *= matVar backward scan order for square matrix multiply
+- Fixed GLSL converter: Buffer A self-feedback detection, bare return, hardcoded resolution
+- Fixed GLSL converter: matrix funcs, array params, struct ctors, vector comparisons
+- Fixed Shadertoy import: alpha output, per-pass diagnostics, Image texture V-flip
+- Fixed Shadertoy time variable shadowing for animation looping
+- Fixed Shadertoy converter: UV calculation, matrix functions, inout structs
+- Fixed Shadertoy converter: over-specified constructors, iChannel0 mapping, sRGB gamma
+- Fixed ResizeBuffers E_INVALIDARG by passing tearing flag
+- Fixed Shadertoy shader error dialog on resolution change
+- Fixed mirror opacity hang, default to 100%, and add display profiles
+- Fixed invisible controls in Messages/Sprites windows
+- Fixed Ctrl+A/C/V/X/Z not working in tool window edit boxes
+- Fixed LaunchOrFocusApp focus stealing and control ID collision
+- Fixed Spout input not rendering on startup
+- Fixed video file playback for most MP4s (stream selection, hardware transforms, proper stride handling)
+- Fixed video input invisible despite successful decode (alpha=0 in MFVideoFormat_RGB32)
+- Fixed overlay radio button not responding
+- Fixed global hotkey focus and Always Show Track Info
+- Separated track info from error notification bucket so it survives resize/preset changes
+
+### Code
+
+- New file: `version.h` (single source of truth for version number)
+- New file: `engine_workspace_layout_ui.cpp` (Workspace Layout window)
+- New file: `engine_video_effects_ui.cpp` (Video Effects window)
+- New file: `engine_vfx_profiles_ui.cpp` (VFX JSON profiles)
+- New files: `engine_hotkeys_ui.cpp`, `engine_songinfo_ui.cpp` (ToolWindow subclasses)
+- New files: `midi_input.h`, `midi_input.cpp` (winmm MIDI input wrapper)
+- New file: `engine_midi_ui.cpp` (MidiWindow ToolWindow + Engine MIDI functions)
+- New files: `video_capture.h`, `video_capture.cpp` (Media Foundation capture)
+- New files: `json_utils.cpp/h` (lightweight JSON writer/reader)
+- New file: `docs/tool_window.md` (comprehensive ToolWindow developer reference)
+- Linked Media Foundation libraries (mfplat.lib, mfreadwrite.lib, mfuuid.lib, mf.lib)
+- Static CRT linking (no VC++ Redistributable required)
+- Consolidated all OutputDebugString calls to DebugLogA/W
+- Level-gated debug macros with output destination control
+
+## v1.3 (2026-03-02)
+
+### Performance
+
+- Removed per-frame debug overhead from render loop (unconditional sprintf/DebugLog calls)
+- Gated diagnostic logging with once-per-preset flag instead of per-frame time checks
+- Replaced O(n) vector::erase(begin()) with O(1) ring buffer for audio band smoothing (bass_smooth, mid_smooth, treb_smooth)
+- Cached QPC frequency; standardized all throttles to std::chrono::steady_clock
+
+### Audio
+
+- Consolidated 11-file src/audio/ into 2 files (audio_capture.h/cpp) inside src/mDropDX12/
+- Removed dead weight: CPrefs command-line parser, WAV file recording, duplicate logging system
+
+### Engine
+
+- Self-bootstrapping exe with embedded shaders — no external .fx files required
+- Disk .fx files in resources/data/ now serve as user overrides (embedded shaders are primary)
+
+### Settings UI
+
+- About tab now shows active paths (Base Dir, Settings INI, Presets directory)
+
+### Resources
+
+- Pared down bundled resources — ships curated texture-mix presets and textures only
+- Removed legacy buttons, icons, docs, shapes, waves, sprites, and BeatDrop preset pack
+- Removed resources/data/ shader files (now embedded in exe)
+
+## v1.2 (2026-03-01)
+
+### Media Integration
+
+- Added song title rendering with selectable track info sources (Spotify, System Media, Window Title)
+- Added Window Title regex profiles with configurable parse patterns and named capture groups
+- Added Artist-Title Match Editor popup with live preview, enumerated windows dropdown, and profile management
+- Added per-profile poll interval (1-10 seconds) for window title polling
+
+### Display & Window
+
+- Added Alt+S mirror mode failsafe: prompts to enable all monitors when none are enabled
+- Added "Don't ask when no mirrors are enabled" checkbox on Displays tab to auto-enable all monitors
+
+### Documentation & Project
+
+- Clarified project attribution and derivation chain (MilkDrop2 -> BeatDrop -> Milkwave -> MDropDX12)
+- Rewrote bundled README.txt for MDropDX12 with correct maintainer and project info
+- Removed ambiguous first-person references inherited from upstream projects
+
+## v1.1 (2026-03-01)
+
+### Rendering & Performance
+
+- Replaced SpoutDX9 with SpoutDX12 via D3D11On12 interop for OBS compatibility
+- Replaced GDI overlay with DX12 font atlas for all HUD text rendering
+- Replaced Sleep()-based FPS limiter with high-resolution waitable timer
+- Separated render thread from message pump with fire-and-forget IPC
+- Added VSync toggle and tearing support
+- Added FPS cap dropdown to Visual tab (30/60/90/120/144/240/360/720/Unlimited) and Ctrl+Shift+F3 reset hotkey
+- Fixed all 45 build warnings (now 0 warnings)
+
+### Expression Evaluation
+
+- Replaced projectM-eval with native WDL ns-eel2 for x64 JIT compiled expression evaluation
+
+### Display & Window
+
+- Added unified Display Outputs system with monitor mirroring and multiple Spout senders
+- Added mirror mode (ALT+S) with safety controls (activation button, click-through, opacity, topmost)
+- Added per-display settings and configurable global hotkeys
+- Added idle timer / screensaver mode
+- Restored window focus after TDR device rebuild
+
+### Settings UI
+
+- Added Sprites tab with full sprite management UI (blend modes, layers, EEL code, import dialog)
+- Added Script tab with Milkwave-compatible BPM-timed script file playback
+- Added Content Base Path setting to Files tab for textures and sprites
+- Added Show Messages and Show Sprites checkboxes to Messages tab
+- Added log level radio buttons (Off/Error/Warn/Info/Verbose)
+- Added sprite layer rendering support and redesigned sprite properties panel
+
+### Input & Control
+
+- Added game controller support with JSON configuration, settings UI, 14-button mapping (Xbox reference)
+- Added media key hotkeys (play/pause/stop/next/prev/rewind/ff) and song info polling
+- Added Milkwave Remote button support
+- Fixed global hotkeys: register on render thread, disable controls when off, error feedback
+
+### Messages & Sprites
+
+- Added Send Now button and per-message randomization (position, size, font, color, effects, growth, duration)
+- Added animation and color shifting overrides to Message Overrides dialog
+- Added Spout video input mixing with background/overlay compositing
+
+### Presets
+
+- Added drag-and-drop preset loading with folder support and multi-file DND directory
+- Added Quicksave2 (Ctrl+Shift+S) slot
+
+### Project
+
+- Refactored source directory: `vis_milk2/` -> `mDropDX12/`, `Milkdrop2PcmVisualizer` -> `App`
+- Unified license under CC-BY-NC 4.0 (third-party components retain original licenses)
+- Renamed project from MDropDX12Visualizer to MDropDX12
+
+### Documentation
+
+- Added comprehensive Manual.md, Architecture.md, and comparison chart
+- Consolidated documentation into docs/ directory
+
+## v1.0 (2026-02-28)
+
+Initial release. Forked from Milkwave v3.5-dev Visualizer and rebuilt as a standalone DirectX 12 application.
+
+### DirectX 12 Rendering Engine
+
+- Ground-up DirectX 12 rebuild replacing DX9Ex entirely
+- x64 native build
+- DX12 3D volume texture support (noisevol_lq/noisevol_hq)
+- Async shader compilation with timeout and auto-skip (prevents GPU stalls)
+- TDR recovery with focus restoration after device lost
+- Shader precompiling and caching
+- HLSL variable shadowing fix (auto-renames variables shadowing built-in functions)
+- GLSL-to-HLSL shader conversion
+- PSVersion=4 support for AMD GPUs
+- VSync toggle and FPS cap (30/60/90/120/144/240/360/720/Unlimited)
+
+### Expression Evaluation
+
+- Replaced projectM-eval with native ns-eel2 (x64 JIT compiled)
+- Full MilkDrop2 expression compatibility
+
+### GDI Overlay HUD
+
+- Separate layered window for text rendering (preset name, FPS, notifications, debug info)
+- Independent of DX12 render pipeline
+
+### Settings Window (F8)
+
+- Dark theme UI with 11 tabs: General, Visual, Colors, System, Files, Messages, Sprites, Remote, Script, Displays, About
+- Preset browser with directory navigation
+- Resource viewer showing all preset textures with load status and paths
+- Fallback texture search paths and Random Textures Directory
+- Content Base Path for textures and sprites
+- Log level control (Off/Error/Warn/Info/Verbose)
+
+### Audio
+
+- WASAPI loopback capture with input device support
+- On-the-fly device selection
+- Hi-res audio support
+- Smooth audio variables (bass_smooth, mid_smooth, treb_smooth, vol_smooth)
+- Signal amplification
+- Audio sensitivity with auto-adaptive mode
+
+### Presets
+
+- .milk preset loading with full compatibility
+- Preset browser with directory navigation
+- Preset tagging system
+- Quicksave (Ctrl+S) and Quicksave2 (Ctrl+Shift+S)
+- Auto-change timer and preset change on track change
+- Drag-and-drop preset loading
+- Soft blend transitions with 19+ blend patterns
+- Beat-driven hard cuts with 13 configurable modes
+- Async shader compilation (non-blocking transitions)
+
+### Window Modes
+
+- Fullscreen, borderless windowed, windowed fullscreen
+- Window transparency with opacity control
+- Clickthrough mode and watermark mode
+- Always on top
+- Multiple monitor stretch
+- Black mode (hide rendering)
+
+### Messages and Sprites
+
+- Up to 100 custom message slots with per-message properties
+- Message autoplay with interval, jitter, and sequential/random order
+- Per-message randomization (position, size, font, color, effects, growth, duration)
+- Global message overrides dialog
+- Send Now button for message preview
+- Sprite management with blend modes, layers, EEL code, and positioning
+- Independent show/hide toggles for messages and sprites
+
+### Media Integration
+
+- Now Playing track info from Spotify, YouTube, and system media
+- Album artwork display
+- Media transport hotkeys (play/pause/stop/next/prev/rewind/ff)
+- Preset change on track change
+
+### Spout
+
+- Spout texture output for sharing frames with other applications
+- Window-independent fixed output resolution (64x64 to 7680x4320)
+
+### Remote Control
+
+- Milkwave Remote IPC compatibility via WM_COPYDATA protocol
+- 32 of 34 Milkwave commands handled
+- Configurable window title for Remote discovery
+
+### Color Effects
+
+- Hue/Saturation/Brightness shifting with auto hue cycling
+- Brighten/darken/solarize/invert effects (F11)
+- Custom preset variables (vis_intensity, vis_shift, vis_version, colshift_hue)
+
+### Screenshots
+
+- Ctrl+X auto-saves to capture/ folder as timestamped PNG
+- Save Screenshot button in Settings with file dialog
+
+### Script System
+
+- BPM-timed preset script playback
+- Loop mode with beat counter
