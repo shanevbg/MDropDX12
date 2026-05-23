@@ -1,0 +1,205 @@
+MILKDROP_PRESET_VERSION=300
+PSVERSION=3
+PSVERSION_WARP=2
+PSVERSION_COMP=3
+[preset00]
+fRating=0.000
+fGammaAdj=1.000
+fDecay=1.000
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=1
+nWaveMode=0
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=1
+bDarkenCenter=1
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=0.010
+fWaveSmoothing=0.270
+fWaveParam=-0.380
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.459
+fWarpScale=2.007
+fZoomExponent=1.00000
+fShader=0.000
+zoom=1.00990
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=0.99990
+sy=1.00000
+wave_r=1.000
+wave_g=1.000
+wave_b=1.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.075
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=0.300
+ib_size=0.010
+ib_r=0.600
+ib_g=0.400
+ib_b=0.400
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.850
+mv_r=0.500
+mv_g=0.500
+mv_b=0.500
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+wavecode_0_enabled=1
+wavecode_0_samples=512
+wavecode_0_sep=0
+wavecode_0_bSpectrum=0
+wavecode_0_bUseDots=0
+wavecode_0_bDrawThick=0
+wavecode_0_bAdditive=0
+wavecode_0_scaling=1.00000
+wavecode_0_smoothing=0.50000
+wavecode_0_r=1.000
+wavecode_0_g=1.000
+wavecode_0_b=1.000
+wavecode_0_a=1.000
+wave_0_per_point1=x = .5 + (bass*.2)*sin(sample*2*(time*10*treb));
+wave_0_per_point2=y = .5 + (bass*.2)*cos(sample*2*(time*10*treb));
+wave_0_per_point3=r = 1 + .5*sin(sample*.10+(time*10*bass));
+wave_0_per_point4=g = 1 + .5*sin(sample*2+(time*50*treb));
+wave_0_per_point5=b = 1 + .5*sin(sample*5+(time*20*mid));
+wave_0_per_point6=a = r;
+per_frame_init_1=n = -5000; loop (20000, megabuf(n)=0; gmegabuf(n)=0; n +=1; );
+per_frame_init_2=
+per_frame_init_3=MINBPM = 80; MAXBPM = 200; num_res = 80; num_sig=3;
+per_frame_init_4=blocksize = num_res*12+12; 
+per_frame_init_5=reg04 = blocksize;
+per_frame_init_6=
+per_frame_init_7=sig = 0;
+per_frame_init_8=loop (num_sig,
+per_frame_init_9=  index = 0;
+per_frame_init_10=  loop (num_res,
+per_frame_init_11=    n = blocksize*sig + 12*index;
+per_frame_init_12=    BPM      = minbpm * pow(maxbpm/minbpm,index/num_res);
+per_frame_init_13=    gmegabuf(n) = BPM;
+per_frame_init_14=    index += 1;
+per_frame_init_15=  );
+per_frame_init_16=sig+=1);
+per_frame_init_17=
+per_frame_init_18=pi = 3.1416;
+per_frame_init_19=OCTAVE = (num_res) * log(2) / log (MAXBPM / MINBPM);
+per_frame_init_20=
+per_frame_init_21=prog = 0;
+per_frame_init_22=bindex = rand(8);
+per_frame_init_23=count5 = rand(8);
+per_frame_1=dt = min (1/fps,0.1) ; //Stability !
+per_frame_2=dec_f = 0.8; dec_m = 1 - 4*dt; dec_s = 1 - dt;
+per_frame_3=
+per_frame_4=beat = max (max (bass, mid), treb); 
+per_frame_5=avg = avg*dec_s + beat*(1-dec_s);
+per_frame_6=is_beat = above(beat, .5+avg+peak) * above (time, t0+.25);
+per_frame_7=t0 = is_beat*time + (1-is_beat)*t0;
+per_frame_8=peak = is_beat * beat + (1-is_beat)*peak*dec_m;
+per_frame_9=bindex = (bindex + is_beat) %8;
+per_frame_10=bindex2 += is_beat*!bindex;
+per_frame_11=q24 = is_beat;
+per_frame_12=
+per_frame_13=
+per_frame_14=//Vol delay chain 
+per_frame_15=vol = (bass+mid+treb);
+per_frame_16=tr2  += vol*dt;
+per_frame_17=q6 = tr2;
+per_frame_18=
+per_frame_19=vol_=vol_*0.8 + 0.2*vol;
+per_frame_20=tvol = tvol*0.8 + 0.2*(vol-vol_);
+per_frame_21=n = 50100; loop (100, gmegabuf (n) = gmegabuf (n-1); n -= 1; ); gmegabuf (50000) = tvol;
+per_frame_22=q1 = vol-vol_;
+per_frame_23=
+per_frame_24=q5 = 0.025*sin(time*0.17);
+per_frame_25=monitor = q6;
+per_frame_26=
+per_frame_27=
+per_frame_28=q8 = sin(tr2*0.078);
+per_frame_29=q9 = sin(tr2*0.019);
+per_frame_30=
+per_frame_31=wx += q8*dt/2;
+per_frame_32=wy += (1+q9)*dt/2;
+per_frame_33=q18 = wx;
+per_frame_34=q19 = wy;
+per_frame_35=q32=aspecty;
+per_pixel_1=warp = .0; rot = .0;
+per_pixel_2=
+per_pixel_3=zoom = 0.99+ 0.06*abs(pow(gmegabuf(50000+rad*30),1));
+per_pixel_4=zoom -= -q5*((sin(ang*3+q6*0.2)<0)-0.5);
+per_pixel_5=
+per_pixel_6=dx = q8*(1-rad*2)*0.003;
+per_pixel_7=dy = q9*(1-rad*2)*0.003;
+warp_1=`shader_body
+warp_2=`{
+warp_3=`   float d = texsize.zw;
+warp_4=`   float3 deltax = (GetPixel(uv + float2(1,0)*d) + GetPixel(uv + float2(1,0)*d))*0.5;    
+warp_5=`   float3 deltay = (GetPixel(uv + float2(0,1)*d) + GetPixel(uv + float2(0,1)*d))*0.5;    
+warp_6=`     
+warp_7=`
+warp_8=`   ret = ((deltax+deltay - tex2D(sampler_main, (uv-0.5)*0.9 + 0.5 ))); 
+warp_9=`   ret -= 0.4;
+warp_10=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=` 
+comp_4=`    uv = 0.05 + 0.9*uv;
+comp_5=`    ret = GetBlur1(uv);
+comp_6=`    uv += -.05*asin(3*ret.yx)+.05*cos(2*ret.zz)-0.025;
+comp_7=`    
+comp_8=`    ret = tex2D(sampler_main,uv);
+comp_9=`    ret += GetBlur1(uv);
+comp_10=` 
+comp_11=`    // palettize:
+comp_12=` //   ret = pow(lum(ret), float3(0.3, .76, 0.87));
+comp_13=`
+comp_14=`    // invert
+comp_15=`    ret = saturate(ret);
+comp_16=`    ret *= ret;
+comp_17=`    //ret.xyz *= 2; // a little bit of overbright
+comp_18=`//MilkDrop3 Color Mode:
+comp_19=`ret /= float3(1.1,0.6,1.9);
+comp_20=`}
+
+[SPRITE1_BEGIN]
+SpriteName=sprites\Spirale1.png
+SpriteColorKey=0x000000
+SpriteLayer=0
+SpriteBlend=0
+SpriteAlpha=0.250000
+SpriteBurn=1
+SpriteX=0.000000
+SpriteY=0.000000
+SpriteSX=1.540000
+SpriteSY=1.540000
+SpriteRot=1.000000
+SpriteSpeed=0.200000
+SpriteRepeatX=1.000000
+SpriteRepeatY=1.000000
+[SPRITE1_END]

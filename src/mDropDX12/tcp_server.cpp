@@ -178,6 +178,7 @@ void TcpServer::ProcessFrames(TcpClientConnection& client) {
             }
             continue;
         }
+        client.authState = TcpAuthState::Authenticated;
 
         // Drop all non-AUTH commands from unauthenticated clients
         if (client.authState != TcpAuthState::Authenticated) continue;

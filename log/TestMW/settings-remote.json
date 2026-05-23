@@ -1,0 +1,51 @@
+{
+  "Styles": [
+    {
+      "Name": "Style A",
+      "Value": "time=5.0|growth=2.0"
+    },
+    {
+      "Name": "Style B",
+      "Value": "size=23|time=4.0|growth=2.0|randx=0.2|randy=0.2|r=0|g=195|b=0"
+    }
+  ],
+  "LoadFilters": [
+    "calm \u0026 dark",
+    "watermark \u0026 !colorful",
+    "shader \u0026 !expensive"
+  ],
+  "RemoteWindowLocation": {
+    "IsEmpty": false,
+    "X": 616,
+    "Y": 411
+  },
+  "RemoteWindowSize": {
+    "IsEmpty": false,
+    "Width": 1246,
+    "Height": 894
+  },
+  "RemoteWindowCompactSize": {
+    "IsEmpty": true,
+    "Width": 0,
+    "Height": 0
+  },
+  "SplitterDistance1": 408,
+  "DarkMode": true,
+  "ShowTabsPanel": true,
+  "ShowButtonPanel": true,
+  "EnableSpriteButtonImage": true,
+  "EnableMonitorCPU": true,
+  "EnableMonitorGPU": true,
+  "MonitorPollingInterval": 1500,
+  "CloseVisualizerWithRemote": false,
+  "SelectedTabIndex": 6,
+  "ShaderFileChecked": true,
+  "WrapChecked": true,
+  "VisIntensity": 1,
+  "VisShift": 0,
+  "VisVersion": 1,
+  "MidiEnabled": true,
+  "MidiBufferDelay": 30,
+  "ShadertoyFilesDirectory": "",
+  "ShadertoyFileIndex": 1
+}

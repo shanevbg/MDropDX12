@@ -50,8 +50,8 @@ void Engine::SetFPSCap(int fps) {
   if (hSettingsWnd && IsWindow(hSettingsWnd)) {
     HWND hCombo = GetDlgItem(hSettingsWnd, IDC_MW_FPS_CAP);
     if (hCombo) {
-      const int vals[] = { 30, 60, 90, 120, 144, 240, 360, 720, 0 };
-      for (int i = 0; i < 9; i++)
+      const int vals[] = { 30, 40, 60, 90, 120, 144, 240, 360, 720, 0 };
+      for (int i = 0; i < 10; i++)
         if (vals[i] == fps) { SendMessage(hCombo, CB_SETCURSEL, i, 0); break; }
     }
   }

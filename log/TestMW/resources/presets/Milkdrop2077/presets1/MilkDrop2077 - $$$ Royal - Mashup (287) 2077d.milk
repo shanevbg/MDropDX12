@@ -1,0 +1,197 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=3
+PSVERSION_WARP=3
+PSVERSION_COMP=2
+[preset00]
+fRating=3.000
+fGammaAdj=1.000
+fDecay=1.000
+fVideoEchoZoom=1.000
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=0
+nWaveMode=8
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=0
+bModWaveAlphaByVolume=1
+bMaximizeWaveColor=0
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=1.286
+fWaveSmoothing=0.630
+fWaveParam=0.000
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.000
+fWarpScale=1.000
+fZoomExponent=0.31218
+fShader=0.000
+zoom=0.98020
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=1.02010
+sy=1.02010
+wave_r=0.650
+wave_g=0.650
+wave_b=0.650
+wave_x=0.500
+wave_y=0.500
+ob_size=0.007
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.900
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.000
+shapecode_0_enabled=1
+shapecode_0_sides=16
+shapecode_0_additive=0
+shapecode_0_thickOutline=0
+shapecode_0_textured=0
+shapecode_0_num_inst=353
+shapecode_0_x=0.503
+shapecode_0_y=0.500
+shapecode_0_rad=0.03760
+shapecode_0_ang=0.00000
+shapecode_0_tex_ang=0.00000
+shapecode_0_tex_zoom=1.11234
+shapecode_0_r=1.000
+shapecode_0_g=1.000
+shapecode_0_b=1.000
+shapecode_0_a=1.000
+shapecode_0_r2=0.000
+shapecode_0_g2=0.000
+shapecode_0_b2=0.000
+shapecode_0_a2=0.000
+shapecode_0_border_r=1.000
+shapecode_0_border_g=1.000
+shapecode_0_border_b=1.000
+shapecode_0_border_a=0.000
+shape_0_per_frame1=sample=instance/num_inst;
+shape_0_per_frame2=rad=.05+.04*sin(sample);
+shape_0_per_frame3=/////  Knot with enhanced rotation/spiral
+shape_0_per_frame4=q10=125*sample;
+shape_0_per_frame5=// Added spiral modulation to the base equations
+shape_0_per_frame6=spiral_mod = 2*sin(q10/3);  // Slow spiral modulator
+shape_0_per_frame7=my_x = -.22*cos(q10+spiral_mod)-1.28*sin(q10)-.44*cos(2*q10)-.78*sin(2*q10+spiral_mod);
+shape_0_per_frame8=my_y= -.1*cos(1.5*q10+spiral_mod)-.27*sin(1.5*q10)+.38*cos(3*q10)+.46*sin(3*q10+spiral_mod);
+shape_0_per_frame9=my_z=.7*cos(2*q10+spiral_mod)-.4*sin(2*q10);
+shape_0_per_frame10=/////// rotations... by flexi - enhanced rotation
+shape_0_per_frame11=d = .2; 
+shape_0_per_frame12=zoom = 1;
+shape_0_per_frame13=// Modified rotation parameters for more spinning
+shape_0_per_frame14=w3 = q1*1.5;  // Increased rotation speed
+shape_0_per_frame15=w2 = q2*1.2;  // Added more rotation in second axis
+shape_0_per_frame16=w1 = q3*1.3;  // Enhanced third axis rotation
+shape_0_per_frame17=x1 = cos(w1)*my_x + sin(w1)*my_y;
+shape_0_per_frame18=y1 = -sin(w1)*my_x + cos(w1)*my_y;
+shape_0_per_frame19=z1 = my_z;
+shape_0_per_frame20=x2 = cos(w2)*x1 + sin(w2)*z1;
+shape_0_per_frame21=z2 = -sin(w2)*x1 + cos(w2)*z1;
+shape_0_per_frame22=y2 = y1;
+shape_0_per_frame23=y3 = cos(w3)*y2 + sin(w3)*z2;
+shape_0_per_frame24=z3 = -sin(w3)*y2 + cos(w3)*z2;
+shape_0_per_frame25=x3 = x2;
+shape_0_per_frame26=// perspective calculation with added spiral movement
+shape_0_per_frame27=l = sqrt(x3*x3 + y3*y3);
+shape_0_per_frame28=w = atan2(x3,y3) + sin(sample*10);  // Added rotational offset
+shape_0_per_frame29=p = tan(asin(1) + atan2(d+z3,l));
+shape_0_per_frame30=d = sqrt(x3*x3 + y3*y3 + (z3+d)*(z3+d));
+shape_0_per_frame31=my_x = zoom*sin(w)*p;
+shape_0_per_frame32=my_y = zoom*cos(w)*p;
+shape_0_per_frame33=// Added spiral motion to position modulation
+shape_0_per_frame34=spiral_time = sample*10;  // Spiral time factor
+shape_0_per_frame35=p1 = .2*sin(sample*25 + spiral_time);
+shape_0_per_frame36=p2 = .2*sin(sample*40 + spiral_time);
+shape_0_per_frame37=x = .5+my_x*p1 + .1*sin(spiral_time);  // Added spiral offset
+shape_0_per_frame38=y = .5+my_y*p2 + .1*cos(spiral_time);  // Added spiral offset
+shape_0_per_frame39=// Colors modulated with spiral motion
+shape_0_per_frame40=r = .4*sin(sample*40 + spiral_time);
+shape_0_per_frame41=b = .8*sin(sample*33 + spiral_time/2);
+shape_0_per_frame42=g = .6*sin(sample*60 + spiral_time/3);
+per_frame_1=movement = movement + 0.01*(bass+bass_att) + 0.001*pow(bass+1,3);
+per_frame_2=q1 = movement/5;
+per_frame_3=monitor =q1;
+warp_1=`#define MyGet GetPixel //GetBlur1
+warp_2=`shader_body
+warp_3=`{
+warp_4=`    // GROW EFFECT - bright pixels spread radially outward.
+warp_5=`    // BE CAREFUL - this can really thrash the texture cache! (SLOW)
+warp_6=`    float grad_rad = 3;  //TWEAK
+warp_7=`    float str = 2.3;      //TWEAK
+warp_8=`    float3 d = float3(texsize.zw, 0) * grad_rad;
+warp_9=`    float4 lums = 0;
+warp_10=`    lums.x = lum( MyGet(uv + texsize.zw*d.xz) );
+warp_11=`    lums.y = lum( MyGet(uv - texsize.zw*d.xz) );
+warp_12=`    lums.z = lum( MyGet(uv + texsize.zw*d.zy) );
+warp_13=`    lums.w = lum( MyGet(uv - texsize.zw*d.zy) );
+warp_14=`    float2 grad = float2(lums.x-lums.y, lums.z-lums.w)*str*1000/grad_rad;
+warp_15=`    grad = (saturate(grad*0.5+0.5)*2-1)*1.4;
+warp_16=`    // sample previous frame
+warp_17=`    ret = tex2D( sampler_fc_main, uv + grad*texsize.zw ).xyz;
+warp_18=`
+warp_19=`    // darken (decay) over time
+warp_20=`    ret *= 0.95; //or try: ret -= 0.004;
+warp_21=`}
+comp_1=`sampler sampler_MilkDrop3_018;
+comp_2=`sampler sampler_MilkDrop3_009;
+comp_3=`
+comp_4=`shader_body
+comp_5=`{
+comp_6=`
+comp_7=`
+comp_8=`    float2 d = texsize.zw*12;
+comp_9=`    float3 dx = ( GetBlur1(uv + float2(1,0)*d) - GetBlur1(uv-float2(1,0)*d) );
+comp_10=`    float3 dy = ( GetBlur1(uv + float2(0,1)*d) - GetBlur1(uv-float2(0,1)*d) );
+comp_11=`    float2 my_uv = uv + float2(dx.y,dy.y)*0.1;
+comp_12=`
+comp_13=`float3 re;
+comp_14=`
+comp_15=`//uv = uv + 0.02*float2(cos(uv.y*17),sin(uv.x*39));
+comp_16=`float2 m = float2(1-q4,q8);
+comp_17=`float2 bg_uv = m + (uv-m)*0.992; // subtle 3D shadow drop
+comp_18=`float2 mid_uv = m + (uv-m)*0.996;
+comp_19=`ret = lerp( float3(1,0,2.2), float3(0.3,0,1),tex2D( sampler_fw_main, bg_uv).y);
+comp_20=`ret = lerp(ret, float3(3,1,2), max(GetBlur1(bg_uv).z*1.5,tex2D( sampler_main, mid_uv).z)); // if that isn't a cool glow effect?
+comp_21=`ret *= 1-GetBlur1(bg_uv).x*3; // drop shadow
+comp_22=`ret = lerp( ret, float3(3,0.01,0.4),tex2D( sampler_fw_main, uv).x);
+comp_23=`//ret = tex2D(sampler_main, uv);
+comp_24=`re = tex2D( sampler_MilkDrop3_018, my_uv);
+comp_25=`re = lerp( tex2D(sampler_MilkDrop3_009,my_uv), re, ret.x);
+comp_26=`ret = lerp( re, 1-re, ret.y);
+comp_27=`
+comp_28=`//ret /= float3(2.7,1.9,2.6);
+comp_29=`//MilkDrop3 SoftColor Mode:
+comp_30=`ret += float3(0.0,-0.1,-0.0);
+comp_31=`//MilkDrop3 Burn Mode:
+comp_32=`ret = lerp(ret,2,GetPixel(uv).z*1.36);
+comp_33=`}

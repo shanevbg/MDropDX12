@@ -1,0 +1,151 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=3
+[preset00]
+fRating=5.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=15
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=0.625
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=0.880
+fModWaveAlphaEnd=1.980
+fWarpAnimSpeed=1.000
+fWarpScale=1.331
+fZoomExponent=1.00000
+fShader=1.000
+zoom=13.29089
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=-0.28000
+dy=-0.32000
+warp=0.00909
+sx=1.00000
+sy=1.00000
+wave_r=0.000
+wave_g=0.000
+wave_b=0.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=1.000
+ib_size=0.000
+ib_r=1.000
+ib_g=0.000
+ib_b=0.000
+ib_a=1.000
+nMotionVectorsX=64.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=1.000
+mv_r=1.060
+mv_g=1.000
+mv_b=0.819
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_init_1=zoom=1;
+per_frame_init_2=xpos=0;
+per_frame_init_3=ypos=0;
+per_pixel_1=da=.13133;//+sin(time/17) /30;
+per_pixel_2=nh=2;
+per_pixel_3=nh2=1;
+per_pixel_4=myx=(-int(x*nh)+x*nh-.4);
+per_pixel_5=myy=(-int(y*nh2)+y*nh2-.5);//+sin(time/11) /22);
+per_pixel_6=
+per_pixel_7=myx=sin(x*6.28+time/3.6)/3;
+per_pixel_8=myy=sin(y*6.28+time/q1/tan(time/300))/3;
+per_pixel_9=
+per_pixel_10=//myy = y*.5-.35;///+sin(time/8)/40;
+per_pixel_11=//myx = x*1-.5;
+per_pixel_12=dx = da*(1*myx*myy);
+per_pixel_13=dy = da*((myy*myy) - (myx*myx));
+warp_1=`shader_body
+warp_2=`{
+warp_3=`    //Shader By XorDev (x.com/XorDev), ported to MilkDrop by MilkDrop2077
+warp_4=`    // Initialize output color
+warp_5=`    float3 col = float3(0,0,0);
+warp_6=`    
+warp_7=`    // Center and aspect-correct UV coordinates
+warp_8=`    float aspect = aspect.x / aspect.y;
+warp_9=`    uv = (uv - 0.5) * float2(aspect.x, 1.0);
+warp_10=`    
+warp_11=`    // Ray direction (approximating FC.rgb * 2. - r.xyy)
+warp_12=`    float3 rd = normalize(float3(uv, 1.0)); // Simplified, assuming z=1 for depth
+warp_13=`    
+warp_14=`    // Ray marching loop
+warp_15=`    float z = 0.0;
+warp_16=`    for(float i = 0.0; i < 50.0; i++)
+warp_17=`    {
+warp_18=`        // Ray position
+warp_19=`        float3 p = z * rd;
+warp_20=`        p.z -= time*2; // Time-based offset
+warp_21=`        
+warp_22=`        // Distance function
+warp_23=`        float3 v = cos(p/12) - sin(float3(p.y, p.z, p.x)); // Swizzle .yzx
+warp_24=`        float3 v_swizzle = float3(v.y, v.z, v.x); // Swizzle .yzx for comparison
+warp_25=`        float d = 1 * length(max(v, v_swizzle * 0.5));
+warp_26=`        
+warp_27=`        // Color accumulation
+warp_28=`        col += (cos(p) + 1.2) / d;
+warp_29=`        
+warp_30=`        // Advance ray
+warp_31=`        z += d;
+warp_32=`    }
+warp_33=`    
+warp_34=`    // Final normalization
+warp_35=`    col /= col * bass_att/2 + 1000.0;
+warp_36=`    
+warp_37=`    // Final output
+warp_38=`    ret = float4(col, 1.0);
+warp_39=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`    ret = tex2D(sampler_main, uv).xyz;
+comp_4=`    ret = ret * 1.5 - 0.1;
+comp_5=`    
+comp_6=`    float4 g;
+comp_7=`    float3 d = float3(texsize.zw * 4, 0);
+comp_8=`    g.x = lum(GetBlur1(uv + d.xz));
+comp_9=`    g.y = lum(GetBlur1(uv - d.xz));
+comp_10=`    g.z = lum(GetBlur1(uv + d.zy));
+comp_11=`    g.w = lum(GetBlur1(uv - d.zy));
+comp_12=`    
+comp_13=`    ret *= 0.7;
+comp_14=`    ret.x += saturate(g.x - g.y) * 5;
+comp_15=`    ret.z += saturate(g.y - g.x) * 5;
+comp_16=`    //ret.xy += (g.xz - g.yw) * 3;
+comp_17=`    
+comp_18=`    ret.x = GetBlur1(uv).x * 2;
+comp_19=`    ret.z = GetBlur2(uv).z * 3;
+comp_20=`//MilkDrop3 Color Mode:
+comp_21=`//ret /= float3(2.4,1.9,-2.8);
+comp_22=`}

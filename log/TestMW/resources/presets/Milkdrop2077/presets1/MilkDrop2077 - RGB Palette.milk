@@ -1,0 +1,92 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=3
+[preset00]
+fRating=5.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=9
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=3.200
+fWaveScale=1.768
+fWaveSmoothing=0.630
+fWaveParam=0.000
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.459
+fWarpScale=2.007
+fZoomExponent=1.00000
+fShader=1.000
+zoom=0.99990
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=0.99990
+sy=1.00000
+wave_r=1.000
+wave_g=1.000
+wave_b=1.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=1.000
+ob_g=0.000
+ob_b=1.000
+ob_a=1.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=1.248
+mv_dx=0.000
+mv_dy=0.000
+mv_l=5.000
+mv_r=1.000
+mv_g=1.000
+mv_b=0.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+warp_1=`shader_body{
+warp_2=`    float C = time/2, a=sin(C), b=cos(C);
+warp_3=`    float3x3 U = float3x3(a, b*b, b*a,
+warp_4=`                  0,   a,  -b,
+warp_5=`                 -b, a*b, a*a);
+warp_6=`    
+warp_7=`    float3 A = mul(float3(0,0,9), U);
+warp_8=`    float2 XUV = uv*float2(1.0/aspect.y, 1.0);
+warp_9=`    float3 d = mul(normalize(float3(0.5,0.5,1.5) - float3(XUV.x, XUV.y, 0)), U);
+warp_10=`    
+warp_11=`    float final_a = length(max(abs(A)-1.0+b*b, 0.0))-1.3*b*b;
+warp_12=`    float3 col = final_a < 1.0 ? cos(A) : d*d;
+warp_13=`    ret = float4(col, 1.0);
+warp_14=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=` ret = GetPixel(uv);
+comp_4=`}

@@ -1,0 +1,123 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=2
+[preset00]
+fRating=5.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=4
+bAdditiveWaves=0
+bWaveDots=1
+bWaveThick=0
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=0.012
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=0.750
+fModWaveAlphaEnd=0.950
+fWarpAnimSpeed=0.498
+fWarpScale=100.000
+fZoomExponent=1.00183
+fShader=1.000
+zoom=0.99815
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=1.00180
+sy=0.99990
+wave_r=0.500
+wave_g=0.400
+wave_b=0.300
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=0.360
+ob_g=0.290
+ob_b=0.290
+ob_a=1.000
+ib_size=0.000
+ib_r=1.000
+ib_g=0.000
+ib_b=1.000
+ib_a=1.000
+nMotionVectorsX=64.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=1.000
+mv_r=0.390
+mv_g=0.440
+mv_b=0.900
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+warp_1=`shader_body
+warp_2=`{
+warp_3=`   //Shader By XorDev (x.com/XorDev), ported to MilkDrop by MilkDrop2077
+warp_4=`        // Setup coordinates
+warp_5=`        float2 r = aspect.xy;
+warp_6=`        float2 p = (uv_orig * 2.0 - 1.0) * r / r.y;
+warp_7=`        float t = time;
+warp_8=`        
+warp_9=`        // Initialize output color
+warp_10=`        float4 o = float4(0,0,0,0);
+warp_11=`        
+warp_12=`        // Main spiral effect loop
+warp_13=`        for(float i = 1.0; i <= 9.0; i += 1.0) {
+warp_14=`            // Calculate polar coordinates
+warp_15=`            float angle = atan2(p.y, p.x) + i +time/5;
+warp_16=`            float radius = log(length(p));
+warp_17=`            
+warp_18=`            // Create spiral pattern
+warp_19=`            float2 spiral = sin(float2(angle, radius+time) * i) - 0.5;
+warp_20=`            float dist = length(min(spiral, 0.1));
+warp_21=`            
+warp_22=`            // Color bands
+warp_23=`            float4 color_band = (cos(i + float4(6,1,2,3)) + 1.0) / dist;
+warp_24=`            o += color_band;
+warp_25=`        }
+warp_26=`        
+warp_27=`        // Final color processing
+warp_28=`        o = tanh(o*o/1000.0);
+warp_29=`        
+warp_30=`        // Output with audio reactivity
+warp_31=`        float audio = bass_att*2 * 0.3 + treb_att * 0.1;
+warp_32=`        ret = float4(o.rgb * (1.0 + audio), 1.0);
+warp_33=`    
+warp_34=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`    ret = tex2D(sampler_main, uv).xyz;
+comp_4=`    float L = lum(ret);
+comp_5=`    float bw = saturate(cos(L*27 + 3)*30 - 26);
+comp_6=`    float L2 = lum(GetBlur1(uv));
+comp_7=`    float bw2 = saturate(cos(L*27 + 3)*3 - 6);
+comp_8=`
+comp_9=`    ret = float3(.1,.6,1.1)*ret.x +
+comp_10=`          float3(.1,.6,.55)*ret.y + 
+comp_11=`          float3(1.5,.6,.2)*ret.z;
+comp_12=`
+comp_13=`    ret = ret*ret * (.5 + bw*bw2*1);
+comp_14=`
+comp_15=`}

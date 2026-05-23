@@ -1,0 +1,134 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+fRating=4.000
+fGammaAdj=1.000
+fDecay=1.000
+fVideoEchoZoom=2.000
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=0
+nWaveMode=0
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=100.000
+fWaveScale=3.266
+fWaveSmoothing=0.207
+fWaveParam=0.000
+fModWaveAlphaStart=0.750
+fModWaveAlphaEnd=0.950
+fWarpAnimSpeed=1.000
+fWarpScale=1.331
+fZoomExponent=1.00000
+fShader=0.000
+zoom=1.00400
+rot=-0.01400
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.02944
+sx=1.00000
+sy=1.00000
+wave_r=1.000
+wave_g=1.000
+wave_b=1.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.010
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.010
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.000
+mv_r=0.350
+mv_g=0.350
+mv_b=0.350
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_1=wave_r = wave_r + 0.350*( 0.60*sin(3.980*time) + 0.40*sin(11.047*time) );
+per_frame_2=wave_g = wave_g + 0.350*( 0.60*sin(0.835*time) + 0.40*sin(1.081*time) );
+per_frame_3=wave_b = wave_b + 0.350*( 0.60*sin(0.814*time) + 0.40*sin(1.011*time) );
+per_frame_4=cx = cx + 0.110*( 0.60*sin(0.374*time) + 0.40*sin(0.294*time) );
+per_frame_5=cy = cy + 0.110*( 0.60*sin(0.393*time) + 0.40*sin(0.223*time) );
+per_frame_6=dx = dx + 0.005*( 0.60*sin(0.173*time) + 0.40*sin(0.223*time) );
+per_frame_7=decay = decay - 0.01*equal(frame%20,0);
+per_frame_8=wave_x = 0.5 + 0.25*cos(time*2)/aspecty;
+per_frame_9=wave_y = 0.5 + 0.25*sin(time*2)/aspectx;
+per_frame_10=
+per_frame_11=ang = time*2;
+per_frame_12=q1 = cos(ang);
+per_frame_13=q2 = sin(ang);
+warp_1=`sampler sampler_fw_clouds;
+warp_2=`shader_body
+warp_3=`{// sample previous frame
+warp_4=`ret = tex2D( sampler_main, uv ).xyz;
+warp_5=`float4 noise9 = tex3D(sampler_noisevol_hq, 
+warp_6=`                      ((uv.xyy*q27
+warp_7=`                       )*texsize.xyy*texsize_noisevol_hq.zww
+warp_8=`                      ).xyz*
+warp_9=`                      float3(1,1,0)*0.05 + 
+warp_10=`                      time*float3(0,0,1)*q29
+warp_11=`                     );
+warp_12=`if(ret.x> q21*q13         && ret.x<= q24*q11        )ret.y += (noise9).x*.5; 
+warp_13=`if(ret.y> q22*q11         && ret.y<= q25*q12        )ret.z += (noise9).y*.5; 
+warp_14=`if(ret.z> q23*q12         && ret.z<= q26*q13        )ret.x += (noise9).z*.5; 
+warp_15=`float blur =sin(bass*90)*rad;
+warp_16=`ret=0.115*(
+warp_17=`GetPixel(float2(uv.x-0.01*blur,uv.y-0.01*blur)) +
+warp_18=`GetPixel(float2(uv.x+0.01*blur,uv.y+0.01*blur)) +
+warp_19=`GetPixel(float2(uv.x-0.01*blur,uv.y+0.01*blur)) +
+warp_20=`GetPixel(float2(uv.x+0.01*blur,uv.y-0.01*blur)) +
+warp_21=`GetPixel(float2(uv.x,uv.y-0.01*blur)) +
+warp_22=`GetPixel(float2(uv.x,uv.y+0.01*blur)) +
+warp_23=`GetPixel(float2(uv.x-0.01*blur,uv.y)) +
+warp_24=`GetPixel(float2(uv.x+0.01*blur,uv.y)));
+warp_25=`//add a 'bass overbright' effect:
+warp_26=`ret+=-(lum(ret)<sin(time*90))*ret*blur+(lum(ret)>sin(-time*90))*ret*blur;
+warp_27=`}
+comp_1=`float2 d, d_uv;
+comp_2=`float3 dx, dy;
+comp_3=`
+comp_4=`shader_body
+comp_5=`{
+comp_6=`
+comp_7=`   d = texsize.zw*4;
+comp_8=`   d_uv = uv;
+comp_9=`   dx = GetBlur1(d_uv + float2(1,0)*d) - GetBlur1(d_uv - float2(1,0)*d);
+comp_10=`// dy = GetBlur1(d_uv + float2(0,1)*d) - GetBlur1(d_uv - float2(0,1)*d);
+comp_11=`//   d_uv += float2(dx.x,dy.x)*0.03;
+comp_12=`
+comp_13=`ret = lerp(GetBlur2(d_uv),GetPixel(d_uv),0.4);
+comp_14=`ret = (ret.y-ret.x*0.1)*lerp(float3(1,2,0),1,ret.x)*2.4;
+comp_15=`
+comp_16=`ret = lerp(ret,3,GetBlur1(d_uv-float2(1,1)*texsize.zw*162).z*0.6);
+comp_17=`ret = lerp(ret,2,GetPixel(uv).z*0.16);
+comp_18=`//MilkDrop3 Color Mode:
+comp_19=`ret /= float3(-0.7,1.5,2.0);
+comp_20=`}

@@ -1,0 +1,75 @@
+# Example script file for Milkwave Remote
+#
+# Lines starting with # are ignored when parsing this file.
+# You can load other files by right-clicking "From File" in the Milkwave Remote window.
+#
+# You can add 0..n commands per line separated by | 
+# If it's not a known command, the text is treated as message
+#
+# Possible commmands: 
+#
+# NEXT: Next preset (like pressing the Space key in the Visualizer)
+# PREV: Previous preset (like pressing the Backspace key in the Visualizer)
+# STYLE=My Style: Switch to saved messenger style named "My Style"
+# FONT=Arial: Set font in Remote to Arial
+# SIZE=20: Set font size in Remote to 20
+# COLOR=255,0,0: Set Color in Remote to the given R,G,B value
+# BPM=123: Set BPM to 123
+# BEATS=8: Set Beats to 8
+# STOP: Stop autoplay
+# SEND=00: Send this string to the Visualizer window, eg. for triggering sprite 00
+#   If your string starts with 0x, it is treated as keycode, eg. 0x73 for F4 key
+#   See https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
+# PRESET=C:\Path\To\Preset.milk: Run preset file in Visualizer, the path can be 
+#   absolute or relative to the Milkwave base directory
+# RESET: Reset the Remote form timer. The timer may run out of sync after a while,
+#   depending on the set BPM, beats and your computer. This command resets the 
+#   timer. The same can be achieved by double-clicking the "BPM"-label in the 
+#   Remote window.
+# CLEARSPRITES: Clear all sprites
+# CLEARTEXTS: Clear all texts
+# CLEARPARAMS: Clears the parameters definition in Remote
+# MSG=time=5.0;growth=1.5;text=This is the message
+#   Raw message sending: Send message using parameters separated by semicolon (;). 
+#   If font face, size and color parameters are not included, the current Remote settings 
+#   are used.
+# TIME=1.2: Set time factor to 1.2 (Settings tab)
+# FRAME=1.5: Set frame factor to 1.5 (Settings tab)
+# FPS=0.1: Set FPS factor to 0.1 (Settings tab)
+# INTENSITY=1.2: Set intensity to 1.2 (Settings tab)
+# SHIFT=-0.2: Set shift to -0.2 (Settings tab)
+# VERSION=2: Set version to 2 (Settings tab)
+# QUALITY=0.5: Set quality to 0.5 (Settings tab)
+# HUE=-0.8: Shift hue by -0.8 (Settings tab)
+# SATURATION=0.77: Shift saturation by 0.77 (Settings tab)
+# BRIGHTNESS=0.1: Shift brightness by 0.1 (Settings tab)
+# MEDIA_PLAY: Press the Windows Media "Play/Pause" key
+# MEDIA_STOP: Press the Windows Media "Stop" key
+# LINE=5: Jump to Line 5 of the current script file and run it immediately (commented lines are not counted)
+# LINE=CURR: Run currently selected autoplay line (useful in MIDI automation)
+# LINE=NEXT: Jump to next autoplay line and run it (useful in MIDI automation)
+# LINE=PREV: Jump to previous autoplay line and run it (useful in MIDI automation)
+# EXEC=C:\Tools\MySuperScript.bat: Open/run anything
+#
+BPM=120|BEATS=8|STYLE=Style A|PRESET=resources\presets\Milkwave\01 - Martin - blue haze.milk|Welcome to Milkwave!
+STYLE=Style B|Switched to "Style B"
+This style uses random coordinates
+Switched to next preset|NEXT
+STYLE=Style A|COLOR=255, 102, 0|Back to "Style A" but changing color
+SEND=99|Triggering Sprite 99
+FONT=Courier New|Everybody likes Courier!
+FONT=Arial|Some Arial//doubleline text!
+PRESET=resources\presets\Milkwave\Geiss - Reaction Diffusion 3 (Lichen Mix).milk|COLOR=255,255,0|I like this preset!
+MSG=size=25;time=3.0;growth=1.5;startx=0;starty=0;y=0.4;movetime=1.0;easemode=1;shadowoffset=0;text=Shadowless text from the upper left
+MSG=size=25;time=3.0;growth=1.5;startx=1;starty=0.5;y=0.5;movetime=1.0;text=With shadow from the right, easing in
+MSG=size=25;time=3.0;growth=1.5;startx=1;starty=1;y=0.6;movetime=1.0;burntime=5;text=Some text with long burntime
+
+PRESET=resources\presets\Milkwave\Flexi - lorenz attractor.milk|BPM=180|BEATS=4|Let's go faster!
+RESET|CLEARPARAMS|SIZE=30|Boom
+SIZE=40|Boom
+# use any number of blank lines for delays
+
+SIZE=60|BOOM
+
+STYLE=Style A|COLOR=200,0,200|SIZE=25|PRESET=resources\presets\Milkwave\Geiss - Reaction Diffusion 2.milk|That's all folks!|STOP
+# if you don't STOP, autoplay will continue from the beginning (unless random play is enabled)

@@ -1,0 +1,122 @@
+MILKDROP_PRESET_VERSION=300
+PSVERSION=3
+PSVERSION_WARP=3
+PSVERSION_COMP=3
+[preset00]
+fRating=3.000
+fGammaAdj=1.000
+fDecay=0.925
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=3
+nWaveMode=7
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.303
+fWaveScale=2.911
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=1.110
+fModWaveAlphaEnd=1.230
+fWarpAnimSpeed=1.000
+fWarpScale=1.331
+fZoomExponent=1.00000
+fShader=0.000
+zoom=1.00951
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=1.00000
+sy=1.00000
+wave_r=0.500
+wave_g=0.500
+wave_b=0.800
+wave_x=0.500
+wave_y=0.500
+ob_size=0.500
+ob_r=0.290
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.900
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=0.500
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_1=wave_r = wave_r + 0.400*( 0.60*sin(0.933*time) + 0.40*sin(1.045*time) );
+per_frame_2=wave_g = wave_g + 0.400*( 0.60*sin(0.900*time) + 0.40*sin(0.956*time) );
+per_frame_3=wave_b = wave_b + 0.400*( 0.60*sin(0.910*time) + 0.40*sin(0.920*time) );
+per_frame_4=zoom = zoom + 0.023*( 0.60*sin(0.339*time) + 0.40*sin(0.276*time) );
+per_frame_5=warp =0;
+per_pixel_1=zoom=zoom-max(0.03,(bass/1.3-1.3))*cos(time*1.4+rad*24*cos(time/2+ang)*cos(rad)-time);
+warp_1=`shader_body {
+warp_2=`
+warp_3=`ret.r = GetBlur3(uv).r*0.6*(1-GetBlur1(uv).r/2);
+warp_4=`ret.r = max (ret.r,GetPixel(uv).r*0.3);
+warp_5=`
+warp_6=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`    float2 d = texsize.zw*4;
+comp_4=`    float3 dx = ( GetBlur1(uv+float2(1,0)*d)-GetBlur1(uv-float2(1,0)*d) );
+comp_5=`    float3 dy = ( GetBlur1(uv+float2(0,1)*d)-GetBlur1(uv-float2(0,1)*d) );
+comp_6=`
+comp_7=`float2 uv_x = uv - float2(dx.y,dy.y)*0.1 + float2(dx.z,dy.z)*0.06;
+comp_8=`ret = GetBlur2(uv_x).x*saturate(1-GetPixel(uv).y)*pow(hue_shader.yxz,8)*3;
+comp_9=`ret = lerp(ret,pow(hue_shader.yzx,8)*1.4,GetPixel(uv_x).x*0.8 + GetBlur1(uv_x).x);
+comp_10=`ret *= saturate(1 - GetBlur1(uv).z*4);
+comp_11=`ret = lerp(ret,1,pow(hue_shader,8)*GetPixel(saturate(uv - float2(dx.z,dy.z)*2)).y*1.2);
+comp_12=`ret = lerp(ret,pow(hue_shader,8).zxy*1.8,GetPixel(uv).z);
+comp_13=`//MilkDrop3 Solarize Mode:
+comp_14=`ret = ret*(1-ret)*4;
+comp_15=`}
+
+[SPRITE1_BEGIN]
+SpriteName=sprites\Mandala0.png
+SpriteColorKey=0x000000
+SpriteLayer=0
+SpriteBlend=3
+SpriteAlpha=1.000000
+SpriteBurn=1
+SpriteX=0.000000
+SpriteY=0.000000
+SpriteSX=-0.620000
+SpriteSY=-0.620000
+SpriteRot=1.000000
+SpriteSpeed=0.500000
+SpriteRepeatX=1.000000
+SpriteRepeatY=1.000000
+code_1=new_scale=1.0+0.05*bass_att;
+code_2=sx=new_scale;
+code_3=sy=new_scale;
+code_4=a=1.0;
+[SPRITE1_END]

@@ -1,0 +1,153 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=3
+PSVERSION_WARP=3
+PSVERSION_COMP=2
+[preset00]
+fRating=5.000
+fGammaAdj=1.700
+fDecay=1.000
+fVideoEchoZoom=1.000
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=0
+nWaveMode=0
+bAdditiveWaves=0
+bWaveDots=1
+bWaveThick=0
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=1
+bSolarize=0
+bInvert=1
+fWaveAlpha=0.001
+fWaveScale=0.295
+fWaveSmoothing=0.000
+fWaveParam=-0.440
+fModWaveAlphaStart=1.000
+fModWaveAlphaEnd=1.000
+fWarpAnimSpeed=1.000
+fWarpScale=3.138
+fZoomExponent=1.00000
+fShader=0.000
+zoom=1.00189
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=1.00000
+sy=1.00000
+wave_r=1.000
+wave_g=1.000
+wave_b=1.000
+wave_x=0.500
+wave_y=0.040
+ob_size=0.010
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.010
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.250
+mv_r=1.000
+mv_g=0.500
+mv_b=0.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.000
+wavecode_0_enabled=1
+wavecode_0_samples=512
+wavecode_0_sep=0
+wavecode_0_bSpectrum=0
+wavecode_0_bUseDots=0
+wavecode_0_bDrawThick=1
+wavecode_0_bAdditive=1
+wavecode_0_scaling=2.02310
+wavecode_0_smoothing=0.00000
+wavecode_0_r=0.000
+wavecode_0_g=1.000
+wavecode_0_b=1.000
+wavecode_0_a=1.000
+wave_0_init1=t2 = 0;
+wave_0_init2=t3 = 0;
+wave_0_init3=t4 = 0;
+wave_0_init4=cl = 0;
+wave_0_per_frame1=vol = bass*8 + mid*5 + treb*3;
+wave_0_per_frame2=m = m*0.97 + vol*0.08;
+wave_0_per_frame3=monitor = vol;
+wave_0_per_frame4=beat = above(vol,res)*above(vol,m)*above(vol,16);
+wave_0_per_frame5=diff = (1-beat)*diff + beat*(vol-res);
+wave_0_per_frame6=res = beat*(vol + m*0.04) + (1-beat)*(res -  (0.1+diff*0.02)*60/fps);
+wave_0_per_frame7=res = max(0,res);
+wave_0_per_frame8=b = beat;
+wave_0_per_frame9=g = 1-beat;
+wave_0_per_point1=tt3 = tt3*0.6 + (value1)*1;
+wave_0_per_point2=tt2 = tt2*0.7 + tt3*0.2;
+wave_0_per_point3=tt1 = tt1*0.8 + tt2*0.1;
+wave_0_per_point4=d = d*0.9 + tt1*0.2;
+wave_0_per_point5=
+wave_0_per_point6=y = 0.5 + d*sample*(1-sample)*4;
+wave_0_per_point7=x =  -0.05 + sample*1.1;
+per_frame_1=q1=.5+(.1*sin(time*.41)+.05*sin(time*.62)+.05*sin(time*.44));
+per_frame_2=q2=.5+(.1*sin(time*.11)+.05*sin(time*.32)+.05*sin(time*.95));
+per_frame_3=
+per_frame_4=bassfix=.05+.01*bass;
+per_frame_5=midfix=.05+.01*mid;
+per_frame_6=trebfix=.05+.01*treb;
+per_frame_7=bassif=if(above(bass_att,1),bassif+bassfix,if(above(bassif,85),0,bassif*.96));
+per_frame_8=midif=if(above(mid_att,1),midif+midfix,if(above(midif,.85),0,midif*.96));
+per_frame_9=trebif=if(above(treb_att,1),trebif+trebfix,if(above(trebif,.85),0,trebif*.96));
+per_frame_10=
+per_frame_11=q11=bassif;
+per_frame_12=q12=midif;
+per_frame_13=q13=trebif;
+per_frame_14=q14=abs(cos(bassif-time));
+per_frame_15=q15=abs(cos(midif-time));
+per_frame_16=q16=abs(cos(trebif-time));
+per_frame_17=
+per_frame_18=
+per_frame_19=q21=.01*(sin(time*.52)*cos(time*1.31)*sin(time*.8));
+per_frame_20=q22=.01*(sin(time*.12)*cos(time*.19)*sin(time*1.29));
+per_frame_21=q23=.01*(sin(time*.23)*cos(time*.91)*sin(time*1.1));
+warp_1=`shader_body
+warp_2=`{ret=tex2D(sampler_fc_main,uv).xyz;ret*=0.96;}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`    float2 d = texsize.zw;
+comp_4=`    float3 dx = ( GetPixel(uv+float2(1,0)*d)-GetPixel(uv-float2(1,0)*d) );
+comp_5=`    float3 dy = ( GetPixel(uv+float2(0,1)*d)-GetPixel(uv-float2(0,1)*d) );
+comp_6=`float2 dz = float2(dx.y,dy.y)*3;
+comp_7=`
+comp_8=`d = texsize.zw*2;
+comp_9=`dx = ( GetBlur1(uv+float2(1,0)*d)-GetBlur1(uv-float2(1,0)*d) );
+comp_10=`dy = ( GetBlur1(uv+float2(0,1)*d)-GetBlur1(uv-float2(0,1)*d) );
+comp_11=`
+comp_12=`dz +=float2(dx.y,dy.y);
+comp_13=`
+comp_14=`float3 bg = pow(length(dz)*0.8+0,0.7)*2 + GetBlur1(uv).y*2;
+comp_15=`
+comp_16=`ret = bg*float3(0.2,0.3,0.6);
+comp_17=`float2 uv_swimmer =frac(0.5 + (uv-0.5)+float2(q19,q20)*float2(-1,1));
+comp_18=`ret = lerp(ret,float3(3,2,1),GetBlur3(uv_swimmer -float2(dx.y,dy.y)).x);
+comp_19=`ret = lerp(ret,0,GetBlur2(uv_swimmer-dz).x);
+comp_20=`ret = lerp(ret,float3(0,0,0),1.5*GetPixel(uv_swimmer).x);
+comp_21=`
+comp_22=`//ret = GetPixel(uv);
+comp_23=`}

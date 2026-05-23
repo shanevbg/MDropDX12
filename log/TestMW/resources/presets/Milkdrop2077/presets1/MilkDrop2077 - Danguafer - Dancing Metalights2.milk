@@ -1,0 +1,154 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=3
+PSVERSION_WARP=3
+PSVERSION_COMP=3
+[preset00]
+fRating=4.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=0
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=0
+bModWaveAlphaByVolume=1
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.000
+fWaveScale=1.000
+fWaveSmoothing=0.750
+fWaveParam=0.000
+fModWaveAlphaStart=0.750
+fModWaveAlphaEnd=0.950
+fWarpAnimSpeed=1.000
+fWarpScale=1.331
+fZoomExponent=1.00000
+fShader=1.000
+zoom=0.99951
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=1.00000
+sy=1.00000
+wave_r=0.000
+wave_g=0.000
+wave_b=0.000
+wave_x=0.000
+wave_y=0.000
+ob_size=0.500
+ob_r=0.010
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.900
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_1=// Beat detection and timing
+per_frame_2=beat = 0;
+per_frame_3=
+per_frame_4=// Time variables
+per_frame_5=t = time + beat*2.0;
+per_frame_6=t2 = t*2.0;
+per_frame_7=t3 = t*3.0;
+per_frame_8=t4 = t*4.0;
+per_frame_9=s2 = sin(t2);
+per_frame_10=s3 = sin(t3);
+per_frame_11=s4 = sin(t4);
+per_frame_12=c2 = cos(t2);
+per_frame_13=c3 = cos(t3);
+per_frame_14=
+per_frame_15=// Metaball positions
+per_frame_16=q1 = 0.10*s4+0.40*c3;    // mbr.x
+per_frame_17=q2 = 0.40*s2+0.20*c3;    // mbr.y
+per_frame_18=q3 = 0.15*s3+0.30*c2;    // mbg.x
+per_frame_19=q4 = -0.10*s4+0.30*c3;   // mbg.y
+per_frame_20=q5 = 0.10*s3+0.50*c3;    // mbb.x
+per_frame_21=q6 = -0.10*s4+0.50*c2;   // mbb.y
+per_frame_22=q7 = beat;               // beat intensity
+per_frame_23=q8 = 0.04+beat;          // metaball size base
+warp_1=`shader_body
+warp_2=`{
+warp_3=`    // sample previous frame
+warp_4=`    // ret = tex2D( sampler_main, uv ).xyz;
+warp_5=`    
+warp_6=`    // darken (decay) over time
+warp_7=`    ret *= 0.94; //or try: ret -= 0.004;
+warp_8=`}
+comp_1=`shader_body
+comp_2=`{   // Thanks to Author: Danguafer/Silexars for the original code
+comp_3=`    // Coordinate system
+comp_4=`    float2 p = (uv-0.5)*aspect.xy;
+comp_5=`    
+comp_6=`    // Setup variables
+comp_7=`    float2 mbr = float2(q1, q2);
+comp_8=`    float2 mbg = float2(q3, q4);
+comp_9=`    float2 mbb = float2(q5, q6);
+comp_10=`    float2 o = float2(pow(p.x,2.),pow(p.y,2.));
+comp_11=`    
+comp_12=`    // Base color calculation
+comp_13=`    float3 col = pow(2.*abs(o.x+o.y)+abs(o.x-o.y),5.);
+comp_14=`    col = max(col,1.);
+comp_15=`    
+comp_16=`    // Calculate metaball values inline instead of using a function
+comp_17=`    float mb_r = q8/(pow(p.x-mbr.x,2.)+pow(p.y-mbr.y,2.));
+comp_18=`    float mb_g = q8/(pow(p.x-mbg.x,2.)+pow(p.y-mbg.y,2.));
+comp_19=`    float mb_b = q8/(pow(p.x-mbb.x,2.)+pow(p.y-mbb.y,2.));
+comp_20=`    float mb_total = mb_r + mb_g + mb_b;
+comp_21=`    
+comp_22=`    // Apply metaball coloring
+comp_23=`    col.r *= length(mbr.xy-p.xy);
+comp_24=`    col.g *= length(mbg.xy-p.xy);
+comp_25=`    col.b *= length(mbb.xy-p.xy);
+comp_26=`    col *= pow(mb_total, 0.2);
+comp_27=`    
+comp_28=`    // Apply original comp shader effects
+comp_29=`    col = col*1.5 - 0.1;
+comp_30=`    
+comp_31=`    float4 g;
+comp_32=`    float3 d = float3(texsize.zw * 4, 0);
+comp_33=`    g.x = lum(GetBlur1(uv + d.xz));
+comp_34=`    g.y = lum(GetBlur1(uv - d.xz));
+comp_35=`    g.z = lum(GetBlur1(uv + d.zy));
+comp_36=`    g.w = lum(GetBlur1(uv - d.zy));
+comp_37=`    
+comp_38=`    col *= 0.7;
+comp_39=`    col.x += saturate(g.x-g.y)*5;
+comp_40=`    col.z += saturate(g.y-g.x)*5;
+comp_41=`    
+comp_42=`    // Blend with original comp effects
+comp_43=`    col.x = lerp(col.x, GetBlur1(uv).x*2, 0.3);
+comp_44=`    col.z = lerp(col.z, GetBlur2(uv).z*3, 0.3);
+comp_45=`    
+comp_46=`    ret = col-bass/3;
+comp_47=`//MilkDrop3 Blow Mode:
+comp_48=`float3 avg_col = GetBlur2(uv);ret = abs(avg_col - ret)*2;
+comp_49=`}

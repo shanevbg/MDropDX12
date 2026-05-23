@@ -1,0 +1,112 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=3
+PSVERSION_WARP=3
+PSVERSION_COMP=3
+[preset00]
+fRating=4.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=7
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=3.200
+fWaveScale=1.768
+fWaveSmoothing=0.630
+fWaveParam=0.000
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.000
+fWarpScale=1.331
+fZoomExponent=1.00000
+fShader=1.000
+zoom=0.99951
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=1.00000
+sy=1.00000
+wave_r=0.200
+wave_g=0.500
+wave_b=0.900
+wave_x=0.500
+wave_y=0.500
+ob_size=0.500
+ob_r=0.010
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.900
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_1=time = time + .3;
+per_frame_2=wave_r = 0.2;
+per_frame_3=wave_g = 0.5;
+per_frame_4=wave_b = 0.9;
+warp_1=`shader_body
+warp_2=`{
+warp_3=`    // sample previous frame
+warp_4=`    ret = tex2D(sampler_main, uv).xyz;
+warp_5=`    ret *= 0.94;
+warp_6=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`    // Normalize coordinates
+comp_4=`    float2 uv_scaled = (uv -1) * aspect.xy * 12;
+comp_5=`    
+comp_6=`    // Time-based movement variables
+comp_7=`    float k = 2.7 + cos(uv_scaled.y + sin(0.148 - time)) + .4 * time;
+comp_8=`    float w = 2.9 + sin(uv_scaled.x + cos(0.128 + time)) - 1.7 * time;
+comp_9=`    float d = length(uv_scaled);
+comp_10=`    float s = 3 * cos(d + w) * sin(k + w);
+comp_11=`    
+comp_12=`    // Base color calculation
+comp_13=`    float3 color = 2.5+bass*12 + 0.4 * cos(s + float3(bass_att, 3, 2));
+comp_14=`    
+comp_15=`    // Specular highlight calculation
+comp_16=`    float2 dx = ddx(color);
+comp_17=`    float2 dy = ddy(color);
+comp_18=`    float3 normal = normalize(float3(length(dx), length(dy), 0.5/texsize.y));
+comp_19=`    float spec = pow(max(normal.z, .0), 1.9);
+comp_20=`    color = color * float3(1.0, .7, 1.4) * spec + .75;
+comp_21=`    
+comp_22=`    ret = float4(color, 1.0);
+comp_23=`ret -=.62;
+comp_24=`//MilkDrop3 Color Mode:
+comp_25=`ret /= float3(1.2,-2.0,2.9);
+comp_26=`//MilkDrop3 Rainbow Mode:
+comp_27=`ret *= 1*normalize ((tex2D (sampler_noise_hq,(uv+q4/2)/6)));
+comp_28=`}

@@ -1,0 +1,217 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=3
+[preset00]
+fRating=4.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=3
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=0.625
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=0.880
+fModWaveAlphaEnd=1.980
+fWarpAnimSpeed=1.000
+fWarpScale=1.000
+fZoomExponent=1.00000
+fShader=1.000
+zoom=1.00000
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.00000
+sx=1.00000
+sy=1.00000
+wave_r=0.000
+wave_g=0.000
+wave_b=0.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.010
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.010
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=0.000
+nMotionVectorsY=0.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.900
+mv_r=0.000
+mv_g=0.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+shapecode_0_enabled=1
+shapecode_0_sides=16
+shapecode_0_additive=0
+shapecode_0_thickOutline=1
+shapecode_0_textured=1
+shapecode_0_num_inst=1
+shapecode_0_x=0.500
+shapecode_0_y=0.500
+shapecode_0_rad=0.73891
+shapecode_0_ang=3.14159
+shapecode_0_tex_ang=0.18850
+shapecode_0_tex_zoom=0.93101
+shapecode_0_r=1.000
+shapecode_0_g=1.000
+shapecode_0_b=1.000
+shapecode_0_a=1.000
+shapecode_0_r2=1.000
+shapecode_0_g2=1.000
+shapecode_0_b2=1.000
+shapecode_0_a2=0.000
+shapecode_0_border_r=1.000
+shapecode_0_border_g=1.000
+shapecode_0_border_b=1.000
+shapecode_0_border_a=0.000
+per_frame_init_1=    x0 = .25 + rand(10)/20;
+per_frame_init_2=    y0 = .25 + rand(10)/20;
+per_frame_init_3=    vx0 = .25 - rand(10)/20;
+per_frame_init_4=    vy0 = .25 - rand(10)/20;
+per_frame_init_5=
+per_frame_init_6=    x1 = .25 + rand(10)/20;
+per_frame_init_7=    y1 = .25 + rand(10)/20;
+per_frame_init_8=    vx1 = .25 - rand(10)/20;
+per_frame_init_9=    vy1 = .25 - rand(10)/20;
+per_frame_init_10=
+per_frame_init_11=    //# average of positions should be at (.5, .5)
+per_frame_init_12=    x2 = 1.5 - x0 - x1;
+per_frame_init_13=    y2 = 1.5 - y0 - y1;
+per_frame_init_14=
+per_frame_init_15=    //# average of velocities should be 0
+per_frame_init_16=    vx2 = -vx0 - vx1;
+per_frame_init_17=    vy2 = -vy0 - vy1;
+per_frame_1=    dt = 1/fps;
+per_frame_2=
+per_frame_3=    x0 = x0 + vx0*dt;
+per_frame_4=    y0 = y0 + vy0*dt;
+per_frame_5=
+per_frame_6=    x1 = x1 + vx1*dt;
+per_frame_7=    y1 = y1 + vy1*dt;
+per_frame_8=
+per_frame_9=    x2 = x2 + vx2*dt;
+per_frame_10=    y2 = y2 + vy2*dt;
+per_frame_11=
+per_frame_12=    vx0 = vx0 + .2*(x1 - x0)*dt + .2*(x2 - x0)*dt + .1*(.5 - x0)*dt;
+per_frame_13=    vy0 = vy0 + .2*(y1 - y0)*dt + .2*(y2 - y0)*dt + .1*(.5 - y0)*dt;
+per_frame_14=
+per_frame_15=    vx1 = vx1 + .2*(x0 - x1)*dt + .2*(x2 - x1)*dt + .1*(.5 - x1)*dt;
+per_frame_16=    vy1 = vy1 + .2*(y0 - y1)*dt + .2*(y2 - y1)*dt + .1*(.5 - y1)*dt;
+per_frame_17=
+per_frame_18=    vx2 = vx2 + .2*(x0 - x2)*dt + .2*(x1 - x2)*dt + .1*(.5 - x2)*dt;
+per_frame_19=    vy2 = vy2 + .2*(y0 - y2)*dt + .2*(y1 - y2)*dt + .1*(.5 - y2)*dt;
+per_frame_20=
+per_frame_21=    q1 = x0;
+per_frame_22=    q2 = y0;
+per_frame_23=
+per_frame_24=    q3 = x1;
+per_frame_25=    q4 = y1;
+per_frame_26=
+per_frame_27=    q5 = x2;
+per_frame_28=    q6 = y2;
+per_frame_29=
+per_frame_30=    q8 = dt;
+per_frame_31=
+per_frame_32=wave_a=0;
+warp_1=`shader_body
+warp_2=`{
+warp_3=`    // Transform screen UV coordinates to view space
+warp_4=`    float2 viewCoord = (uv_orig * 2.0 - 1.0) * float2(texsize.x / texsize.y, 1.0);
+warp_5=`
+warp_6=`    float frameDepth = 2.0 * time; // Simulated camera depth over time
+warp_7=`
+warp_8=`    // Static camera anchor
+warp_9=`    float2 anchorNow = float2(0.0, 0.0);
+warp_10=`
+warp_11=`    float simStep = 0.5;
+warp_12=`    float frameDepthNext = 2.0 * (time + simStep); // Camera depth in next frame
+warp_13=`
+warp_14=`    // Static camera anchor in next frame
+warp_15=`    float2 anchorNext = float2(0.0, 0.0);
+warp_16=`
+warp_17=`    float2 velocity = (anchorNext - anchorNow) / simStep; // Simulated movement (zero)
+warp_18=`
+warp_19=`    float3 colorOut = 0.1; // Final color accumulator
+warp_20=`
+warp_21=`    for (int particleIndex = 1; particleIndex < 10; particleIndex++) {
+warp_22=`        float particleDepth = float(particleIndex);
+warp_23=`        float absDepth = floor(frameDepth) + particleDepth;
+warp_24=`        float relDepth = absDepth - frameDepth;
+warp_25=`        float particleSize = 1.0 / relDepth;
+warp_26=`
+warp_27=`        // Simulated particle world-space position (static)
+warp_28=`        float2 particleWorld = float2(0.0, 0.0);
+warp_29=`
+warp_30=`        // Convert world-space to screen-space
+warp_31=`        float2 screenSpacePos = (particleWorld - anchorNow) * 10.0 / relDepth - velocity * 0.4;
+warp_32=`
+warp_33=`        // Particle RGB color based on depth
+warp_34=`        float3 particleColor = (
+warp_35=`            float3(sin(absDepth * 0.07), sin(absDepth * 0.1), sin(absDepth * 0.08)) +
+warp_36=`            float3(1.0, 1.0, 1.0)
+warp_37=`        ) / 6.0;
+warp_38=`
+warp_39=`        // Radial falloff and color intensity accumulation
+warp_40=`        colorOut += 0.02 / relDepth / abs(length(viewCoord - screenSpacePos) - particleSize);
+warp_41=`    }
+warp_42=`
+warp_43=`    ret = float4(colorOut, 1.0); // Final output color
+warp_44=`}
+comp_1=`shader_body 
+comp_2=`{ 
+comp_3=`
+comp_4=`float3 reta = tex2D(sampler_main, uv);
+comp_5=`ret = reta;
+comp_6=`//ret = sqrt(ret)*1;
+comp_7=`//ret += GetBlur2(uv);
+comp_8=`ret -= GetBlur1(uv)*0.5;
+comp_9=`
+comp_10=`ret *= 3;
+comp_11=`
+comp_12=`float4 noise9 = tex3D(sampler_noisevol_hq, 
+comp_13=`                      ((uv.xyy*q28
+comp_14=`                       )*texsize.xyy*texsize_noisevol_hq.zww
+comp_15=`                      ).xyz*
+comp_16=`                      float3(1.6,1.3,1.4)*0.05 + 
+comp_17=`                      time*float3(2.9,2.7,0.9)*q31 
+comp_18=`                     );
+comp_19=`if(ret.x> q26*roam_cos.y && ret.x<= q23*roam_sin.x)ret.z -= (noise9).x*.5; 
+comp_20=`if(ret.y> q25*roam_sin.x && ret.y<= q22*roam_cos.x)ret.x -= (noise9).y*.5; 
+comp_21=`if(ret.z> q24*roam_cos.x && ret.z<= q21*roam_sin.y)ret.y -= (noise9).z*.5; 
+comp_22=`
+comp_23=`ret -= 0.2;
+comp_24=`//MilkDrop3 Color Mode:
+comp_25=`ret /= float3(1.4,-0.2,0.8);
+comp_26=`}

@@ -1,0 +1,107 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=3
+[preset00]
+fRating=5.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=15
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=0.625
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=0.880
+fModWaveAlphaEnd=1.980
+fWarpAnimSpeed=1.459
+fWarpScale=2.007
+fZoomExponent=1.00000
+fShader=1.000
+zoom=0.99990
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=0.99990
+sy=1.00000
+wave_r=0.000
+wave_g=0.000
+wave_b=0.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=1.000
+ob_g=0.000
+ob_b=1.000
+ob_a=1.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=1.000
+mv_r=1.060
+mv_g=1.000
+mv_b=0.819
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+warp_1=`shader_body{
+warp_2=`     float aspect = aspect.x / aspect.y;  // width/height ratio
+warp_3=`
+warp_4=`     // Initialize variables
+warp_5=`    float2 r = float2(1.0, 1.0);  // Fake resolution
+warp_6=`    float4 o = float4(0,0,0,0);
+warp_7=`    float2 i = float2(0,0);
+warp_8=`    
+warp_9=`    // Create transformed coordinates
+warp_10=`    float2 p = (uv.xy*2.0-r)/r.y*exp(3.0-cos(time.x));
+warp_11=`    
+warp_12=`    // Fractal iteration loop
+warp_13=`    for(; i.x < 50.0; ) {
+warp_14=`        // Apply transformation matrix and accumulate color
+warp_15=`        o += 0.01/length(cos(p+i));
+warp_16=`        
+warp_17=`        // Apply fractal transformation - CORRECTED MATRIX MULTIPLICATION
+warp_18=`        p = mul(float2x2(0.3, 0.9, -0.9, 0.3), p);
+warp_19=`        
+warp_20=`        // Increment counter
+warp_21=`        i += float2(1.0, 0.0);
+warp_22=`    }
+warp_23=`    
+warp_24=`    // Final tone mapping
+warp_25=`    o = tanh(o*o);
+warp_26=`    
+warp_27=`    // Output result
+warp_28=`    ret = o;
+warp_29=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=` ret = GetPixel(uv);
+comp_4=`}

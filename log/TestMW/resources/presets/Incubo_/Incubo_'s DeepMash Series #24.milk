@@ -1,0 +1,232 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=3
+PSVERSION_WARP=2
+PSVERSION_COMP=3
+[preset00]
+fRating=3.000
+fGammaAdj=1.000
+fDecay=0.900
+fVideoEchoZoom=1.000
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=3
+nWaveMode=1
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=0
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=1
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.982
+fWaveScale=0.010
+fWaveSmoothing=0.900
+fWaveParam=1.000
+fModWaveAlphaStart=0.750
+fModWaveAlphaEnd=0.950
+fWarpAnimSpeed=0.442
+fWarpScale=0.498
+fZoomExponent=43.07961
+fShader=1.000
+zoom=0.01125
+rot=1.00000
+cx=0.500
+cy=0.980
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=0.98020
+sy=0.98030
+wave_r=0.650
+wave_g=0.650
+wave_b=0.650
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=1.000
+ob_g=1.000
+ob_b=1.000
+ob_a=0.050
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.900
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_init_1=dirx = 1;
+per_frame_1=dec_med = pow (0.9, 30/fps);
+per_frame_2=dec_slow = pow (0.99, 30/fps);
+per_frame_3=beat = max (max (bass, mid), treb); 
+per_frame_4=avg = avg*dec_slow + beat*(1-dec_slow);
+per_frame_5=is_beat = above(beat, .5+avg+peak) * above (time, t0+.2);
+per_frame_6=t0 = is_beat*time + (1-is_beat)*t0;
+per_frame_7=peak = is_beat * beat + (1-is_beat)*peak*dec_med;
+per_frame_8=index = (index + is_beat) %2;
+per_frame_9=index2 = (index2 + is_beat*bnot(index))%2;
+per_frame_10=index3 = (index3 + is_beat*bnot(index)*bnot(index2))%3;
+per_frame_11=
+per_frame_12=
+per_frame_13=q20 = avg;
+per_frame_14=q21 = beat;
+per_frame_15=q22 = peak;
+per_frame_16=q23 = index;
+per_frame_17=q24 = is_beat;
+per_frame_18=q26 = bass + mid + treb;
+per_frame_19=
+per_frame_20=//k1 =  is_beat*bnot(index)*bnot(index2);
+per_frame_21=
+per_frame_22=k1 =  is_beat*equal(index,0);
+per_frame_23=p1 =  k1*(p1+1) + (1-k1)*p1;
+per_frame_24=p2 = dec_med * p2+ (1-dec_med)*p1;
+per_frame_25=rott = p2 * 3.14159265359/2;
+per_frame_26=q1 = cos(rott);
+per_frame_27=
+per_frame_28=q27 = index;
+per_frame_29=q28 = index2 -.5;
+per_frame_30=//**************************
+per_frame_31=
+per_frame_32=
+per_frame_33=rot = .0*q27;;
+per_frame_34=dy = .01 * sin(time/7);;
+per_frame_35=dx = .01 * sin(time/4);;
+per_frame_36=zoom = 1.2;
+per_frame_37=
+per_frame_38=
+warp_1=`shader_body
+warp_2=`{
+warp_3=`    float2 scale = float2(1280,1024)*texsize.zw; // 1280x1024 : the resolution i modelled this shader with
+warp_4=`    float1 d = 0.005;
+warp_5=`    float1 dx = ( GetBlur2(uv + float2(d,0)) - GetBlur2(uv-float2(d,0)) ).x*scale.x;
+warp_6=`    float1 dy = ( GetBlur2(uv + float2(0,d)) - GetBlur2(uv-float2(0,d)) ).x*scale.y;
+warp_7=`    float1 dxb = ( GetBlur2(uv + float2(d,0)) - GetBlur2(uv-float2(d,0)) ).x*scale.x;
+warp_8=`    float1 dyb = ( GetBlur2(uv + float2(0,d)) - GetBlur2(uv-float2(0,d)) ).x*scale.y;
+warp_9=`    float2 my_uv = uv - float2(dx,dy)*0.01 + float2(dxb,dyb)*0.003;
+warp_10=`
+warp_11=`
+warp_12=`
+warp_13=`    float2 v = 0.01;
+warp_14=`    ret.x = tex2D( sampler_fw_main, my_uv -floor(my_uv)*0).x;
+warp_15=`
+warp_16=`    
+warp_17=`    ret.x += (ret.x - GetBlur3(uv).x)*.1;
+warp_18=`    ret.x += 0.004;
+warp_19=`
+warp_20=`
+warp_21=`//--------------------------------
+warp_22=`
+warp_23=`    my_uv = uv + float2(dy,-dx)*0.05*(1.2-GetBlur3(uv).y);
+warp_24=`
+warp_25=`
+warp_26=`
+warp_27=`    v = 0.01;
+warp_28=`    ret.z = tex2D( sampler_fw_main, my_uv).z;
+warp_29=`    
+warp_30=`    ret.z += (ret.z - GetBlur1(uv).z)*length(my_uv-uv)*180/length(scale);
+warp_31=`    ret.z *= 0.8;
+warp_32=`    ret.z += 0.004;
+warp_33=`
+warp_34=`
+warp_35=`
+warp_36=`//--------------------------------
+warp_37=`
+warp_38=`    d = 0.01;
+warp_39=`    my_uv = float2(-dy,dx)*0.045;
+warp_40=`
+warp_41=`    dx = ( GetBlur2(uv + float2(d,0)) - GetBlur2(uv-float2(d,0)) ).y*scale.x;
+warp_42=`    dy = ( GetBlur2(uv + float2(0,d)) - GetBlur2(uv-float2(0,d)) ).y*scale.y;
+warp_43=`    my_uv += uv - float2(dx,dy)*0.03;
+warp_44=`
+warp_45=`
+warp_46=`
+warp_47=`    v = 0.01;
+warp_48=`    ret.y =tex2D( sampler_fw_main, my_uv).y;
+warp_49=`
+warp_50=`    
+warp_51=`    ret.y += (ret.y - GetBlur3(my_uv).y)*0.1 + 0.01;
+warp_52=`//ret = 0;
+warp_53=`}
+comp_1=`float2 polar, factorA, factorB, product;
+comp_2=`
+comp_3=`sampler sampler_rand00;
+comp_4=`sampler sampler_rand01;
+comp_5=`sampler sampler_rand02;
+comp_6=`
+comp_7=`shader_body
+comp_8=`{
+comp_9=`
+comp_10=`float z = q30;
+comp_11=`float d = q31;
+comp_12=`float pi = q28;
+comp_13=`float pi2inv = q29;
+comp_14=`float mask_apex = q32;
+comp_15=`float zoom = q27;
+comp_16=`
+comp_17=`float2 c = zoom*(uv-0.5)*aspect.xy;
+comp_18=`
+comp_19=`float camera_apex = atan2( length(c),z);
+comp_20=`
+comp_21=`bool mask = mask_apex >= camera_apex;
+comp_22=`
+comp_23=`float longitude = atan2(c.x,c.y);
+comp_24=`float latitude = (pi - camera_apex + asin(d*sin(camera_apex)));
+comp_25=`
+comp_26=`float2 polar = float2(longitude,latitude);
+comp_27=`
+comp_28=`float3 p = float3( sin(polar.x)*sin(polar.y),cos(polar.x)*sin(polar.y),cos(polar.y));
+comp_29=`
+comp_30=`factorA = p.zy;
+comp_31=`factorB = float2(q20,q21);
+comp_32=`product = float2( factorA.x*factorB.x - factorA.y*factorB.y,factorA.x*factorB.y + factorA.y*factorB.x);
+comp_33=`p.zy = product.xy;
+comp_34=`
+comp_35=`factorA = p.zx;
+comp_36=`factorB = float2(q22,q23);
+comp_37=`product = float2( factorA.x*factorB.x - factorA.y*factorB.y,factorA.x*factorB.y + factorA.y*factorB.x);
+comp_38=`p.zx = product.xy;
+comp_39=`
+comp_40=`factorA = p.yx;
+comp_41=`factorB = float2(q24,q25);
+comp_42=`product = float2( factorA.x*factorB.x - factorA.y*factorB.y, factorA.x*factorB.y + factorA.y*factorB.x);
+comp_43=`p.yx = product.xy;
+comp_44=`
+comp_45=`polar = float2(atan2(p.z,p.x),atan2(p.y,length(p.xz)))*pi2inv*float2(1,2)+float2(0,0.5);
+comp_46=`
+comp_47=`ret = tex2d(sampler_rand01,polar);
+comp_48=`ret = p;
+comp_49=`ret += mask*tex2d(sampler_rand01,polar);
+comp_50=`//ret = lerp(ret,1,mask*tex2d(sampler_pano_earth_clouds,polar)*mid_att*0.5);
+comp_51=`
+comp_52=`c = -(uv-0.5)*aspect.xy;
+comp_53=`polar = float2( atan2(c.x,z), atan2(c.y,z));
+comp_54=`p = float3( sin(polar.x)*cos(polar.y),sin(polar.y)*cos(polar.x),cos(polar.x)*cos(polar.y));
+comp_55=`factorA = p.zy;factorB = float2(q20,q21);
+comp_56=`product = float2( factorA.x*factorB.x - factorA.y*factorB.y,factorA.x*factorB.y + factorA.y*factorB.x);
+comp_57=`p.zy = product.xy;factorA = p.zx;factorB = float2(q22,q23);
+comp_58=`product = float2( factorA.x*factorB.x - factorA.y*factorB.y,factorA.x*factorB.y + factorA.y*factorB.x);
+comp_59=`p.zx = product.xy;factorA = p.yx;factorB = float2(q24,q25);
+comp_60=`product = float2( factorA.x*factorB.x - factorA.y*factorB.y, factorA.x*factorB.y + factorA.y*factorB.x);
+comp_61=`p.yx = product.xy;polar = float2( atan2(p.x,p.z),atan2(p.y,length(p.xz))*2)*pi2inv + float2(0,0.5);
+comp_62=`ret = lerp(ret,tex2d(sampler_rand02,polar),(1-mask));
+comp_63=`
+comp_64=`}
+comp_65=`
+comp_66=`
