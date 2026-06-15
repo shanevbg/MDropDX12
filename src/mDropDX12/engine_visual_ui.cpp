@@ -8,6 +8,7 @@
 #include "tool_window.h"
 #include "engine.h"
 #include "engine_helpers.h"
+#include "fps_caps.h"
 #include "utility.h"
 #include <commctrl.h>
 
@@ -177,13 +178,10 @@ void VisualWindow::DoBuildControls() {
       x + lw + 4, y, 120, lineH * 8, hw,
       (HMENU)(INT_PTR)IDC_MW_FPS_CAP, GetModuleHandle(NULL), NULL);
     if (hCombo && hFont) SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, TRUE);
-    const wchar_t* fpsLabels[] = { L"30", L"40", L"60", L"90", L"120", L"144", L"240", L"360", L"720", L"Unlimited" };
-    const int fpsValues[] = { 30, 40, 60, 90, 120, 144, 240, 360, 720, 0 };
-    int selIdx = 1; // default to 40 fps
-    for (int i = 0; i < 10; i++) {
-      SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)fpsLabels[i]);
-      if (fpsValues[i] == p->m_max_fps_fs) selIdx = i;
-    }
+    int selIdx = FpsCapFindIndex(p->m_max_fps_fs);
+    if (selIdx < 0) selIdx = FpsCapFindIndex(40);
+    for (int i = 0; i < kFpsCapOptionCount; i++)
+      SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)kFpsCapOptions[i].uiLabel);
     SendMessage(hCombo, CB_SETCURSEL, selIdx, 0);
     TrackControl(hCombo);
   }
@@ -309,9 +307,8 @@ LRESULT VisualWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
   // FPS Cap combo box
   if (id == IDC_MW_FPS_CAP && code == CBN_SELCHANGE) {
     int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
-    const int fpsValues[] = { 30, 40, 60, 90, 120, 144, 240, 360, 720, 0 };
-    if (sel >= 0 && sel < 10)
-      p->SetFPSCap(fpsValues[sel]);
+    if (sel >= 0 && sel < kFpsCapOptionCount)
+      p->SetFPSCap(kFpsCapOptions[sel].value);
     return 0;
   }
 

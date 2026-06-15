@@ -599,6 +599,7 @@ SPOUT :
 #include "tool_window.h"
 #include "video_capture.h"
 #include "engine_helpers.h"
+#include "fps_caps.h"
 #include "utility.h"
 #include "support.h"
 #include "resource.h"
@@ -623,7 +624,7 @@ SPOUT :
 
 namespace mdrop {
 
-int ToggleFPSNumPressed = 7;			// Default is Unlimited FPS.
+int ToggleFPSNumPressed = FpsCapDefaultIndex();
 int HardcutMode = 0;
 float timetick = 0;
 float timetick2 = 0;

@@ -155,6 +155,7 @@ using Microsoft::WRL::ComPtr;
 
 #include "engine.h"
 #include "engine_helpers.h"
+#include "fps_caps.h"
 #include "resource.h"
 #include "engineshell.h"
 #include "utility.h"
@@ -1504,12 +1505,9 @@ LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPara
           ? L"Black Mode enabled" : L"Black Mode disabled");
       break;
     case HK_FPS_CYCLE: {
-      static const int cycle[] = { 60, 90, 120, 144, 240, 360, 720, 0, 30, 40 };
-      static const wchar_t* labels[] = { L"60 fps", L"90 fps", L"120 fps", L"144 fps",
-        L"240 fps", L"360 fps", L"720 fps", L"Unlimited fps", L"30 fps", L"40 fps" };
-      ToggleFPSNumPressed = (ToggleFPSNumPressed + 1) % 10;
-      g_engine.SetFPSCap(cycle[ToggleFPSNumPressed]);
-      g_engine.AddNotification((wchar_t*)labels[ToggleFPSNumPressed]);
+      ToggleFPSNumPressed = (ToggleFPSNumPressed + 1) % kFpsCapOptionCount;
+      g_engine.SetFPSCap(kFpsCapOptions[ToggleFPSNumPressed].value);
+      g_engine.AddNotification((wchar_t*)kFpsCapOptions[ToggleFPSNumPressed].notifyLabel);
       break;
     }
     case HK_OPACITY_UP:

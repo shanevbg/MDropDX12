@@ -21,6 +21,7 @@
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
 #include "App.h"
+#include "fps_caps.h"
 
 #define FRAND ((rand() % 7381)/7380.0f)
 #define clamp(value, min, max) ((value) < (min) ? (min) : ((value) > (max) ? (max) : (value)))
@@ -46,14 +47,13 @@ void Engine::SetFPSCap(int fps) {
   WritePrivateProfileIntW(fps, L"max_fps_fs", ini, L"Settings");
   WritePrivateProfileIntW(fps, L"max_fps_dm", ini, L"Settings");
   WritePrivateProfileIntW(fps, L"max_fps_w", ini, L"Settings");
+  int idx = FpsCapFindIndex(fps);
+  if (idx >= 0) ToggleFPSNumPressed = idx;
   HWND hSettingsWnd = m_settingsWindow ? m_settingsWindow->GetHWND() : NULL;
   if (hSettingsWnd && IsWindow(hSettingsWnd)) {
     HWND hCombo = GetDlgItem(hSettingsWnd, IDC_MW_FPS_CAP);
-    if (hCombo) {
-      const int vals[] = { 30, 40, 60, 90, 120, 144, 240, 360, 720, 0 };
-      for (int i = 0; i < 10; i++)
-        if (vals[i] == fps) { SendMessage(hCombo, CB_SETCURSEL, i, 0); break; }
-    }
+    if (hCombo && idx >= 0)
+      SendMessage(hCombo, CB_SETCURSEL, idx, 0);
   }
 }
 
