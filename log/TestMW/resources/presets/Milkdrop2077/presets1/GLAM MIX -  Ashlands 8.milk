@@ -1,0 +1,140 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=3
+PSVERSION_WARP=2
+PSVERSION_COMP=3
+[preset00]
+fRating=5.000
+fGammaAdj=1.900
+fDecay=0.980
+fVideoEchoZoom=1.169
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=0
+nWaveMode=9
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=1
+bMaximizeWaveColor=0
+bTexWrap=0
+bDarkenCenter=1
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.004
+fWaveScale=0.418
+fWaveSmoothing=0.000
+fWaveParam=0.000
+fModWaveAlphaStart=1.400
+fModWaveAlphaEnd=1.400
+fWarpAnimSpeed=100.000
+fWarpScale=4.142
+fZoomExponent=4.32547
+fShader=0.000
+zoom=1.04010
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=1.00000
+sy=1.00000
+wave_r=1.000
+wave_g=1.000
+wave_b=1.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=0.010
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.000
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.850
+mv_r=0.500
+mv_g=0.500
+mv_b=0.500
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_1=warp=bass*.2;
+per_frame_2=warp=warp+(above(bass,1)*bass*.2);
+per_frame_3=
+per_frame_4=echo_alpha=(above(bass,1.25)*.9);
+per_frame_5=
+per_frame_6=//mv_a=(above(bass,1)*bass*.5);
+per_frame_7=
+per_frame_8=// Awesome beat code by martin!
+per_frame_9=dec_med = pow (0.9, 30/fps);
+per_frame_10=dec_slow = pow (0.99, 30/fps);
+per_frame_11=beat = max (max (bass, mid), treb); 
+per_frame_12=avg = avg*dec_slow + beat*(1-dec_slow);
+per_frame_13=is_beat = above(beat, .5+avg+peak) * above (time, t0+.2);
+per_frame_14=t0 = is_beat*time + (1-is_beat)*t0;
+per_frame_15=peak = is_beat * beat + (1-is_beat)*peak*dec_med;
+per_frame_16=
+per_frame_17=FR = if(is_beat,if(above(FR,0),-1,1),FR);
+per_frame_18=
+per_frame_19=q2=q2+(above(bass,1.3)*sin(time)*.02);
+per_frame_20=
+per_frame_21=rot=(rot+q2)*FR;
+per_frame_22=
+per_frame_23=zoom=zoom+(above(bass,1.3)*bass*.03);
+per_frame_24=
+per_frame_25=sy=sy+(above(treb_att,1.2)*treb_att*.002*sin(time));
+per_frame_26=sx=sx+(above(treb_att,1.2)*treb_att*.002*sin(time));
+warp_1=`shader_body
+warp_2=`{
+warp_3=`uv = lerp( uv_orig,uv,0.2);
+warp_4=`
+warp_5=`float2 dither_uv = uv_orig*texsize.xy*texsize_noise_lq.zw*1.5 + rand_frame.xy;
+warp_6=`uv  -= (float2(0,1)*(lum(GetPixel(uv)-0.35))*texsize.zw*32)*(lum(GetPixel(uv))-0.4);
+warp_7=`ret  = GetPixel(saturate(uv)) - 0.0011 + (tex2D(sampler_noise_lq, dither_uv)-0.5)*0.0038;    
+warp_8=`}
+comp_1=`
+comp_2=`float2 rs, rs0, uv2, uv3,uv4,dz;
+comp_3=`float3 noise, ret1, neu;
+comp_4=`
+comp_5=`shader_body {
+comp_6=`float2 uv1 = (uv-.5 )*aspect.xy;
+comp_7=`
+comp_8=`float2 hor = float2 (texsize.z,0)*4;
+comp_9=`float2 ver = float2 (0, texsize.w)*4;
+comp_10=`
+comp_11=`//    uv *= aspect.yx;
+comp_12=`uv3 = uv;
+comp_13=`
+comp_14=`dz.x = (2*lum(GetPixel(uv3+hor))- 2*lum(GetPixel(uv3-hor)));
+comp_15=`dz.y = (2*lum(GetPixel(uv3+ver))- 2*lum(GetPixel(uv3-ver)));
+comp_16=`neu = GetPixel(uv3+dz.yx*0);
+comp_17=`ret1 = neu;
+comp_18=`
+comp_19=`dz = dz*12;
+comp_20=`float2 pos = 1;
+comp_21=`float2 uv_rr = sin(2*uv1 + dz*.8 + pos);
+comp_22=`float2 uv_gg = sin(2*uv1 + dz*1 + pos);
+comp_23=`float2 uv_bb = sin(2*uv1 + dz*1.2 +pos);
+comp_24=`float3 fac = .1;
+comp_25=`float3 mus = float3(fac.x/length(uv_rr),
+comp_26=`fac.y/length(uv_gg),
+comp_27=`fac.z/length(uv_bb));
+comp_28=`
+comp_29=`ret = mus -  ret1 *.15 + ret1.g/2;
+comp_30=`ret *= 1+ret;
+comp_31=`ret*=2;
+comp_32=`}

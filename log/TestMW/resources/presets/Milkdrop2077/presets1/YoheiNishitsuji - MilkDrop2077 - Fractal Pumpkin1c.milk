@@ -1,0 +1,158 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=3
+[preset00]
+fRating=5.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=15
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=0.625
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=0.880
+fModWaveAlphaEnd=1.980
+fWarpAnimSpeed=1.459
+fWarpScale=2.007
+fZoomExponent=1.00000
+fShader=1.000
+zoom=0.99990
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=0.99990
+sy=1.00000
+wave_r=0.000
+wave_g=0.000
+wave_b=0.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=1.000
+ob_g=0.000
+ob_b=1.000
+ob_a=1.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=1.000
+mv_r=1.060
+mv_g=1.000
+mv_b=0.819
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+warp_1=`//Shader from Yohei Nishitsuji
+warp_2=`//https://x.com/YoheiNishitsuji/status/1949255489864581135
+warp_3=`//Ported to MilkDrop by MilkDrop2077
+warp_4=`//MIT Licensed
+warp_5=`
+warp_6=`// Helper: 2D rotation matrix
+warp_7=`float2x2 rotate2D(float angle) {
+warp_8=`    float s = sin(angle);
+warp_9=`    float c = cos(angle);
+warp_10=`    return float2x2(c, -s, s, c);
+warp_11=`}
+warp_12=`
+warp_13=`// Helper: HSV to RGB
+warp_14=`float3 hsv(float h, float s, float v) {
+warp_15=`    float3 k = float3(1.0, 2.0/3.0, 1.0/3.0);
+warp_16=`    float3 p = abs(frac(h + k) * 6.0 - 3.0);
+warp_17=`    return v * lerp(float3(1,1,1), saturate(p - 1.0), s);
+warp_18=`}
+warp_19=`
+warp_20=`// Helper: mod (like GLSL)
+warp_21=`float mod(float a, float b) {
+warp_22=`    return a - b * floor(a / b);
+warp_23=`}
+warp_24=`
+warp_25=`shader_body
+warp_26=`{
+warp_27=`    uv = (uv_orig * aspect.xy - 0.5 * aspect.xy) / aspect.y;
+warp_28=`    float t = time / 3.0;
+warp_29=`    float3 col = float3(0.0, 0.0, 0.0);
+warp_30=`    float g = 0.0;
+warp_31=`
+warp_32=`    for (float i = 0.0; i < 80.0; i++) {
+warp_33=`        float3 p = float3(uv * 1.5 * (cos(t * 0.5) * 0.2 + 0.6), g - 0.4);
+warp_34=`        p.xz = mul(rotate2D(t * 0.5), p.xz);
+warp_35=`        float s = 1.0;
+warp_36=`        float e = 0.0;
+warp_37=`
+warp_38=`        for (int j = 0; j < 21; j++) {
+warp_39=`            e = max(1.01, 8.0 / dot(p, p));
+warp_40=`            p = abs(abs(p) * e - float3(4.0, 2.0, 2.0));
+warp_41=`            p = float3(3.5, 5.0, 0.5) - p;
+warp_42=`            s *= e;
+warp_43=`        }
+warp_44=`
+warp_45=`        g += mod(length(p.zx), p.y) / s;
+warp_46=`        float final_s = log2(s) / g;
+warp_47=`        col += hsv(e, p.z, final_s / 1e4);
+warp_48=`    }
+warp_49=`
+warp_50=`    ret = float4(sqrt(col), 1.0);
+warp_51=`}
+comp_1=`static const int anz = 3;
+comp_2=`float3 ret1, neu, blur;
+comp_3=`float2 uv3;
+comp_4=`shader_body
+comp_5=`{
+comp_6=`float2 pos = float2 (sin(q10*3.14), cos(q10*3.14+q8*.04));
+comp_7=`float r1 = frac(q10/2+time*0.2);
+comp_8=`float r2 = frac(q10/4);
+comp_9=`float2 uv2;
+comp_10=`float ang2, c, s;
+comp_11=`uv -= .5;
+comp_12=`uv *= aspect.xy*1.5;    
+comp_13=`ret1 = (roam_sin+0.5)/(0.01+length((uv)*r1-pos*0.07*q7))*0.015*q7;
+comp_14=`ret1 += (roam_sin+0.5).bgr/(0.01+length((uv)*r1+pos*0.07*q7))*0.015*q7;
+comp_15=`ret1 += (roam_cos+0.5)/(0.02+8*pow(length(uv)-1*r1,2))*0.01*q7;
+comp_16=`ret1*= (1+lum(ret1))/2;
+comp_17=`float n = 1;
+comp_18=`while (n <= anz) {
+comp_19=`  ang2 = n/anz*3.1416;
+comp_20=`  c = cos(ang2);
+comp_21=`  s = sin(ang2);
+comp_22=`  uv2.x =  uv.x*c - uv.y*s;
+comp_23=`  uv2.y =  uv.x*s + uv.y*c;
+comp_24=`  uv3= abs(frac(uv2*aspect.yx)-.5);
+comp_25=`  neu =  max(GetPixel (uv3),GetBlur1(uv3))/2 ;
+comp_26=`  ret1 = max(ret1,neu+ret1);
+comp_27=`n++;
+comp_28=`}
+comp_29=`ret = ret1+(0.9-rad);
+comp_30=`//ret*=1.2;
+comp_31=`ret-=1;
+comp_32=`//ret = GetPixel(uv+0.5);
+comp_33=`}

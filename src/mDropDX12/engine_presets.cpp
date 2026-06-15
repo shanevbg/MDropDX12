@@ -24,6 +24,7 @@
 #include <sstream>
 #include <condition_variable>
 #include <algorithm>
+#include "tool_window.h"
 
 #define FRAND ((rand() % 7381)/7380.0f)
 
@@ -1867,6 +1868,21 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
   // preset keeps rendering without stutter. When the thread finishes,
   // LoadPresetTick() detects it and does an instant hard-cut or blended swap.
 
+  // Detect preset type early — .json needs special routing before loading state init
+  int fnLen = lstrlenW(szPresetFilename);
+  const wchar_t* lastDot = wcsrchr(szPresetFilename, L'.');
+  bool bIsJson  = lastDot && _wcsicmp(lastDot, L".json") == 0;
+
+  if (bIsJson) {
+    // .json shader import: GLSL→HLSL conversion via ShaderImportWindow
+    // Must be handled BEFORE loading state init — ImportFromFile manages its own state.
+    if (!m_shaderImportWindow)
+      m_shaderImportWindow = std::make_unique<ShaderImportWindow>(this);
+    std::wstring result = m_shaderImportWindow->ImportFromFile(szPresetFilename);
+    DLOG_INFO("LoadPreset(json): %ls", result.c_str());
+    return;
+  }
+
   m_NewShaders.warp.Clear();
   m_NewShaders.comp.Clear();
   m_NewShaders.bufferA.Clear();
@@ -1883,8 +1899,6 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
   NumTotalPresetsLoaded++;
 
   // Detect preset type for routing — match .milk* by finding last '.' and checking prefix
-  int fnLen = lstrlenW(szPresetFilename);
-  const wchar_t* lastDot = wcsrchr(szPresetFilename, L'.');
   bool bIsMilk3 = lastDot && _wcsicmp(lastDot, L".milk3") == 0;
   bool bIsMilk2 = lastDot && _wcsicmp(lastDot, L".milk2") == 0;
 

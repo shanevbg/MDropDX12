@@ -1,0 +1,126 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=2
+[preset00]
+fRating=5.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=15
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=0.625
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=0.880
+fModWaveAlphaEnd=1.980
+fWarpAnimSpeed=1.459
+fWarpScale=2.007
+fZoomExponent=1.00000
+fShader=1.000
+zoom=0.99990
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=0.99990
+sy=1.00000
+wave_r=0.000
+wave_g=0.000
+wave_b=0.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=1.000
+ob_g=0.000
+ob_b=1.000
+ob_a=1.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=1.000
+mv_r=1.060
+mv_g=1.000
+mv_b=0.819
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+warp_1=`shader_body{
+warp_2=`    
+warp_3=`    uv = (uv - 0.5) * aspect.xy * 4.0;
+warp_4=`    
+warp_5=`    // Music reactivity - bass controls ring thickness
+warp_6=`    float bass2 = bass_att * 0.5;
+warp_7=`    float treb2 = treb_att * 0.3;
+warp_8=`    
+warp_9=`    // Create circular pattern with angle modulation
+warp_10=`    float ang2 = 0.5 * cos(ang) + 0.5;
+warp_11=`    
+warp_12=`    // Music-reactive ring parameters
+warp_13=`    float ring_size = 0.85 * (1.0 + treb2 * 0.1);
+warp_14=`    float ring_width = 0.01 + bass2 * 0.02;
+warp_15=`    
+warp_16=`    // Create the glowing ring effect
+warp_17=`    float dist = abs(length(uv) - ring_size) - ang2;
+warp_18=`    float s = ring_width / smoothstep(-ang2 - 0.005, 0.0, dist);
+warp_19=`    
+warp_20=`    // Color with music-reactive channels
+warp_21=`    float3 color = float3(
+warp_22=`        s * (1.0 + bass2),
+warp_23=`        s * s * (1.0 + treb2),
+warp_24=`        s * s * s
+warp_25=`    );
+warp_26=`    
+warp_27=`    // Final output with music-reactive pulse
+warp_28=`    ret = float4(sqrt(color) * (0.5 + 0.2 * (bass2 + treb2)), 1.0);
+warp_29=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`
+comp_4=`float2 uvm = uv;
+comp_5=`
+comp_6=`ret = tex2D(sampler_main, uvm).x,
+comp_7=`
+comp_8=`ret = lerp (
+comp_9=`GetBlur1(uvm).x + GetBlur3(uvm).x,
+comp_10=`ret,
+comp_11=`pow(ret,.3));
+comp_12=`
+comp_13=`ret *= 1;
+comp_14=`  
+comp_15=`//  ret = tex2D(sampler_main, uv).x - GetBlur1(uv).x;
+comp_16=`    ret = pow(ret,float3(2.8,1.1,.8))*1.25 -.25; //MilkDrop2077 color mod
+comp_17=`
+comp_18=`
+comp_19=` //   ret *= ret
+comp_20=`//ret += tex2D(sampler_main, uvm).yyy,
+comp_21=` 
+comp_22=`//ret.z += tex2D(sampler_main, uvm).y*4;
+comp_23=`}

@@ -1,0 +1,109 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=2
+[preset00]
+fRating=4.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=7
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=3.200
+fWaveScale=1.768
+fWaveSmoothing=0.630
+fWaveParam=0.000
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.000
+fWarpScale=1.331
+fZoomExponent=1.00000
+fShader=1.000
+zoom=0.99951
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=1.00000
+sy=1.00000
+wave_r=1.000
+wave_g=1.000
+wave_b=1.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.500
+ob_r=0.010
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=1.248
+mv_dx=0.000
+mv_dy=0.000
+mv_l=5.000
+mv_r=1.000
+mv_g=1.000
+mv_b=0.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+warp_1=`shader_body
+warp_2=`{
+warp_3=`    // Define PI
+warp_4=`    #define PI 3.14159265359
+warp_5=`
+warp_6=`    // Adjust UVs
+warp_7=`    uv = uv * 2.0 - 1.0;
+warp_8=`   // uv *= uv.x / uv.y;
+warp_9=`
+warp_10=`    // Make a tube
+warp_11=`    float f = 3.0 / length(uv);
+warp_12=`
+warp_13=`    // Add the angle
+warp_14=`    f += atan2(uv.x, uv.y) / (PI / 12.0);
+warp_15=`
+warp_16=`    // Let's roll
+warp_17=`    f -= time;
+warp_18=`
+warp_19=`    // Make it black and white
+warp_20=`    f = 1.0 - clamp(sin(f * PI * 1.0) * dot(uv, uv) * texsize.y / 15.0 + 0.5, 0.0, 1.0);
+warp_21=`
+warp_22=`    // Add the darkness to the end of the tunnel
+warp_23=`    f *= sin(length(uv) - 0.1);
+warp_24=`
+warp_25=`    // Output the final color
+warp_26=`    ret = float4(f, f, f, 1.0);
+warp_27=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`ret = lerp(GetBlur2(uv),GetPixel(uv),0.44);
+comp_4=`
+comp_5=`ret = (ret.y-ret.x*0.5)*lerp(float3(2.4,2.7,2.8),1,ret.x)*2.4;
+comp_6=`//MilkDrop3 Burn Mode:
+comp_7=`ret = lerp(ret,2,GetPixel(uv).z*1.36);
+comp_8=`}

@@ -1,0 +1,140 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=2
+[preset00]
+fRating=5.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=15
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=0.625
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=0.880
+fModWaveAlphaEnd=1.980
+fWarpAnimSpeed=1.459
+fWarpScale=2.007
+fZoomExponent=1.00000
+fShader=1.000
+zoom=0.99990
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=0.99990
+sy=1.00000
+wave_r=0.000
+wave_g=0.000
+wave_b=0.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=1.000
+ob_g=0.000
+ob_b=1.000
+ob_a=1.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=1.000
+mv_r=1.060
+mv_g=1.000
+mv_b=0.819
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+warp_1=`//Shader from https://x.com/YoheiNishitsuji/status/1947086995928519076
+warp_2=`//Ported to MilkDrop by MilkDrop2077
+warp_3=`//MIT Licensed
+warp_4=`
+warp_5=`// HSV to RGB conversion
+warp_6=`float3 hsv(float h, float s, float v) {
+warp_7=`    float4 K = float4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+warp_8=`    float3 p = abs(frac(h + K.xyz) * 6.0 - K.www);
+warp_9=`    return v * lerp(K.xxx, saturate(p - K.xxx), s);
+warp_10=`}
+warp_11=`
+warp_12=`// 2D rotation matrix
+warp_13=`float2x2 rotate2D(float angle) {
+warp_14=`    float s = sin(angle);
+warp_15=`    float c = cos(angle);
+warp_16=`    return float2x2(c, -s, s, c);
+warp_17=`}
+warp_18=`shader_body{
+warp_19=`uv = (uv_orig) * aspect.xy;
+warp_20=`float t = time;
+warp_21=`float3 o = float3(0.0, 0.0, 0.0);
+warp_22=`float g = 0.0;
+warp_23=`float s = 0.0;  // Added missing s declaration
+warp_24=`
+warp_25=`for(float e, i, a, h; i++ < 29.0; ) {
+warp_26=`    float3 p = float3(uv * g + 1.0, g);
+warp_27=`    p.zy = mul(p.zy, rotate2D(0.5));
+warp_28=`    e = p.y;
+warp_29=`    h = e;
+warp_30=`    for(a = 0.6; a > 0.001; a *= 0.7) {
+warp_31=`        p.xz = mul(p.xz, rotate2D(33.9));
+warp_32=`        e -= exp(sin(p.z/a + t) - 2.0) * a;
+warp_33=`        h += abs(dot(sin(p.xz/a * 0.3)+time/33 * a, float2(1.0, 1.0)));
+warp_34=`    }
+warp_35=`    g += e = min(e, h * 0.5 - 1.0);
+warp_36=`    o.rgb += 0.01 - 0.02/exp(max(s, e) * 1e3)/h*hsv(a, h - 2.0, 1.0);
+warp_37=`}
+warp_38=`
+warp_39=`ret = float4(o, 1.0);
+warp_40=`}
+comp_1=`shader_body
+comp_2=`{//MilkDrop3 Flip Mode:
+comp_3=`uv = 1-uv;
+comp_4=`
+comp_5=`    ret = tex2D(sampler_main, uv).xyz;
+comp_6=`    ret = ret*1.5 - 0.1;
+comp_7=`
+comp_8=`    float4 g;
+comp_9=`    float3 d = float3(texsize.zw * 4, 0);
+comp_10=`    g.x = lum(GetBlur1(uv + d.xz));
+comp_11=`    g.y = lum(GetBlur1(uv - d.xz));
+comp_12=`    g.z = lum(GetBlur1(uv + d.zy));
+comp_13=`    g.w = lum(GetBlur1(uv - d.zy));
+comp_14=`    
+comp_15=`    ret *= 0.9;
+comp_16=`    ret.x += saturate(g.x-g.y)*5;
+comp_17=`    ret.z += saturate(g.y-g.x)*5;
+comp_18=`    //ret.xy += (g.xz-g.yw)*3;
+comp_19=`
+comp_20=`ret.x = GetBlur1(uv).x*5;
+comp_21=`//ret.z = GetBlur2(uv).z;
+comp_22=`//ret += float3(cos(time*3),0,0);
+comp_23=`ret -=0.1;
+comp_24=`//MilkDrop3 Color Mode:
+comp_25=`ret /= float3(-0.4,-2.8,2.1);
+comp_26=`}

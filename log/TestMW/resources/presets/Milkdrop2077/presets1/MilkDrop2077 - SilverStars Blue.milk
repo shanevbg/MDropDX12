@@ -1,0 +1,202 @@
+MILKDROP_PRESET_VERSION=300
+PSVERSION=3
+PSVERSION_WARP=2
+PSVERSION_COMP=3
+[preset00]
+fRating=3.000
+fGammaAdj=2.000
+fDecay=0.925
+fVideoEchoZoom=2.000
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=0
+nWaveMode=2
+bAdditiveWaves=0
+bWaveDots=1
+bWaveThick=0
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=0.012
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=0.750
+fModWaveAlphaEnd=0.950
+fWarpAnimSpeed=1.459
+fWarpScale=2.007
+fZoomExponent=1.00000
+fShader=0.000
+zoom=0.99990
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=0.99990
+sy=1.00000
+wave_r=0.500
+wave_g=0.400
+wave_b=0.300
+wave_x=0.500
+wave_y=0.500
+ob_size=0.015
+ob_r=0.000
+ob_g=0.000
+ob_b=1.000
+ob_a=0.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=3.000
+nMotionVectorsY=2.000
+mv_dx=0.020
+mv_dy=-0.020
+mv_l=0.150
+mv_r=0.490
+mv_g=0.480
+mv_b=0.300
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+shapecode_0_enabled=1
+shapecode_0_sides=9
+shapecode_0_additive=0
+shapecode_0_thickOutline=1
+shapecode_0_textured=1
+shapecode_0_num_inst=3
+shapecode_0_x=0.500
+shapecode_0_y=0.500
+shapecode_0_rad=1.06779
+shapecode_0_ang=0.75398
+shapecode_0_tex_ang=0.00000
+shapecode_0_tex_zoom=0.77977
+shapecode_0_r=1.000
+shapecode_0_g=1.000
+shapecode_0_b=1.000
+shapecode_0_a=1.000
+shapecode_0_r2=1.000
+shapecode_0_g2=1.000
+shapecode_0_b2=1.000
+shapecode_0_a2=0.000
+shapecode_0_border_r=1.000
+shapecode_0_border_g=1.000
+shapecode_0_border_b=1.000
+shapecode_0_border_a=0.000
+shape_0_per_frame1=ang=sin(q1*0.25);
+shape_0_per_frame2=x=sin(q1*0.5) * 0.05 + 0.5;
+shape_0_per_frame3=y=cos(q1*0.63)* 0.05 + 0.5
+per_frame_1=dec_med = pow (0.7, 30/fps);
+per_frame_2=dec_slow = pow (0.99, 30/fps);
+per_frame_3=beat = max (max (bass, mid), treb); 
+per_frame_4=avg = avg*dec_slow + beat*(1-dec_slow);
+per_frame_5=is_beat = above(beat, .5+avg+peak) * above (time, t0+.2);
+per_frame_6=t0 = is_beat*time + (1-is_beat)*t0;
+per_frame_7=peak = is_beat * beat + (1-is_beat)*peak*dec_med;
+per_frame_8=index = (index + is_beat) %16;
+per_frame_9=index2 = (index2 + is_beat*bnot(index))%2;
+per_frame_10=
+per_frame_11=q20 = avg;
+per_frame_12=q21 = beat;
+per_frame_13=q22 = peak;
+per_frame_14=q23 = index;
+per_frame_15=q24 = is_beat;
+per_frame_16=q26 = bass_att + mid_att + treb_att;
+per_frame_17=q27 = index + 1;
+per_frame_18=q28 = index2;
+per_frame_19=
+per_frame_20=
+per_frame_21=
+per_frame_22=k1 =  is_
+per_frame_23=beat*equal(index%2,0);
+per_frame_24=p1 =  k1*(p1+1) + (1-k1)*p1;
+per_frame_25=p2 = dec_med * p2+ (1-dec_med)*p1;
+per_frame_26=rott = p2 * 3.1416/4;
+per_frame_27=
+per_frame_28=q1 = cos(rott);
+per_frame_29=q2 = sin(rott);
+per_frame_30=q3 = -q2;
+per_frame_31=q4 = q1;
+per_frame_32=
+per_frame_33=ds = max ((q26*q26-.5),0);
+per_frame_34=step = step + 8*ds;
+per_frame_35=
+per_frame_36=p3 = p3*dec_med + (1-dec_med) * step;
+per_frame_37=q30 = p3 ;
+per_frame_38=
+per_frame_39=p4 = dec_med*p4 + (1-dec_med)*q27;
+per_frame_40=q31 = p4;
+per_frame_41=
+per_frame_42=zoom = 1;
+per_frame_43=rot = -0.001 ;
+per_frame_44=
+per_frame_45=
+warp_1=`sampler sampler_fw_clouds;
+warp_2=`shader_body
+warp_3=`{// sample previous frame
+warp_4=`ret = tex2D( sampler_main, uv ).xyz;
+warp_5=`float blur =sin(bass*90)*rad;
+warp_6=`ret=0.125*(
+warp_7=`GetPixel(float2(uv.x-0.01*blur,uv.y-0.01*blur)) +
+warp_8=`GetPixel(float2(uv.x+0.01*blur,uv.y+0.01*blur)) +
+warp_9=`GetPixel(float2(uv.x-0.01*blur,uv.y+0.01*blur)) +
+warp_10=`GetPixel(float2(uv.x+0.01*blur,uv.y-0.01*blur)) +
+warp_11=`GetPixel(float2(uv.x,uv.y-0.01*blur)) +
+warp_12=`GetPixel(float2(uv.x,uv.y+0.01*blur)) +
+warp_13=`GetPixel(float2(uv.x-0.01*blur,uv.y)) +
+warp_14=`GetPixel(float2(uv.x+0.01*blur,uv.y)));
+warp_15=`//add a 'bass overbright' effect:
+warp_16=`ret-=-(lum(ret)<sin(time*90))*ret*blur+(lum(ret)>sin(-time*90))*ret*blur;
+warp_17=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`  rad = pow(rad,0.7)*1;
+comp_4=`  float2 ang_hq = atan2(uv.x-0.5,uv.y-0.5) - rad*q1;
+comp_5=`
+comp_6=`
+comp_7=`  float ang2 = frac(ang_hq/6.28*5 + q2);
+comp_8=`  ang2 = abs(ang2*2-1) - q3;
+comp_9=`  float2 uv2 = 0.5 + rad*0.5*float2(cos(ang2),sin(ang2));    
+comp_10=`
+comp_11=`  uv = uv2;
+comp_12=`    ret = tex2D(sampler_main, uv).xyz;
+comp_13=`    ret *= 1.00; //gamma
+comp_14=`//MilkDrop3 Color Mode:
+comp_15=`ret /= float3(0.7,3.0,-2.7);
+comp_16=`//MilkDrop3 Blow Mode:
+comp_17=`float3 avg_col = GetBlur2(uv);ret = abs(avg_col - ret)*2;
+comp_18=`}
+
+[SPRITE1_BEGIN]
+SpriteName=sprites\burst3.png
+SpriteColorKey=0x000000
+SpriteLayer=1
+SpriteBlend=3
+SpriteAlpha=1.000000
+SpriteBurn=1
+SpriteX=0.000000
+SpriteY=0.000000
+SpriteSX=-0.260000
+SpriteSY=-0.260000
+SpriteRot=1.000000
+SpriteSpeed=0.200000
+SpriteRepeatX=1.000000
+SpriteRepeatY=1.000000
+code_1=new_scale=1.0+0.05*bass_att;
+code_2=sx=new_scale;
+code_3=sy=new_scale;
+code_4=a=0.1*bass*2;
+[SPRITE1_END]

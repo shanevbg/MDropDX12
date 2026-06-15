@@ -1,0 +1,146 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=3
+[preset00]
+fRating=5.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=4
+bAdditiveWaves=0
+bWaveDots=1
+bWaveThick=0
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=0.012
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=0.750
+fModWaveAlphaEnd=0.950
+fWarpAnimSpeed=0.498
+fWarpScale=100.000
+fZoomExponent=1.00183
+fShader=1.000
+zoom=0.99815
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=1.00180
+sy=0.99990
+wave_r=0.500
+wave_g=0.400
+wave_b=0.300
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=0.360
+ob_g=0.290
+ob_b=0.290
+ob_a=1.000
+ib_size=0.000
+ib_r=1.000
+ib_g=0.000
+ib_b=1.000
+ib_a=1.000
+nMotionVectorsX=64.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=1.000
+mv_r=0.390
+mv_g=0.440
+mv_b=0.900
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+warp_1=`shader_body
+warp_2=`{
+warp_3=`    //Shader By XorDev (x.com/XorDev), ported to MilkDrop by MilkDrop2077
+warp_4=`        // Setup coordinates
+warp_5=`        float2 r = aspect.xy;
+warp_6=`        float2 p = (uv_orig * 2.0 - 1.0) * r / r.y;
+warp_7=`        float t = time;
+warp_8=`        
+warp_9=`        // Initialize output color
+warp_10=`        float4 o = float4(0,0,0,0);
+warp_11=`        
+warp_12=`        // Main spiral effect loop
+warp_13=`        for(float i = 1.0; i <= 9.0; i += 1.0) {
+warp_14=`            // Calculate polar coordinates
+warp_15=`            float angle = atan2(p.y, p.x) + i +time/5;
+warp_16=`            float radius = log(length(p)) - t/i + i*rad-time;
+warp_17=`            
+warp_18=`            // Create spiral pattern
+warp_19=`            float2 spiral = sin(float2(angle, radius) * i) - 0.5;
+warp_20=`            float dist = length(min(spiral, 0.3));
+warp_21=`            
+warp_22=`            // Color bands
+warp_23=`            float4 color_band = (cos(i + float4(6,1,2,3)) + 1.0) / dist;
+warp_24=`            o += color_band;
+warp_25=`        }
+warp_26=`        
+warp_27=`        // Final color processing
+warp_28=`        o = tanh(o*o/400.0);
+warp_29=`        
+warp_30=`        // Output with audio reactivity
+warp_31=`        float audio = bass_att * 0.3 + treb_att * 0.1;
+warp_32=`        ret = float4(o.rgb * (1.0 + audio), 1.0);
+warp_33=`    
+warp_34=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`  // Center and normalize coordinates
+comp_4=`  float2 uv2 = uv - 0.5;
+comp_5=`  uv2.x *= texsize.x/texsize.y;  // correct aspect ratio
+comp_6=`  
+comp_7=`  // Distance from center
+comp_8=`  float dist = length(uv2);
+comp_9=`  
+comp_10=`  // Create repeating circles that move outward over time
+comp_11=`  float rings = frac(dist*10 - time*0.92);
+comp_12=`  
+comp_13=`  // Create sharp rings
+comp_14=`  float ring_val = smoothstep(0.4, 0.6, rings) * smoothstep(0.9, 0.7, rings);
+comp_15=`  
+comp_16=`  // Sample base colors from previous frame
+comp_17=`  float3 base = tex2D(sampler_main, uv).xyz;
+comp_18=`  
+comp_19=`  // Create red circle/tunnel color
+comp_20=`  float3 tunnelColor = float3(0.7 + 0.3*rings, 0.1 + 0.05*rings, 0.1 + 0.05*rings);
+comp_21=`  
+comp_22=`  // Add some variation based on angle
+comp_23=`  float angle = atan2(uv2.y, uv2.x);
+comp_24=`  tunnelColor += float3(bass_att, sin(bass_att), 0) * sin(angle*3 + time);
+comp_25=`  
+comp_26=`  // Distance falloff to make center brighter
+comp_27=`  float center_glow = 0.03/(0.01 + dist);
+comp_28=`  center_glow = min(center_glow, 2.0);
+comp_29=`  
+comp_30=`  // Mix everything together
+comp_31=`  ret = base + ring_val * tunnelColor + center_glow * float3(1, 0.2, 0.2);
+comp_32=`  
+comp_33=`  // Add soft glow in the center
+comp_34=`  ret += 0.1 * float3(1, 0.3, 0.3) * exp(-20*dist);
+comp_35=`  
+comp_36=`  // Ensure we don't exceed valid color ranges
+comp_37=`  ret = saturate(ret);
+comp_38=`}

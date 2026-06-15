@@ -1,0 +1,199 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=3
+PSVERSION_WARP=3
+PSVERSION_COMP=2
+[preset00]
+fRating=5.000
+fGammaAdj=1.900
+fDecay=0.980
+fVideoEchoZoom=2.000
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=0
+nWaveMode=9
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=1.000
+fWaveScale=0.900
+fWaveSmoothing=0.190
+fWaveParam=0.010
+fModWaveAlphaStart=0.750
+fModWaveAlphaEnd=0.950
+fWarpAnimSpeed=1.459
+fWarpScale=2.007
+fZoomExponent=1.00000
+fShader=0.000
+zoom=0.99990
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.00909
+sx=0.99990
+sy=1.00000
+wave_r=0.650
+wave_g=0.650
+wave_b=0.650
+wave_x=0.530
+wave_y=0.440
+ob_size=0.050
+ob_r=0.800
+ob_g=1.000
+ob_b=1.000
+ob_a=0.000
+ib_size=0.000
+ib_r=0.000
+ib_g=0.000
+ib_b=0.000
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.000
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_init_1=zo=1; zo_=0.6; zo__=0.92; tstart=time;
+per_frame_init_2=t1=rand(6); t2=rand(6);
+per_frame_1=dt=1/fps; dec_m = 1-2*dt; dec_s = 1-0.5*dt; 
+per_frame_2=vol = (2*bass_att+mid_att+treb_att)/3;
+per_frame_3=
+per_frame_4=p = progress;
+per_frame_5=trest = if (p==0,100000, (time-tstart)*(1-p)/p);
+per_frame_6=
+per_frame_7=v = max(0,vol);
+per_frame_8=dec = if (v>vol_,1-1*dt,1-0.25*dt);
+per_frame_9=vol_= vol_*dec+(1-dec)*v;
+per_frame_10=spd = vol_*dt * (0.5+zo__)/4;
+per_frame_11=
+per_frame_12=isb = above(vol, pk) * (time>t0+.5);
+per_frame_13=if (isb,t0=time; pk=vol*3,Pk*=dec_s);
+per_frame_14=bi += isb;
+per_frame_15=
+per_frame_16=sw = isb&&(rand(1)>0.7)&&(time-ts>8);
+per_frame_17=if (sw,ts=time,0);
+per_frame_18=zo = 2;
+per_frame_19=zo_ += 2;
+per_frame_20=zo__ = 2;
+per_frame_21=
+per_frame_22=
+per_frame_23=if (isb&&(bi%2==0),r1 = rand(2)-1,0);
+per_frame_24=if (isb&&(bi%3==0),r2 = rand(2)-1,0);
+per_frame_25=if (isb&&(bi%5==2),r3 = rand(12)-1,0);
+per_frame_26=
+per_frame_27=r1a += atan(150*(r1-r1a))*spd*.01;
+per_frame_28=r2a += atan(150*(r2-r2a))*spd*.01;
+per_frame_29=r3a += atan(150*(r3-r3a))*spd*.01;
+per_frame_30=
+per_frame_31=r1b = r1b*dec_m + (1-dec_m)*r1a;
+per_frame_32=r2b = r2b*dec_m + (1-dec_m)*r2a;
+per_frame_33=r3b = r3b*dec_m + (1-dec_m)*r3a;
+per_frame_34=r1c = r1c*dec_m + (1-dec_m)*r1b;
+per_frame_35=r2c = r2c*dec_m + (1-dec_m)*r2b;
+per_frame_36=r3c = r3c*dec_m + (1-dec_m)*r3b;
+per_frame_37=
+per_frame_38=s1 += (1+r1c)*spd;
+per_frame_39=s2 += (r2c)*spd;
+per_frame_40=s3 += (1+r2c)*spd;
+per_frame_41=
+per_frame_42=q1=r1c;
+per_frame_43=q2=r2c;
+per_frame_44=q3=r3c;
+per_frame_45=q4=(q1-q2)*0.2;
+per_frame_46=q5=s1;
+per_frame_47=q6=s2;
+per_frame_48=q7=s3*4;
+per_frame_49=q8=(s2+s3)*12;
+per_frame_50=q10 = zo__;
+per_frame_51=
+per_frame_52=q12 = 0.2; //front-back light
+per_frame_53=tr = tr*dec_m + (1-dec_m)*trest/5;
+per_frame_54=q20 = max(0,min(1,tr)); //fade - does not work
+per_frame_55=
+per_frame_56=//colors
+per_frame_57=t1 += spd*0.12;
+per_frame_58=t2 += spd*0.07;
+per_frame_59=q21 = 1.5 + 0.3*sin(t1);
+per_frame_60=q22 = 1 + 0.3*sin(t2); 
+per_frame_61=monitor = t1;
+warp_1=`#define sat saturate
+warp_2=`#define snh sampler_noise_hq
+warp_3=`float2 uv0, uv1, uv2, uv3, uvd;
+warp_4=`
+warp_5=`float2 noise (float2 uvi) {uvi+= time*0.001;
+warp_6=`return tex2D(snh,uvi) +tex2D(snh,uvi*2)/2 +tex2D(snh,uvi*5)/5-1;}
+warp_7=`
+warp_8=`shader_body {
+warp_9=`uv0 = uv;
+warp_10=`uv1 = uv-.5;
+warp_11=`float k = 16*lum(GetBlur1(uv_orig))*(3.14);
+warp_12=`
+warp_13=`uv3 = mul(uv1,float2x2(cos(k),sin(k),-sin(k),cos(k)));
+warp_14=`uvd = .25*lum(GetBlur1(uv_orig))*uv3;
+warp_15=`uv += uvd;
+warp_16=`float3 crisp = tex2D(sampler_fw_main,uv);
+warp_17=`float2 diff = (uv-uv_orig);
+warp_18=`crisp = lerp (crisp, GetPixel(uv_orig+2*diff), 0.5);
+warp_19=`
+warp_20=`ret = crisp * (1-0.2*lum(GetBlur1(uv)))- 0.1 *rad*rad;;
+warp_21=`ret = ret*float3(1,1,0) - 0.01;
+warp_22=`
+warp_23=`uv = uv1*aspect.xy+0.5;
+warp_24=`uv2 = uv+noise(uv/2)*0.07;
+warp_25=`//ret.b = exp(- 12*abs(0.3-uv2.x)) * (1-pow(uv1.y*2.5,2))*0.4; 
+warp_26=`ret.b *= 1+pow(tex2D(sampler_noise_lq,uv*0.1+noise(uv2+time*.0019)*.004).r,3);
+warp_27=`}
+comp_1=`float a,b,c;
+comp_2=`shader_body
+comp_3=`{
+comp_4=`float2 uv2 = uv;
+comp_5=`//if(uv2.x >= 0.5) {uv2.x = 1-uv2.x;}
+comp_6=`//if(uv2.y >= 0.5) {uv2.y = 1-uv2.y;}
+comp_7=`
+comp_8=`//float1 cs = cos(0.25*3.14159);
+comp_9=`//float1 sn = sin(0.278*3.424333);
+comp_10=`//float2 uv3 = uv2;
+comp_11=`//uv2.x = uv3.x * cs - uv3.y * sn;
+comp_12=`//uv2.y = uv3.x * sn + uv3.y * cs;
+comp_13=`
+comp_14=`//uv.x=uv2.x;
+comp_15=`//uv.y=uv2.y;
+comp_16=`
+comp_17=`
+comp_18=`    float3 base = GetBlur3(uv) + GetBlur2(uv) + GetBlur1(uv) + tex2D(sampler_main, uv)*0.886 - 0.466 ;
+comp_19=`a =base.x/12;b = base.y/8; c = base.x/3;
+comp_20=`c = c + b + a-b;
+comp_21=`a = a + c + a*c;
+comp_22=`base = 0.2+c;
+comp_23=`ret = base*(0.552-base)*(1-base)*2*float3(0.55,1.688,2.25) + pow(base,2)*float3(2.29,1.688,1.74); //MilkDrop2077 color mod
+comp_24=`//ret.xy = ret.yx;
+comp_25=`ret = ret*(1-ret)*4; //MilkDrop2077 solarize effect
+comp_26=`//MilkDrop3 Color Mode:
+comp_27=`ret /= float3(0.7,2.6,1.7);
+comp_28=`//MilkDrop3 Brightness Mode:
+comp_29=`ret *= 2.2;
+comp_30=`//MilkDrop3 RGB Mode:
+comp_31=`ret += float3(-0.0,0.0,0.0);
+comp_32=`//MilkDrop3 Blow Mode:
+comp_33=`float3 avg_col = GetBlur2(uv);ret = abs(avg_col - ret)*2;
+comp_34=`ret-=0.1;
+comp_35=`}

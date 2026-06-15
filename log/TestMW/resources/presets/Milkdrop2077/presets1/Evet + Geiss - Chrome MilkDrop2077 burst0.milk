@@ -1,0 +1,161 @@
+MILKDROP_PRESET_VERSION=300
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+fRating=1.000
+fGammaAdj=2.700
+fDecay=0.980
+fVideoEchoZoom=2.000
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=0
+nWaveMode=5
+bAdditiveWaves=1
+bWaveDots=1
+bWaveThick=0
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=3.300
+fWaveScale=1.694
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=0.750
+fModWaveAlphaEnd=0.950
+fWarpAnimSpeed=1.459
+fWarpScale=2.007
+fZoomExponent=1.00000
+fShader=0.000
+zoom=0.99990
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=0.99990
+sy=1.00000
+wave_r=0.500
+wave_g=0.500
+wave_b=0.800
+wave_x=0.500
+wave_y=0.500
+ob_size=0.010
+ob_r=1.000
+ob_g=1.000
+ob_b=1.000
+ob_a=0.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.900
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_1=dec_med = pow (0.9, 30/fps);
+per_frame_2=dec_slow = pow (0.99, 30/fps);
+per_frame_3=beat = max (max (bass, mid), treb); 
+per_frame_4=avg = avg*dec_slow + beat*(1-dec_slow);
+per_frame_5=is_beat = above(beat, .2+avg+peak) * above (time, t0+.2);
+per_frame_6=t0 = is_beat*time + (1-is_beat)*t0;
+per_frame_7=peak = is_beat * beat + (1-is_beat)*peak*dec_med;
+per_frame_8=index = (index + is_beat) %8;
+per_frame_9=
+per_frame_10=q20 = avg;
+per_frame_11=q21 = beat;
+per_frame_12=q22 = peak;
+per_frame_13=q23 = index;
+per_frame_14=q24 = is_beat;
+per_frame_15=q26 = bass + mid + treb;
+per_frame_16=
+per_frame_17=k1 =  is_beat*equal(index,0);
+per_frame_18=p1 =  k1*(p1+1) + (1-k1)*p1;
+per_frame_19=p2 = dec_med * p2+ (1-dec_med)*p1;
+per_frame_20=rott = p2 * 3.1416/2;
+per_frame_21=q27 = index + 1;
+per_frame_22=
+per_frame_23=q1 = cos(rott);
+per_frame_24=q2 = sin(rott);
+per_frame_25=q3 = -q2;
+per_frame_26=q4 = q1;
+per_frame_27=
+per_frame_28=zoom = 1.01;
+per_frame_29=rot = -0.00 * index;
+per_frame_30=
+per_frame_31=q32 = pow(0.996, 30/fps); //fade
+warp_1=`shader_body
+warp_2=`{
+warp_3=`    float4 N = tex2D(sampler_noise_lq, rand_frame.xy + uv*
+warp_4=`                             texsize_noise_lq.zw*texsize.xy )*2-1;
+warp_5=`    // sample previous frame
+warp_6=`    ret = tex2D( sampler_pw_main, uv + N.zw*texsize.zw*0.5 ).xyz;
+warp_7=`    ret += (0.52-0.2*rad)*N.xyz;
+warp_8=`
+warp_9=`    ret = saturate((ret-0.5)*3 + 0.5);
+warp_10=`    ret.yz = ret.x;
+warp_11=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`
+comp_4=`ret=GetBlur1(uv);
+comp_5=`ret+=GetBlur1(float2(uv.x+ret.x,uv.y+ret.y));
+comp_6=`ret+=GetBlur1(float2(uv.x-ret.y,uv.y-ret.y));
+comp_7=`float4 noise9 = tex3D(sampler_noisevol_hq, 
+comp_8=`                      ((uv.xyy*q28
+comp_9=`                       )*texsize.xyy*texsize_noisevol_hq.zww
+comp_10=`                      ).xyz*
+comp_11=`                      float3(1,1,0)*0.05 + 
+comp_12=`                      time*float3(0,0,1)*q31
+comp_13=`                     );
+comp_14=`if(ret.x> q26*q13         && ret.x<= q23*q11        )ret.z -= (noise9).x*.5; 
+comp_15=`if(ret.y> q25*q11         && ret.y<= q22*q12        )ret.x -= (noise9).y*.5; 
+comp_16=`if(ret.z> q24*q12         && ret.z<= q21*q13        )ret.y -= (noise9).z*.5; 
+comp_17=`ret=pow(length(ret)*ret*1.63,0.99-GetBlur3(uv));
+comp_18=`ret=saturate(ret);
+comp_19=`//ret*=tex2D(sampler_noise_lq,uv*ret.y);
+comp_20=`ret*=ret.z;
+comp_21=`ret=ret-GetPixel(uv);
+comp_22=`//ret -= 0.1;
+comp_23=`ret /= float3(.8,1.0,0.9);
+comp_24=`}
+
+[SPRITE1_BEGIN]
+SpriteName=sprites\burst2.png
+SpriteColorKey=0x000000
+SpriteLayer=0
+SpriteBlend=10
+SpriteAlpha=1.000000
+SpriteBurn=1
+SpriteX=0.000000
+SpriteY=0.000000
+SpriteSX=-0.620000
+SpriteSY=-0.620000
+SpriteRot=2.000000
+SpriteSpeed=0.100000
+SpriteRepeatX=1.000000
+SpriteRepeatY=1.000000
+code_1=new_scale=1.0+0.3*bass_att;
+code_2=sx=new_scale;
+code_3=sy=new_scale;
+code_4=a=1.0;
+[SPRITE1_END]

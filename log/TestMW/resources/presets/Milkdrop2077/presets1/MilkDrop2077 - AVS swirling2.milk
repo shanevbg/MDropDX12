@@ -1,0 +1,125 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=3
+PSVERSION_WARP=3
+PSVERSION_COMP=2
+[preset00]
+fRating=5.000
+fGammaAdj=1.000
+fDecay=0.900
+fVideoEchoZoom=1.000
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=3
+nWaveMode=7
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=1
+bDarkenCenter=1
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=3.200
+fWaveScale=1.768
+fWaveSmoothing=0.630
+fWaveParam=0.000
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.000
+fWarpScale=3.138
+fZoomExponent=1.00000
+fShader=0.000
+zoom=1.02300
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.07618
+sx=1.00000
+sy=1.00000
+wave_r=0.200
+wave_g=0.500
+wave_b=0.900
+wave_x=0.500
+wave_y=0.500
+ob_size=0.010
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.010
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.900
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_1=wave_r = wave_r + 0.850*( 0.60*sin(1.437*time) + 0.20*sin(0.970*time) );
+per_frame_2=wave_g = wave_g + 0.650*( 0.60*sin(1.344*time) + 0.40*sin(0.841*time) );
+per_frame_3=wave_b = wave_b + 0.650*( 0.60*sin(1.251*time) + 0.40*sin(1.055*time) );
+per_frame_4=rot = rot + 0.04*( 0.60*sin(0.181*time) + 0.09*sin(-0.279*time) );
+per_frame_5=cx = cx + 0.10*( 0.60*sin(0.374*time) + 0.10*sin(0.294*time) );
+per_frame_6=cy = cy + 0.10*( 0.60*sin(0.393*time) + 0.10*sin(0.223*time) );
+per_frame_7=dx = dx + 0.0040*( 0.60*sin(0.234*time) + 0.40*sin(0.277*time) );
+per_frame_8=dy = dy + 0.0040*( 0.60*sin(0.284*time) + 0.40*sin(0.247*time) );
+per_frame_9=decay = decay - 0.06*equal(frame%6,0);
+warp_1=`shader_body
+warp_2=`{
+warp_3=`    // Swirling effect
+warp_4=`    float2 uv_swirl = lerp(uv_orig, uv, 0.5);
+warp_5=`    float2 d = uv_swirl - 0.5;
+warp_6=`    float r = length(d);
+warp_7=`    float2 uv2 = uv;
+warp_8=`    
+warp_9=`    // Swirling transformation
+warp_10=`    float angle = r * 6.28 * 5;
+warp_11=`    float s = sin(angle);
+warp_12=`    float c = cos(angle);
+warp_13=`    float2 uv3 = float2(uv2.x * c - uv2.y * s, uv2.x * s + uv2.y * c);
+warp_14=`    
+warp_15=`    // Sample and blend
+warp_16=`    ret = tex2D(sampler_main, lerp(uv_orig, uv3, 0.5 + 0.5 * sin(time * 0.5)));
+warp_17=`    
+warp_18=`    // Add dynamic color modulation
+warp_19=`    ret.rgb *= 0.5 + 0.5 * sin(time + uv3.x * 10);
+warp_20=`    ret.rgb += 0.1 * sin(time * 2 + uv3.y * 10);
+warp_21=`    
+warp_22=`    // Apply final color adjustments
+warp_23=`    ret.rgb = saturate(ret.rgb);
+warp_24=`}
+comp_1=`sampler sampler_Pattern_047;  // loads clouds.jpg (or .tga, etc)
+comp_2=`
+comp_3=`shader_body         
+comp_4=`{
+comp_5=`    ret = tex2D(sampler_main, uv).xyz +
+comp_6=`              GetBlur2(uv)
+comp_7=`          ;
+comp_8=`
+comp_9=`    ret = tex2D( sampler_Pattern_047, 
+comp_10=`                     ret.xy*(0.5) 
+comp_11=`                     + uv*float2(1,1)*aspect.xy
+comp_12=`                   ).xyz;
+comp_13=`
+comp_14=`    //ret *= 1.333; // a little bit of overbright
+comp_15=`
+comp_16=`//MilkDrop3 Burn Mode:
+comp_17=`ret = lerp(ret,2,GetPixel(uv).z*1.36);
+comp_18=`}

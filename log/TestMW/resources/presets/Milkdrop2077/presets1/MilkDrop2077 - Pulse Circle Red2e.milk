@@ -1,0 +1,138 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=3
+PSVERSION_WARP=3
+PSVERSION_COMP=3
+[preset00]
+fRating=3.000
+fGammaAdj=1.000
+fDecay=0.980
+fVideoEchoZoom=1.000
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=0
+nWaveMode=0
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=0
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.000
+fWaveScale=1.000
+fWaveSmoothing=0.700
+fWaveParam=0.000
+fModWaveAlphaStart=0.750
+fModWaveAlphaEnd=0.950
+fWarpAnimSpeed=1.000
+fWarpScale=1.331
+fZoomExponent=1.00000
+fShader=0.000
+zoom=1.00400
+rot=-0.01400
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.02944
+sx=1.00000
+sy=1.00000
+wave_r=0.500
+wave_g=0.500
+wave_b=0.500
+wave_x=0.500
+wave_y=0.500
+ob_size=0.010
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.010
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=0.000
+nMotionVectorsY=0.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=1.000
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_1=wave_r = wave_r + 0.350*( 0.60*sin(3.980*time) + 0.40*sin(11.047*time) );
+per_frame_2=wave_g = wave_g + 0.350*( 0.60*sin(0.835*time) + 0.40*sin(1.081*time) );
+per_frame_3=wave_b = wave_b + 0.350*( 0.60*sin(0.814*time) + 0.40*sin(1.011*time) );
+per_frame_4=cx = cx + 0.110*( 0.60*sin(0.374*time) + 0.40*sin(0.294*time) );
+per_frame_5=cy = cy + 0.110*( 0.60*sin(0.393*time) + 0.40*sin(0.223*time) );
+per_frame_6=dx = dx + 0.005*( 0.60*sin(0.173*time) + 0.40*sin(0.223*time) );
+per_frame_7=decay = decay - 0.01*equal(frame%20,0);
+per_frame_8=wave_x = 0.5 + 0.25*cos(time*2)/aspecty;
+per_frame_9=wave_y = 0.5 + 0.25*sin(time*2)/aspectx;
+per_frame_10=
+per_frame_11=ang = time*2;
+per_frame_12=q1 = cos(ang);
+per_frame_13=q2 = sin(ang);
+warp_1=`shader_body
+warp_2=`{
+warp_3=`  // Sample previous frame with slight zoom to create movement
+warp_4=`  float2 uv2 = uv - 0.5;
+warp_5=`  uv2 *= 0.99;  // zoom in slightly each frame for tunnel effect
+warp_6=`  uv2 += 0.5;
+warp_7=`  
+warp_8=`  // Sample previous frame
+warp_9=`  ret = tex2D(sampler_main, uv2).xyz;
+warp_10=`  
+warp_11=`  // Slight darkening for fade effect
+warp_12=`  ret *= 0.98;
+warp_13=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`  // Center and normalize coordinates
+comp_4=`  float2 uv2 = uv - 0.5;
+comp_5=`  uv2.x *= texsize.x/texsize.y;  // correct aspect ratio
+comp_6=`  
+comp_7=`  // Distance from center
+comp_8=`  float dist = length(uv2);
+comp_9=`  
+comp_10=`  // Create repeating circles that move outward over time
+comp_11=`  float rings = frac(dist*16 - time*0.92);
+comp_12=`  
+comp_13=`  // Create sharp rings
+comp_14=`  float ring_val = smoothstep(2, 0, rings) * smoothstep(0.9, 0.7, rings*5);
+comp_15=`  
+comp_16=`  // Sample base colors from previous frame
+comp_17=`  float3 base = tex2D(sampler_main, uv).xyz;
+comp_18=`  
+comp_19=`  // Create red circle/tunnel color
+comp_20=`  float3 tunnelColor = float3(0.7 + 0.3*rings, 0.1 + 0.05*rings, 0.1 + 0.05*rings);
+comp_21=`  
+comp_22=`  // Add some variation based on angle
+comp_23=`  float angle = atan2(uv2.y, uv2.x);
+comp_24=`  tunnelColor += float3(q1, q1, q2) * sin(angle + time);
+comp_25=`  
+comp_26=`  // Distance falloff to make center brighter
+comp_27=`  float center_glow = 0;
+comp_28=`  //center_glow = min(center_glow, 2.0);
+comp_29=`  
+comp_30=`  // Mix everything together
+comp_31=`  ret = base + ring_val * tunnelColor + 0 * float3(1, 0.2, 0.2);
+comp_32=`  
+comp_33=`  // Add soft glow in the center
+comp_34=`  ret += 0.1 * float3(1, 0.3, 0.3) * exp(-20*dist);
+comp_35=`  
+comp_36=`  // Ensure we don't exceed valid color ranges
+comp_37=`  ret = saturate(ret);
+comp_38=`}

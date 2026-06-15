@@ -1,0 +1,157 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=3
+[preset00]
+fRating=5.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=15
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=0.625
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=0.880
+fModWaveAlphaEnd=1.980
+fWarpAnimSpeed=1.459
+fWarpScale=2.007
+fZoomExponent=1.00000
+fShader=1.000
+zoom=0.99990
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=0.99990
+sy=1.00000
+wave_r=0.000
+wave_g=0.000
+wave_b=0.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=1.000
+ob_g=0.000
+ob_b=1.000
+ob_a=1.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=1.000
+mv_r=1.060
+mv_g=1.000
+mv_b=0.819
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+warp_1=`//Shader from https://x.com/YoheiNishitsuji/status/1947086995928519076
+warp_2=`//Ported to MilkDrop by MilkDrop2077
+warp_3=`//MIT Licensed
+warp_4=`
+warp_5=`// HSV to RGB conversion
+warp_6=`float3 hsv(float h, float s, float v) {
+warp_7=`    float4 K = float4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+warp_8=`    float3 p = abs(frac(h + K.xyz) * 6.0 - K.www);
+warp_9=`    return v * lerp(K.xxx, saturate(p - K.xxx), s);
+warp_10=`}
+warp_11=`
+warp_12=`// 2D rotation matrix
+warp_13=`float2x2 rotate2D(float angle) {
+warp_14=`    float s = sin(angle);
+warp_15=`    float c = cos(angle);
+warp_16=`    return float2x2(c, -s, s, c);
+warp_17=`}
+warp_18=`shader_body{
+warp_19=`uv = (uv_orig - 0.5) * aspect.xy;
+warp_20=`float t = time;
+warp_21=`float3 o = float3(0.0, 0.0, 0.0);
+warp_22=`float g = 0.0;
+warp_23=`float s = 0.0;  // Added missing s declaration
+warp_24=`
+warp_25=`for(float e, i, a, h; i++ < 29.0; ) {
+warp_26=`    float3 p = float3(uv * g + 1.0, g);
+warp_27=`    p.zy = mul(p.zy, rotate2D(0.5));
+warp_28=`    e = p.y;
+warp_29=`    h = e;
+warp_30=`    for(a = 0.6; a > 0.001; a *= 0.7) {
+warp_31=`        p.xz = mul(p.xz, rotate2D(33.9));
+warp_32=`        e -= exp(sin(p.z/a + t) - 2.0) * a;
+warp_33=`        h += abs(dot(sin(p.xz/a * 0.3)+time/33 * a, float2(1.0, 1.0)));
+warp_34=`    }
+warp_35=`    g += e = min(e, h * 0.5 - 1.0);
+warp_36=`    o.rgb += 0.01 - 0.02/exp(max(s, e) * 1e3)/h*hsv(a, h - 2.0, 1.0);
+warp_37=`}
+warp_38=`
+warp_39=`ret = float4(o, 1.0);
+warp_40=`}
+comp_1=`#define sat saturate
+comp_2=`float glow, tmp, lamp, dist, bdist, b2dist, dist_c, smask;
+comp_3=`float2 dz, uv1, uv3, uv4;
+comp_4=`static const float3 CamPos = float3(q4,q5,q6);
+comp_5=`static const float myzoom = q7,  res = 255, res2 = 64, tele = q16;
+comp_6=`static const float3x3 RotMat = float3x3(q20,q21,q22,q23,q24,q25,q26,q27,q28);
+comp_7=`
+comp_8=`float2 fstep2 (float2 xy) {return 1.0/res*round(res*xy);}
+comp_9=`
+comp_10=`float GetDist(float2 uvi) {float2 tmp; tmp = (tex2D (sampler_fc_main, uvi).gb); 
+comp_11=`return 1.0078125-tmp.y -0.015625*tmp.x;} // = 1-(tmp.y + 1.0/res2*(tmp.x-.50));}
+comp_12=`
+comp_13=`float GetDistB(float2 uvi)  {return 1-GetBlur1(uvi).b;}
+comp_14=`float3 screen3;
+comp_15=`float3 lavcol (float t) {return saturate(float3(pow(t,1),pow(t,2.),pow(t,5)));}
+comp_16=`
+comp_17=`static float3 t = float3(q20,q23,q26);
+comp_18=`static float3 s = float3(q21,q24,q27);
+comp_19=`static float3 ts = -cross(s,t);
+comp_20=`static float3 pos = float3 (1,1,1);
+comp_21=`
+comp_22=`float3 project (float dist) {  float z;
+comp_23=`  z = 18*dist/mul(cross(ts,-t),screen3);
+comp_24=`  return float3(mul(float2x3(ts,t),cross(pos,screen3))-z,-z);}
+comp_25=`
+comp_26=`shader_body {
+comp_27=`screen3 = float3 ((uv-.5)*aspect.xy,tele*0+1);
+comp_28=`float3 uv2 = project(.1);
+comp_29=`float3 sky = sat(lavcol (1-(abs(.3/uv2.z))))-.8;
+comp_30=`
+comp_31=`bdist = min(GetDist(uv),GetDistB(uv));;
+comp_32=`
+comp_33=`sky *= sat(1*bdist-2);
+comp_34=`ret = sat(lerp (1, sky, bdist));
+comp_35=`
+comp_36=`float struc = lerp(GetPixel(uv).r, GetBlur1((uv-5)/5+5).r,GetBlur1(uv).r-.8);
+comp_37=`ret += lavcol(struc)*(.2-pow(bdist,1+5*mid_att));
+comp_38=`//ret = struc;
+comp_39=`}
+comp_40=`
+comp_41=`//-------------------------------------------
+comp_42=`//Written by martin
+comp_43=`

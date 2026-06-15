@@ -1,0 +1,118 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+fRating=1.000
+fGammaAdj=1.000
+fDecay=0.940
+fVideoEchoZoom=0.498
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=2
+nWaveMode=7
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=0
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=0
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=4.100
+fWaveScale=1.286
+fWaveSmoothing=0.630
+fWaveParam=0.000
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.000
+fWarpScale=1.000
+fZoomExponent=1.00016
+fShader=0.000
+zoom=0.99724
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01012
+sx=1.00000
+sy=1.02410
+wave_r=1.000
+wave_g=1.000
+wave_b=1.000
+wave_x=0.500
+wave_y=0.000
+ob_size=0.005
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=1.000
+ib_size=0.005
+ib_r=0.000
+ib_g=0.000
+ib_b=0.000
+ib_a=1.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.900
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_1=flames=equal(frame%2,0);
+per_frame_2=wave_y=if(flames,.3,.1);
+per_frame_3=wave_r=if(flames,sin(bass)/2+.5,0);
+per_frame_4=wave_g=if(flames,sin((time*3)+1)/5,0);
+per_frame_5=wave_b=if(flames,sin((time*4)+1)/5,0);
+per_frame_6=b_r=max(bass-1,0);
+per_frame_7=b_g=max(treb-2,0);
+per_frame_8=b_b=max(mid-1.6,0);
+per_frame_9=ob_r=b_r;ib_r=b_r;
+per_frame_10=ob_g=b_g;ib_g=b_g;
+per_frame_11=ob_b=b_b;ib_b=b_b;
+per_pixel_1=dx=-.004+if(below(abs(x-.5)+abs(y-.5),.5),
+per_pixel_2=.3*sign(x-.5)*sqr(sin(x/3.14))*
+per_pixel_3=sin(y*3.14),sign(x-.5)*-.02);
+per_pixel_4=dy=if(below(abs(x-.5)+abs(y-.5),.5),
+per_pixel_5=sign(y-.5)*.005,sign(y-.5)*-.02)
+warp_1=`shader_body
+warp_2=`{
+warp_3=`    // sample previous frame
+warp_4=`    ret = tex2D( sampler_main, uv ).xyz;
+warp_5=`    
+warp_6=`    // darken (decay) over time
+warp_7=`    ret *= 1.00; //or try: ret -= 0.004;
+warp_8=`}
+comp_1=`sampler sampler_pw_noise_lq;
+comp_2=`
+comp_3=`shader_body
+comp_4=`{
+comp_5=`    float tiles = 10*((bass*bass*bass_att*bass_att));
+comp_6=`    //float tiles = 100;
+comp_7=`  
+comp_8=`    float2 uv2 = float2( floor(uv.x*tiles), floor(uv.y*tiles) )/tiles 
+comp_9=`               + rand_preset.xy;
+comp_10=`    float2 delta = float2(roam_cos.x, roam_sin.x)*(0.00+0.00023*(bass*tiles));
+comp_11=`  
+comp_12=`//    float2 delta = float2(roam_cos.x, roam_sin.x)*(0.08+0.2*(bass+bass_att)*tiles);
+comp_13=`  
+comp_14=`    float4 N = tex2D( sampler_noise_lq, uv2 * aspect.xy + delta ) - 0.5;
+comp_15=`    uv += normalize(N.xy)*0.033*(1.5*bass*rad);
+comp_16=`
+comp_17=`    ret.x = tex2D(sampler_main, uv).z*1.4 - 0.4*(0.1*bass);    
+comp_18=`  ret.z = tex2D(sampler_main, uv).y*1.4 - 0.4*(0.1*treb);    
+comp_19=`  ret.y = tex2D(sampler_main, uv).x*1.4 - 0.4*(0.1*mid);    
+comp_20=`}

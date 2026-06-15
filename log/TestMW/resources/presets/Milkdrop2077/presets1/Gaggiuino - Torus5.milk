@@ -1,0 +1,134 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=2
+[preset00]
+fRating=5.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=15
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=0.625
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=0.880
+fModWaveAlphaEnd=1.980
+fWarpAnimSpeed=0.498
+fWarpScale=100.000
+fZoomExponent=1.00183
+fShader=1.000
+zoom=0.99815
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=1.00180
+sy=0.99990
+wave_r=0.000
+wave_g=0.000
+wave_b=0.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=0.360
+ob_g=0.290
+ob_b=0.290
+ob_a=1.000
+ib_size=0.000
+ib_r=1.000
+ib_g=0.000
+ib_b=1.000
+ib_a=1.000
+nMotionVectorsX=64.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=1.000
+mv_r=1.060
+mv_g=1.000
+mv_b=0.819
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+warp_1=`shader_body 
+warp_2=`{
+warp_3=`    // Aspect-correct coordinates
+warp_4=`    float aspect_ratio = aspect.x / aspect.y;
+warp_5=`    float2 centered_uv = (uv_orig - 0.5) * 2.0 * float2(aspect_ratio, 1.0);
+warp_6=`    
+warp_7=`    float4 col = float4(0,0,0,0);  // Start with black
+warp_8=`    float iter = 0.0;               // Iteration counter
+warp_9=`    
+warp_10=`    // Main rendering loop (64 iterations)
+warp_11=`    for(col.b = 1.0; iter < 64.0; iter += 1.0) 
+warp_12=`    { 
+warp_13=`        // Distance field calculation
+warp_14=`        float dist = length(float2(
+warp_15=`            col.a = length(col.xz) - 0.72,  // Circular shape
+warp_16=`            col.y                           // Vertical component
+warp_17=`        )) - 0.5;                           // Radius adjustment
+warp_18=`        
+warp_19=`        // Accumulate monochrome effect
+warp_20=`        col += float4(centered_uv, 1.0, 0.0) * dist;
+warp_21=`    }
+warp_22=`    
+warp_23=`    // Pattern
+warp_24=`    float angleDiff = atan2(col.y, col.w) - atan2(col.z+q1, col.x);
+warp_25=`    float pattern = sin(18.0 * (angleDiff - time/2));
+warp_26=`    
+warp_27=`    // Convert to grayscale with contrast adjustment
+warp_28=`    float grayscale = dot(col.rgb, float3(0.299, 0.587, 0.114));
+warp_29=`    grayscale = 1.5 * pow(grayscale + pattern, 1.5); // Contrast boost
+warp_30=`    
+warp_31=`    // Vignette effect
+warp_32=`    float2 centerUV = uv_orig - 0.5;
+warp_33=`    float vignette = 1.0 - smoothstep(0.3, 0.7, dot(centerUV, centerUV));
+warp_34=`    
+warp_35=`    // Final black and white output
+warp_36=`    ret = grayscale;
+warp_37=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`
+comp_4=`float2 uv1 = uv-.5;
+comp_5=`
+comp_6=`float3 ret1 = tex2D(sampler_main, uv) +tex2D(sampler_main, 1-uv)*0;
+comp_7=`
+comp_8=`
+comp_9=`float2 hor = float2 (texsize.z,0);
+comp_10=`float2 ver = float2 (0,texsize.w);
+comp_11=`float dx = GetPixel (uv-hor) - GetPixel (uv+hor);
+comp_12=`float dy = GetPixel (uv-ver) - GetPixel (uv+ver);
+comp_13=`float2 dz = float2 (dx,dy);
+comp_14=`
+comp_15=`uv1 = .3*cos(uv1*2+1.7) -2*dz;;
+comp_16=`float3 dots = saturate(.03/length(uv1));
+comp_17=`
+comp_18=`
+comp_19=`ret1 = (-ret1/4) + 6*dots*(-0.08+ret1);
+comp_20=`
+comp_21=`ret = lum(ret1)*rand_preset;
+comp_22=`ret = lum(ret); //MilkDrop2077 monochrome effect
+comp_23=`}

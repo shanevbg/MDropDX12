@@ -1,0 +1,139 @@
+MILKDROP_PRESET_VERSION=300
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+fRating=4.000
+fGammaAdj=1.630
+fDecay=0.940
+fVideoEchoZoom=1.002
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=1
+nWaveMode=6
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=1
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=0
+bSolarize=0
+bInvert=1
+fWaveAlpha=1.059
+fWaveScale=1.351
+fWaveSmoothing=0.630
+fWaveParam=0.000
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.000
+fWarpScale=1.331
+fZoomExponent=1.00000
+fShader=0.000
+zoom=1.00400
+rot=-0.01400
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.02944
+sx=1.00000
+sy=1.00000
+wave_r=0.650
+wave_g=0.650
+wave_b=0.650
+wave_x=0.500
+wave_y=0.500
+ob_size=0.010
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.010
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.200
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_1=wave_r = wave_r + 0.350*( 0.60*sin(3.980*time) + 0.40*sin(11.047*time) );
+per_frame_2=wave_g = wave_g + 0.350*( 0.60*sin(0.835*time) + 0.40*sin(1.081*time) );
+per_frame_3=wave_b = wave_b + 0.350*( 0.60*sin(0.814*time) + 0.40*sin(1.011*time) );
+per_frame_4=cx = cx + 0.110*( 0.60*sin(0.374*time) + 0.40*sin(0.294*time) );
+per_frame_5=cy = cy + 0.110*( 0.60*sin(0.393*time) + 0.40*sin(0.223*time) );
+per_frame_6=dx = dx + 0.005*( 0.60*sin(0.173*time) + 0.40*sin(0.223*time) );
+per_frame_7=decay = decay - 0.01*equal(frame%20,0);
+per_frame_8=wave_x = 0.5 + 0.25*cos(time*2)/aspecty;
+per_frame_9=wave_y = 0.5 + 0.25*sin(time*2)/aspectx;
+per_frame_10=
+per_frame_11=ang = time*2;
+per_frame_12=q1 = cos(ang);
+per_frame_13=q2 = sin(ang);
+warp_1=`shader_body
+warp_2=`{
+warp_3=`    // PAINTERLY EFFECT:
+warp_4=`    float2 t = 0.005 + 0.045*saturate(float2(bass,treb)-1);
+warp_5=`    float2 uv2 = uv;
+warp_6=`    float2 delta2 = texsize.zw*float2(1,1);
+warp_7=`    float3 blurry_color = tex2D( sampler_main, 
+warp_8=`        lerp(uv,uv_orig,-1) + delta2 ).xyz;
+warp_9=`    float2 v = (blurry_color.xy-0.37) * t;
+warp_10=`      //uv2 += v;
+warp_11=`      // instead, add a rotated version:
+warp_12=`      uv2.x += v.x*q1 + v.y*q2;
+warp_13=`      uv2.y += v.x*q2 - v.y*q1;
+warp_14=`
+warp_15=`    // sample previous frame
+warp_16=`    ret = tex2D( sampler_main, uv2 ).xyz;
+warp_17=`
+warp_18=`    // darken over time
+warp_19=`    ret -= 0.004;    
+warp_20=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`    ret = tex2D(sampler_main, uv).xyz;
+comp_4=`    float L = lum(ret);
+comp_5=`    float bw = saturate(cos(L*27 + 3)*30 - 26);
+comp_6=`    float L2 = lum(GetBlur1(uv));
+comp_7=`    float bw2 = saturate(cos(L*27 + 3)*3 - 6);
+comp_8=`
+comp_9=`    ret = float3(.1,.6,1.1)*ret.x +
+comp_10=`          float3(.1,.6,.55)*ret.y + 
+comp_11=`          float3(1.5,.6,.2)*ret.z;
+comp_12=`
+comp_13=`    ret = ret*ret * (.5 + bw*bw2*1);
+comp_14=`
+comp_15=`}
+
+[SPRITE1_BEGIN]
+SpriteName=textures\MilkDrop3_023.jpg
+SpriteColorKey=0x000000
+SpriteLayer=0
+SpriteBlend=3
+SpriteAlpha=0.500000
+SpriteBurn=1
+SpriteX=0.000000
+SpriteY=0.000000
+SpriteSX=0.650000
+SpriteSY=0.650000
+SpriteRot=0.000000
+SpriteSpeed=0.000000
+SpriteRepeatX=1.000000
+SpriteRepeatY=1.000000
+[SPRITE1_END]

@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "mainWindowOpacity": 1,
+  "mirrorsActive": false,
+  "mirrorModeForAltS": true,
+  "displays": [
+    {
+      "type": "Spout",
+      "name": "MDropDX12",
+      "enabled": false,
+      "fixedSize": false,
+      "width": 1280,
+      "height": 720
+    },
+    {
+      "type": "Monitor",
+      "name": "Generic PnP Monitor (\\\\.\\DISPLAY1)",
+      "enabled": false,
+      "deviceName": "\\\\.\\DISPLAY1",
+      "fullscreen": true,
+      "opacity": 100,
+      "clickThrough": false
+    },
+    {
+      "type": "Monitor",
+      "name": "Generic PnP Monitor (\\\\.\\DISPLAY2)",
+      "enabled": true,
+      "deviceName": "\\\\.\\DISPLAY2",
+      "fullscreen": true,
+      "opacity": 100,
+      "clickThrough": false
+    },
+    {
+      "type": "Monitor",
+      "name": "Generic PnP Monitor (\\\\.\\DISPLAY3)",
+      "enabled": true,
+      "deviceName": "\\\\.\\DISPLAY3",
+      "fullscreen": true,
+      "opacity": 57,
+      "clickThrough": false
+    },
+    {
+      "type": "Monitor",
+      "name": "Generic PnP Monitor (\\\\.\\DISPLAY4)",
+      "enabled": false,
+      "deviceName": "\\\\.\\DISPLAY4",
+      "fullscreen": true,
+      "opacity": 100,
+      "clickThrough": false
+    }
+  ]
+}

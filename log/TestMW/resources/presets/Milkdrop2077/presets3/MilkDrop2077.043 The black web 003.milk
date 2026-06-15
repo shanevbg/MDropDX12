@@ -1,0 +1,305 @@
+MILKDROP_PRESET_VERSION=300
+PSVERSION=3
+PSVERSION_WARP=4
+PSVERSION_COMP=2
+[preset00]
+fRating=5.000
+fGammaAdj=1.070
+fDecay=0.955
+fVideoEchoZoom=100.000
+fVideoEchoAlpha=0.650
+nVideoEchoOrientation=0
+nWaveMode=0
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=1
+bMaximizeWaveColor=1
+bTexWrap=0
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=0.133
+fWaveSmoothing=0.000
+fWaveParam=-1.000
+fModWaveAlphaStart=1.000
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.000
+fWarpScale=1.331
+fZoomExponent=1.00000
+fShader=0.000
+zoom=1.00049
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=1.00000
+sy=1.00000
+wave_r=0.500
+wave_g=0.500
+wave_b=0.500
+wave_x=0.500
+wave_y=0.500
+ob_size=0.002
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=1.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.900
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+shapecode_0_enabled=1
+shapecode_0_sides=40
+shapecode_0_additive=0
+shapecode_0_thickOutline=1
+shapecode_0_textured=0
+shapecode_0_num_inst=1
+shapecode_0_x=0.500
+shapecode_0_y=0.500
+shapecode_0_rad=0.06623
+shapecode_0_ang=0.00000
+shapecode_0_tex_ang=0.00000
+shapecode_0_tex_zoom=1.79845
+shapecode_0_r=0.000
+shapecode_0_g=0.000
+shapecode_0_b=0.000
+shapecode_0_a=0.100
+shapecode_0_r2=0.000
+shapecode_0_g2=0.000
+shapecode_0_b2=0.000
+shapecode_0_a2=0.000
+shapecode_0_border_r=1.000
+shapecode_0_border_g=1.000
+shapecode_0_border_b=0.000
+shapecode_0_border_a=0.000
+shape_0_init1=bob = 1.5;
+shape_0_init2=ro = 0;
+shape_0_init3=red = int(rand(20));
+shape_0_per_frame1=vol = 1 + 0.2*((bass_att+treb_att+mid_att)/3);
+shape_0_per_frame2=bob = bob*above(bob,0.01) - 0.01 + 1*(1 - above(bob,0.01));
+shape_0_per_frame3=bob = 0.4 + 0.4*sin(time*0.8);
+shape_0_per_frame4=bob = bob*vol;
+shape_0_per_frame5=//rad = bob;
+shape_0_per_frame6=border_1 = 0.4;
+shape_0_per_frame7=sides = 30;
+shape_0_per_frame8=ro = ro + 0.02;
+shape_0_per_frame9=ang = ro;
+shape_0_per_frame10=//rad = 0.6;
+shape_0_per_frame11=
+shape_0_per_frame12=sp = red*0.025;
+shape_0_per_frame13=spi = 0.5 - sp;
+shape_0_per_frame14=tm = time*0.1;
+shape_0_per_frame15=border_r = 0.5 + sp*sin(tm*0.6) + spi*cos(tm*1.46);
+shape_0_per_frame16=border_g = 0.5 + sp*sin(tm*1.294) + spi*cos(tm*0.87);
+shape_0_per_frame17=border_b = 0.5 + sp*sin(tm*1.418) + spi*cos(tm*0.76);
+shape_0_per_frame18=
+shapecode_1_enabled=1
+shapecode_1_sides=40
+shapecode_1_additive=1
+shapecode_1_thickOutline=0
+shapecode_1_textured=0
+shapecode_1_num_inst=4
+shapecode_1_x=0.500
+shapecode_1_y=0.500
+shapecode_1_rad=0.10000
+shapecode_1_ang=0.00000
+shapecode_1_tex_ang=0.00000
+shapecode_1_tex_zoom=1.00000
+shapecode_1_r=1.000
+shapecode_1_g=1.000
+shapecode_1_b=1.000
+shapecode_1_a=1.000
+shapecode_1_r2=0.000
+shapecode_1_g2=0.000
+shapecode_1_b2=0.000
+shapecode_1_a2=0.000
+shapecode_1_border_r=1.000
+shapecode_1_border_g=1.000
+shapecode_1_border_b=1.000
+shapecode_1_border_a=0.000
+shape_1_per_frame1=x = 0.5 + 0.225*sin(time /instance*0.7);
+shape_1_per_frame2=y = 0.5 + 0.3*cos(time /instance*0.7);
+shape_1_per_frame3=x = x- 0.4*x*sin(time);
+shape_1_per_frame4=y = y- 0.4*y*cos(time);
+shape_1_per_frame5=
+shape_1_per_frame6=
+shape_1_per_frame7=
+shape_1_per_frame8=rad = rad*mid_att;
+shape_1_per_frame9=r = 0.5 + 0.5*sin(frame*0.5);
+shape_1_per_frame10=b = 0.5 + 0.5*sin(frame*0.5 + 2.094);
+shape_1_per_frame11=g = 0.5 + 0.5*sin(frame*0.5 + 4.188);
+shape_1_per_frame12=
+shapecode_2_enabled=1
+shapecode_2_sides=40
+shapecode_2_additive=1
+shapecode_2_thickOutline=0
+shapecode_2_textured=0
+shapecode_2_num_inst=1
+shapecode_2_x=0.500
+shapecode_2_y=0.500
+shapecode_2_rad=0.10000
+shapecode_2_ang=0.00000
+shapecode_2_tex_ang=0.00000
+shapecode_2_tex_zoom=1.00000
+shapecode_2_r=1.000
+shapecode_2_g=1.000
+shapecode_2_b=1.000
+shapecode_2_a=1.000
+shapecode_2_r2=0.000
+shapecode_2_g2=0.000
+shapecode_2_b2=0.000
+shapecode_2_a2=0.000
+shapecode_2_border_r=1.000
+shapecode_2_border_g=1.000
+shapecode_2_border_b=1.000
+shapecode_2_border_a=0.000
+shape_2_per_frame1=x = 0.5 + 0.5*(sin(time*1.1)*0.3 + 0.7*sin(time*0.5));
+shape_2_per_frame2=x = 0.5 + 0.225*sin(time + 2.09);
+shape_2_per_frame3=y = 0.5 + 0.3*cos(time + 2.09);
+shape_2_per_frame4=
+shape_2_per_frame5=rad = rad*bass_att;
+shape_2_per_frame6=r = 0.5 + 0.5*sin(frame*0.5);
+shape_2_per_frame7=b = 0.5 + 0.5*sin(frame*0.5 + 2.094);
+shape_2_per_frame8=g = 0.5 + 0.5*sin(frame*0.5 + 4.188);
+shape_2_per_frame9=
+shapecode_3_enabled=1
+shapecode_3_sides=40
+shapecode_3_additive=1
+shapecode_3_thickOutline=0
+shapecode_3_textured=0
+shapecode_3_num_inst=5
+shapecode_3_x=0.500
+shapecode_3_y=0.500
+shapecode_3_rad=0.07419
+shapecode_3_ang=0.00000
+shapecode_3_tex_ang=0.00000
+shapecode_3_tex_zoom=1.00000
+shapecode_3_r=1.000
+shapecode_3_g=1.000
+shapecode_3_b=1.000
+shapecode_3_a=1.000
+shapecode_3_r2=0.000
+shapecode_3_g2=0.000
+shapecode_3_b2=0.000
+shapecode_3_a2=0.000
+shapecode_3_border_r=1.000
+shapecode_3_border_g=1.000
+shapecode_3_border_b=1.000
+shapecode_3_border_a=0.000
+shape_3_per_frame1=//x = 0.5 + 0.5*(sin(time*1.1)*0.3 + 0.7*sin(time*0.5));
+shape_3_per_frame2=x = 0.5 + 0.225*sin(time /instance);
+shape_3_per_frame3=y = 0.5 + 0.3*cos(time /instance);
+shape_3_per_frame4=x = x+ 0.4*x*sin(time);
+shape_3_per_frame5=y = y+ 0.4*y*cos(time);
+shape_3_per_frame6=
+shape_3_per_frame7=
+shape_3_per_frame8=//x = x+(0.1*q3)*sin((instance*2.4));
+shape_3_per_frame9=//y = y+(0.1*q4)*cos((instance*2.4));
+shape_3_per_frame10=
+shape_3_per_frame11=
+shape_3_per_frame12=rad = rad*treb_att;
+shape_3_per_frame13=r = 0.5 + 0.5*sin(frame*0.5);
+shape_3_per_frame14=b = 0.5 + 0.5*sin(frame*0.5 + 2.094);
+shape_3_per_frame15=g = 0.5 + 0.5*sin(frame*0.5 + 4.188);
+shape_3_per_frame16=
+per_frame_1=warp = 0;
+per_frame_2=
+per_frame_3=tic = min(time-tin,.1);
+per_frame_4=tin = time;
+per_frame_5=
+per_frame_6=ra = 1/tic*.25;
+per_frame_7=
+per_frame_8=treb_avg = tic*(treb_avg*(1/tic - ra) + ra*treb);
+per_frame_9=mid_avg = tic*(mid_avg*(1/tic - ra) + ra*mid);
+per_frame_10=bass_avg = tic*(bass_avg*(1/tic - ra) + ra*bass);
+per_frame_11=
+per_frame_12=tt = tt + tic*treb;
+per_frame_13=mt = mt + tic*mid;
+per_frame_14=bt = bt + tic*bass;
+per_frame_15=
+per_frame_16=q1 = tt*4;
+per_frame_17=q2 = mt*4;
+per_frame_18=q3 = bt*4;
+per_frame_19=
+per_frame_20=st = .1;
+per_frame_21=base = .15;
+per_frame_22=q4 = base + treb_avg*st;
+per_frame_23=q5 = base + mid_avg*st;
+per_frame_24=q6 = base + bass_avg*st;
+per_pixel_1=ti = time*.3;
+per_pixel_2=
+per_pixel_3=mx = x - .5 + .25*(sin(ti*1.1278) + sin(ti*.7458));
+per_pixel_4=my = y - .5 + .25*(sin(ti*.9454) + sin(ti*1.2378));
+per_pixel_5=zm = cos(pow(mx*mx*1.5 + my*my,.5)*16 - q1)*q4;
+per_pixel_6=dx = zm*(x-mx);
+per_pixel_7=dy = zm*(y-my);
+per_pixel_8=
+per_pixel_9=mx = x - .5 + .25*(sin(ti*1.3488) + sin(ti*.8552));
+per_pixel_10=my = y - .5 + .25*(sin(ti*.7366) + sin(ti*1.1447));
+per_pixel_11=zm = cos(pow(mx*mx*1.5 + my*my,.5)*16 - q2)*q5;
+per_pixel_12=dx = dx + zm*mx;
+per_pixel_13=dy = dy + zm*my;
+per_pixel_14=
+per_pixel_15=mx = x - .5 + .25*(sin(ti*1.3544) + sin(ti*.8926));
+per_pixel_16=my = y - .5 + .25*(sin(ti*.9021) + sin(ti*1.2468));
+per_pixel_17=zm = cos(pow(mx*mx*1.5 + my*my,.5)*16 - q3)*q6;
+per_pixel_18=dx = dx + zm*mx;
+per_pixel_19=dy = dy + zm*my;
+warp_1=`//sampler sampler_colors3;
+warp_2=`
+warp_3=`shader_body
+warp_4=`{
+warp_5=`ret.x = uv.x;
+warp_6=`ret.y = uv.y;
+warp_7=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`ret = lerp( 0, float3(1, 1, 0), GetBlur2(uv).x*2.5 -  GetBlur1(uv).x*0.7 + tex2D(sampler_main, uv).x*0.75);
+comp_4=`ret *= 1- GetBlur1(uv).x*1.85;
+comp_5=`ret += float3(0,0,0.7)*tex2D(sampler_main, uv).x + float3(0.25,0.25,0.25)*tex2D(sampler_main, uv).y;
+comp_6=`ret *= max(tex2D(sampler_main, uv).y*0.8, GetBlur2(uv).y*0.5);
+comp_7=`//ret = tex2D(sampler_main, uv);
+comp_8=`//MilkDrop3 Color Mode:
+comp_9=`ret /= float3(-0.5,-2.5,-0.4);
+comp_10=`}
+
+[SPRITE1_BEGIN]
+SpriteName=sprites\Spirale1.png
+SpriteColorKey=0x000000
+SpriteLayer=0
+SpriteBlend=9
+SpriteAlpha=1.000000
+SpriteBurn=1
+SpriteX=0.000000
+SpriteY=0.000000
+SpriteSX=1.060000
+SpriteSY=1.060000
+SpriteRot=1.000000
+SpriteSpeed=0.100000
+SpriteRepeatX=1.000000
+SpriteRepeatY=1.000000
+[SPRITE1_END]

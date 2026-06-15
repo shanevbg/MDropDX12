@@ -1,0 +1,197 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=3
+[preset00]
+fRating=5.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=15
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=0.625
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=0.880
+fModWaveAlphaEnd=1.980
+fWarpAnimSpeed=1.459
+fWarpScale=2.007
+fZoomExponent=1.00000
+fShader=1.000
+zoom=0.99990
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=0.99990
+sy=1.00000
+wave_r=0.000
+wave_g=0.000
+wave_b=0.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=1.000
+ob_g=0.000
+ob_b=1.000
+ob_a=1.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=1.000
+mv_r=1.060
+mv_g=1.000
+mv_b=0.819
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+warp_1=`// CC0: Another windows terminal shader
+warp_2=`// Created this based on an old shader as a background in windows terminal
+warp_3=`// Shader by mrange https://www.shadertoy.com/view/DdSGzy 
+warp_4=`// Ported to MilkDrop by MilkDrop2077
+warp_5=`
+warp_6=`#define PI 3.141592654
+warp_7=`#define TAU (2.0*PI)
+warp_8=`
+warp_9=`// Rotate matrix helper
+warp_10=`float2x2 ROT(float a) {
+warp_11=`    float c = cos(a*3);
+warp_12=`    float s = sin(a*3);
+warp_13=`    return float2x2(c, s, -s, c);
+warp_14=`}
+warp_15=`
+warp_16=`// HSV to RGB conversion
+warp_17=`float3 hsv2rgb(float3 c) {
+warp_18=`    const float4 K = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+warp_19=`    float3 p = abs(frac(c.xxx + K.xyz) * 6.0 - K.www);
+warp_20=`    return c.z * lerp(K.xxx, saturate(p - K.xxx), c.y);
+warp_21=`}
+warp_22=`
+warp_23=`// Tonemapping approximation
+warp_24=`float3 aces_approx(float3 v) {
+warp_25=`    v = max(v, 0.0);
+warp_26=`    v *= 0.6;
+warp_27=`    float a = 2.51;
+warp_28=`    float b = 0.03;
+warp_29=`    float c = 2.43;
+warp_30=`    float d = 0.59;
+warp_31=`    float e = 0.14;
+warp_32=`    return saturate((v*(a*v+b))/(v*(c*v+d)+e));
+warp_33=`}
+warp_34=`
+warp_35=`// Fractal distance function
+warp_36=`float apolloian(float3 p, float s) {
+warp_37=`    float scale = 1.0;
+warp_38=`    for(int i = 0; i < 5; i++) {
+warp_39=`        p = -1.0 + 2.0*frac(0.5*p+0.5);
+warp_40=`        float r2 = dot(p,p);
+warp_41=`        float k = s/r2;
+warp_42=`        p *= k;
+warp_43=`        scale *= k;
+warp_44=`    }
+warp_45=`    
+warp_46=`    float3 ap = abs(p/scale);  
+warp_47=`    float d = length(ap.xy);
+warp_48=`    d = min(d, ap.z);
+warp_49=`
+warp_50=`    return d;
+warp_51=`}
+warp_52=`
+warp_53=`// Distance field calculation
+warp_54=`float df(float2 p) {
+warp_55=`    float fz = lerp(0.75, 1.0, smoothstep(-0.9, 0.9, cos(TAU*time/300.0)));
+warp_56=`    float z = 1.55*fz;
+warp_57=`    p /= z;
+warp_58=`    float3 p3 = float3(p, 0.1);
+warp_59=`    
+warp_60=`    // Apply rotations
+warp_61=`    float2x2 rot0 = ROT(0.1*time);
+warp_62=`    float2x2 rot1 = ROT(0.123*time);
+warp_63=`    p3.xz = mul(rot0, p3.xz);
+warp_64=`    p3.yz = mul(rot1, p3.yz);
+warp_65=`    
+warp_66=`    float d = apolloian(p3, 1.0/fz);
+warp_67=`    d *= z;
+warp_68=`    return d;
+warp_69=`}
+warp_70=`
+warp_71=`// Main effect
+warp_72=`float3 effect(float2 p, float2 pp) {
+warp_73=`    float aa = 2.0/aspect.y;
+warp_74=`    float d = df(p);
+warp_75=`    
+warp_76=`    float3 bcol0 = hsv2rgb(float3(0.55, 0.85, 0.85));
+warp_77=`    float3 bcol1 = hsv2rgb(float3(0.33, 0.85, 0.025));
+warp_78=`    
+warp_79=`    float3 col = 0.1*bcol0;
+warp_80=`    col += bcol1/sqrt(abs(d));
+warp_81=`    col += bcol0*smoothstep(aa, -aa, (d-0.001));
+warp_82=`    
+warp_83=`    col *= smoothstep(1.5, 0.5, length(pp));
+warp_84=`    
+warp_85=`    return col;
+warp_86=`}
+warp_87=`
+warp_88=`shader_body {
+warp_89=` float aspect = aspect.x / aspect.y;
+warp_90=`
+warp_91=`    float2 q = uv;
+warp_92=`    float2 p = -1.0 + 2.0 * q;
+warp_93=`    float2 pp = p;
+warp_94=`    p.x *= aspect.x;
+warp_95=`    
+warp_96=`    float3 col = effect(p, pp);
+warp_97=`    col = aces_approx(col);
+warp_98=`    col = sqrt(col);
+warp_99=`    
+warp_100=`    ret = float4(col, 1.0);
+warp_101=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`float3 ret2;
+comp_4=`ret2 = tex2D( sampler_main, uv ).xyz;
+comp_5=`    // Coordinate system
+comp_6=`    float2 p = (uv-0.5)*aspect.xy;
+comp_7=`    
+comp_8=`    float2 o = float2(pow(p.x,2.),pow(p.y,2.));
+comp_9=`    
+comp_10=`    // Base color calculation
+comp_11=`    float3 col = pow(2.*abs(o.x+o.y)+abs(o.x-o.y),5.);
+comp_12=`    col = max(col,1.);
+comp_13=`       
+comp_14=`    // Apply original comp shader effects
+comp_15=`    col = col*0.1 - 0.1;
+comp_16=`    
+comp_17=`    // Blend with original comp effects
+comp_18=`    col.x = lerp(col.x, GetBlur1(uv).x, 0.3);
+comp_19=`    col.z = lerp(col.z, GetBlur2(uv).z, 0.3);
+comp_20=`    
+comp_21=`    ret = col+ret2;
+comp_22=`}

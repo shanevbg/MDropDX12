@@ -1,0 +1,171 @@
+MILKDROP_PRESET_VERSION=300
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+fRating=5.000
+fGammaAdj=1.980
+fDecay=0.500
+fVideoEchoZoom=1.000
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=3
+nWaveMode=11
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=0
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=1.059
+fWaveScale=1.351
+fWaveSmoothing=0.630
+fWaveParam=0.000
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.000
+fWarpScale=1.331
+fZoomExponent=1.00000
+fShader=0.000
+zoom=1.00049
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=1.00000
+sy=1.00000
+wave_r=0.650
+wave_g=0.650
+wave_b=0.650
+wave_x=0.500
+wave_y=0.500
+ob_size=0.002
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=1.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.200
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.000
+per_frame_1=warp = 0;
+per_frame_2=
+per_frame_3=tic = min(time-tin,.1);
+per_frame_4=tin = time;
+per_frame_5=
+per_frame_6=ra = 1/tic*.25;
+per_frame_7=
+per_frame_8=treb_avg = tic*(treb_avg*(1/tic - ra) + ra*treb);
+per_frame_9=mid_avg = tic*(mid_avg*(1/tic - ra) + ra*mid);
+per_frame_10=bass_avg = tic*(bass_avg*(1/tic - ra) + ra*bass);
+per_frame_11=
+per_frame_12=tt = tt + tic*treb;
+per_frame_13=mt = mt + tic*mid;
+per_frame_14=bt = bt + tic*bass;
+per_frame_15=
+per_frame_16=q1 = tt*4;
+per_frame_17=q2 = mt*4;
+per_frame_18=q3 = bt*4;
+per_frame_19=
+per_frame_20=st = .1;
+per_frame_21=base = .15;
+per_frame_22=q4 = base + treb_avg*st;
+per_frame_23=q5 = base + mid_avg*st;
+per_frame_24=q6 = base + bass_avg*st;
+per_pixel_1=ti = time*.3;
+per_pixel_2=
+per_pixel_3=mx = x - .5 + .25*(sin(ti*1.1278) + sin(ti*.7458));
+per_pixel_4=my = y - .5 + .25*(sin(ti*.9454) + sin(ti*1.2378));
+per_pixel_5=zm = cos(pow(mx*mx*1.5 + my*my,.5)*16 - q1)*q4;
+per_pixel_6=dx = zm*(x-mx);
+per_pixel_7=dy = zm*(y-my);
+per_pixel_8=
+per_pixel_9=mx = x - .5 + .25*(sin(ti*1.3488) + sin(ti*.8552));
+per_pixel_10=my = y - .5 + .25*(sin(ti*.7366) + sin(ti*1.1447));
+per_pixel_11=zm = cos(pow(mx*mx*1.5 + my*my,.5)*16 - q2)*q5;
+per_pixel_12=dx = dx + zm*mx;
+per_pixel_13=dy = dy + zm*my;
+per_pixel_14=
+per_pixel_15=mx = x - .5 + .25*(sin(ti*1.3544) + sin(ti*.8926));
+per_pixel_16=my = y - .5 + .25*(sin(ti*.9021) + sin(ti*1.2468));
+per_pixel_17=zm = cos(pow(mx*mx*1.5 + my*my,.5)*16 - q3)*q6;
+per_pixel_18=dx = dx + zm*mx;
+per_pixel_19=dy = dy + zm*my;
+warp_1=`sampler sampler_Pattern_017;
+warp_2=`
+warp_3=`shader_body
+warp_4=`{
+warp_5=`    // sample previous frame
+warp_6=`   ret = tex2D( sampler_Pattern_017, uv);
+warp_7=`}
+comp_1=`float a,b,c;
+comp_2=`shader_body
+comp_3=`{
+comp_4=`float2 uv2 = uv;
+comp_5=`if(uv2.x >= 0.5) {uv2.x = 1-uv2.x;}
+comp_6=`if(uv2.y >= 0.5) {uv2.y = 1-uv2.y;}
+comp_7=`
+comp_8=`//float1 cs = cos(0.25*3.14159);
+comp_9=`//float1 sn = sin(0.278*3.424333);
+comp_10=`//float2 uv3 = uv2;
+comp_11=`//uv2.x = uv3.x * cs - uv3.y * sn;
+comp_12=`//uv2.y = uv3.x * sn + uv3.y * cs;
+comp_13=`
+comp_14=`uv.x=uv2.x;
+comp_15=`uv.y=uv2.y;
+comp_16=`
+comp_17=`
+comp_18=`    float3 base = GetBlur3(uv) + GetBlur2(uv) + GetBlur1(uv) + tex2D(sampler_main, uv)*0.886 - 0.466 ;
+comp_19=`a =base.x/12;b = base.y/8; c = base.x/3;
+comp_20=`c = c + b + a-b;
+comp_21=`a = a + c + a*c;
+comp_22=`base = 0.2+c;
+comp_23=`ret = base*(0.552-base)*(1-base)*2*float3(0.55,1.688,2.25) + pow(base,2)*float3(2.29,1.688,1.74); //MilkDrop2077 color mod
+comp_24=`//ret.xy = ret.yx;
+comp_25=`ret = ret*(1-ret)*4; //MilkDrop2077 solarize effect
+comp_26=`//MilkDrop3 Color Mode:
+comp_27=`ret /= float3(0.7,1.0,0.8);
+comp_28=`//MilkDrop3 Shadows Mode:
+comp_29=`ret += pow(tex2D(sampler_main,float2(uv.x,1-uv.y)).yyy+tex2D(sampler_main,1-uv).yyy,float3(0.4,2,3));
+comp_30=`}
+
+[SPRITE1_BEGIN]
+SpriteName=sprites\lazer1.jpg
+SpriteColorKey=0x000000
+SpriteLayer=1
+SpriteBlend=5
+SpriteAlpha=1.000000
+SpriteBurn=1
+SpriteX=0.000000
+SpriteY=0.000000
+SpriteSX=0.340000
+SpriteSY=0.340000
+SpriteRot=1.000000
+SpriteSpeed=0.100000
+SpriteRepeatX=1.000000
+SpriteRepeatY=1.000000
+[SPRITE1_END]

@@ -1,0 +1,154 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=2
+[preset00]
+fRating=5.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=6
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=3.200
+fWaveScale=1.768
+fWaveSmoothing=0.630
+fWaveParam=0.000
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.000
+fWarpScale=1.000
+fZoomExponent=1.00000
+fShader=1.000
+zoom=1.00000
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=1.00000
+sx=1.00000
+sy=1.00000
+wave_r=1.000
+wave_g=1.000
+wave_b=1.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.005
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.010
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=1.248
+mv_dx=0.000
+mv_dy=0.000
+mv_l=5.000
+mv_r=1.000
+mv_g=1.000
+mv_b=0.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+wavecode_0_enabled=1
+wavecode_0_samples=512
+wavecode_0_sep=0
+wavecode_0_bSpectrum=0
+wavecode_0_bUseDots=0
+wavecode_0_bDrawThick=0
+wavecode_0_bAdditive=0
+wavecode_0_scaling=1.00000
+wavecode_0_smoothing=0.50000
+wavecode_0_r=1.000
+wavecode_0_g=1.000
+wavecode_0_b=1.000
+wavecode_0_a=1.000
+wave_0_per_point1=per_point1=rad = i * 6.283185; // Full circle (2*PI)
+wave_0_per_point2=per_point2=ang = rad;
+wave_0_per_point3=per_point3=dist = 0.3 + 0.1 * (bass_att + treb_att) * 0.5; // Radius modulated by bass and treble
+wave_0_per_point4=per_point4=x = dist * cos(ang);
+wave_0_per_point5=per_point5=y = dist * sin(ang);
+wave_0_per_point6=per_point6=value1 = (spectrum[i * 512] + spectrum[(i * 512 + 1) % 512]) * 0.5; // Audio spectrum
+wave_0_per_point7=per_point7=dist += value1 * 0.2; // Extend radius based on spectrum
+wave_0_per_point8=per_point8=r = 0.5 + 0.5 * sin(time + rad); // Dynamic color
+wave_0_per_point9=per_point9=g = 0.5 + 0.5 * cos(time + rad + 2.094); // Phase shift for color
+wave_0_per_point10=per_point10=b = 0.5 + 0.5 * sin(time + rad + 4.188);
+per_frame_init_1=bassc=0;
+per_frame_init_2=midc=0;
+per_frame_init_3=mcount=0;
+per_frame_init_4=bcount=0;
+per_frame_1=decay = .9;
+per_frame_2=warp = 0;
+per_frame_3=
+per_frame_4=bassc = if(above(bass,bassc),bassc + bass*.07,bassc-.03);
+per_frame_5=midc = if(above(mid,midc),midc + mid*.07,midc-.03);
+per_frame_6=
+per_frame_7=q1 = bassc/32;
+per_frame_8=q2 = midc/32;
+per_pixel_1=zoom = pow(rad-tan(25),1);
+warp_1=`shader_body{
+warp_2=`     float aspect = aspect.x / aspect.y;  // width/height ratio
+warp_3=`
+warp_4=`     // Initialize variables
+warp_5=`    float2 r = float2(1.0, 1.0);  // Fake resolution
+warp_6=`    float4 o = float4(0,0,0,0);
+warp_7=`    float2 i = float2(0,0);
+warp_8=`    
+warp_9=`    // Create transformed coordinates
+warp_10=`    float2 p = (uv.xy*2.0-r)/r.y*exp(3.0-cos(time.x));
+warp_11=`    
+warp_12=`    // Fractal iteration loop
+warp_13=`    for(; i.x < 50.0; ) {
+warp_14=`        // Apply transformation matrix and accumulate color
+warp_15=`        o += 0.01/length(cos(p+i));
+warp_16=`        
+warp_17=`        // Apply fractal transformation - CORRECTED MATRIX MULTIPLICATION
+warp_18=`        p = mul(float2x2(0.3, 0.9, -0.9, 0.3), p);
+warp_19=`        
+warp_20=`        // Increment counter
+warp_21=`        i += float2(1.0, 0.0);
+warp_22=`    }
+warp_23=`    
+warp_24=`    // Final tone mapping
+warp_25=`    o = tanh(o*o);
+warp_26=`    
+warp_27=`    // Output result
+warp_28=`    ret = o;
+warp_29=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`    ret = tex2D(sampler_main, uv).xyz;
+comp_4=`    float L = lum(ret);
+comp_5=`    float bw = saturate(cos(L*27 + 3)*30 - 26);
+comp_6=`    float L2 = lum(GetBlur1(uv));
+comp_7=`    float bw2 = saturate(cos(L*27 + 3)*3 - 6);
+comp_8=`
+comp_9=`    ret = float3(.1,.6,1.1)*ret.x +
+comp_10=`          float3(.1,.6,.55)*ret.y + 
+comp_11=`          float3(1.5,.6,.2)*ret.z;
+comp_12=`
+comp_13=`    ret = ret*ret * (.5 + bw*bw2*1);
+comp_14=`
+comp_15=`}

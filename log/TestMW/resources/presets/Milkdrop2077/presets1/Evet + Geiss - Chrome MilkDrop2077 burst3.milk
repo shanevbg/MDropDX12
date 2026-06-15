@@ -1,0 +1,251 @@
+MILKDROP_PRESET_VERSION=300
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=2
+[preset00]
+fRating=1.000
+fGammaAdj=2.700
+fDecay=0.980
+fVideoEchoZoom=2.000
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=0
+nWaveMode=5
+bAdditiveWaves=1
+bWaveDots=1
+bWaveThick=0
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=3.300
+fWaveScale=1.694
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=0.750
+fModWaveAlphaEnd=0.950
+fWarpAnimSpeed=1.000
+fWarpScale=1.000
+fZoomExponent=1.00016
+fShader=0.000
+zoom=1.00022
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.00000
+sx=1.00000
+sy=1.00000
+wave_r=0.500
+wave_g=0.500
+wave_b=0.800
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=1.000
+ib_size=0.000
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=1.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.900
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_1=// timed sidon sensor
+per_frame_2=// le = signal level; desired average value = 2
+per_frame_3=le=1.4*bass_att+.1*bass+.5*treb;
+per_frame_4=pulse=above(le,th);
+per_frame_5=// pulsefreq = running average of interval between last 5 pulses
+per_frame_6=pulsefreq=if(equal(pulsefreq,0),2,
+per_frame_7=if(pulse,.8*pulsefreq+.2*(time-lastpulse),pulsefreq));
+per_frame_8=lastpulse=if(pulse,time,lastpulse);
+per_frame_9=// bt = relative time; 0 = prev beat; 1 = expected beat
+per_frame_10=bt=(time-lastbeat)/(.5*beatfreq+.5*pulsefreq);
+per_frame_11=// hccp = handcicap for th driven by bt
+per_frame_12=hccp=(.03/(bt+.2))+.5*if(band(above(bt,.8),below(bt,1.2)),
+per_frame_13=(pow(sin((bt-1)*7.854),4)-1),0);
+per_frame_14=beat=band(above(le,th+hccp),btblock);
+per_frame_15=btblock=1-above(le,th+hccp);
+per_frame_16=lastbeat=if(beat,time,lastbeat);
+per_frame_17=beatfreq=if(equal(beatfreq,0),2,
+per_frame_18=if(beat,.8*beatfreq+.2*(time-lastbeat),beatfreq));
+per_frame_19=// th = threshold
+per_frame_20=th=if(above(le,th),le+114/(le+10)-7.407,
+per_frame_21=th+th*.07/(th-12)+below(th,2.7)*.1*(2.7-th));
+per_frame_22=th=if(above(th,6),6,th);
+per_frame_23=sp=60/fps;
+per_frame_24=thccl=thccl+sp*(th-2.5144);
+per_frame_25=leccl=leccl+sp*le;
+per_frame_26=wave_r=.5+.5*sin(.027*leccl);
+per_frame_27=wave_g=.5+.5*sin(.025*leccl);
+per_frame_28=wave_b=.5+.5*sin(.031*leccl);
+per_frame_29=q1=.01*thccl;
+per_frame_30=monitor=q1;
+per_pixel_1=zone=1;//below(abs(rad-.5),.1);
+per_pixel_2=dx=zone*x;
+per_pixel_3=dy=zone*x*sin(7*sin(.63*q1)*y+7*sin(.21*q1)*x+3*sin(.47*q1)*rad);
+warp_1=`//sampler sampler_colors3;
+warp_2=`
+warp_3=`shader_body
+warp_4=`{
+warp_5=`
+warp_6=`float2 uv2 = uv;
+warp_7=`//if(uv2.x >= 0.5) {uv2.x = 1-uv2.x;}
+warp_8=`//if(uv2.y >= 0.5) {uv2.y = 1-uv2.y;}
+warp_9=`
+warp_10=`//float1 cs = cos(0.25*3.14159);
+warp_11=`//float1 sn = sin(0.25*3.14159);
+warp_12=`//float2 uv3 = uv2;
+warp_13=`//uv2.x = uv3.x * cs - uv3.y * sn;
+warp_14=`//uv2.y = uv3.x * sn + uv3.y * cs;
+warp_15=`
+warp_16=`uv.x=uv2.x;
+warp_17=`uv.y=uv2.y;
+warp_18=`
+warp_19=`    // sample previous frame
+warp_20=`    ret = tex2D( sampler_main, uv ).xyz;
+warp_21=`    
+warp_22=`    // darken (decay) over time
+warp_23=`    ret *= 0.7;
+warp_24=`
+warp_25=`float1 a = uv.x;
+warp_26=`float1 b = uv.y;
+warp_27=`float1 ca;
+warp_28=`float1 cb;
+warp_29=`if(q9 == 5){
+warp_30=`    ca = 0.5;
+warp_31=`    cb = 0.5;
+warp_32=`}
+warp_33=`else if(q9 == 6){
+warp_34=`    ca = -0.66176 + 0.03*q20;
+warp_35=`    cb = -0.3842;
+warp_36=`}
+warp_37=`else if(q9 == 0) {
+warp_38=`    ca = -0.7269 + 0.01*q21 ;
+warp_39=`    cb = 0.1889 + 0.01*q22;
+warp_40=`}
+warp_41=`else {
+warp_42=`    ca = a;
+warp_43=`    cb = b;
+warp_44=`}
+warp_45=`float1 aa;
+warp_46=`float1 bb;
+warp_47=`
+warp_48=`float1 n = 0;
+warp_49=`float1 maxiter = 60;
+warp_50=`float1 m=0;
+warp_51=`float1 r =20;
+warp_52=`float1 r2 = r*r;
+warp_53=`//float1 dist = length(z);
+warp_54=`float3 col;
+warp_55=`
+warp_56=`float1 pa;
+warp_57=`float1 pb;
+warp_58=`float2 z;
+warp_59=`float2 pz;
+warp_60=`while(n < maxiter && m==0)
+warp_61=`{
+warp_62=`    aa = a*a - b*b;
+warp_63=`    bb = 2*a*b;
+warp_64=`    pa = a;
+warp_65=`    pb = b;
+warp_66=`    pz = float2(pa,pb);
+warp_67=`    a = aa + ca;
+warp_68=`    b = bb + cb;
+warp_69=`    z = float2(a,b);
+warp_70=`    //if(sqrt(a*a + b*b) > r2) // no
+warp_71=`    //if(sqrt(pow(a-pa,2) + pow(b-pb,2)) > r2)
+warp_72=`    //if(dot(z,pz) > r2) // creates the leaves outside the mandelbrot set
+warp_73=`    if(sqrt(a*a + b*b) > r2) 
+warp_74=`    {
+warp_75=`        m = 1;
+warp_76=`    }
+warp_77=`    else
+warp_78=`    {
+warp_79=`        n++;
+warp_80=`    }
+warp_81=`}
+warp_82=`
+warp_83=`//col = tex2D(sampler_colors3, float2(0.5 + 0.5*sin(n*0.05),0.5 + 0.5*cos(n*0.05+time))).xyz;
+warp_84=`
+warp_85=`float1 dist = (sqrt(a*a + b*b));
+warp_86=`float1 fraciter = (dist - r) / (r2 - r);
+warp_87=`fraciter = log2(log(dist) / log(r));
+warp_88=`n -= fraciter; // makes the colors smoother, outside of the mandelbrot set
+warp_89=`float3 color; 
+warp_90=`
+warp_91=`color.x = 0.5 + 0.5*tan(0.21*n*3.5 + 0.5*time + 0.2*q5);
+warp_92=`color.y = 0.5 + 0.5*cos(0.33*n*3.5 + 0.7*time + 0.2*q6);
+warp_93=`color.z = 0.5 + 0.5*tan(0.45*n*3.5 + 0.9*time + 0.2*q7);
+warp_94=`
+warp_95=`if(m == 1)
+warp_96=`{
+warp_97=`    ret = color;
+warp_98=`}
+warp_99=`else
+warp_100=`{
+warp_101=`    //ret.x=0.1;
+warp_102=`    //ret.y=0.5;
+warp_103=`    //ret.z=0;
+warp_104=`    ret=color;
+warp_105=`}
+warp_106=`
+warp_107=`}
+comp_1=`sampler sampler_Pattern_047;  // loads clouds.jpg (or .tga, etc)
+comp_2=`
+comp_3=`shader_body         
+comp_4=`{
+comp_5=`    ret = tex2D(sampler_main, uv).xyz +
+comp_6=`              GetBlur2(uv)
+comp_7=`          ;
+comp_8=`
+comp_9=`    ret = tex2D( sampler_Pattern_047, 
+comp_10=`                     ret.xy*(0.1 + 0.7*rand_preset.x*rand_preset.y) 
+comp_11=`                     + uv*float2(1,-1)*aspect.xy
+comp_12=`                   ).xyz;
+comp_13=`
+comp_14=`    //ret *= 1.333; // a little bit of overbright
+comp_15=`
+comp_16=`}
+
+[SPRITE1_BEGIN]
+SpriteName=sprites\burst2.png
+SpriteColorKey=0x000000
+SpriteLayer=0
+SpriteBlend=10
+SpriteAlpha=1.000000
+SpriteBurn=1
+SpriteX=0.000000
+SpriteY=0.000000
+SpriteSX=-0.620000
+SpriteSY=-0.620000
+SpriteRot=2.000000
+SpriteSpeed=0.100000
+SpriteRepeatX=1.000000
+SpriteRepeatY=1.000000
+code_1=new_scale=1.0+0.3*bass_att;
+code_2=sx=new_scale;
+code_3=sy=new_scale;
+code_4=a=1.0;
+[SPRITE1_END]

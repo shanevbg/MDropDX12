@@ -1,0 +1,202 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=3
+[preset00]
+fRating=5.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=11
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=1.059
+fWaveScale=1.351
+fWaveSmoothing=0.630
+fWaveParam=0.000
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.459
+fWarpScale=2.007
+fZoomExponent=1.00000
+fShader=1.000
+zoom=0.99990
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=0.99990
+sy=1.00000
+wave_r=0.650
+wave_g=0.650
+wave_b=0.650
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=1.000
+ob_g=0.000
+ob_b=1.000
+ob_a=1.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.200
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+warp_1=`shader_body{
+warp_2=`    uv = (uv-0.5)*float2(aspect.x,1.0);
+warp_3=`    float3 col = float3(0,0,0);
+warp_4=`    
+warp_5=`    // Calculate pattern and normals
+warp_6=`    float s = 6.0;
+warp_7=`    float2 i = floor(uv*s);
+warp_8=`    float h = frac(sin(dot(i, float2(32.91, 54.28)))*96516.4172);
+warp_9=`    
+warp_10=`    // Calculate normals
+warp_11=`    float pixel = 1.0/uv.y;
+warp_12=`    float2 e = float2(pixel, 0.0);
+warp_13=`    float h_x = frac(sin(dot(floor((uv-e.xy)*s), float2(32.91, 54.28)))*96516.4172);
+warp_14=`    float h_y = frac(sin(dot(floor((uv-e.yx)*s), float2(32.91, 54.28)))*96516.4172);
+warp_15=`    float3 n = float3((h_x-h)/e.x, (h_y-h)/e.x, 1.0);
+warp_16=`    n = n/length(n);
+warp_17=`    
+warp_18=`    // Ambient occlusion
+warp_19=`    float ao = 0.0;
+warp_20=`    float3 origin = float3(uv, h);
+warp_21=`    for (int i = 0; i < 16; i++) {
+warp_22=`        float angle = float(i)*3.141592/16.0;
+warp_23=`        float2 dir = float2(cos(angle), sin(angle));
+warp_24=`        float skip = 0.0;
+warp_25=`        for (int j = 1; j <= 6; j++) {
+warp_26=`            float2 point = uv+float(j)*pixel*dir*12.0;
+warp_27=`            float2 i_point = floor(point*s);
+warp_28=`            float r = frac(sin(dot(i_point, float2(32.91, 54.28)))*96516.4172);
+warp_29=`            float3 current = float3(point, r);
+warp_30=`            float3 dir_curr = current - origin;
+warp_31=`            float dir_dot = dot(dir_curr/length(dir_curr), n);
+warp_32=`            float cond = step(0.0, dir_dot)*(1.0-skip);
+warp_33=`            ao += cond*length(dir_curr)/float(j);
+warp_34=`            skip = max(skip, step(dir_dot, 0.0));
+warp_35=`        }
+warp_36=`    }
+warp_37=`    ao = 1.0 - ao/16.0;
+warp_38=`    
+warp_39=`    // Lighting
+warp_40=`    float t = time;
+warp_41=`    float3 ld = float3(cos(t), sin(t), 0.5)*3.0 - float3(uv, h);
+warp_42=`    ld = ld/length(ld);
+warp_43=`    float diff = max(dot(n, ld), 0.0);
+warp_44=`    float l = diff*ao;
+warp_45=`    
+warp_46=`    // Color mixing
+warp_47=`    col += l*lerp(float3(1.0,1.0,1.0), float3(0.0, 0.6, 0.8), h);
+warp_48=`    col = sqrt(clamp(col, 0.0, 1.0));
+warp_49=`    
+warp_50=`    ret = float4(col, 1.0);
+warp_51=`}
+comp_1=`#define GP GetPixel
+comp_2=`#define GB GetBlur1
+comp_3=`sampler sampler_pw_noise_lq;
+comp_4=`static float2 hor = float2 (texsize.z,0);
+comp_5=`static float2 ver = float2 (0, texsize.w);
+comp_6=`float2 uv1,uv10,uv2,uv3,uv6,dz,dz0,dz1;
+comp_7=`float3 noise, ret1, ret2, neu, mus;
+comp_8=`
+comp_9=`float matan (float x)
+comp_10=`{return x*(1.061 - abs(x)*0.274);}
+comp_11=`
+comp_12=`float matan2 (float im, float re)
+comp_13=`{float x;
+comp_14=`   if (abs(re) > abs(im)) 
+comp_15=`   {x = matan (im/re); 
+comp_16=`    if (re<0) {x += M_PI;}
+comp_17=`   }
+comp_18=`   else
+comp_19=`   {x = M_PI/2 -matan (re/im); 
+comp_20=`   if (im<0) {x += M_PI;}
+comp_21=`   } 
+comp_22=`  return (x>=M_PI? x-2*M_PI: x);
+comp_23=`}
+comp_24=`
+comp_25=`
+comp_26=`shader_body {//MilkDrop3 Zoom Mode:
+comp_27=`uv = 0.25 + 0.5*uv;
+comp_28=`
+comp_29=`uv10 = (uv-.5)*aspect.xy; 
+comp_30=`float ang1 = matan2 (uv10.x,uv10.y)/M_PI;
+comp_31=`float ang2 = 0.5 + (1.0 - abs( frac(ang1 * 0.5) * 2 - 1.0 )-.5); 
+comp_32=`float z = 0.02;
+comp_33=`uv1 = float2 (.6+3*z-z/length (uv10), ang2).yx;
+comp_34=`ret1= ret2= 0;
+comp_35=`dz= dz1=0;
+comp_36=`uv3 = uv1;
+comp_37=`float mask = saturate(4*uv3.y) * saturate(rad*1);
+comp_38=`uv3 = frac(uv3);
+comp_39=`dz0.x = (lum(GP(uv3+hor))- lum(GP(uv3-hor)));
+comp_40=`dz0.y = (lum(GP(uv3+ver))- lum(GP(uv3-ver)));
+comp_41=`dz0.x += 2*(lum(GB(uv3+hor))- lum(GB(uv3-hor)));
+comp_42=`dz0.y += 2*(lum(GB(uv3+ver))- lum(GB(uv3-ver)));
+comp_43=`dz +=  mask*dz0/2;
+comp_44=`ret1 = max(ret1,(GP(uv3)+GB(uv3))/2*mask);
+comp_45=`ret2 = abs(GetPixel(uv3)-GetBlur1(uv3));
+comp_46=`
+comp_47=`mus = 1.2/length(sin(12*(uv1+dz/2 + 2.25*(ret1-0.5)) +time))*rad*(1-rad);
+comp_48=`
+comp_49=`float stars = 0;
+comp_50=`int anz = 6;
+comp_51=`uv2 = float2 (0.02/length (uv10), ang2).yx;
+comp_52=`for (int n=1; n <= anz; n++) 
+comp_53=`{
+comp_54=`  float2 uv4 = 8.0*((1.0+n)*(uv2+(dz+(ret1-.5)) + 0.1*n )+ float2(0,time*.1));
+comp_55=`  float smask = saturate(tex2D (sampler_pw_noise_lq,uv4/256)-.95);
+comp_56=`  stars = max(stars,(0.1/pow(length(frac(uv4)-.5),2)*smask));
+comp_57=`n++;
+comp_58=`}
+comp_59=`
+comp_60=`//mus = max(mus,stars);
+comp_61=`uv2 = float2 (22*length (uv10), ang2).yx;
+comp_62=`uv2 = uv2*.2+float2(0.07*time,.5);
+comp_63=`uv2=frac(uv2);
+comp_64=`float3 bk = GetBlur2(uv2) * 2*(1-rad) + .2;
+comp_65=`ret = sqrt(ret1)*(1+ret2)*(.25+mus) ;
+comp_66=`ret *= 1+6*length(dz);
+comp_67=`ret += saturate(stars)*.7;
+comp_68=`ret += 2*bk* saturate(1-lum(ret1)*16)*sqrt(mid_att+1)*saturate(0.035/(0.001+sqrt(length(uv10))));
+comp_69=`
+comp_70=`ret *= 1.7-rad;
+comp_71=`ret -= 0.07;
+comp_72=`//ret = GetPixel(uv);
+comp_73=`//MilkDrop3 Color Mode:
+comp_74=`ret /= float3(2.2,3.0,1.9);
+comp_75=`//MilkDrop3 Solarize Mode:
+comp_76=`ret = ret*(1-ret)*4;
+comp_77=`}

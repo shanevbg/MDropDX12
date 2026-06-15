@@ -2030,14 +2030,18 @@ std::string ShaderImportWindow::FixMatrixMultiplication(const std::string& input
             std::string fac1 = prefix.substr(fac1Start, fac1End - fac1Start);
             std::string left = prefix.substr(0, fac1Start);
 
-            std::string rest = result.substr(index + skip);
-            int closingIdx = FindClosingBracket(rest, '(', ')', 1);
-            if (closingIdx > 0) {
-                std::string args = rest.substr(0, closingIdx);
-                std::string suffix = rest.substr(closingIdx + 1);
-                // x * matNxM(args) → mul(floatNxM(args), x)  [swapped for column-major]
-                result = left + "mul("
-                       + matType + "(" + args + "), " + fac1 + ")" + suffix;
+            // Guard: skip if fac1 is empty (left operand on a different line)
+            // The multi-line post-Phase-3 pass will handle cross-line cases.
+            if (!fac1.empty()) {
+                std::string rest = result.substr(index + skip);
+                int closingIdx = FindClosingBracket(rest, '(', ')', 1);
+                if (closingIdx > 0) {
+                    std::string args = rest.substr(0, closingIdx);
+                    std::string suffix = rest.substr(closingIdx + 1);
+                    // x * matNxM(args) → mul(floatNxM(args), x)  [swapped for column-major]
+                    result = left + "mul("
+                           + matType + "(" + args + "), " + fac1 + ")" + suffix;
+                }
             }
         }
 
@@ -2731,6 +2735,43 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                     pos = after;
                 }
             }
+            // Detect #define macros that expand to matrix constructors: #define NAME(args) matN(...)
+            // These need mul() conversion just like declared matrix functions.
+            {
+                size_t dpos = 0;
+                while ((dpos = inp.find("#define ", dpos)) != std::string::npos) {
+                    size_t ns = dpos + 8;
+                    while (ns < inp.size() && (inp[ns] == ' ' || inp[ns] == '\t')) ns++;
+                    size_t ne = ns;
+                    while (ne < inp.size() && isIdent(inp[ne])) ne++;
+                    if (ne > ns && ne < inp.size() && inp[ne] == '(') {
+                        std::string macroName = inp.substr(ns, ne - ns);
+                        // Skip macro args: find closing paren
+                        size_t ae = ne + 1;
+                        int dp = 1;
+                        while (ae < inp.size() && dp > 0) {
+                            if (inp[ae] == '(') dp++;
+                            else if (inp[ae] == ')') dp--;
+                            ae++;
+                        }
+                        // Skip whitespace after )
+                        while (ae < inp.size() && (inp[ae] == ' ' || inp[ae] == '\t')) ae++;
+                        // Check if expansion starts with a matrix type
+                        for (auto& mt : matTypes) {
+                            int mtLen = (int)strlen(mt.type);
+                            if (ae + mtLen <= inp.size() && inp.substr(ae, mtLen) == mt.type) {
+                                size_t at = ae + mtLen;
+                                if (at < inp.size() && inp[at] == '(') {
+                                    matFuncs.push_back({macroName, mt.isSquare});
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    dpos = ne > ns ? ne : dpos + 1;
+                }
+            }
+
             // Helper: detect scalar numeric literals (e.g., "3.0", "0.5f", "2", "1e-3").
             // Scalar*matrix and matrix*scalar should use * (component-wise), NOT mul().
             auto isScalarLiteral = [](const std::string& s) -> bool {
@@ -3380,8 +3421,9 @@ void ShaderImportWindow::ConvertGLSLtoHLSL(int passOverride) {
                             if (pos + 1 < result.size() && result[pos + 1] == '=') { pos++; continue; }
 
                             // Extract fac1 (left operand) by working backward
+                            // Skip whitespace AND newlines so cross-line expressions are found
                             size_t fac1End = pos;
-                            while (fac1End > 0 && result[fac1End - 1] == ' ') fac1End--;
+                            while (fac1End > 0 && (result[fac1End - 1] == ' ' || result[fac1End - 1] == '\n' || result[fac1End - 1] == '\r' || result[fac1End - 1] == '\t')) fac1End--;
                             size_t fac1Start = fac1End;
                             if (fac1Start > 0 && result[fac1Start - 1] == ')') {
                                 int depth = 0;

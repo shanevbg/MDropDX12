@@ -1,0 +1,217 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=3
+[preset00]
+fRating=3.000
+fGammaAdj=1.000
+fDecay=0.980
+fVideoEchoZoom=1.000
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=0
+nWaveMode=6
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=1.059
+fWaveScale=1.351
+fWaveSmoothing=0.630
+fWaveParam=0.000
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.000
+fWarpScale=1.000
+fZoomExponent=1.00000
+fShader=0.000
+zoom=1.00000
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=1.00000
+sy=1.00000
+wave_r=0.650
+wave_g=0.650
+wave_b=0.650
+wave_x=0.500
+wave_y=0.500
+ob_size=0.005
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=1.000
+ib_size=0.000
+ib_r=0.000
+ib_g=0.000
+ib_b=0.000
+ib_a=0.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.200
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_1=wave_r = 0.85 + 0.15*sin(time*0.5);
+per_frame_2=wave_g = 0.1 + 0.05*cos(time*0.4);
+per_frame_3=wave_b = 0.1 + 0.05*sin(time*0.3);
+per_frame_4=rot = 0.01*sin(time*0.2);
+per_frame_5=zoom = 1.0 + 0.01*sin(time*0.15);
+warp_1=`float dist(float2 a, float2 b)
+warp_2=`{
+warp_3=`    return sqrt(pow(a.x-b.x,2) + pow(a.y-b.y,2));
+warp_4=`}
+warp_5=`
+warp_6=`shader_body
+warp_7=`{
+warp_8=`    uv-= 0.5;
+warp_9=`    uv.y*=-1;
+warp_10=`    uv *= aspect.xy;
+warp_11=`    
+warp_12=`    float rotspeed = 0.02*q5 + time*0.2;
+warp_13=`    uv = float2(cos(rotspeed)*uv.x - sin(rotspeed)*uv.y, sin(rotspeed)*uv.x + cos(rotspeed)*uv.y);
+warp_14=`    
+warp_15=`    float beat = q32;
+warp_16=`    
+warp_17=`    ret = tex2D( sampler_main, uv ).xyz;
+warp_18=`    
+warp_19=`    float3 col = 0;
+warp_20=`    
+warp_21=`    float3 lookat = float3(3*sin(0.2*time), 3*cos(q5*0.05), 0);
+warp_22=`    
+warp_23=`    float zoom = 0.0;
+warp_24=`
+warp_25=`    float3 ro = float3(0, 0, -1);
+warp_26=`    
+warp_27=`    float3 F = normalize(lookat-ro); // Forward
+warp_28=`    float3 R = normalize(cross(float3(0., 1., 0.), F)); //Right
+warp_29=`    float3 U = cross(F, R); //Up
+warp_30=`
+warp_31=`    float3 C = ro + F*zoom;
+warp_32=`    float3 I = C + uv.x*R + uv.y*U;
+warp_33=`    float3 rd = normalize(I-ro);
+warp_34=`    float t = time;
+warp_35=`    
+warp_36=`    float dS, dO;
+warp_37=`    float3 p;
+warp_38=`    float breakloop = 0;
+warp_39=`    for(int i = 0; i<100 && breakloop == 0; i++)
+warp_40=`    {
+warp_41=`        p = ro + rd * dO;
+warp_42=`        dS = -(length(float2(length(p.xz)-1, p.y)) -0.75);
+warp_43=`        if(dS < 0.001) {breakloop = 1; }
+warp_44=`        dO += dS;
+warp_45=`    }    
+warp_46=`    float check1 = q8;
+warp_47=`    float check2 = q9;
+warp_48=`    float check3 = q10;
+warp_49=`    if(dS < 0.003)
+warp_50=`    {
+warp_51=`        float x = atan2(p.x,p.z) - rotspeed;
+warp_52=`        float y = atan2(length(p.xz)-1, p.y);
+warp_53=`        float bands = sin(y*100 + x*3);
+warp_54=`        float ripples = sin((x*10 - y*30)*3)*0.5 + 0.5;
+warp_55=`        float waves = tan(x*4 - y*2 + q5*0.4);
+warp_56=`        float b1 = smoothstep(-0.2, 0.2, bands);
+warp_57=`        float b2 = smoothstep(-0.2, 0.2, bands-0.5);
+warp_58=`        float m = b1*(1-b2);
+warp_59=`        m = max(m,ripples*b2*max(30,waves));
+warp_60=`        m += max(0,waves*0.2*b2);
+warp_61=`        float m2 = m-ripples-waves;
+warp_62=`        float m22 = 0.5*m2 + m2*q3*1.5;
+warp_63=`        float m3 = b1*waves;
+warp_64=`        if(check1 == 1) {col = 10.4*float3(m22,m22, m22);}
+warp_65=`        if(check2 == 1) {col = float3(m22*0.5,0, 0);}
+warp_66=`        if(check3 == 1) {col = float3(m22*0.2,0, m22*0.5);}
+warp_67=`        col += float3(0.2*m3 + m3*q2, 0*m3*q3*0.5, 0);
+warp_68=`        //col = waves;
+warp_69=`    
+warp_70=`    }
+warp_71=`
+warp_72=`    ret = col*2;
+warp_73=`
+warp_74=`    // darken (decay) over time
+warp_75=`    ret *= 0.317; //or try: ret -= 0.004;   
+warp_76=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`  // Center and normalize coordinates
+comp_4=`  float2 uv2 = uv - 0.5;
+comp_5=`  uv2.x *= texsize.x/texsize.y;  // correct aspect ratio
+comp_6=`  
+comp_7=`  // Distance from center
+comp_8=`  float dist = length(uv2);
+comp_9=`  
+comp_10=`  // Create multiple layers of rings for 3D depth effect
+comp_11=`  float speed = 0.2;
+comp_12=`  float ring1 = frac(dist*3 - time*speed*3);
+comp_13=`  float ring2 = frac(dist*5 - time*speed*3);
+comp_14=`  float ring3 = frac(dist*7 - time*speed*3);
+comp_15=`  
+comp_16=`  // Create rings with different thicknesses for 3D effect
+comp_17=`  float ring_val1 = smoothstep(0.3, 0.7, ring1) * smoothstep(1.0, 0.6, ring1);
+comp_18=`  float ring_val2 = smoothstep(0.4, 0.6, ring2) * smoothstep(0.9, 0.7, ring2);
+comp_19=`  float ring_val3 = smoothstep(0.45, 0.55, ring3) * smoothstep(0.85, 0.75, ring3);
+comp_20=`  
+comp_21=`  // Different intensities based on "distance" for 3D effect
+comp_22=`  ring_val1 *= 1.0;
+comp_23=`  ring_val2 *= 2.7;
+comp_24=`  ring_val3 *= 1.5;
+comp_25=`  
+comp_26=`  // Sample base colors from previous frame
+comp_27=`  float3 base = tex2D(sampler_main, uv).xyz;
+comp_28=`  
+comp_29=`  // Create red tunnel color with "depth" variation
+comp_30=`  float3 tunnel1 = float3(0.8, 0.1, 0.1);  // closest ring (brightest)
+comp_31=`  float3 tunnel2 = float3(0.6, 0.05, 0.05);  // middle ring
+comp_32=`  float3 tunnel3 = float3(0.4, 0.02, 0.02);  // farthest ring (darkest)
+comp_33=`  
+comp_34=`  // Add some variation based on angle for 3D texture effect
+comp_35=`  float angle = atan2(uv2.y, uv2.x);
+comp_36=`  float3 angleVar = float3(0.2, 0.05, 0.05) * sin(angle*6 + time); 
+comp_37=`  
+comp_38=`  // Distance falloff to make center brighter - enhances 3D effect
+comp_39=`  float center_glow = 0.05/(0.01 + dist*dist);
+comp_40=`  center_glow = min(center_glow, 3.0);
+comp_41=`  
+comp_42=`  // Mix everything together with proper depth layering
+comp_43=`  float3 rings = ring_val1 * tunnel1 + ring_val2 * tunnel2 + ring_val3 * tunnel3;
+comp_44=`  rings += angleVar * (ring_val1 + ring_val2*0.7 + ring_val3*0.5);
+comp_45=`  
+comp_46=`  // Added pulsing highlight in the center
+comp_47=`  float pulse = 0.5 + 0.5*sin(time*2);
+comp_48=`  float3 highlight = float3(1.0, 0.3, 0.2) * pulse * exp(-8*dist);
+comp_49=`  
+comp_50=`  // Final composition with all 3D elements
+comp_51=`  ret = base + rings + center_glow * float3(1, 0.2, 0.2) + highlight;
+comp_52=`  
+comp_53=`  // Vignette effect to enhance tunnel perspective
+comp_54=`  ret *= 1.0 - dist*0.5;
+comp_55=`  
+comp_56=`  // Ensure we don't exceed valid color ranges
+comp_57=`  ret = saturate(ret);
+comp_58=`//MilkDrop3 Color Mode:
+comp_59=`ret /= float3(0.7,-0.4,-1.2);
+comp_60=`//MilkDrop3 Solarize Mode:
+comp_61=`ret = ret*(1-ret)*4;
+comp_62=`}

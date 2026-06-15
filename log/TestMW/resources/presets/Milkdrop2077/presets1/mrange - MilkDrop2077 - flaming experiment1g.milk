@@ -1,0 +1,135 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=2
+[preset00]
+fRating=5.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=6
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=3.200
+fWaveScale=1.768
+fWaveSmoothing=0.630
+fWaveParam=-1.000
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.000
+fWarpScale=1.331
+fZoomExponent=1.00000
+fShader=1.000
+zoom=0.99950
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.00900
+sx=1.00000
+sy=1.00000
+wave_r=1.000
+wave_g=1.000
+wave_b=1.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.500
+ob_r=0.010
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=1.248
+mv_dx=0.000
+mv_dy=0.000
+mv_l=5.000
+mv_r=1.000
+mv_g=1.000
+mv_b=0.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+warp_1=`shader_body{
+warp_2=`
+warp_3=`//Shader from https://www.shadertoy.com/view/wX33zX
+warp_4=`//Ported to MilkDrop by MilkDrop2077
+warp_5=`//license: CC0 
+warp_6=`
+warp_7=`    float3 o = float3(0,0,0);
+warp_8=`    float t = time*3;
+warp_9=`    float2 r = float2(1.0, 1.0/aspect.x);
+warp_10=`    
+warp_11=`    for(float i=0.0, z=0.0, d=0.0, j=0.0; i<34.0; i+=1.0) {
+warp_12=`        // Ray setup
+warp_13=`        float2 centered_uv = (uv-0.5)*r*1.3;
+warp_14=`        float3 p = z*normalize(float3(centered_uv,1.0));
+warp_15=`        p.z -= 4.0;
+warp_16=`        float3 P = p;
+warp_17=`        
+warp_18=`        // Space transformation
+warp_19=`        float angle = P.y*P.y/4.0 + 3.0*P.y - t;
+warp_20=`        float2x2 rot = float2x2(cos(angle), -sin(angle), sin(angle), cos(angle));
+warp_21=`        p.xz = float2(p.x*rot[0][0] + p.z*rot[0][1], p.x*rot[1][0] + p.z*rot[1][1]);
+warp_22=`        p.x += sin(0.1*t - p.x);
+warp_23=`        
+warp_24=`        // Turbulence (fractal noise)
+warp_25=`        float turbulence = 12.0;
+warp_26=`        for(j=8.0; j>5.0; j-=1.0) {
+warp_27=`            turbulence /= 0.8+q1;
+warp_28=`            p += 0.1*(p.y+2.0)*cos(p.zxy*turbulence - 3.0*t)/turbulence;
+warp_29=`        }
+warp_30=`        
+warp_31=`        // Distance field
+warp_32=`        j = length(p-P);
+warp_33=`        p = abs(p*2);
+warp_34=`        d = abs(min(
+warp_35=`            max(p.z-0.1, p.x-1.0-0.3*P.y),
+warp_36=`            max(p.x-0.2, p.z-1.0-0.3*P.y)
+warp_37=`        )) + 9e-3;
+warp_38=`        
+warp_39=`        // Color calculation
+warp_40=`        float3 P_color = 1.0 + sin(0.5 + j - P.y + P.z + float3(2,3,4));
+warp_41=`        
+warp_42=`        // Volumetric rendering
+warp_43=`        o += P_color.x/d * P_color;
+warp_44=`        
+warp_45=`        // Ray marching step
+warp_46=`        z += d/8.0;
+warp_47=`    }
+warp_48=`    
+warp_49=`    // Tone mapping with music reactivity
+warp_50=`    float brightness = 0.8 + 0.2*bass_att;
+warp_51=`    ret = float4(tanh(o/2e3 * brightness), 1.0);
+warp_52=`}
+comp_1=`shader_body
+comp_2=`{//MilkDrop3 Rotate Mode:
+comp_3=`uv = uv.yx;
+comp_4=`
+comp_5=`    float2 uv_echo = (uv - 0.5)*1.0*float2(-1,-1) + 0.5;
+comp_6=`    ret = abs( tex2D(sampler_main, uv).xyz -
+comp_7=`                    tex2D(sampler_main, uv_echo).zyx );
+comp_8=`ret*=2;
+comp_9=`}

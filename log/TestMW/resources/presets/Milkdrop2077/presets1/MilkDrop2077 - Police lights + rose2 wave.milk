@@ -1,0 +1,206 @@
+MILKDROP_PRESET_VERSION=300
+PSVERSION=3
+PSVERSION_WARP=3
+PSVERSION_COMP=2
+[preset00]
+fRating=4.000
+fGammaAdj=2.000
+fDecay=0.900
+fVideoEchoZoom=2.000
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=0
+nWaveMode=15
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=0
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=0.625
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=0.880
+fModWaveAlphaEnd=1.980
+fWarpAnimSpeed=0.010
+fWarpScale=0.009
+fZoomExponent=1.00000
+fShader=0.000
+zoom=1.00000
+rot=0.00000
+cx=0.465
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.00960
+sx=1.00000
+sy=1.00000
+wave_r=0.000
+wave_g=0.000
+wave_b=0.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=0.123
+ob_g=0.000
+ob_b=0.100
+ob_a=0.000
+ib_size=0.000
+ib_r=0.000
+ib_g=0.000
+ib_b=0.000
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=1.000
+mv_r=1.060
+mv_g=1.000
+mv_b=0.819
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+wavecode_0_enabled=1
+wavecode_0_samples=500
+wavecode_0_sep=0
+wavecode_0_bSpectrum=0
+wavecode_0_bUseDots=0
+wavecode_0_bDrawThick=1
+wavecode_0_bAdditive=0
+wavecode_0_scaling=2.07700
+wavecode_0_smoothing=0.50000
+wavecode_0_r=1.000
+wavecode_0_g=1.000
+wavecode_0_b=1.000
+wavecode_0_a=1.000
+wave_0_per_point1=    x=sample;
+wave_0_per_point2=    y=value1*.25 + .25;
+wave_0_per_point3=    y = .5 - (.25 - y);
+shapecode_0_enabled=1
+shapecode_0_sides=5
+shapecode_0_additive=1
+shapecode_0_thickOutline=1
+shapecode_0_textured=0
+shapecode_0_num_inst=1
+shapecode_0_x=0.500
+shapecode_0_y=0.500
+shapecode_0_rad=0.41490
+shapecode_0_ang=0.00000
+shapecode_0_tex_ang=0.25133
+shapecode_0_tex_zoom=1.13600
+shapecode_0_r=0.342
+shapecode_0_g=0.000
+shapecode_0_b=0.000
+shapecode_0_a=1.000
+shapecode_0_r2=0.000
+shapecode_0_g2=0.000
+shapecode_0_b2=0.200
+shapecode_0_a2=0.000
+shapecode_0_border_r=0.000
+shapecode_0_border_g=0.000
+shapecode_0_border_b=0.000
+shapecode_0_border_a=0.000
+shape_0_per_frame1=
+shape_0_per_frame2=adv=adv+(bass*bass)/10;
+shape_0_per_frame3=
+shape_0_per_frame4=r=rand(10)*0.1*0.5+0.5;
+shape_0_per_frame5=g=r*3;
+shape_0_per_frame6=b=r*3;
+shape_0_per_frame7=
+shape_0_per_frame8=x=rand(200*bass/2)*0.01*0.5 + 0.25;
+shape_0_per_frame9=y=rand(200*bass/2)*0.01*0.5 + 0.25;
+shape_0_per_frame10=rad=rand(300)*0.01*0.4+0.1;
+shape_0_per_frame11=
+per_frame_init_1=mv_x=64;mv_y=48;
+per_frame_init_2=nut=0;
+per_frame_init_3=stp=0;stq=0;
+per_frame_init_4=rtp=0;rtq=0;
+per_frame_init_5=wvr=0;
+per_frame_init_6=decay=0;
+per_frame_init_7=dcsp=0
+per_frame_init_8=
+per_frame_1=decay=1.058;
+per_frame_2=zoom=1.000;
+per_frame_3=warp=0;
+per_frame_4=
+per_frame_5=
+per_frame_6=q1=(mid_att+treb_att)*0.198;
+per_frame_7=
+per_frame_8=q2=1 - min(q1,2)*0.6;
+per_frame_9=
+per_frame_10=
+per_frame_11=mvol=(bass_att+mid_att+treb_att)*0.33;
+per_frame_12=mvolB=(mvolB-0.00547) + mvol*0.00547;
+per_frame_13=mvolB=max(mvolB,0);
+per_frame_14=mvolB=min(mvolB,1);
+per_frame_15=q8=mvolB;
+per_frame_16=monitor=q8
+per_frame_17=
+per_pixel_1=zoom=1 + (sin(ang*9 + time*0.202)*0.39 + 0.39)*0.033
+warp_1=`shader_body
+warp_2=`{
+warp_3=`    float2 d = texsize.zw * 8;
+warp_4=`    float3 dx = ( GetBlur1(uv + float2(1,0)*d) - GetBlur1(uv-float2(1,0)*d) );
+warp_5=`    float3 dy = ( GetBlur1(uv + float2(0,1)*d) - GetBlur1(uv-float2(0,1)*d) );
+warp_6=`
+warp_7=`    float2 dither_uv = uv_orig*texsize.xy*texsize_noise_lq.zw * 1.2 + rand_frame.xy;
+warp_8=`
+warp_9=`    float2 uv_x= lerp(uv_orig,uv,0.1)  + float2(dx.x,dy.x)*texsize.zw  *2;
+warp_10=`    float2 uv_y= lerp(uv_orig,uv,0.3)  + float2(dx.y,dy.y)*texsize.zw  *2;
+warp_11=`    float2 uv_z= lerp(uv_orig,uv,0.1)  + float2(dx.z,dy.z)*texsize.zw  *2;
+warp_12=`    ret.x = GetPixel(uv_x).x - (GetPixel(uv_x) - GetBlur3(uv_x)).x  * 0.01;
+warp_13=`    ret.y = GetPixel(uv_y).y - (GetPixel(uv_y) - GetBlur3(uv_y)).y  * 0.01;
+warp_14=`    ret.z = GetPixel(uv_z).z - (GetPixel(uv_z) - GetBlur3(uv_z)).z  * 0.01;
+warp_15=`float4 noise9 = tex3D(sampler_noisevol_hq, 
+warp_16=`                      ((float3(uv_z.y,uv_x.x,uv_y.x)*q27
+warp_17=`                       )*texsize.xyy*texsize_noisevol_hq.zww
+warp_18=`                      ).xyz*
+warp_19=`                      float3(1,1,0)*0.05 + 
+warp_20=`                      time*float3(0,0,1)*q29
+warp_21=`                     );
+warp_22=`if(ret.x> q21*q13         && ret.x<= q24*q11        )ret.y += (noise9).x*.5; 
+warp_23=`if(ret.y> q22*q11         && ret.y<= q25*q12        )ret.z += (noise9).y*.5; 
+warp_24=`if(ret.z> q23*q12         && ret.z<= q26*q13        )ret.x += (noise9).z*.5; 
+warp_25=`
+warp_26=`    ret += - 0.004  +(tex2D(sampler_noise_lq, dither_uv).xyz-0.5) *0.1;
+warp_27=`
+warp_28=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`    ret = tex2D(sampler_main, uv).xyz;
+comp_4=`    //ret += GetBlur1(uv);
+comp_5=`    ret += GetBlur2(uv);
+comp_6=`    ret = ret;
+comp_7=`    
+comp_8=`    ret *= 1.00; //gamma
+comp_9=`}
+
+[SPRITE1_BEGIN]
+SpriteName=sprites\rose1b.png
+SpriteColorKey=0x000000
+SpriteLayer=1
+SpriteBlend=5
+SpriteAlpha=1.000000
+SpriteBurn=1
+SpriteX=0.000000
+SpriteY=0.000000
+SpriteSX=1.720000
+SpriteSY=1.720000
+SpriteRot=1.000000
+SpriteSpeed=0.200000
+SpriteRepeatX=1.000000
+SpriteRepeatY=1.000000
+code_1=a=0.1*bass*2;
+[SPRITE1_END]

@@ -1,0 +1,147 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+fRating=4.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=6
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=3.200
+fWaveScale=3.342
+fWaveSmoothing=0.630
+fWaveParam=0.000
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.000
+fWarpScale=1.331
+fZoomExponent=1.00000
+fShader=1.000
+zoom=13.29089
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=-0.28000
+dy=-0.32000
+warp=0.00909
+sx=1.00000
+sy=1.00000
+wave_r=1.000
+wave_g=1.000
+wave_b=1.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=1.000
+ib_size=0.000
+ib_r=1.000
+ib_g=0.000
+ib_b=0.000
+ib_a=1.000
+nMotionVectorsX=64.000
+nMotionVectorsY=1.248
+mv_dx=0.000
+mv_dy=0.000
+mv_l=5.000
+mv_r=1.000
+mv_g=1.000
+mv_b=0.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_init_1=zoom=1;
+per_frame_init_2=xpos=0;
+per_frame_init_3=ypos=0;
+per_pixel_1=da=.13133;//+sin(time/17) /30;
+per_pixel_2=nh=2;
+per_pixel_3=nh2=1;
+per_pixel_4=myx=(-int(x*nh)+x*nh-.4);
+per_pixel_5=myy=(-int(y*nh2)+y*nh2-.5);//+sin(time/11) /22);
+per_pixel_6=
+per_pixel_7=myx=sin(x*6.28+time/3.6)/3;
+per_pixel_8=myy=sin(y*6.28+time/q1/tan(time/300))/3;
+per_pixel_9=
+per_pixel_10=//myy = y*.5-.35;///+sin(time/8)/40;
+per_pixel_11=//myx = x*1-.5;
+per_pixel_12=dx = da*(1*myx*myy);
+per_pixel_13=dy = da*((myy*myy) - (myx*myx));
+warp_1=`shader_body
+warp_2=`{
+warp_3=`    float2 r = float2(1.0, 1.0);
+warp_4=`    
+warp_5=`    // First layer: spinning clockwise
+warp_6=`    float2 uv_rotated1 = uv - 0.5; // Center coordinates
+warp_7=`    float angle1 = time * 0.5; // Rotation speed (clockwise)
+warp_8=`    float cos_angle1 = cos(angle1);
+warp_9=`    float sin_angle1 = sin(angle1);
+warp_10=`    uv_rotated1 = float2(
+warp_11=`        uv_rotated1.x * cos_angle1 - uv_rotated1.y * sin_angle1,
+warp_12=`        uv_rotated1.x * sin_angle1 + uv_rotated1.y * cos_angle1
+warp_13=`    ) + 0.5; // Restore original coordinate space
+warp_14=`    
+warp_15=`    float2 p1 = (uv_rotated1 * 2.0 - r) / r.y;
+warp_16=`    float d1 = length(p1) - 0.5 + 0.01 / (p1.x - p1.y);
+warp_17=`    float o1 = 0.08 / abs(d1);
+warp_18=`    
+warp_19=`    // Second layer: spinning counterclockwise
+warp_20=`    float2 uv_rotated2 = uv - 0.5; // Center coordinates
+warp_21=`    float angle2 = -time * 0.5; // Rotation speed (counterclockwise)
+warp_22=`    float cos_angle2 = cos(angle2);
+warp_23=`    float sin_angle2 = sin(angle2);
+warp_24=`    uv_rotated2 = float2(
+warp_25=`        uv_rotated2.x * cos_angle2 - uv_rotated2.y * sin_angle2,
+warp_26=`        uv_rotated2.x * sin_angle2 + uv_rotated2.y * cos_angle2
+warp_27=`    ) + 0.5; // Restore original coordinate space
+warp_28=`    
+warp_29=`    float2 p2 = (uv_rotated2 * 2.0 - r) / r.y;
+warp_30=`    float d2 = length(p2) - 0.5 + 0.01 / (p2.x - p2.y);
+warp_31=`    float o2 = 0.08 / abs(d2);
+warp_32=`    
+warp_33=`    // Combine both layers
+warp_34=`    ret = float3(o1 + o2, o1 + o2, o1 + o2); // Additive blending
+warp_35=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`    ret = tex2D(sampler_main, uv).xyz;
+comp_4=`    ret = ret*1.5 - 0.1;
+comp_5=`
+comp_6=`    float4 g;
+comp_7=`    float3 d = float3(texsize.zw * 4, 0);
+comp_8=`    g.x = lum(GetBlur1(uv + d.xz));
+comp_9=`    g.y = lum(GetBlur1(uv - d.xz));
+comp_10=`    g.z = lum(GetBlur1(uv + d.zy));
+comp_11=`    g.w = lum(GetBlur1(uv - d.zy));
+comp_12=`    
+comp_13=`    ret *= 0.9;
+comp_14=`    ret.x += saturate(g.x-g.y)*5;
+comp_15=`    ret.z += saturate(g.y-g.x)*5;
+comp_16=`    //ret.xy += (g.xz-g.yw)*3;
+comp_17=`
+comp_18=`ret.x = GetBlur1(uv).x*5;
+comp_19=`//ret.z = GetBlur2(uv).z;
+comp_20=`//ret += float3(cos(time*3),0,0);
+comp_21=`ret -=0.1;
+comp_22=`}

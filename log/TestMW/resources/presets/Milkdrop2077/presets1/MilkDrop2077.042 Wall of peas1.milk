@@ -1,0 +1,194 @@
+MILKDROP_PRESET_VERSION=300
+PSVERSION=3
+PSVERSION_WARP=2
+PSVERSION_COMP=3
+[preset00]
+fRating=0.000
+fGammaAdj=1.000
+fDecay=0.940
+fVideoEchoZoom=0.498
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=2
+nWaveMode=7
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=0
+bSolarize=0
+bInvert=1
+fWaveAlpha=1.059
+fWaveScale=1.351
+fWaveSmoothing=0.630
+fWaveParam=0.000
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.620
+fWarpScale=1.846
+fZoomExponent=1.21000
+fShader=0.000
+zoom=1.05989
+rot=0.00000
+cx=0.550
+cy=0.580
+dx=0.00000
+dy=0.00000
+warp=0.00860
+sx=1.14989
+sy=1.09000
+wave_r=0.650
+wave_g=0.650
+wave_b=0.650
+wave_x=0.500
+wave_y=0.500
+ob_size=0.012
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=1.200
+ib_size=0.000
+ib_r=0.282
+ib_g=0.248
+ib_b=0.210
+ib_a=0.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.200
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_init_1=trel = rand(10);
+per_frame_init_2=index = rand(8);
+per_frame_init_3=index2 = rand(8);
+per_frame_init_4=avg = 0;
+per_frame_1=dec_med = pow (0.8, 30/fps);
+per_frame_2=dec_slow = pow (0.862, 30/fps);
+per_frame_3=beat = (bass + mid + treb)/3;
+per_frame_4=avg = avg*dec_slow + beat*(1-dec_slow);
+per_frame_5=is_beat = above(beat, 0.22+avg+peak) * above (time, t0+0.22);
+per_frame_6=t0 = is_beat*time + (1-is_beat)*t0;
+per_frame_7=peak = is_beat * beat + (1-is_beat)*peak*dec_med;
+per_frame_8=index = (index + is_beat) %8;
+per_frame_9=index2 = (index2 + is_beat*bnot(index))%8;
+per_frame_10=
+per_frame_11=q20 = avg;
+per_frame_12=q21 = beat;
+per_frame_13=q22 = peak;
+per_frame_14=q23 = (bass+mid+treb)-(bass_att+mid_att+treb_att);
+per_frame_15=q23 = beat - avg;
+per_frame_16=q24 = is_beat;
+per_frame_17=q27 = index;
+per_frame_18=q28 = index2;
+per_frame_19=q19 = index;
+per_frame_20=
+per_frame_21=k1 =  is_beat*equal(index,0);
+per_frame_22=p1 =  k1*(p1+1) + (1-k1)*p1;
+per_frame_23=p2 = dec_med * p2+ (1-dec_med)*p1;
+per_frame_24=rott = p2 * 3.330088212805/2;
+per_frame_25=q1 = cos(rott);
+per_frame_26=q2 = sin(rott);
+per_frame_27=
+per_frame_28=pulse = pulse*dec_slow+ (1-dec_slow)* peak;
+per_frame_29=winkel = winkel + pulse/fps*30;
+per_frame_30=q29 = winkel;
+per_frame_31=
+per_frame_32=trel = trel + (bass_+mid_+treb_)/fps/3;
+per_frame_33=trel_ = trel_*dec_med + (1-dec_med)*trel;
+per_frame_34=q30 = trel_;
+per_frame_35=q31 = sin(trel_/4)*12;
+per_frame_36=
+per_frame_37=dec_slow = pow (0.79, 30/fps);
+per_frame_38=bass_ = bass_*dec_slow + (1-dec_slow)*bass_att;
+per_frame_39=mid_  = mid_*dec_slow + (1-dec_slow)*(mid_att);
+per_frame_40=treb_ = treb_*dec_slow + (1-dec_slow)*treb_att;
+per_frame_41=
+per_frame_42=q12 = sigmoid((bass_-treb_)*4,1); 
+per_frame_43=q13 = sigmoid((mid_-bass_)*4,1);
+per_frame_44=q14 = sigmoid((treb_-mid_)*4,1);
+per_frame_45=
+per_frame_46=q15 = above(q20,1.59); //stopngo
+per_frame_47=
+per_frame_48=rota = rota*dec_med + (1-dec_med)*q22/2;
+per_frame_49=zoom = 0.76 + 0.046*q1*50/fps;
+per_frame_50=cx = 0.44+0.25*sin(trel_*12) * bnot(q28%3);
+per_frame_51=cy = 0.38+0.49*cos(trel_*6) * bnot(q28%3);
+per_frame_52=rot = (0.032*q1+rota/8*q2)*50/fps;
+per_frame_53=dx = 0.0144*q1*50/fps*avg;
+per_frame_54=dy = 0.014*q2*50/fps*avg;
+per_frame_55=
+warp_1=`shader_body
+warp_2=`{
+warp_3=`    // PAINTERLY EFFECT:
+warp_4=`    float2 t = 0.0005 + 0.045*saturate(float2(bass,treb)-1);
+warp_5=`    float2 uv2 = uv;
+warp_6=`    float2 delta2 = texsize.zw*float2(1,1);
+warp_7=`    float3 blurry_color = tex2D( sampler_main, 
+warp_8=`        lerp(uv,uv_orig,-1) + delta2 ).xyz;
+warp_9=`    float2 v = (blurry_color.xy-0.37) * t;
+warp_10=`      //uv2 += v;
+warp_11=`      // instead, add a rotated version:
+warp_12=`      uv2.x += v.x*q1 + v.y*q2;
+warp_13=`      uv2.y += v.x*q2 - v.y*q1;
+warp_14=`
+warp_15=`    // sample previous frame
+warp_16=`    ret = tex2D( sampler_main, uv2 ).xyz;
+warp_17=`
+warp_18=`    // darken over time
+warp_19=`    ret -= 0.006;    
+warp_20=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`
+comp_4=`
+comp_5=`    ret = tex2D(sampler_main, uv).xyz;
+comp_6=`    float L = lum(ret);
+comp_7=`    float bw = saturate(cos(L*17 + 3 + uv.x*30)*3 - 21);
+comp_8=`    float L2 = lum(GetBlur1(uv));
+comp_9=`    float bw2 = saturate(cos(L*17 + 3 + uv.x*30)*3 - 2.7);
+comp_10=`
+comp_11=`    ret = float3(2.6,2.8,2.6)*ret.x +
+comp_12=`          float3(0.1,0.5,0.4)*ret.y + 
+comp_13=`          float3(1.6,1.2,2.6)*ret.z;
+comp_14=`    ret *= 0.17;
+comp_15=`
+comp_16=`    ret = ret*ret * (1 + bw2*4);
+comp_17=`
+comp_18=`//MilkDrop3 Color Mode:
+comp_19=`ret /= float3(0.6,1.1,0.3);
+comp_20=`}
+
+[SPRITE1_BEGIN]
+SpriteName=sprites\peas.png
+SpriteColorKey=0x000000
+SpriteLayer=1
+SpriteBlend=4
+SpriteAlpha=1.000000
+SpriteBurn=1
+SpriteX=-1.305005
+SpriteY=0.200000
+SpriteSX=-0.200000
+SpriteSY=-0.200000
+SpriteRot=1.000000
+SpriteSpeed=0.100000
+SpriteRepeatX=1.000000
+SpriteRepeatY=1.000000
+code_1=new_scale=1.0+0.05*bass_att;
+code_2=sx=new_scale;
+code_3=sy=new_scale;
+code_4=a=1.0;
+[SPRITE1_END]

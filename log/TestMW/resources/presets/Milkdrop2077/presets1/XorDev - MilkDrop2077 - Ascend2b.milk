@@ -1,0 +1,166 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=2
+[preset00]
+fRating=5.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=7
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.986
+fWaveScale=2.727
+fWaveSmoothing=0.690
+fWaveParam=0.000
+fModWaveAlphaStart=2.000
+fModWaveAlphaEnd=0.296
+fWarpAnimSpeed=30.965
+fWarpScale=2.572
+fZoomExponent=2.00672
+fShader=1.000
+zoom=1.00901
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.00054
+sx=1.00000
+sy=1.00000
+wave_r=1.000
+wave_g=1.000
+wave_b=1.000
+wave_x=0.070
+wave_y=0.941
+ob_size=0.000
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.000
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=51.840
+nMotionVectorsY=39.840
+mv_dx=0.000
+mv_dy=0.000
+mv_l=5.800
+mv_r=0.000
+mv_g=0.000
+mv_b=0.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+shapecode_0_enabled=1
+shapecode_0_sides=100
+shapecode_0_additive=0
+shapecode_0_thickOutline=0
+shapecode_0_textured=0
+shapecode_0_num_inst=16
+shapecode_0_x=0.500
+shapecode_0_y=0.590
+shapecode_0_rad=0.12201
+shapecode_0_ang=0.00000
+shapecode_0_tex_ang=0.00000
+shapecode_0_tex_zoom=0.78000
+shapecode_0_r=0.820
+shapecode_0_g=1.190
+shapecode_0_b=1.240
+shapecode_0_a=1.010
+shapecode_0_r2=0.860
+shapecode_0_g2=1.200
+shapecode_0_b2=1.070
+shapecode_0_a2=0.840
+shapecode_0_border_r=0.000
+shapecode_0_border_g=0.000
+shapecode_0_border_b=0.000
+shapecode_0_border_a=0.100
+shape_0_per_frame1=x = 0.5+0.23*if(equal(instance,0),1,if(equal(instance,2),1,-1))*sin(time+0.785*instance);
+shape_0_per_frame2=y = 0.5+0.23*if(equal(instance,0),1,if(equal(instance,2),1,-1))*cos(time+0.785*instance);
+shape_0_per_frame3=ang = sin(time);
+shape_0_per_frame4=r = q2;
+shape_0_per_frame5=g = q3;
+shape_0_per_frame6=b = q1;
+shape_0_per_frame7=r2 = q3;
+shape_0_per_frame8=g2 = q1;
+shape_0_per_frame9=b2 = q2;
+per_frame_1=zoom = 1.01;
+per_frame_2=
+per_frame_3=q1 = time*0.01;
+warp_1=`shader_body{
+warp_2=`  
+warp_3=`    //Shader By XorDev (x.com/XorDev), ported to MilkDrop by MilkDrop2077
+warp_4=`    // Center coordinates and aspect ratio correction
+warp_5=`    float aspect = aspect.x / aspect.y;
+warp_6=`    uv = (uv.xy - 0.5) * float2(aspect, 1.0);
+warp_7=`    float4 o = float4(0,0,0,1.0);
+warp_8=`    
+warp_9=`    // Initialize variables
+warp_10=`    float i = 0.0, d, z = 0.0;
+warp_11=`    float3 s = normalize(float3(uv * 2.1, -1.0));
+warp_12=`    float3 p, c = abs(s);
+warp_13=`    
+warp_14=`    // Main raymarching loop (30 iterations)
+warp_15=`    for(i = 0.0; i < 10.0; i++) {
+warp_16=`        // Ray setup
+warp_17=`        p = z * s;
+warp_18=`        c /= c.y;
+warp_19=`        c.z += time;
+warp_20=`        p.z -= time;
+warp_21=`        
+warp_22=`        // Position manipulation
+warp_23=`        s = p + 6.0; // Equivalent to ++p
+warp_24=`        p.y = abs(fmod(p.y - 2.0, 4.0));
+warp_25=`        
+warp_26=`        // Distance estimation with complex pattern
+warp_27=`        float pattern = length(sin(p + p).xz + p.y * 0.1);
+warp_28=`        float wave = 0.1 * exp(sin(length(sin(c)) * 40.0 + p.z));
+warp_29=`        z += d = 0.01 + 0.15 * pattern + wave * length(p - s);
+warp_30=`        
+warp_31=`        // Color accumulation
+warp_32=`        o.rgb += (sin(p * 0.6) + 1.1) / d / z*2;
+warp_33=`    }
+warp_34=`    
+warp_35=`    // Tone mapping and final output
+warp_36=`    o = tanh(o / 50.0);
+warp_37=`    ret = float4(o.rgb, 1.0);
+warp_38=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`uv = 0.5 + (uv-0.5)*float2(1,-1);
+comp_4=`
+comp_5=`    float2 d = texsize.zw*4;
+comp_6=`    float3 dx = ( GetBlur1(uv+float2(1,0)*d)-GetBlur1(uv-float2(1,0)*d) );
+comp_7=`    float3 dy = ( GetBlur1(uv+float2(0,1)*d)-GetBlur1(uv-float2(0,1)*d) );
+comp_8=`
+comp_9=`
+comp_10=`float2 uv_x = uv - float2(dx.y,dy.y)*0.1;
+comp_11=`ret = GetBlur2(uv_x).x*float3(0,0,2);
+comp_12=`ret = lerp(ret,1.2,GetBlur1(uv_x).x);
+comp_13=`
+comp_14=`//MilkDrop3 Brightness Mode:
+comp_15=`ret *= 1;
+comp_16=`//MilkDrop3 Color Mode:
+comp_17=`ret /= float3(0.4,1.1,-0.4);
+comp_18=`}

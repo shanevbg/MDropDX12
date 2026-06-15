@@ -1,0 +1,279 @@
+MILKDROP_PRESET_VERSION=300
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+fRating=0.000
+fGammaAdj=1.000
+fDecay=0.940
+fVideoEchoZoom=0.498
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=2
+nWaveMode=8
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=0
+bSolarize=0
+bInvert=1
+fWaveAlpha=0.001
+fWaveScale=2.630
+fWaveSmoothing=0.360
+fWaveParam=0.000
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.620
+fWarpScale=1.846
+fZoomExponent=1.21000
+fShader=0.000
+zoom=1.05989
+rot=0.00000
+cx=0.550
+cy=0.580
+dx=0.00000
+dy=0.00000
+warp=0.00860
+sx=1.14989
+sy=1.09000
+wave_r=0.650
+wave_g=0.650
+wave_b=0.650
+wave_x=0.500
+wave_y=0.500
+ob_size=0.012
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=1.200
+ib_size=0.000
+ib_r=0.282
+ib_g=0.248
+ib_b=0.210
+ib_a=0.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.900
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+shapecode_0_enabled=1
+shapecode_0_sides=44
+shapecode_0_additive=0
+shapecode_0_thickOutline=0
+shapecode_0_textured=0
+shapecode_0_num_inst=1
+shapecode_0_x=0.500
+shapecode_0_y=0.500
+shapecode_0_rad=0.03347
+shapecode_0_ang=0.00000
+shapecode_0_tex_ang=0.00000
+shapecode_0_tex_zoom=1.00000
+shapecode_0_r=1.000
+shapecode_0_g=1.000
+shapecode_0_b=1.000
+shapecode_0_a=1.000
+shapecode_0_r2=1.000
+shapecode_0_g2=1.000
+shapecode_0_b2=1.000
+shapecode_0_a2=0.000
+shapecode_0_border_r=1.000
+shapecode_0_border_g=1.000
+shapecode_0_border_b=1.000
+shapecode_0_border_a=0.000
+shape_0_init1=fran = 1;
+shape_0_init2=xs = 1;
+shape_0_init3=ys = 1;
+shape_0_init4=xm = 0.5;
+shape_0_init5=ym = 0.5;
+shape_0_per_frame1=xs = xs*(1 - 2*above(xm,0.99) - 2*below(xm,0.01));
+shape_0_per_frame2=ys = ys*(1 - 2*above(ym,0.99) - 2*below(ym,0.01));
+shape_0_per_frame3=
+shape_0_per_frame4=xm = xm + 0.03*xs*(sin(time*0.53)*0.4 + 0.6*cos(time*0.62));
+shape_0_per_frame5=ym = ym + 0.03*ys*(sin(time*0.29)*0.5 + 0.5*cos(time*0.78));
+shape_0_per_frame6=
+shape_0_per_frame7=x = xm;
+shape_0_per_frame8=y = ym;
+shape_0_per_frame9=
+shape_0_per_frame10=r = 0.5 + 0.25*sin(x*12) + 0.25*sin(y*3);
+shape_0_per_frame11=g = 0.5 + 0.25*sin(x*7) + 0.25*sin(y*32);
+shape_0_per_frame12=b = 0.5 + 0.25*sin(x*21) + 0.25*sin(y*16);
+shape_0_per_frame13=r2 = r; g2 = g; b2 = b;
+shape_0_per_frame14=rad = 0.2*(bass_att + mid_att + treb_att)/3;
+shapecode_1_enabled=1
+shapecode_1_sides=44
+shapecode_1_additive=0
+shapecode_1_thickOutline=0
+shapecode_1_textured=0
+shapecode_1_num_inst=1
+shapecode_1_x=0.500
+shapecode_1_y=0.500
+shapecode_1_rad=0.03347
+shapecode_1_ang=0.00000
+shapecode_1_tex_ang=0.00000
+shapecode_1_tex_zoom=1.00000
+shapecode_1_r=1.000
+shapecode_1_g=1.000
+shapecode_1_b=1.000
+shapecode_1_a=1.000
+shapecode_1_r2=1.000
+shapecode_1_g2=1.000
+shapecode_1_b2=1.000
+shapecode_1_a2=0.000
+shapecode_1_border_r=1.000
+shapecode_1_border_g=1.000
+shapecode_1_border_b=1.000
+shapecode_1_border_a=0.000
+shape_1_init1=fran = 1;
+shape_1_init2=xs = 1;
+shape_1_init3=ys = 1;
+shape_1_init4=xm = 0.5;
+shape_1_init5=ym = 0.5;
+shape_1_per_frame1=xs = xs*(1 - 2*above(xm,0.99) - 2*below(xm,0.01));
+shape_1_per_frame2=ys = ys*(1 - 2*above(ym,0.99) - 2*below(ym,0.01));
+shape_1_per_frame3=
+shape_1_per_frame4=xm = xm + 0.03*xs*(sin(time*0.63)*0.9 + 0.3*cos(time*0.62));
+shape_1_per_frame5=ym = ym + 0.04*ys*(sin(time*0.129)*0.7 + 0.3*cos(time*0.58));
+shape_1_per_frame6=
+shape_1_per_frame7=x = xm;
+shape_1_per_frame8=y = ym;
+shape_1_per_frame9=
+shape_1_per_frame10=r = 0.5 + 0.25*sin(x*12) + 0.25*sin(y*3);
+shape_1_per_frame11=g = 0.5 + 0.25*sin(x*6) + 0.25*sin(y*32);
+shape_1_per_frame12=b = 0.5 + 0.25*sin(x*21) + 0.25*sin(y*16);
+shape_1_per_frame13=r2 = r; g2 = g; b2 = b;
+shape_1_per_frame14=rad = 0.2*(bass_att + mid_att + treb_att)/3;
+per_frame_init_1=trel = rand(10);
+per_frame_init_2=index = rand(8);
+per_frame_init_3=index2 = rand(8);
+per_frame_init_4=avg = 0;
+per_frame_1=dec_med = pow (0.8, 30/fps);
+per_frame_2=dec_slow = pow (0.862, 30/fps);
+per_frame_3=beat = (bass + mid + treb)/3;
+per_frame_4=avg = avg*dec_slow + beat*(1-dec_slow);
+per_frame_5=is_beat = above(beat, 0.22+avg+peak) * above (time, t0+0.22);
+per_frame_6=t0 = is_beat*time + (1-is_beat)*t0;
+per_frame_7=peak = is_beat * beat + (1-is_beat)*peak*dec_med;
+per_frame_8=index = (index + is_beat) %8;
+per_frame_9=index2 = (index2 + is_beat*bnot(index))%8;
+per_frame_10=
+per_frame_11=q20 = avg;
+per_frame_12=q21 = beat;
+per_frame_13=q22 = peak;
+per_frame_14=q23 = (bass+mid+treb)-(bass_att+mid_att+treb_att);
+per_frame_15=q23 = beat - avg;
+per_frame_16=q24 = is_beat;
+per_frame_17=q27 = index;
+per_frame_18=q28 = index2;
+per_frame_19=q19 = index;
+per_frame_20=
+per_frame_21=k1 =  is_beat*equal(index,0);
+per_frame_22=p1 =  k1*(p1+1) + (1-k1)*p1;
+per_frame_23=p2 = dec_med * p2+ (1-dec_med)*p1;
+per_frame_24=rott = p2 * 3.330088212805/2;
+per_frame_25=q1 = cos(rott);
+per_frame_26=q2 = sin(rott);
+per_frame_27=
+per_frame_28=pulse = pulse*dec_slow+ (1-dec_slow)* peak;
+per_frame_29=winkel = winkel + pulse/fps*30;
+per_frame_30=q29 = winkel;
+per_frame_31=
+per_frame_32=trel = trel + (bass_+mid_+treb_)/fps/3;
+per_frame_33=trel_ = trel_*dec_med + (1-dec_med)*trel;
+per_frame_34=q30 = trel_;
+per_frame_35=q31 = sin(trel_/4)*12;
+per_frame_36=
+per_frame_37=dec_slow = pow (0.79, 30/fps);
+per_frame_38=bass_ = bass_*dec_slow + (1-dec_slow)*bass_att;
+per_frame_39=mid_  = mid_*dec_slow + (1-dec_slow)*(mid_att);
+per_frame_40=treb_ = treb_*dec_slow + (1-dec_slow)*treb_att;
+per_frame_41=
+per_frame_42=q12 = sigmoid((bass_-treb_)*4,1); 
+per_frame_43=q13 = sigmoid((mid_-bass_)*4,1);
+per_frame_44=q14 = sigmoid((treb_-mid_)*4,1);
+per_frame_45=
+per_frame_46=q15 = above(q20,1.59); //stopngo
+per_frame_47=
+per_frame_48=rota = rota*dec_med + (1-dec_med)*q22/2;
+per_frame_49=zoom = 0.76 + 0.046*q1*50/fps;
+per_frame_50=cx = 0.44+0.25*sin(trel_*12) * bnot(q28%3);
+per_frame_51=cy = 0.38+0.49*cos(trel_*6) * bnot(q28%3);
+per_frame_52=rot = (0.032*q1+rota/8*q2)*50/fps;
+per_frame_53=dx = 0.0144*q1*50/fps*avg;
+per_frame_54=dy = 0.014*q2*50/fps*avg;
+per_frame_55=
+warp_1=`shader_body {
+warp_2=`float corr = texsize.xy*texsize_noise_lq.zw;
+warp_3=`float2 uv1 = float2(uv.x-0.5,uv.y-0.5);//*aspect.xy;
+warp_4=`
+warp_5=`float3 noiseVal =.0*(tex2D(sampler_noise_lq, uv*.3+.01*rand_frame));
+warp_6=`float3 Feedback = GetBlur1(1-uv);
+warp_7=`
+warp_8=`float2 zz = uv1 *texsize.xy *.01;
+warp_9=`zz =mul(zz,float2x2(_qa));
+warp_10=`zz = zz.yx;
+warp_11=`float2 h1 =  cos(zz);
+warp_12=`
+warp_13=`uv += h1*texsize.zw * 12;
+warp_14=`
+warp_15=`float3 crisp = tex2D(sampler_main,uv);
+warp_16=`
+warp_17=`ret = crisp+noiseVal-.01;
+warp_18=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`float2 uvo = uv;
+comp_4=`float2 d = texsize.zw*3;
+comp_5=`float3 dx = GetBlur1(uv + float2(1,0)*d) - GetBlur1(uv - float2(1,0)*d);
+comp_6=`float3 dy = GetBlur1(uv + float2(0,1)*d) - GetBlur1(uv - float2(0,1)*d);
+comp_7=`uv+=float2(dx.y,dy.y)*rad*0.3;
+comp_8=`
+comp_9=`d = texsize.zw*16;
+comp_10=`dx = GetBlur2(uv + float2(1,0)*d) - GetBlur2(uv - float2(1,0)*d);
+comp_11=`dy = GetBlur2(uv + float2(0,1)*d) - GetBlur2(uv - float2(0,1)*d);
+comp_12=`
+comp_13=`ret = lerp(ret, (1-GetPixel(uv).x)*float3(1.5,2.5,3),saturate(GetBlur1(uv).x*2)*0.5);
+comp_14=`
+comp_15=`ret = lerp(ret*rad,float3(1,0.75,0),(((dy+dx).z*0.43+0.5)*GetBlur2(uv+float2(dx.z,dy.z)*texsize.zw*32).z));
+comp_16=`
+comp_17=`ret = lerp(ret,float3(1.5,2,3),GetPixel(uvo).y*(0.4-rad*0.7));
+comp_18=`
+comp_19=`//MilkDrop3 Color Mode:
+comp_20=`ret /= float3(0.4,0.6,0.5);
+comp_21=`}
+
+[SPRITE1_BEGIN]
+SpriteName=sprites\peas.png
+SpriteColorKey=0x000000
+SpriteLayer=1
+SpriteBlend=4
+SpriteAlpha=1.000000
+SpriteBurn=1
+SpriteX=-1.305005
+SpriteY=0.200000
+SpriteSX=-0.200000
+SpriteSY=-0.200000
+SpriteRot=1.000000
+SpriteSpeed=0.100000
+SpriteRepeatX=1.000000
+SpriteRepeatY=1.000000
+code_1=new_scale=1.0+0.05*bass_att;
+code_2=sx=new_scale;
+code_3=sy=new_scale;
+code_4=a=1.0;
+[SPRITE1_END]

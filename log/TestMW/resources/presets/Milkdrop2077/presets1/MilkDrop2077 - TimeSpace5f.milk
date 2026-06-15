@@ -1,0 +1,157 @@
+MILKDROP_PRESET_VERSION=300
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+fRating=5.000
+fGammaAdj=1.980
+fDecay=0.500
+fVideoEchoZoom=1.000
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=3
+nWaveMode=0
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=0
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.800
+fWaveScale=1.000
+fWaveSmoothing=0.750
+fWaveParam=0.000
+fModWaveAlphaStart=0.750
+fModWaveAlphaEnd=0.950
+fWarpAnimSpeed=1.000
+fWarpScale=1.000
+fZoomExponent=1.00000
+fShader=0.000
+zoom=1.00000
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=1.00000
+sx=1.00000
+sy=1.00000
+wave_r=0.000
+wave_g=0.000
+wave_b=0.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.005
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.010
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.900
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.000
+per_frame_init_1=bassc=0;
+per_frame_init_2=midc=0;
+per_frame_init_3=mcount=0;
+per_frame_init_4=bcount=0;
+per_frame_1=decay = .9;
+per_frame_2=warp = 0;
+per_frame_3=
+per_frame_4=bassc = if(above(bass,bassc),bassc + bass*.07,bassc-.03);
+per_frame_5=midc = if(above(mid,midc),midc + mid*.07,midc-.03);
+per_frame_6=
+per_frame_7=q1 = bassc/32;
+per_frame_8=q2 = midc/32;
+per_pixel_1=zoom = pow(rad-tan(25),1);
+warp_1=`#define sampler_pic sampler_Pattern_007
+warp_2=`sampler2D sampler_pic;
+warp_3=`
+warp_4=`shader_body
+warp_5=`{
+warp_6=`    ret = tex2D( sampler_main, uv ).xyz;
+warp_7=`
+warp_8=`    // ERROR DIFFUSION DITHER - looks great
+warp_9=`    float2 dither_uv = uv_orig*texsize.xy*texsize_noise_lq.zw + rand_frame.xy;
+warp_10=`    ret += (tex2D(sampler_noise_lq, dither_uv).xyz-0.5)/256.0*1;
+warp_11=`
+warp_12=`    // mix in img...
+warp_13=`    float3 pic = tex2D(sampler_pic, uv_orig*aspect.xy).xyz;
+warp_14=`    float lum = lum(pic);
+warp_15=`    float use_it = abs(lum*0.8+0.1 - (0.5+roam_cos.y*0.25));
+warp_16=`    float LFNoise = tex2D(sampler_noise_lq, uv*0.1 + time*0.01).x*6-2;
+warp_17=`    use_it = saturate(1 - use_it*(3+9*rand_preset.x) - LFNoise);
+warp_18=`    ret = lerp(ret, pic, use_it.xxx);
+warp_19=`
+warp_20=`    // darken over time
+warp_21=`    //ret -= 0.004;
+warp_22=`    //ret *= 0.99;
+warp_23=`    ret *= 0.97 + 0.03*saturate( length(uv - uv_orig)*200 );  // center only
+warp_24=`}
+warp_25=`
+comp_1=`float a,b,c;
+comp_2=`shader_body
+comp_3=`{
+comp_4=`float2 uv2 = uv;
+comp_5=`if(uv2.x >= 0.5) {uv2.x = 1-uv2.x;}
+comp_6=`if(uv2.y >= 0.5) {uv2.y = 1-uv2.y;}
+comp_7=`
+comp_8=`//float1 cs = cos(0.25*3.14159);
+comp_9=`//float1 sn = sin(0.278*3.424333);
+comp_10=`//float2 uv3 = uv2;
+comp_11=`//uv2.x = uv3.x * cs - uv3.y * sn;
+comp_12=`//uv2.y = uv3.x * sn + uv3.y * cs;
+comp_13=`
+comp_14=`uv.x=uv2.x;
+comp_15=`uv.y=uv2.y;
+comp_16=`
+comp_17=`
+comp_18=`    float3 base = GetBlur3(uv) + GetBlur2(uv) + GetBlur1(uv) + tex2D(sampler_main, uv)*0.886 - 0.466 ;
+comp_19=`a =base.x/12;b = base.y/8; c = base.x/3;
+comp_20=`c = c + b + a-b;
+comp_21=`a = a + c + a*c;
+comp_22=`base = 0.2+c;
+comp_23=`ret = base*(0.552-base)*(1-base)*2*float3(0.55,1.688,2.25) + pow(base,2)*float3(2.29,1.688,1.74); //MilkDrop2077 color mod
+comp_24=`//ret.xy = ret.yx;
+comp_25=`ret = ret*(1-ret)*4; //MilkDrop2077 solarize effect
+comp_26=`//MilkDrop3 Burn Mode:
+comp_27=`ret = lerp(ret,2,GetPixel(uv).z*1.36);
+comp_28=`}
+
+[SPRITE1_BEGIN]
+SpriteName=sprites\lazer1.jpg
+SpriteColorKey=0x000000
+SpriteLayer=1
+SpriteBlend=5
+SpriteAlpha=1.000000
+SpriteBurn=1
+SpriteX=0.000000
+SpriteY=0.000000
+SpriteSX=0.340000
+SpriteSY=0.340000
+SpriteRot=1.000000
+SpriteSpeed=0.100000
+SpriteRepeatX=1.000000
+SpriteRepeatY=1.000000
+[SPRITE1_END]

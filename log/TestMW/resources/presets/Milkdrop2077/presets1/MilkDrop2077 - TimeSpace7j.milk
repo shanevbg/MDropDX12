@@ -1,0 +1,251 @@
+MILKDROP_PRESET_VERSION=300
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+fRating=5.000
+fGammaAdj=1.980
+fDecay=0.500
+fVideoEchoZoom=1.000
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=3
+nWaveMode=0
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=0
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.800
+fWaveScale=0.010
+fWaveSmoothing=0.750
+fWaveParam=0.000
+fModWaveAlphaStart=0.750
+fModWaveAlphaEnd=0.950
+fWarpAnimSpeed=1.645
+fWarpScale=1.221
+fZoomExponent=0.32546
+fShader=0.000
+zoom=0.14508
+rot=0.00000
+cx=0.500
+cy=0.860
+dx=0.60000
+dy=-1.00000
+warp=1.95131
+sx=1.00001
+sy=0.99999
+wave_r=1.000
+wave_g=1.000
+wave_b=1.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=0.055
+ob_g=0.050
+ob_b=0.030
+ob_a=0.400
+ib_size=0.000
+ib_r=1.000
+ib_g=1.000
+ib_b=1.000
+ib_a=0.070
+nMotionVectorsX=12.000
+nMotionVectorsY=9.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.900
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.000
+wavecode_0_enabled=1
+wavecode_0_samples=512
+wavecode_0_sep=0
+wavecode_0_bSpectrum=0
+wavecode_0_bUseDots=0
+wavecode_0_bDrawThick=0
+wavecode_0_bAdditive=0
+wavecode_0_scaling=100.00000
+wavecode_0_smoothing=0.00000
+wavecode_0_r=0.800
+wavecode_0_g=0.800
+wavecode_0_b=1.000
+wavecode_0_a=1.000
+wave_0_per_point1=t1=50*sample;
+wave_0_per_point2=t2=.5*sample;
+wave_0_per_point3=
+wave_0_per_point4=ax= .4*sin(t1-t2)*sin(t2-t1);
+wave_0_per_point5=ay= .3*cos(t2+t1)*cos(t2+q2);
+wave_0_per_point6=
+wave_0_per_point7=bx= .4*sin(t1+t2)*sin(3+t2+t1);
+wave_0_per_point8=by= .3*cos(t2+t1-q1);
+wave_0_per_point9=
+wave_0_per_point10=ox=.3*ay+by *sample;
+wave_0_per_point11=oy= - ax*bx;
+wave_0_per_point12=oz= 0;
+wave_0_per_point13=
+wave_0_per_point14=xang = 0;
+wave_0_per_point15=zang = q1;
+wave_0_per_point16=yang = 0;
+wave_0_per_point17=
+wave_0_per_point18=mx = ox*cos(zang) - oy*sin(zang);
+wave_0_per_point19=my = ox*sin(zang) + oy*cos(zang);
+wave_0_per_point20=ox = mx;
+wave_0_per_point21=oy = my;
+wave_0_per_point22=mx = ox*cos(yang) + oz*sin(yang);
+wave_0_per_point23=mz = ox*sin(yang) + oz*cos(yang);
+wave_0_per_point24=ox = mx;
+wave_0_per_point25=oz = mz;
+wave_0_per_point26=my = oy*cos(xang) - oz*sin(xang);
+wave_0_per_point27=mz = oy*sin(xang) + oz*cos(xang);
+wave_0_per_point28=oy = my;
+wave_0_per_point29=oz = mz- 1+.2*sin(2*q1);
+wave_0_per_point30=
+wave_0_per_point31=x = ox/oz + 0.5;
+wave_0_per_point32=y = oy/oz + 0.5;
+wavecode_1_enabled=1
+wavecode_1_samples=512
+wavecode_1_sep=0
+wavecode_1_bSpectrum=0
+wavecode_1_bUseDots=0
+wavecode_1_bDrawThick=0
+wavecode_1_bAdditive=0
+wavecode_1_scaling=1.00000
+wavecode_1_smoothing=0.50000
+wavecode_1_r=0.800
+wavecode_1_g=0.800
+wavecode_1_b=1.000
+wavecode_1_a=1.000
+wave_1_per_point1=t1=50*sample;
+wave_1_per_point2=t2=.5*sample;
+wave_1_per_point3=;
+wave_1_per_point4=
+wave_1_per_point5=ax= .4*sin(t1-t2)*sin(t2-t1);
+wave_1_per_point6=ay= .3*cos(t2+t1)*cos(t2+q2);
+wave_1_per_point7=
+wave_1_per_point8=bx= .4*sin(t1+t2)*sin(3+t2+t1);
+wave_1_per_point9=by= .3*cos(t2+t1-q1);
+wave_1_per_point10=
+wave_1_per_point11=ox=.3*ay+by *sample;
+wave_1_per_point12=oy=  ax*bx;
+wave_1_per_point13=oz= 0;
+wave_1_per_point14=
+wave_1_per_point15=xang = 0;
+wave_1_per_point16=zang = q1;
+wave_1_per_point17=yang = 0;
+wave_1_per_point18=
+wave_1_per_point19=mx = ox*cos(zang) - oy*sin(zang);
+wave_1_per_point20=my = ox*sin(zang) + oy*cos(zang);
+wave_1_per_point21=ox = mx;
+wave_1_per_point22=oy = my;
+wave_1_per_point23=mx = ox*cos(yang) + oz*sin(yang);
+wave_1_per_point24=mz = ox*sin(yang) + oz*cos(yang);
+wave_1_per_point25=ox = mx;
+wave_1_per_point26=oz = mz;
+wave_1_per_point27=my = oy*cos(xang) - oz*sin(xang);
+wave_1_per_point28=mz = oy*sin(xang) + oz*cos(xang);
+wave_1_per_point29=oy = my;
+wave_1_per_point30=oz = mz- 1+.2*sin(2*q1);
+wave_1_per_point31=
+wave_1_per_point32=x = ox/oz + 0.5;
+wave_1_per_point33=y = oy/oz + 0.5;
+per_frame_1=decay=.6;
+per_frame_2=
+per_frame_3=q5=aspectx;
+per_frame_4=q6=aspecty;
+per_frame_5=
+per_frame_6=t10=t10+2/fps;
+per_frame_7=t10=t10*above(50,t10);
+per_frame_8=q10=t10;
+per_frame_9=
+per_frame_10=//// flexi's beat counter
+per_frame_11=bt1 = bt1*0.95 + sqr(bass*4)*30/fps;
+per_frame_12=mt1 = mt1*0.95 + sqr(mid*4)*30/fps;
+per_frame_13=bt2 = bt2 + bt1*0.005;
+per_frame_14=mt2 = mt2 + mt1*0.005;
+per_frame_15=q1 = mt2 *0.01;
+per_frame_16=q2 = bt2 *0.03;
+per_frame_17=
+per_frame_18=rot=.01*q1;
+per_frame_19=dx=-.01*q2;
+per_frame_20=dy=-.02*(q1+q2);
+warp_1=`#define tex sampler_spirale3
+warp_2=`sampler tex;
+warp_3=`
+warp_4=`shader_body
+warp_5=`{
+warp_6=`
+warp_7=`float2 xy1=0;
+warp_8=`float2 xymod=uv-.5;
+warp_9=`
+warp_10=`xy1.x=sin(time/13)*xymod.x-cos(time/13)*xymod.y/3;
+warp_11=`xy1.y=cos(time/13)*xymod.x+sin(time/13)*xymod.y;
+warp_12=`
+warp_13=`uv=xy1+aspect.xy;
+warp_14=`
+warp_15=`ret = tex2D(tex, uv ).xyz;
+warp_16=`
+warp_17=`}
+comp_1=`float a,b,c;
+comp_2=`shader_body
+comp_3=`{
+comp_4=`float2 uv2 = uv;
+comp_5=`if(uv2.x >= 0.5) {uv2.x = 1-uv2.x;}
+comp_6=`if(uv2.y >= 0.5) {uv2.y = 1-uv2.y;}
+comp_7=`
+comp_8=`//float1 cs = cos(0.25*3.14159);
+comp_9=`//float1 sn = sin(0.278*3.424333);
+comp_10=`//float2 uv3 = uv2;
+comp_11=`//uv2.x = uv3.x * cs - uv3.y * sn;
+comp_12=`//uv2.y = uv3.x * sn + uv3.y * cs;
+comp_13=`
+comp_14=`uv.x=uv2.x;
+comp_15=`uv.y=uv2.y;
+comp_16=`
+comp_17=`
+comp_18=`float3 base = GetBlur3(uv) + GetBlur2(uv) + GetBlur1(uv) + tex2D(sampler_main, uv)*0.886 - 0.466 ;
+comp_19=`a =base.x/12;b = base.y/8; c = base.x/3;
+comp_20=`c = c + b + a-b;
+comp_21=`a = a + c + a*c;
+comp_22=`base = 0.2+c;
+comp_23=`ret = base*(0.552-base)*(1-base)*2*float3(0.55,1.688,2.25) + pow(base,2)*float3(2.29,1.688,1.74); //MilkDrop2077 color mod
+comp_24=`//ret.xy = ret.yx;
+comp_25=`ret = ret*(1-ret)*3; //MilkDrop2077 solarize effect
+comp_26=`//MilkDrop3 Color Mode:
+comp_27=`ret /= float3(-2.7,1.8,2.8);
+comp_28=`//MilkDrop3 Burn Mode:
+comp_29=`ret = lerp(ret,2,GetPixel(uv).z*1.16);
+comp_30=`//MilkDrop3 Invert Mode:
+comp_31=`ret = 1 - ret;
+comp_32=`}
+
+[SPRITE1_BEGIN]
+SpriteName=sprites\lazer1.jpg
+SpriteColorKey=0x000000
+SpriteLayer=1
+SpriteBlend=5
+SpriteAlpha=1.000000
+SpriteBurn=1
+SpriteX=0.000000
+SpriteY=0.000000
+SpriteSX=0.340000
+SpriteSY=0.340000
+SpriteRot=1.000000
+SpriteSpeed=0.100000
+SpriteRepeatX=1.000000
+SpriteRepeatY=1.000000
+[SPRITE1_END]

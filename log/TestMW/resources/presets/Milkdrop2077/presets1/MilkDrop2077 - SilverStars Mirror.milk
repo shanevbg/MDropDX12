@@ -1,0 +1,183 @@
+MILKDROP_PRESET_VERSION=300
+PSVERSION=3
+PSVERSION_WARP=0
+PSVERSION_COMP=3
+[preset00]
+fRating=3.000
+fGammaAdj=2.000
+fDecay=0.925
+fVideoEchoZoom=2.000
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=0
+nWaveMode=2
+bAdditiveWaves=0
+bWaveDots=1
+bWaveThick=0
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=0
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.001
+fWaveScale=0.012
+fWaveSmoothing=0.900
+fWaveParam=0.000
+fModWaveAlphaStart=0.750
+fModWaveAlphaEnd=0.950
+fWarpAnimSpeed=1.000
+fWarpScale=1.000
+fZoomExponent=1.00000
+fShader=0.000
+zoom=1.00000
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=1.00000
+sy=1.00000
+wave_r=0.500
+wave_g=0.400
+wave_b=0.300
+wave_x=0.500
+wave_y=0.500
+ob_size=0.005
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=1.000
+ib_size=0.000
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=3.000
+nMotionVectorsY=2.000
+mv_dx=0.020
+mv_dy=-0.020
+mv_l=0.150
+mv_r=0.490
+mv_g=0.480
+mv_b=0.300
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+shapecode_0_enabled=1
+shapecode_0_sides=9
+shapecode_0_additive=0
+shapecode_0_thickOutline=1
+shapecode_0_textured=1
+shapecode_0_num_inst=3
+shapecode_0_x=0.500
+shapecode_0_y=0.500
+shapecode_0_rad=1.06779
+shapecode_0_ang=0.75398
+shapecode_0_tex_ang=0.00000
+shapecode_0_tex_zoom=0.77977
+shapecode_0_r=1.000
+shapecode_0_g=1.000
+shapecode_0_b=1.000
+shapecode_0_a=1.000
+shapecode_0_r2=1.000
+shapecode_0_g2=1.000
+shapecode_0_b2=1.000
+shapecode_0_a2=0.000
+shapecode_0_border_r=1.000
+shapecode_0_border_g=1.000
+shapecode_0_border_b=1.000
+shapecode_0_border_a=0.000
+shape_0_per_frame1=ang=sin(q1*0.25);
+shape_0_per_frame2=x=sin(q1*0.5) * 0.05 + 0.5;
+shape_0_per_frame3=y=cos(q1*0.63)* 0.05 + 0.5
+per_frame_1=warp=0;
+per_frame_2=wave_a=0;
+per_frame_3=zoom=.995;
+per_frame_4=
+per_frame_5=bt=bt+.02*bass_att;
+per_frame_6=q1=bt;
+per_frame_7=tt=tt+.02*treb_att;
+per_frame_8=q2=tt;
+per_frame_9=mt=mt+.02*mid_att;
+per_frame_10=q3=mt;
+comp_1=`float3 ret1, neu, blur;
+comp_2=`
+comp_3=`shader_body
+comp_4=`{
+comp_5=`float2 uv2;
+comp_6=`float ang2, c, s;
+comp_7=`uv -= 0.5;
+comp_8=`uv *= aspect.xy;    
+comp_9=`
+comp_10=`float2 tmp = uv;
+comp_11=`float dist = 1;
+comp_12=`float dista = 0;
+comp_13=`float inten = 1;
+comp_14=`float mask = 0;
+comp_15=`ret1 = 0;
+comp_16=`int anz = 4;
+comp_17=`float n = 1;
+comp_18=`//uv = mul(uv,float2x2(_qa));
+comp_19=`while (n <= anz) {
+comp_20=`    ang2 = 6.28*n/anz;
+comp_21=`    c = cos(ang2);
+comp_22=`    s = sin(ang2);
+comp_23=`    uv2.x =  uv.x*c - uv.y*s;
+comp_24=`    uv2.y =  uv.x*s + uv.y*c;
+comp_25=`
+comp_26=`    dist = 1-frac(.25*n+time/1); //evtl sqrt !
+comp_27=`    inten =  pow(dist,.3)*(1-dist)*2;
+comp_28=`//    inten =  (1-dist);
+comp_29=`
+comp_30=`    neu =  GetPixel (2*uv2*dist + 0.5 );
+comp_31=`    blur = GetBlur1 (2*uv2*dist + 0.54 );
+comp_32=`    neu += blur;
+comp_33=`//    neu *= (neu >= 0);
+comp_34=`  //  mask = 1-(neu*inten >= .1) * (dist < dista);
+comp_35=`    ret1 = ret1*.9+neu*inten;
+comp_36=`    dista = dist;
+comp_37=`n++;
+comp_38=`}
+comp_39=`
+comp_40=`float dz = ret1/2;
+comp_41=`float2 rs1 = uv*8 + time;
+comp_42=`
+comp_43=`float scale = 64;
+comp_44=`rs1 = rs1 + dz*scale*.4;
+comp_45=`
+comp_46=`float lava = tex2D (sampler_noise_hq,rs1/scale).x;
+comp_47=`lava = saturate(-abs (lava) + 1);
+comp_48=`float3 lay1 = saturate(float3 (lava,lava*(lava-0.55)*2,(lava-1)*16));
+comp_49=`
+comp_50=`ret = ret1*1 + 0*float3(0,0,.3)*rad + lay1*0;
+comp_51=`ret -=0.5;
+comp_52=`}
+
+[SPRITE1_BEGIN]
+SpriteName=sprites\burst3.png
+SpriteColorKey=0x000000
+SpriteLayer=1
+SpriteBlend=4
+SpriteAlpha=1.000000
+SpriteBurn=1
+SpriteX=0.000000
+SpriteY=0.000000
+SpriteSX=-0.260000
+SpriteSY=-0.260000
+SpriteRot=1.000000
+SpriteSpeed=0.200000
+SpriteRepeatX=1.000000
+SpriteRepeatY=1.000000
+code_1=x=0.5+0.008+0.083*sin(time*1.9);
+code_2=y=0.5+0.008+0.083*cos(time*1.9);
+code_3=a=1.0;
+[SPRITE1_END]

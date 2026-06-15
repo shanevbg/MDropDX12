@@ -1,0 +1,142 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=3
+[preset00]
+fRating=4.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=7
+bAdditiveWaves=1
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=1
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=3.200
+fWaveScale=1.768
+fWaveSmoothing=0.630
+fWaveParam=0.000
+fModWaveAlphaStart=0.710
+fModWaveAlphaEnd=1.300
+fWarpAnimSpeed=1.000
+fWarpScale=1.331
+fZoomExponent=1.00000
+fShader=1.000
+zoom=0.99951
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.01000
+sx=1.00000
+sy=1.00000
+wave_r=1.000
+wave_g=1.000
+wave_b=1.000
+wave_x=0.500
+wave_y=0.500
+ob_size=0.500
+ob_r=0.010
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.260
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=64.000
+nMotionVectorsY=1.248
+mv_dx=0.000
+mv_dy=0.000
+mv_l=5.000
+mv_r=1.000
+mv_g=1.000
+mv_b=0.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+warp_1=`shader_body
+warp_2=`{
+warp_3=`    // Define PI
+warp_4=`    #define PI 3.14159265359
+warp_5=`
+warp_6=`    // Adjust UVs
+warp_7=`    uv = uv * 2.0 - 1.0;
+warp_8=`   // uv *= uv.x / uv.y;
+warp_9=`
+warp_10=`    // Make a tube
+warp_11=`    float f = 3.0 / length(uv);
+warp_12=`
+warp_13=`    // Add the angle
+warp_14=`    f += atan2(uv.x, uv.y) / (PI / 12.0);
+warp_15=`
+warp_16=`    // Let's roll
+warp_17=`    f -= time;
+warp_18=`
+warp_19=`    // Make it black and white
+warp_20=`    f = 1.0 - clamp(sin(f * PI * 1.0) * dot(uv, uv) * texsize.y / 15.0 + 0.5, 0.0, 1.0);
+warp_21=`
+warp_22=`    // Add the darkness to the end of the tunnel
+warp_23=`    f *= sin(length(uv) - 0.05);
+warp_24=`
+warp_25=`    // Output the final color
+warp_26=`    ret = float4(f, f, f, 1.0);
+warp_27=`}
+comp_1=`sampler sampler_pw_noise_lq;
+comp_2=`float3 ret1;
+comp_3=`float2 zz, uv0, uv1,uv2,uv3,uv4;
+comp_4=`float smask;
+comp_5=`
+comp_6=`float aTan2(float y, float x) {float angle;	 float abs_y = abs(y);
+comp_7=`if (x >= 0) {float r = (x - abs_y) / (x + abs_y); angle = 1-r;} 
+comp_8=`else {float r = (x + abs_y) / (abs_y - x); angle = 3-r; }	
+comp_9=`angle = angle * .25;
+comp_10=`return y < 0 ? -angle : angle;}
+comp_11=`
+comp_12=`shader_body { ;
+comp_13=`uv0 = uv;
+comp_14=`uv1 = (uv-.5)*aspect.xy;
+comp_15=`
+comp_16=`uv1 = (uv - .5) * aspect.xy;    
+comp_17=`float stars = 0; float dist, inten;
+comp_18=`int n = 1;
+comp_19=`int anz = 3;
+comp_20=`while (n <= anz) {
+comp_21=`  dist = (1-frac(1.0/anz*n+.10*time)) * (1-.2*rad);
+comp_22=`  inten =  (1-dist);
+comp_23=`  uv3 = (uv1+float2(q1,q2));
+comp_24=`   uv4 = 64*dist*uv3;
+comp_25=`  smask = (tex2D (sampler_pw_noise_lq,uv4/256)).g-.89;
+comp_26=`  stars += max(stars,saturate(inten*(.1/length(abs(frac(uv4)-.5))*smask)));
+comp_27=`n++;
+comp_28=`}
+comp_29=`uv2 = uv1 - float2(q5,q6);
+comp_30=`float beat = (mid - .5) * (mid > 0.5)*2;
+comp_31=`float flash = .01/(length(uv2))*min(3,pow(beat,1));
+comp_32=`flash *= flash/(abs(frac(3*aTan2(uv2.x,uv2.y)+time*2)-.5)+.18);
+comp_33=`
+comp_34=`ret1 = max(GetPixel(uv0)*2,GetBlur2(uv0)*2);
+comp_35=`ret = saturate(.025/length(sin(uv3)))*float3(.4,.1,1);
+comp_36=`ret += saturate(pow(stars,2));
+comp_37=`ret *= saturate(1-2*lum(ret1));
+comp_38=`ret +=  ret1;
+comp_39=`ret += 2*saturate(flash)*float3(q10,q11,q12);
+comp_40=`    ret += saturate(GetBlur2(uv)*2.8 - 0.13)*float3(1.4,0.3,1.3);
+comp_41=`}
