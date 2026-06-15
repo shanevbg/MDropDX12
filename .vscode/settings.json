@@ -1,0 +1,14 @@
+{
+  "files.associations": {
+    "*.vcxproj": "xml",
+    "*.milk": "plaintext",
+    "*.ini": "ini"
+  },
+  "C_Cpp.default.configurationProvider": "ms-vscode.cpptools",
+  "C_Cpp.default.intelliSenseMode": "windows-msvc-x64",
+  "C_Cpp.default.cppStandard": "c++17",
+  "C_Cpp.errorSquiggles": "enabled",
+  "msbuild.configuration.architecture": "x64",
+  "git.ignoreLimitWarning": true,
+  "kilo-code.new.claudeCodeCompat": true
+}
