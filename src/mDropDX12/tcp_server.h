@@ -30,7 +30,9 @@ struct TcpClientConnection {
     TcpAuthState authState = TcpAuthState::Unauthenticated;
     std::string deviceId;
     std::string deviceName;
+    uint32_t peerIp = 0; // IPv4 sin_addr.s_addr (network byte order)
     ULONGLONG lastActivity = 0; // GetTickCount64
+    bool authRequiredSent = false; // avoid spamming AUTH_REQUIRED
     std::vector<uint8_t> readBuffer;
     std::vector<uint8_t> writeBuffer; // Pending outgoing data for WOULDBLOCK handling
 };
@@ -73,8 +75,11 @@ public:
 private:
     void AcceptNewClients();
     void ReadFromClients();
-    void ProcessFrames(TcpClientConnection& client);
+    void ProcessFrames(size_t clientIndex);
     void RemoveClient(size_t index);
+    size_t EvictConnectionsForDevice(const std::string& deviceId, size_t exceptIndex);
+    size_t EvictStaleUnauthFromPeer(uint32_t peerIp, size_t exceptIndex);
+    size_t EvictConnectionsFromPeer(uint32_t peerIp, size_t exceptIndex);
     void SendRaw(SOCKET sock, const uint8_t* data, int len);
     void CheckTimeouts();
 
@@ -92,6 +97,7 @@ private:
     std::wstring m_iniPath;
 
     static constexpr int RECV_BUFFER_SIZE = 65536;
-    static constexpr ULONGLONG CLIENT_TIMEOUT_MS = 60000;
+    static constexpr ULONGLONG UNAUTH_CLIENT_TIMEOUT_MS = 15000;
+    static constexpr ULONGLONG AUTH_CLIENT_TIMEOUT_MS = 120000;
     static constexpr size_t MAX_CLIENTS = 16;
 };

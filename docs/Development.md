@@ -465,9 +465,10 @@ The TCP server (`tcp_server.cpp`) provides network-based remote control for LAN 
 
 - **Port**: 9270 (default, configurable via INI)
 - **Framing**: 4-byte little-endian length prefix + UTF-8 payload
-- **Authentication**: Clients must send `AUTH|<pin>|<deviceId>|<deviceName>` first. Authorized devices are stored in INI `[AuthorizedDevices]` section.
-- **Responses**: `AUTH_OK`, `AUTH_FAIL|<reason>`, `PONG` (for `PING`), or command-specific responses routed to the requesting client via `g_respondingTcpClient`
-- **Limits**: 16 concurrent clients, 60-second inactivity timeout, 64KB receive buffer
+- **Authentication**: Clients must send `AUTH|<pin>|<deviceId>|<deviceName>` first. Authorized devices are stored in INI `[AuthorizedDevices]` section. Clients must re-send `AUTH` on every new TCP connection (including reconnects after app backgrounding).
+- **Responses**: `AUTH_OK`, `AUTH_PENDING`, `AUTH_FAIL|<reason>`, `AUTH_REQUIRED` (sent once when an unauthenticated client sends a non-AUTH command — client should re-send `AUTH`), `PONG` (for `PING`), or command-specific responses routed to the requesting client via `g_respondingTcpClient`
+- **Reconnect**: On `AUTH`, the server evicts prior connections from the same `deviceId` and from the same client IP (single-phone assumption). Stale unauthenticated sockets from the same IP are dropped immediately on accept.
+- **Limits**: 16 concurrent clients, 15-second unauthenticated / 120-second authenticated inactivity timeout, 64KB receive buffer
 - **mDNS**: Service advertised as `_milkwave._tcp` for automatic discovery
 
 **Command routing** (App.cpp `onMessage` handler): TCP does NOT process commands itself — it forwards them to the existing IPC path:

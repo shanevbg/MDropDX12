@@ -89,9 +89,13 @@ void TcpServer::AcceptNewClients() {
 
     TcpClientConnection conn;
     conn.socket = clientSocket;
+    conn.peerIp = clientAddr.sin_addr.s_addr;
     conn.lastActivity = GetTickCount64();
 
     std::lock_guard<std::mutex> lock(m_clientsMutex);
+    // Android often opens a fresh socket without cleanly closing the old one.
+    // Drop stale unauthenticated sockets from the same device IP immediately.
+    EvictStaleUnauthFromPeer(conn.peerIp, m_clients.size());
     m_clients.push_back(std::move(conn));
 }
 
@@ -106,7 +110,7 @@ void TcpServer::ReadFromClients() {
         if (bytesRead > 0) {
             c.lastActivity = GetTickCount64();
             c.readBuffer.insert(c.readBuffer.end(), buf, buf + bytesRead);
-            ProcessFrames(c);
+            ProcessFrames(i);
             ++i;
         } else if (bytesRead == 0) {
             RemoveClient(i);
@@ -121,14 +125,14 @@ void TcpServer::ReadFromClients() {
     }
 }
 
-void TcpServer::ProcessFrames(TcpClientConnection& client) {
-    while (client.readBuffer.size() >= 4) {
+void TcpServer::ProcessFrames(size_t clientIndex) {
+    while (clientIndex < m_clients.size() && m_clients[clientIndex].readBuffer.size() >= 4) {
+        auto& client = m_clients[clientIndex];
         uint32_t payloadLen = 0;
         memcpy(&payloadLen, client.readBuffer.data(), 4);
 
         if (payloadLen > 4 * 1024 * 1024) {
-            closesocket(client.socket);
-            client.socket = INVALID_SOCKET;
+            RemoveClient(clientIndex);
             return;
         }
 
@@ -139,30 +143,6 @@ void TcpServer::ProcessFrames(TcpClientConnection& client) {
 
         // Handle AUTH specially — evict stale connections from the same device
         if (utf8.rfind("AUTH|", 0) == 0) {
-            // Parse deviceId early for dedup (parts[2])
-            {
-                size_t p1 = utf8.find('|', 0);
-                size_t p2 = (p1 != std::string::npos) ? utf8.find('|', p1 + 1) : std::string::npos;
-                size_t p3 = (p2 != std::string::npos) ? utf8.find('|', p2 + 1) : std::string::npos;
-                if (p2 != std::string::npos) {
-                    std::string incomingId = utf8.substr(p2 + 1, (p3 != std::string::npos ? p3 : utf8.size()) - p2 - 1);
-                    if (!incomingId.empty()) {
-                        // Close any existing connections from this device
-                        for (size_t j = 0; j < m_clients.size(); ++j) {
-                            if (&m_clients[j] != &client && m_clients[j].deviceId == incomingId) {
-                                closesocket(m_clients[j].socket);
-                                m_clients[j].socket = INVALID_SOCKET;
-                            }
-                        }
-                        // Remove invalidated clients (iterate backward to keep indices stable)
-                        for (size_t j = m_clients.size(); j-- > 0; ) {
-                            if (m_clients[j].socket == INVALID_SOCKET && &m_clients[j] != &client) {
-                                m_clients.erase(m_clients.begin() + j);
-                            }
-                        }
-                    }
-                }
-            }
             std::vector<std::string> parts;
             size_t start = 0;
             for (size_t pos = 0; pos <= utf8.size(); ++pos) {
@@ -172,16 +152,37 @@ void TcpServer::ProcessFrames(TcpClientConnection& client) {
                 }
             }
             if (parts.size() >= 4) {
-                m_onAuthRequest(client, parts[1], parts[2], parts[3]);
+                const std::string& deviceId = parts[2];
+                const std::string& deviceName = parts[3];
+                if (!deviceId.empty()) {
+                    // Reconnect: close any prior socket for this authorized device.
+                    clientIndex = EvictConnectionsForDevice(deviceId, clientIndex);
+                }
+                // Single-phone assumption: drop any prior socket from this IP (even other deviceIds).
+                clientIndex = EvictConnectionsFromPeer(m_clients[clientIndex].peerIp, clientIndex);
+
+                auto& authClient = m_clients[clientIndex];
+                authClient.deviceId = deviceId;
+                authClient.deviceName = deviceName;
+                authClient.authRequiredSent = false;
+
+                if (m_onAuthRequest) {
+                    m_onAuthRequest(authClient, parts[1], deviceId, deviceName);
+                }
             } else {
-                SendTo(client, "AUTH_FAIL|MALFORMED");
+                SendTo(m_clients[clientIndex], "AUTH_FAIL|MALFORMED");
             }
             continue;
         }
-        client.authState = TcpAuthState::Authenticated;
 
-        // Drop all non-AUTH commands from unauthenticated clients
-        if (client.authState != TcpAuthState::Authenticated) continue;
+        // Drop non-AUTH commands from unauthenticated clients; prompt re-auth once.
+        if (client.authState != TcpAuthState::Authenticated) {
+            if (!client.authRequiredSent) {
+                client.authRequiredSent = true;
+                SendTo(client, "AUTH_REQUIRED");
+            }
+            continue;
+        }
 
         // Handle PING (authenticated only)
         if (utf8 == "PING") {
@@ -245,12 +246,54 @@ void TcpServer::CheckTimeouts() {
     ULONGLONG now = GetTickCount64();
     std::lock_guard<std::mutex> lock(m_clientsMutex);
     for (size_t i = 0; i < m_clients.size(); ) {
-        if (now - m_clients[i].lastActivity > CLIENT_TIMEOUT_MS) {
+        ULONGLONG limit = (m_clients[i].authState == TcpAuthState::Authenticated)
+            ? AUTH_CLIENT_TIMEOUT_MS : UNAUTH_CLIENT_TIMEOUT_MS;
+        if (now - m_clients[i].lastActivity > limit) {
             RemoveClient(i);
         } else {
             ++i;
         }
     }
+}
+
+size_t TcpServer::EvictConnectionsForDevice(const std::string& deviceId, size_t exceptIndex) {
+    if (deviceId.empty() || exceptIndex >= m_clients.size()) return exceptIndex;
+    size_t removedBelow = 0;
+    for (size_t j = m_clients.size(); j-- > 0; ) {
+        if (j == exceptIndex) continue;
+        if (m_clients[j].deviceId == deviceId) {
+            RemoveClient(j);
+            if (j < exceptIndex) removedBelow++;
+        }
+    }
+    return exceptIndex - removedBelow;
+}
+
+size_t TcpServer::EvictStaleUnauthFromPeer(uint32_t peerIp, size_t exceptIndex) {
+    if (peerIp == 0) return exceptIndex;
+    size_t removedBelow = 0;
+    for (size_t j = m_clients.size(); j-- > 0; ) {
+        if (j == exceptIndex) continue;
+        if (m_clients[j].peerIp == peerIp &&
+            m_clients[j].authState == TcpAuthState::Unauthenticated) {
+            RemoveClient(j);
+            if (j < exceptIndex) removedBelow++;
+        }
+    }
+    return exceptIndex - removedBelow;
+}
+
+size_t TcpServer::EvictConnectionsFromPeer(uint32_t peerIp, size_t exceptIndex) {
+    if (peerIp == 0) return exceptIndex;
+    size_t removedBelow = 0;
+    for (size_t j = m_clients.size(); j-- > 0; ) {
+        if (j == exceptIndex) continue;
+        if (m_clients[j].peerIp == peerIp) {
+            RemoveClient(j);
+            if (j < exceptIndex) removedBelow++;
+        }
+    }
+    return exceptIndex - removedBelow;
 }
 
 void TcpServer::RemoveClient(size_t index) {
