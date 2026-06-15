@@ -1,5 +1,29 @@
 # MDropDX12 Changelog
 
+## v2.8.0 (2026-06-15)
+
+MilkRemote connectivity, Shadertoy import fixes, and FPS cap cleanup.
+
+### MilkRemote / TCP
+
+- **TCP reconnect handling**: Evicts stale sockets from the same device ID and client IP on reconnect; sends `AUTH_REQUIRED` when commands arrive before re-auth.
+- **Split connection timeouts**: 15s for unauthenticated clients, 120s for authenticated sessions.
+
+### Shadertoy Import
+
+- **Cross-line matrix multiply**: GLSL→HLSL converter no longer emits `mul(matN(...), )` with an empty operand when `*` spans lines.
+- **Matrix macro detection**: `#define R(a) mat2(...)` style macros are converted to `mul()` correctly.
+- **`.json` preset loading**: `LoadPreset()` routes `.json` files through `ShaderImportWindow::ImportFromFile()`.
+
+### UI / Controls
+
+- **FPS cap table**: All FPS options (Visual combo, F3 hotkey, `SetFPSCap` sync) use a single `kFpsCapOptions` table in `fps_caps.h`.
+- **40 fps cap**: Added to the FPS cap list; F3 cycles in the same order as the Visual window combo.
+
+### Other
+
+- **Manifest trustInfo**: Explicit `asInvoker` execution level in `manifest.xml`.
+
 ## v2.7.0 (2026-03-20)
 
 Stability, rendering fixes, and quality-of-life improvements.
