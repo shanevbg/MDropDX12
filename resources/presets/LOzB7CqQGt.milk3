@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "shadertoy": true,
+  "name": "LOzB7CqQGt",
+  "channels": {
+    "image": {
+      "iChannel0": "self"
+    }
+  },
+  "image": "//sdf functions\n\nfloat sdOctahedron( float3 p, float s)\n{\n  p = abs(p);\n  return (p.x+p.y+p.z-s)*0.57735027;\n}\n\n\n\n//intersection functions\nfloat smin(float a, float b, float k)\n{\n    float h = max(k - abs(a-b), 0.0)/k;\n    return min(a,b) - h*h*h*k*(1.0/6.0);\n}\n\n//rotation function\nfloat2x2 rotate2D(float theta) {\n    float c = cos(theta);\n    float s = sin(theta);\n    return float2x2(c, -s, s, c);\n}\n\n//color palette function\n  float3 palette(float t, float3 a, float3 b, float3 c, float3 d)\n{\n     return a + b*cos( 6.28318*(c*t+d));\n}  \n\n\n\n\n\n//world map\nfloat map(float3 p)\n{\n    p.z += time * 0.4;\n\n    //space repetition\n    p.xy = frac(p.xy) -0.5;\n    p.z = fmod(p.z, 0.25) - 0.5;\n\n    //float box = sdBox(p, float3(0.1, 0.1, 0.1));\n    float box = sdOctahedron(p,sin(time)*0.025+0.45);\n\n    float ground = p.y + 0.85;\n    return box;\n}\n\nshader_body {\n    float2 st = ((uv * texsize.xy) * 2.0 - texsize.xy) / texsize.y;\n\n    //ray initialization\n    float3 ro = float3(0,-0.4, -3); //ray origin\n    float3 rd = normalize(float3(st, 1)); //ray direction\n    float tDist = 0.0; //distance traveled\n\n    //ro.xz = mul(rotate2D(-90.0), ro.xz);\n    //rd.xz = mul(rotate2D(-90.0), rd.xz);\n\n    const int iterationCount = 80;\n\n    float3 col = float3(0, 0, 0);\n\n    //raymarching\n    int iter=0;\n    for(int i = 0; i < iterationCount; i++)\n    {\n        float3 p = ro + rd * tDist; //position along the ray\n\n        p.xy = mul(rotate2D(tDist*0.2 * sin(time * 0.02 + 0.9)), p.xy);\n        p.y += sin(tDist*(cos(time*0.2)))*0.1;\n\n        float d = map(p); //current distance to scene\n\n        tDist += d;\n\n        iter=i;\n        if(d<0.001 ||tDist > 100.0) break; //breaks if ray is close enough to object or has traveled so far; render distance\n\n    }\n\n\n    col = palette(tDist*0.04 + float(iter)*0.005, float3(0.5, 0.5, 0.5), float3(0.5, 0.5, 0.5), float3(0.9, 0.87, 0.78), float3(0.26,0.316,sin(time)*0.157+0.25));\n    ret = float4(col , 1.0);\n}\n"
+}
