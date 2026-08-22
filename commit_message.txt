@@ -1,0 +1,9 @@
+feat: add compatibility flag and update engine modules
+
+- Add a new compatibility setting to VSCode configuration for easier project build.
+- Update `engine_input.cpp` with improved networking logic, including parsing of input packets and handling of data streams.
+- Refactor `engine_visual_ui.cpp` for cleaner UI rendering pipeline; introduce new helper functions and optimize drawing calls.
+- Adjust the project manifest (`manifest.xml`) to reflect updated dependencies and metadata.
+- Enhance `tcp_server.cpp` with revised socket handling and connection management.
+
+This commit brings the latest changes to the core engine files, improving readability and performance across the codebase.

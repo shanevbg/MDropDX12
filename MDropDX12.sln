@@ -1,0 +1,40 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.0.11217.181
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "MDropDX12", "src\mDropDX12\engine.vcxproj", "{881FB534-7396-485A-ADC2-6FBEBED7A0F4}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}"
+	ProjectSection(SolutionItems) = preProject
+		config\1-copy-presets-beatdrop-to-release.cmd = config\1-copy-presets-beatdrop-to-release.cmd
+		config\2-copy-presets-release-to-visualizer.cmd = config\2-copy-presets-release-to-visualizer.cmd
+		Changes.md = Changes.md
+		Manual.md = Manual.md
+		config\messages.ini = config\messages.ini
+		config\precompile.txt = config\precompile.txt
+		README.md = README.md
+		config\README.txt = config\README.txt
+		config\release.cmd = config\release.cmd
+		config\script-default.txt = config\script-default.txt
+		config\settings.ini = config\settings.ini
+		config\sprites.ini = config\sprites.ini
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{881FB534-7396-485A-ADC2-6FBEBED7A0F4}.Debug|x64.ActiveCfg = Debug|x64
+		{881FB534-7396-485A-ADC2-6FBEBED7A0F4}.Debug|x64.Build.0 = Debug|x64
+		{881FB534-7396-485A-ADC2-6FBEBED7A0F4}.Release|x64.ActiveCfg = Release|x64
+		{881FB534-7396-485A-ADC2-6FBEBED7A0F4}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {E80B7573-1C36-4BEF-A30D-CA05CE7EDD9B}
+	EndGlobalSection
+EndGlobal

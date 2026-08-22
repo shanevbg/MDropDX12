@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "shadertoy": true,
+  "name": "NGPRkFCiya",
+  "channels": {
+    "image": {
+      "iChannel0": "self"
+    }
+  },
+  "image": "// Creation by Danilo Guanabara — Shadertoy XsXXDn / pouet 57245\n// Converted from SHADERed rust-gpu port for MDropDX12\n\nshader_body {\n  float3 c = float3(0, 0, 0);\n  float l = 0.0;\n  float z = time;\n  float2 frag = uv; // milk3 uv is 0..1\n\n  [unroll] for (int i = 0; i < 3; i++) {\n    float2 p = frag;\n    float2 q = p;\n    p -= 0.5;\n    p.x *= texsize.x / max(texsize.y, 1.0);\n    z += 0.07;\n    l = length(p);\n    // avoid div0 at exact center\n    float invl = 1.0 / max(l, 1e-4);\n    q += p * invl * (sin(z) + 1.0) * abs(sin(l * 9.0 - z * 2.0));\n    // GLSL/Rust rem_euclid into [0,1), then distance to tile center\n    float2 t = q - floor(q);\n    float ci = 0.01 / max(length(abs(t - 0.5)), 1e-4);\n    if (i == 0) c.x = ci;\n    else if (i == 1) c.y = ci;\n    else c.z = ci;\n  }\n\n  ret = float4(c / max(l, 1e-3), 1.0);\n}\n"
+}
