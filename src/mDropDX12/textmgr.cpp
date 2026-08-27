@@ -1,0 +1,908 @@
+/*
+  LICENSE
+  -------
+Copyright 2005-2013 Nullsoft, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+  * Redistributions of source code must retain the above copyright notice,
+    this list of conditions and the following disclaimer.
+
+  * Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation
+    and/or other materials provided with the distribution.
+
+  * Neither the name of Nullsoft nor the names of its contributors may be used to
+    endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
+// CTextManager: GDI font atlas + DX12 sprite quad text rendering.
+// At startup, renders all printable characters to bitmap atlases using GDI,
+// then uploads them as DX12 textures. Each frame, builds SPRITEVERTEX quads
+// for queued text and draws with the existing DX12 pipeline.
+
+#include "textmgr.h"
+#include "dxcontext.h"
+#include "engineshell.h"  // td_fontinfo
+#include "support.h"      // SPRITEVERTEX, WFVERTEX
+#include "dx12pipeline.h" // PSO enums
+#include "utility.h"
+#include <cmath>
+#include <vector>
+
+using namespace mdrop;
+
+#define MAX_MSG_CHARS (65536*2)
+static wchar_t g_szMsgPool[MAX_MSG_CHARS];
+
+// Atlas grid layout: 16 columns × 15 rows = 240 cells (covers 0x20-0xFF = 224 chars + extras)
+static const int ATLAS_COLS = 16;
+static const int ATLAS_ROWS = 15;
+static const int ATLAS_FIRST_CHAR = 0x20;
+static const int ATLAS_LAST_CHAR  = 0xFF;
+
+// Extra Unicode characters beyond 0xFF, rendered into spare atlas slots (224..239).
+// These get atlas glyph index = (ATLAS_LAST_CHAR - ATLAS_FIRST_CHAR + 1) + i
+static const wchar_t ATLAS_EXTRA_CHARS[] = {
+    0x2022, // • BULLET (unused, kept for index stability)
+    0x2191, // ↑ UP ARROW (Shadertoy preset indicator)
+};
+static const int ATLAS_NUM_EXTRAS = (int)(sizeof(ATLAS_EXTRA_CHARS) / sizeof(ATLAS_EXTRA_CHARS[0]));
+
+// Special glyph codes for baked icons (mapped to unused control char slots)
+// These are NOT rendered by GDI — they are painted pixel-by-pixel into the atlas.
+static const int GLYPH_LOCK_ICON = 2; // glyphs[2] = baked lock icon
+
+// Map a Unicode character to its atlas glyph index, or -1 if not in atlas.
+// Main range (0x20-0xFF): glyph index = character code (direct indexing).
+// Extra chars: glyph index = ATLAS_EXTRAS_BASE + i.
+static const int ATLAS_EXTRAS_BASE = ATLAS_LAST_CHAR + 1; // 0x100 = 256 — but glyphs[] is 256 entries (0..255)
+
+static int CharToGlyphIndex(int c) {
+    if (c >= ATLAS_FIRST_CHAR && c <= ATLAS_LAST_CHAR)
+        return c; // direct index into glyphs[]
+    // Check extra characters — but they'd need index >= 256 which exceeds glyphs[256]
+    // So we reuse the unused low indices (0x00-0x1F) for extras
+    for (int i = 0; i < ATLAS_NUM_EXTRAS; i++) {
+        if (c == (int)ATLAS_EXTRA_CHARS[i])
+            return i; // map to glyphs[0], glyphs[1], ... (unused control char slots)
+    }
+    // Baked lock icon: map U+E000 (Private Use Area) to GLYPH_LOCK_ICON slot
+    if (c == 0xE000)
+        return GLYPH_LOCK_ICON;
+    return -1; // not in atlas
+}
+
+CTextManager::CTextManager()
+  : m_lpDevice(nullptr)
+  , m_lpTextSurface(nullptr)
+  , m_blit_additively(0)
+  , m_lpDX(nullptr)
+  , m_nFonts(0)
+  , m_pFontInfo(nullptr)
+  , m_ready(false)
+{
+  m_nMsg = 0;
+  m_next_msg_start_ptr = g_szMsgPool;
+}
+
+CTextManager::~CTextManager() {
+  CleanupDX12();
+}
+
+void CTextManager::Init(ID3D12Device* lpDevice, void* lpTextSurface, int bAdditive) {
+  m_lpDevice        = lpDevice;
+  m_lpTextSurface   = lpTextSurface;
+  m_blit_additively = bAdditive;
+
+  m_nMsg = 0;
+  m_next_msg_start_ptr = g_szMsgPool;
+}
+
+void CTextManager::Finish() {
+  CleanupDX12();
+}
+
+// HUD atlas scale. Landscape: height/720 (unchanged). Portrait: midpoint
+// between short-side/720 (too small) and height/720 (too large).
+static float HudFontScaleFromClient(int w, int h, float userScale) {
+  if (h <= 0)
+    return 1.0f;
+  float byHeight = (float)h / 720.0f;
+  float autoScale;
+  if (w > 0 && h > w) {
+    float byShort = (float)w / 720.0f;
+    autoScale = 0.5f * (byShort + byHeight);
+  } else {
+    autoScale = byHeight;
+  }
+  if (userScale < 0.10f) userScale = 0.10f;
+  if (userScale > 2.00f) userScale = 2.00f;
+  // Auto size never goes below 1x (720p). Only the Settings slider can shrink.
+  if (autoScale < 1.0f) autoScale = 1.0f;
+  return max(0.10f, autoScale * userScale);
+}
+
+void CTextManager::SetHudUserScale(float scale) {
+  if (scale < 0.10f) scale = 0.10f;
+  if (scale > 2.00f) scale = 2.00f;
+  if (fabsf(scale - m_hudUserScale) < 0.001f)
+    return;
+  m_hudUserScale = scale;
+  m_hudScaleDirty = true;
+}
+
+void CTextManager::ApplyPendingHudScale() {
+  if (!m_hudScaleDirty)
+    return;
+  m_hudScaleDirty = false;
+  if (!m_ready || !m_lpDX)
+    return;
+  OnResize(m_lpDX->m_client_width, m_lpDX->m_client_height);
+}
+
+int CTextManager::DecodeFontIndex(void* pFont) {
+  if (!pFont) return -1;
+  int idx = (int)(intptr_t)pFont - 1;
+  return idx;
+}
+
+void CTextManager::InitDX12(DXContext* lpDX, HFONT* pFonts, int nFonts, void* pFontInfo) {
+  m_lpDX      = lpDX;
+  m_nFonts    = nFonts;
+  m_pFontInfo = pFontInfo;
+
+  if (!lpDX) return;
+
+  m_hudFontScale = HudFontScaleFromClient(lpDX->m_client_width, lpDX->m_client_height, m_hudUserScale);
+
+  // Build a font atlas for each configured font
+  for (int i = 0; i < nFonts && i < MAX_TEXT_FONTS; i++) {
+    if (!BuildFontAtlas(i)) {
+      char buf[128];
+      sprintf(buf, "CTextManager: BuildFontAtlas(%d) failed\n", i);
+      DebugLogA(buf, LOG_ERROR);
+    }
+  }
+
+  m_ready = true;
+  DebugLogA("CTextManager: Font atlas text rendering initialized");
+}
+
+bool CTextManager::BuildFontAtlas(int fontIdx) {
+  if (!m_lpDX || !m_pFontInfo || fontIdx < 0 || fontIdx >= m_nFonts)
+    return false;
+
+  td_fontinfo* fonts = (td_fontinfo*)m_pFontInfo;
+  td_fontinfo& fi = fonts[fontIdx];
+
+  // 1. Create GDI font matching the configured settings
+  // Scale HUD fonts (SIMPLE=0, DECORATIVE=1) proportional to window height.
+  // Other fonts (help, playlist, extras) keep their configured sizes.
+  int fontSize = fi.nSize;
+  if (fontIdx <= 1 && fabsf(m_hudFontScale - 1.0f) > 0.001f) {
+    // nSize is typically negative (GDI character height, e.g. -20).
+    // Do not clamp that to +6 -- that made FPS unreadable whenever scale != 1.
+    const float scaled = (float)fi.nSize * m_hudFontScale;
+    fontSize = (int)(scaled + (scaled >= 0.0f ? 0.5f : -0.5f));
+    if (abs(fontSize) < 6)
+      fontSize = (fontSize < 0) ? -6 : 6;
+  }
+  HFONT hFont = CreateFontW(
+    fontSize, 0, 0, 0,
+    fi.bBold ? FW_BOLD : FW_NORMAL,
+    fi.bItalic, FALSE, FALSE,
+    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+    ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+    fi.szFace);
+  if (!hFont) return false;
+
+  // 2. Create memory DC and get font metrics
+  HDC memDC = CreateCompatibleDC(nullptr);
+  HGDIOBJ oldFont = SelectObject(memDC, hFont);
+
+  TEXTMETRICW tm;
+  GetTextMetricsW(memDC, &tm);
+
+  // Cell dimensions: enough for any character including overhang
+  int cellW = tm.tmMaxCharWidth + 4;  // +4 padding for ClearType/overhang
+  int cellH = tm.tmHeight;
+
+  int atlasW = ATLAS_COLS * cellW;
+  int atlasH = ATLAS_ROWS * cellH;
+
+  // Round up to multiple of 4 for DX12 texture alignment
+  atlasW = (atlasW + 3) & ~3;
+  atlasH = (atlasH + 3) & ~3;
+
+  // 3. Create 32-bit top-down DIB
+  BITMAPINFO bmi = {};
+  bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+  bmi.bmiHeader.biWidth       = atlasW;
+  bmi.bmiHeader.biHeight      = -atlasH; // top-down
+  bmi.bmiHeader.biPlanes      = 1;
+  bmi.bmiHeader.biBitCount    = 32;
+  bmi.bmiHeader.biCompression = BI_RGB;
+
+  void* dibBits = nullptr;
+  HBITMAP hBmp = CreateDIBSection(memDC, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
+  if (!hBmp || !dibBits) {
+    SelectObject(memDC, oldFont);
+    DeleteObject(hFont);
+    DeleteDC(memDC);
+    return false;
+  }
+  HGDIOBJ oldBmp = SelectObject(memDC, hBmp);
+
+  // Clear to black (CreateDIBSection zeros memory)
+  SetBkMode(memDC, TRANSPARENT);
+  SetTextColor(memDC, RGB(255, 255, 255));
+
+  // 4. Get ABC widths for each character
+  ABC abcWidths[256] = {};
+  if (!GetCharABCWidthsW(memDC, ATLAS_FIRST_CHAR, ATLAS_LAST_CHAR, &abcWidths[ATLAS_FIRST_CHAR])) {
+    // Fallback: use GetCharWidth32 for non-TrueType fonts
+    INT charWidths[256] = {};
+    GetCharWidth32W(memDC, ATLAS_FIRST_CHAR, ATLAS_LAST_CHAR, &charWidths[ATLAS_FIRST_CHAR]);
+    for (int c = ATLAS_FIRST_CHAR; c <= ATLAS_LAST_CHAR; c++) {
+      abcWidths[c].abcA = 0;
+      abcWidths[c].abcB = charWidths[c];
+      abcWidths[c].abcC = 0;
+    }
+  }
+
+  // 5. Render each character to the atlas grid
+  FontAtlas& atlas = m_atlases[fontIdx];
+  memset(atlas.glyphs, 0, sizeof(atlas.glyphs));
+  atlas.lineHeight = (float)tm.tmHeight;
+  atlas.ascent     = (float)tm.tmAscent;
+  atlas.cellWidth  = cellW;
+  atlas.cellHeight = cellH;
+
+  for (int c = ATLAS_FIRST_CHAR; c <= ATLAS_LAST_CHAR; c++) {
+    int idx = c - ATLAS_FIRST_CHAR;
+    int col = idx % ATLAS_COLS;
+    int row = idx / ATLAS_COLS;
+
+    int x = col * cellW;
+    int y = row * cellH;
+
+    // Render character at cell origin (GDI handles bearings)
+    wchar_t ch = (wchar_t)c;
+    TextOutW(memDC, x, y, &ch, 1);
+
+    // Calculate advance width
+    float advance = (float)(abcWidths[c].abcA + (int)abcWidths[c].abcB + abcWidths[c].abcC);
+    if (advance <= 0) advance = (float)cellW * 0.5f;
+
+    // Store glyph metrics with UV coordinates
+    // Tighten glyphWidth to actual visible extent + 1px AA margin (not full cellW).
+    // Using full cellW causes last-character artifacts from neighboring atlas glyphs.
+    float visibleW = (float)(abcWidths[c].abcA + (int)abcWidths[c].abcB);
+    float tightW = max(visibleW, advance) + 1.0f;
+    if (tightW > (float)cellW) tightW = (float)cellW;
+    if (tightW < 1.0f) tightW = 1.0f;
+
+    float halfTexelU = 0.5f / (float)atlasW;
+    float halfTexelV = 0.5f / (float)atlasH;
+
+    GlyphInfo& g = atlas.glyphs[c];
+    g.u0       = (float)x / (float)atlasW + halfTexelU;
+    g.v0       = (float)y / (float)atlasH + halfTexelV;
+    g.u1       = (float)(x + (int)ceilf(tightW)) / (float)atlasW - halfTexelU;
+    g.v1       = (float)(y + cellH) / (float)atlasH - halfTexelV;
+    g.advanceX = advance;
+    g.bearingX = (float)abcWidths[c].abcA;
+    g.glyphWidth  = tightW;
+    g.glyphHeight = (float)cellH;
+  }
+
+  // Set up space character if not already valid
+  if (atlas.glyphs[' '].advanceX <= 0)
+    atlas.glyphs[' '].advanceX = (float)tm.tmAveCharWidth;
+
+  // 5b. Render extra Unicode characters into spare atlas slots.
+  // Atlas grid has 240 cells; main range uses slots 0..223 (chars 0x20-0xFF).
+  // Extra chars go into slots 224..239 (the tail of the grid).
+  for (int ei = 0; ei < ATLAS_NUM_EXTRAS; ei++) {
+    int gridSlot = (ATLAS_LAST_CHAR - ATLAS_FIRST_CHAR + 1) + ei; // 224, 225, ...
+    int glyphIdx = ei; // stored at glyphs[0], glyphs[1], ... (unused control char range)
+    if (glyphIdx >= ATLAS_FIRST_CHAR) break; // safety: don't overwrite main range
+    int col = gridSlot % ATLAS_COLS;
+    int row = gridSlot / ATLAS_COLS;
+    int x = col * cellW;
+    int y = row * cellH;
+
+    wchar_t ch = ATLAS_EXTRA_CHARS[ei];
+    TextOutW(memDC, x, y, &ch, 1);
+
+    // Measure advance width for this character
+    INT charWidth = 0;
+    GetCharWidth32W(memDC, (UINT)ch, (UINT)ch, &charWidth);
+    float advance = (charWidth > 0) ? (float)charWidth : (float)tm.tmAveCharWidth;
+
+    float halfTexelU = 0.5f / (float)atlasW;
+    float halfTexelV = 0.5f / (float)atlasH;
+
+    GlyphInfo& g = atlas.glyphs[glyphIdx];
+    g.u0       = (float)x / (float)atlasW + halfTexelU;
+    g.v0       = (float)y / (float)atlasH + halfTexelV;
+    g.u1       = (float)(x + cellW) / (float)atlasW - halfTexelU;
+    g.v1       = (float)(y + cellH) / (float)atlasH - halfTexelV;
+    g.advanceX = advance;
+    g.bearingX = 0;
+    g.glyphWidth  = (float)cellW;
+    g.glyphHeight = (float)cellH;
+  }
+
+  SelectObject(memDC, oldFont);
+  SelectObject(memDC, oldBmp);
+  DeleteObject(hFont);
+  DeleteDC(memDC);
+
+  // 5c. Bake lock icon into atlas slot GLYPH_LOCK_ICON.
+  // Pixel art lock: shackle (rounded arch) + body (filled rectangle with keyhole).
+  // Drawn at native cell resolution, scaled to 60% of cellH for vertical centering.
+  {
+    int gridSlot = (ATLAS_LAST_CHAR - ATLAS_FIRST_CHAR + 1) + ATLAS_NUM_EXTRAS; // next free slot
+    int col = gridSlot % ATLAS_COLS;
+    int row = gridSlot / ATLAS_COLS;
+    int ox = col * cellW; // origin x in atlas
+    int oy = row * cellH; // origin y in atlas
+
+    // Design lock at a fixed logical size, then scale to cell
+    // Lock proportions: width ~= 0.6*cellH, height ~= 0.85*cellH
+    int lockH = max(10, (int)(cellH * 0.75f));
+    int lockW = max(8, (int)(lockH * 0.7f));
+    int bodyH = lockH * 5 / 9;     // body is bottom 55%
+    int shackleH = lockH - bodyH;  // shackle is top 45%
+    int shackleThick = max(1, lockW / 6);
+    int bodyX = ox;                              // left-aligned
+    int bodyY = oy + (cellH - lockH) / 2 + shackleH; // below shackle
+    int shackleX = bodyX + shackleThick;
+    int shackleY = oy + (cellH - lockH) / 2;
+
+    BYTE* pixels = (BYTE*)dibBits;
+    auto setPixel = [&](int px, int py, BYTE val) {
+      if (px >= 0 && px < atlasW && py >= 0 && py < atlasH) {
+        int i = (py * atlasW + px) * 4;
+        pixels[i + 0] = val; pixels[i + 1] = val; pixels[i + 2] = val; // BGR
+      }
+    };
+
+    // Draw body (filled rectangle)
+    for (int py = bodyY; py < bodyY + bodyH && py < atlasH; py++)
+      for (int px = bodyX; px < bodyX + lockW && px < atlasW; px++)
+        setPixel(px, py, 255);
+
+    // Draw shackle (U-shaped arch)
+    int shInnerW = lockW - shackleThick * 2;
+    int shOuterW = lockW - shackleThick * 2;
+    for (int py = shackleY; py < bodyY; py++) {
+      // Left pillar
+      for (int t = 0; t < shackleThick; t++)
+        setPixel(shackleX + t, py, 255);
+      // Right pillar
+      for (int t = 0; t < shackleThick; t++)
+        setPixel(shackleX + shInnerW + t, py, 255);
+    }
+    // Top bar connecting pillars
+    for (int px = shackleX; px < shackleX + shInnerW + shackleThick; px++)
+      for (int t = 0; t < shackleThick; t++)
+        setPixel(px, shackleY + t, 255);
+
+    // Keyhole (dark circle + slit in center of body)
+    int khX = bodyX + lockW / 2;
+    int khY = bodyY + bodyH / 3;
+    int khR = max(1, bodyH / 6);
+    for (int dy = -khR; dy <= khR; dy++)
+      for (int dx = -khR; dx <= khR; dx++)
+        if (dx * dx + dy * dy <= khR * khR)
+          setPixel(khX + dx, khY + dy, 0);
+    // Slit below circle
+    for (int sy = khY; sy < khY + bodyH / 3; sy++)
+      setPixel(khX, sy, 0);
+
+    // Store glyph metrics
+    float halfTexelU = 0.5f / (float)atlasW;
+    float halfTexelV = 0.5f / (float)atlasH;
+    GlyphInfo& g = atlas.glyphs[GLYPH_LOCK_ICON];
+    g.u0       = (float)ox / (float)atlasW + halfTexelU;
+    g.v0       = (float)oy / (float)atlasH + halfTexelV;
+    g.u1       = (float)(ox + cellW) / (float)atlasW - halfTexelU;
+    g.v1       = (float)(oy + cellH) / (float)atlasH - halfTexelV;
+    g.advanceX = (float)(lockW + 8); // advance = lock width + small gap
+    g.bearingX = 0;
+    g.glyphWidth  = (float)cellW;
+    g.glyphHeight = (float)cellH;
+  }
+
+  // 6. Post-process: convert GDI grayscale to premultiplied alpha
+  // GDI renders white text (R=G=B=intensity, A=0) on black (all zeros).
+  // Convert to premultiplied alpha: BGRA(intensity, intensity, intensity, intensity)
+  BYTE* pixels = (BYTE*)dibBits;
+  for (int py = 0; py < atlasH; py++) {
+    for (int px = 0; px < atlasW; px++) {
+      int i = (py * atlasW + px) * 4;
+      BYTE b = pixels[i + 0];
+      BYTE g = pixels[i + 1];
+      BYTE r = pixels[i + 2];
+      BYTE intensity = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
+      pixels[i + 0] = intensity; // B (premultiplied)
+      pixels[i + 1] = intensity; // G (premultiplied)
+      pixels[i + 2] = intensity; // R (premultiplied)
+      pixels[i + 3] = intensity; // A = coverage
+    }
+  }
+
+  // 7. Upload atlas to DX12 texture. Keep existing SRV/binding slots on rebuild.
+  const UINT keepSrv = atlas.texture.srvIndex;
+  const UINT keepBind = atlas.texture.bindingBlockStart;
+  atlas.texture = m_lpDX->CreateTextureFromPixels(
+    dibBits, (UINT)atlasW, (UINT)atlasH,
+    (UINT)(atlasW * 4), DXGI_FORMAT_B8G8R8A8_UNORM);
+
+  DeleteObject(hBmp);
+
+  if (!atlas.texture.IsValid()) {
+    char buf[128];
+    sprintf(buf, "CTextManager: CreateTextureFromPixels failed for font %d", fontIdx);
+    DebugLogA(buf, LOG_ERROR);
+    return false;
+  }
+
+  if (keepSrv != UINT_MAX && keepBind != UINT_MAX && m_lpDX->m_device) {
+    CreateSRV2D(m_lpDX->m_device.Get(), atlas.texture.resource.Get(),
+                DXGI_FORMAT_B8G8R8A8_UNORM, m_lpDX->GetSrvCpuHandleAt(keepSrv));
+    m_lpDX->m_device->CopyDescriptorsSimple(
+        1, m_lpDX->GetSrvCpuHandleAt(keepBind),
+        m_lpDX->GetSrvCpuHandleAt(keepSrv),
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    atlas.texture.srvIndex = keepSrv;
+    atlas.texture.bindingBlockStart = keepBind;
+  } else {
+    m_lpDX->CreateBindingBlockForTexture(atlas.texture);
+  }
+
+  atlas.valid = true;
+
+  char buf[256];
+  sprintf(buf, "CTextManager: Font %d atlas built: %dx%d cells=%dx%d lineH=%.0f",
+    fontIdx, atlasW, atlasH, cellW, cellH, atlas.lineHeight);
+  DebugLogA(buf, LOG_VERBOSE);
+
+  return true;
+}
+
+void CTextManager::CleanupDX12() {
+  m_ready = false;
+  for (int i = 0; i < MAX_TEXT_FONTS; i++) {
+    m_atlases[i].texture.Reset();
+    m_atlases[i].valid = false;
+  }
+  m_lpDX = nullptr;
+  m_nFonts = 0;
+  m_pFontInfo = nullptr;
+}
+
+void CTextManager::OnResize(int newW, int newH) {
+  if (!m_ready || !m_lpDX)
+    return;
+  float newScale = HudFontScaleFromClient(newW, newH, m_hudUserScale);
+  if (fabsf(newScale - m_hudFontScale) <= 0.01f)
+    return;
+  if (m_lpDX->m_commandQueue)
+    m_lpDX->WaitForGpu();
+  m_hudFontScale = newScale;
+  for (int i = 0; i < 2 && i < m_nFonts; i++) {
+    m_atlases[i].texture.ResetResource();
+    m_atlases[i].valid = false;
+    BuildFontAtlas(i);
+  }
+}
+
+void CTextManager::ClearAll() {
+  m_nMsg = 0;
+  m_next_msg_start_ptr = g_szMsgPool;
+}
+
+void CTextManager::DrawBox(LPRECT pRect, DWORD boxColor) {
+  if (!pRect)
+    return;
+
+  if ((m_nMsg < MAX_MSGS) &&
+    (size_t)((DWORD_PTR)m_next_msg_start_ptr - (DWORD_PTR)g_szMsgPool) + 0 + 1 < MAX_MSG_CHARS) {
+    *m_next_msg_start_ptr = 0;
+
+    m_msg[m_nMsg].msg   = m_next_msg_start_ptr;
+    m_msg[m_nMsg].pfont = nullptr;
+    m_msg[m_nMsg].rect  = *pRect;
+    m_msg[m_nMsg].flags = 0;
+    m_msg[m_nMsg].color = 0xFFFFFFFF;
+    m_msg[m_nMsg].bgColor = boxColor;
+    m_nMsg++;
+    m_next_msg_start_ptr += 1;
+  }
+}
+
+int CTextManager::DrawText(void* pFont, char* szText, RECT* pRect, DWORD flags, DWORD color, bool bBox, DWORD boxColor) {
+  return DrawTextW(pFont, AutoWide(szText), pRect, flags, color, bBox, boxColor);
+}
+
+int CTextManager::DrawTextW(void* pFont, wchar_t* szText, RECT* pRect, DWORD flags, DWORD color, bool bBox, DWORD boxColor) {
+  if (!pRect) return 0;
+
+  // For DT_CALCRECT: measure text immediately and return.
+  if (flags & DT_CALCRECT) {
+    int fontIdx = DecodeFontIndex(pFont);
+    return MeasureText(fontIdx, szText, pRect, flags);
+  }
+
+  // Queue the text entry for rendering in DrawNow()
+  if (!szText || !szText[0]) return 0;
+  int len = (int)wcslen(szText);
+
+  if ((m_nMsg < MAX_MSGS) &&
+      (size_t)((DWORD_PTR)m_next_msg_start_ptr - (DWORD_PTR)g_szMsgPool) + len + 1 < MAX_MSG_CHARS) {
+    wcscpy(m_next_msg_start_ptr, szText);
+
+    td_string& entry = m_msg[m_nMsg];
+    entry.msg     = m_next_msg_start_ptr;
+    entry.pfont   = pFont;
+    entry.rect    = *pRect;
+    entry.flags   = flags;
+    entry.color   = color;
+    entry.bgColor = boxColor;
+    m_nMsg++;
+    m_next_msg_start_ptr += len + 1;
+
+    // If a dark box was requested, queue a box entry after this text
+    if (bBox) {
+      DrawBox(pRect, boxColor);
+    }
+  }
+
+  // Measure actual text height so callers can advance layout.
+  int fontIdx = DecodeFontIndex(pFont);
+  RECT rc = *pRect;
+  return MeasureText(fontIdx, szText, &rc, (flags | DT_CALCRECT) & ~DT_END_ELLIPSIS);
+}
+
+float CTextManager::MeasureStringWidth(int fontIdx, const wchar_t* text, int len) {
+  if (!text || fontIdx < 0 || fontIdx >= m_nFonts || !m_atlases[fontIdx].valid)
+    return 0;
+
+  if (len < 0) len = (int)wcslen(text);
+
+  const FontAtlas& atlas = m_atlases[fontIdx];
+  float width = 0;
+  for (int i = 0; i < len; i++) {
+    int c = (int)text[i];
+    int gi = CharToGlyphIndex(c);
+    if (gi >= 0)
+      width += atlas.glyphs[gi].advanceX;
+    else if (c == '\t')
+      width += atlas.glyphs[' '].advanceX * 8;
+    else if (c > ATLAS_LAST_CHAR)
+      width += atlas.glyphs['?'].advanceX;
+    // skip control chars
+  }
+  return width;
+}
+
+int CTextManager::MeasureText(int fontIdx, const wchar_t* text, RECT* pRect, DWORD flags) {
+  if (!pRect || fontIdx < 0 || fontIdx >= m_nFonts || !m_atlases[fontIdx].valid)
+    return 0;
+
+  const FontAtlas& atlas = m_atlases[fontIdx];
+  const wchar_t* str = text ? text : L"";
+  int strLen = (int)wcslen(str);
+
+  if (flags & DT_SINGLELINE) {
+    // Single line: width = sum of advances, height = lineHeight
+    float w = MeasureStringWidth(fontIdx, str, strLen);
+    pRect->right  = pRect->left + (LONG)ceilf(w);
+    pRect->bottom = pRect->top  + (LONG)ceilf(atlas.lineHeight);
+    return (int)ceilf(atlas.lineHeight);
+  }
+
+  // Multi-line: split on '\n', find max width and total height
+  float maxWidth = 0;
+  float totalHeight = 0;
+  float maxLayoutWidth = (float)(pRect->right - pRect->left);
+  if (maxLayoutWidth <= 0) maxLayoutWidth = 100000.f;
+
+  const wchar_t* lineStart = str;
+  for (int i = 0; i <= strLen; i++) {
+    if (i == strLen || str[i] == '\n') {
+      int lineLen = (int)(str + i - lineStart);
+      float lineW = MeasureStringWidth(fontIdx, lineStart, lineLen);
+
+      // Word wrap: if line exceeds layout width, approximate wrapped height
+      if (lineW > maxLayoutWidth && maxLayoutWidth > 0) {
+        int numWraps = (int)ceilf(lineW / maxLayoutWidth);
+        totalHeight += atlas.lineHeight * numWraps;
+      } else {
+        totalHeight += atlas.lineHeight;
+      }
+      if (lineW > maxWidth) maxWidth = lineW;
+      lineStart = str + i + 1;
+    }
+  }
+
+  pRect->right  = pRect->left + (LONG)ceilf(maxWidth);
+  pRect->bottom = pRect->top  + (LONG)ceilf(totalHeight);
+  return (int)ceilf(totalHeight);
+}
+
+void CTextManager::DrawNow(ID3D12GraphicsCommandList* cmdListIn, int width, int height,
+                           bool clearQueue, int layoutWidth, int layoutHeight) {
+  if (!m_ready || !m_lpDX || m_nMsg == 0) {
+    if (clearQueue) ClearAll();
+    return;
+  }
+
+  auto* cmdList = cmdListIn ? cmdListIn : m_lpDX->m_commandList.Get();
+  if (!cmdList) { if (clearQueue) ClearAll(); return; }
+
+  int cw = (width > 0) ? width : m_lpDX->m_client_width;
+  int ch = (height > 0) ? height : m_lpDX->m_client_height;
+  if (cw <= 0 || ch <= 0) { if (clearQueue) ClearAll(); return; }
+
+  // Layout size = where MyRenderUI placed rects (primary). Defaults to output size.
+  int lw = (layoutWidth > 0) ? layoutWidth : cw;
+  int lh = (layoutHeight > 0) ? layoutHeight : ch;
+  if (lw <= 0) lw = cw;
+  if (lh <= 0) lh = ch;
+
+  // Map primary-pixel layout → output pixels (independent aspect per mirror)
+  const float sx = (float)cw / (float)lw;
+  const float sy = (float)ch / (float)lh;
+  // Glyph size: match the atlas policy (InitDX12 / OnResize use min(w,h)/720).
+  // Using sy alone (height ratio) blows up landscape→portrait (~2× tall screens).
+  // Using min(sx,sy) under-sizes the same case (width shrink without height credit).
+  // Short-side ratio keeps the same visual weight as a native layout at monW×monH.
+  const int layoutMin = (lw < lh) ? lw : lh;
+  const int outMin = (cw < ch) ? cw : ch;
+  const float sFont = (layoutMin > 0)
+    ? ((float)outMin / (float)layoutMin)
+    : 1.0f;
+
+  // Ensure root signature and descriptor heaps are set for built-in PSOs
+  ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
+  cmdList->SetDescriptorHeaps(1, heaps);
+  cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
+
+  float invW = 1.0f / (float)cw;
+  float invH = 1.0f / (float)ch;
+
+  auto toOutX = [&](float layoutPx) { return layoutPx * sx; };
+  auto toOutY = [&](float layoutPx) { return layoutPx * sy; };
+
+  // Pass 1: Draw all dark boxes (untextured, alpha-blended)
+  {
+    // Count boxes
+    int boxCount = 0;
+    for (int i = 0; i < m_nMsg; i++) {
+      if (!m_msg[i].pfont) boxCount++;
+    }
+
+    if (boxCount > 0) {
+      std::vector<WFVERTEX> boxVerts;
+      boxVerts.reserve(boxCount * 6);
+
+      for (int i = 0; i < m_nMsg; i++) {
+        if (m_msg[i].pfont) continue;
+
+        RECT& r = m_msg[i].rect;
+        DWORD col = m_msg[i].bgColor;
+
+        // Layout pixels → output pixels → NDC
+        float x0 = toOutX((float)r.left)   * invW * 2.0f - 1.0f;
+        float x1 = toOutX((float)r.right)  * invW * 2.0f - 1.0f;
+        float y0 = 1.0f - toOutY((float)r.top)    * invH * 2.0f;
+        float y1 = 1.0f - toOutY((float)r.bottom) * invH * 2.0f;
+
+        // Two triangles for the box quad
+        boxVerts.push_back({ x0, y0, 0, col });
+        boxVerts.push_back({ x1, y0, 0, col });
+        boxVerts.push_back({ x0, y1, 0, col });
+        boxVerts.push_back({ x0, y1, 0, col });
+        boxVerts.push_back({ x1, y0, 0, col });
+        boxVerts.push_back({ x1, y1, 0, col });
+      }
+
+      cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_ALPHABLEND_WFVERTEX].Get());
+      m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+                           boxVerts.data(), (UINT)boxVerts.size(), sizeof(WFVERTEX), cmdList);
+    }
+  }
+
+  // Pass 2: Draw text, batched by font atlas
+  for (int fontIdx = 0; fontIdx < m_nFonts; fontIdx++) {
+    if (!m_atlases[fontIdx].valid) continue;
+
+    // Check if any text uses this font
+    bool hasText = false;
+    for (int i = 0; i < m_nMsg; i++) {
+      if (!m_msg[i].pfont) continue;
+      if (DecodeFontIndex(m_msg[i].pfont) == fontIdx) { hasText = true; break; }
+    }
+    if (!hasText) continue;
+
+    FontAtlas& atlas = m_atlases[fontIdx];
+
+    // Bind atlas texture and set PSO (premultiplied alpha blend)
+    cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_PREMULALPHA_SPRITEVERTEX].Get());
+    cmdList->SetGraphicsRootDescriptorTable(1,
+      m_lpDX->GetBindingBlockGpuHandle(atlas.texture));
+
+    std::vector<SPRITEVERTEX> textVerts;
+    textVerts.reserve(2048);
+
+    for (int i = 0; i < m_nMsg; i++) {
+      if (!m_msg[i].pfont) continue;
+      if (DecodeFontIndex(m_msg[i].pfont) != fontIdx) continue;
+
+      td_string& entry = m_msg[i];
+      DWORD color = entry.color;
+      const wchar_t* text = entry.msg;
+      int textLen = (int)wcslen(text);
+      if (textLen == 0) continue;
+
+      // Measure in layout/atlas pixels; place pen in *output* pixels so LEFT/RIGHT/CENTER
+      // stay correct when sx != sy (portrait primary → landscape mirror, etc.).
+      // Bug was: startX = rect.right - textW (layout), then *sx, while glyphs used *sy
+      // so right-aligned FPS/preset floated away from the margin on landscape mirrors.
+      float rectW = (float)(entry.rect.right - entry.rect.left);
+      float textW = MeasureStringWidth(fontIdx, text, textLen);
+
+      float outLeft = toOutX((float)entry.rect.left);
+      float outRight = toOutX((float)entry.rect.right);
+      float outTop = toOutY((float)entry.rect.top);
+      float textWOut = textW * sFont;
+      float rectWOut = rectW * sx;
+
+      // Corner HUD rects are tight-fit to the string (CALCRECT). When sFont > sx
+      // (landscape primary → portrait mirror), rectWOut shrinks but glyphs don't —
+      // clipping to the tight box turns every line into "FPS:..". Grow the budget
+      // toward the opposite screen edge so only strings that truly overflow the
+      // mirror width get ellipsis.
+      float availableOut = rectWOut;
+      if (sFont > sx * 1.001f) {
+        if (entry.flags & DT_RIGHT)
+          availableOut = outRight;                 // anchor right, grow left to x=0
+        else if (entry.flags & DT_CENTER)
+          availableOut = (float)cw;
+        else
+          availableOut = (float)cw - outLeft;      // anchor left, grow to right edge
+        if (availableOut < rectWOut)
+          availableOut = rectWOut;
+      }
+
+      float penX = outLeft;
+      if (entry.flags & DT_CENTER)
+        penX = outLeft + (rectWOut - textWOut) * 0.5f;
+      else if (entry.flags & DT_RIGHT)
+        penX = outRight - textWOut;
+
+      float penY = outTop;
+      // Allow drawing past the tight rect when we expanded the clip budget
+      float clipRight = (availableOut > rectWOut + 0.5f && !(entry.flags & DT_RIGHT))
+        ? (outLeft + availableOut)
+        : outRight;
+      if (clipRight > (float)cw)
+        clipRight = (float)cw;
+
+      int visibleChars = textLen;
+      bool useEllipsis = false;
+      if ((entry.flags & (DT_END_ELLIPSIS | DT_WORD_ELLIPSIS)) &&
+          textWOut > availableOut && availableOut > 0) {
+        float ellipsisW = MeasureStringWidth(fontIdx, L"...", 3);
+        float maxLayoutWForClip = (sFont > 1e-4f) ? (availableOut / sFont) : rectW;
+        float accum = 0;
+        visibleChars = 0;
+        for (int j = 0; j < textLen; j++) {
+          int c = (int)text[j];
+          float charW = 0;
+          int gi = CharToGlyphIndex(c);
+          if (gi >= 0)
+            charW = atlas.glyphs[gi].advanceX;
+          else if (c > ATLAS_LAST_CHAR)
+            charW = atlas.glyphs['?'].advanceX;
+          if (accum + charW + ellipsisW > maxLayoutWForClip) break;
+          accum += charW;
+          visibleChars++;
+        }
+        useEllipsis = true;
+
+        // Recalculate pen in output space for truncated width
+        float truncatedWOut = (accum + ellipsisW) * sFont;
+        penX = outLeft;
+        if (entry.flags & DT_CENTER)
+          penX = outLeft + (rectWOut - truncatedWOut) * 0.5f;
+        else if (entry.flags & DT_RIGHT)
+          penX = outRight - truncatedWOut;
+      }
+
+      // Lambda to emit a character quad (pen already in output pixels; glyphs scaled)
+      auto emitChar = [&](int c) {
+        int gi = CharToGlyphIndex(c);
+        if (gi < 0) {
+          if (c > ATLAS_LAST_CHAR) gi = CharToGlyphIndex('?');
+          else return; // skip control chars
+          if (gi < 0) return;
+        }
+        const GlyphInfo& g = atlas.glyphs[gi];
+
+        float gw = g.glyphWidth * sFont;
+        float gh = g.glyphHeight * sFont;
+        float adv = g.advanceX * sFont;
+
+        // Character quad in output pixel space
+        float x0px = penX;
+        float y0px = penY;
+        float x1px = penX + gw;
+        float y1px = penY + gh;
+
+        // Skip if entirely outside the clipping rect
+        if ((entry.flags & DT_SINGLELINE) && x0px >= clipRight) {
+          penX += adv;
+          return;
+        }
+
+        // Convert to NDC (output viewport)
+        float x0 = x0px * invW * 2.0f - 1.0f;
+        float x1 = x1px * invW * 2.0f - 1.0f;
+        float y0 = 1.0f - y0px * invH * 2.0f;
+        float y1 = 1.0f - y1px * invH * 2.0f;
+
+        textVerts.push_back({ x0, y0, 0, color, g.u0, g.v0 });
+        textVerts.push_back({ x1, y0, 0, color, g.u1, g.v0 });
+        textVerts.push_back({ x0, y1, 0, color, g.u0, g.v1 });
+        textVerts.push_back({ x0, y1, 0, color, g.u0, g.v1 });
+        textVerts.push_back({ x1, y0, 0, color, g.u1, g.v0 });
+        textVerts.push_back({ x1, y1, 0, color, g.u1, g.v1 });
+
+        penX += adv;
+      };
+
+      // Render visible characters
+      for (int j = 0; j < visibleChars; j++) {
+        int c = (int)text[j];
+        if (c == '\t') {
+          penX += atlas.glyphs[' '].advanceX * 8.0f * sFont;
+          continue;
+        }
+        emitChar(c);
+      }
+
+      // Append ellipsis if truncated
+      if (useEllipsis) {
+        emitChar('.');
+        emitChar('.');
+        emitChar('.');
+      }
+    }
+
+    // Issue single batched draw for all text using this font
+    if (!textVerts.empty()) {
+      m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+                           textVerts.data(), (UINT)textVerts.size(), sizeof(SPRITEVERTEX), cmdList);
+    }
+  }
+
+  if (clearQueue)
+    ClearAll();
+}

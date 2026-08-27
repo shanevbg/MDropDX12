@@ -1,0 +1,44 @@
+# markdownlint configuration for this repository's documentation.
+#
+# Written so the docs lint clean, rather than leaving a standing pile of
+# warnings nobody reads. The rules switched off below are style preferences that
+# disagree with how this project's documentation has always been written; the
+# rules that catch real mistakes are left on.
+
+# MD013 (line length, default 80) — off. 1156 hits.
+# The docs are prose meant to be read rendered, and are written as long
+# paragraph lines rather than hard-wrapped source. Reflowing every file to 80
+# columns would touch nearly every line of every document and change nothing a
+# reader sees.
+MD013: false
+
+# MD060 (table column style) — off. 439 hits.
+# Every table in these docs uses the compact `|---|---|` delimiter form. The
+# rule wants padded pipes; the repo has consistently used the compact form since
+# the first document, so the rule is flagging the house style.
+MD060: false
+
+# MD040 (fenced code language) — off. 39 hits.
+# Many fences here hold preset code, INI fragments, IPC transcripts and console
+# output, none of which has a meaningful highlighter. Tagging them all `text`
+# to satisfy the rule would be noise, not information.
+MD040: false
+
+# MD004 (unordered list style) — off. 7 hits.
+# Mixed `-` and `*` bullets appear in nested lists in older documents. Purely
+# cosmetic and invisible once rendered.
+MD004: false
+
+# MD036 (no emphasis as heading) — off. 2 hits.
+# Bold lead-ins are the established shape of a changelog bullet
+# ("- **Find duplicate presets.** ..."), which the rule mistakes for a heading.
+MD036: false
+
+# MD024 (no duplicate headings) — relaxed, NOT disabled.
+# docs/Changes.md gives every released version its own "## vX.Y.Z" section, and
+# the same topic subheadings recur inside them: "### Bug Fixes" under seven
+# versions, "### Preset Rendering Fixes" under five. That repetition is the
+# changelog format. siblings_only keeps the rule useful — two "### Bug Fixes"
+# under the SAME version is still a genuine mistake and is still reported.
+MD024:
+  siblings_only: true

@@ -1,0 +1,67 @@
+src/**/Debug
+src/**/Debug_x64
+src/**/Release
+src/**/Release_x64
+controller.json
+**/.vs
+**/*.opendb
+**/*.aps
+**/*.suo
+**/*.db
+mDropDX12/bin
+/MDropDX12.slnLaunch.user
+/src/mDropDX12/log
+/install/_Archiv
+/config/roadmap.md
+*.exe
+*.zip
+/install/*.zip
+/.gitattributes
+/.idea/.idea.MDropDX12/.idea
+/install/sign.cmd
+/config/notes.md
+/Release/*
+!/Release/Developer*.*
+/packages
+enc_temp_folder/
+
+# External dependencies (fetched by build.ps1)
+/external/
+
+# Large binary assets (download separately)
+resources/textures/
+
+# Shader cache (regenerated at runtime)
+cache/
+
+# Scratch/diagnostic tree: debug logs, captures, ad-hoc scripts, and the
+# Milkwave reference install used for side-by-side comparison.
+
+# Runtime-generated files
+*.log
+diag_*.txt
+sprites.ini
+resources/presets/Quicksave2/
+resources/presets/test/
+settings.ini
+settings.ini.bak
+messages.ini
+messages.ini.bak
+src/settings.ini
+src/messages.ini
+.worktrees/
+
+tools/comparison/
+
+# MD3 PRO-derived shaders are personal-use only: recovered from a local licensed
+# install by tools/md3_shader_import.py, and never redistributable. Keep them
+# under a recovered/ directory so they cannot be committed by accident.
+resources/shaders/recovered/
+*.recovered.hlsl
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Lexer unit-test build output
+tools/lexer-test/bin/

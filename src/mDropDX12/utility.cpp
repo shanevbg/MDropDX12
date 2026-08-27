@@ -1,0 +1,1023 @@
+/*
+  LICENSE
+  -------
+Copyright 2005-2013 Nullsoft, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+  * Redistributions of source code must retain the above copyright notice,
+    this list of conditions and the following disclaimer.
+
+  * Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation
+    and/or other materials provided with the distribution.
+
+  * Neither the name of Nullsoft nor the names of its contributors may be used to
+    endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
+#include "utility.h"
+#include <math.h>
+#include <locale.h>
+#include <stdio.h>
+#include <string>
+#include <windows.h>
+#ifdef _DEBUG
+#define D3D_DEBUG_INFO  // declare this before including d3d9.h
+#endif
+#include <d3d9.h>
+#include "resource.h"
+#include "wasabi.h"
+#include <shellapi.h>
+#include <intrin.h>
+
+extern HINSTANCE api_orig_hinstance;
+
+intptr_t myOpenURL(HWND hwnd, wchar_t* loc) {
+  /* TODO FIXME */
+  return 0;
+}
+
+float PowCosineInterp(float x, float pow) {
+  // input (x) & output should be in range 0..1.
+  // pow > 0: tends to push things toward 0 and 1
+  // pow < 0: tends to push things toward 0.5.
+
+  if (x < 0)
+    return 0;
+  if (x > 1)
+    return 1;
+
+  int bneg = (pow < 0) ? 1 : 0;
+  if (bneg)
+    pow = -pow;
+
+  if (pow > 1000) pow = 1000;
+
+  int its = (int)pow;
+  for (int i = 0; i < its; i++) {
+    if (bneg)
+      x = InvCosineInterp(x);
+    else
+      x = CosineInterp(x);
+  }
+  float x2 = (bneg) ? InvCosineInterp(x) : CosineInterp(x);
+  float dx = pow - its;
+  return ((1 - dx) * x + (dx)*x2);
+}
+
+float AdjustRateToFPS(float per_frame_decay_rate_at_fps1, float fps1, float actual_fps) {
+  // returns the equivalent per-frame decay rate at actual_fps
+
+  // basically, do all your testing at fps1 and get a good decay rate;
+  // then, in the real application, adjust that rate by the actual fps each time you use it.
+
+  float per_second_decay_rate_at_fps1 = powf(per_frame_decay_rate_at_fps1, fps1);
+  float per_frame_decay_rate_at_fps2 = powf(per_second_decay_rate_at_fps1, 1.0f / actual_fps);
+
+  return per_frame_decay_rate_at_fps2;
+}
+
+void RemoveExtension(wchar_t* str) {
+  wchar_t* p = wcsrchr(str, L'.');
+  if (p) *p = 0;
+}
+
+static void ShiftDown(wchar_t* str) {
+  while (*str) {
+    str[0] = str[1];
+    str++;
+  }
+}
+
+void RemoveSingleAmpersands(wchar_t* str) {
+  while (*str) {
+    if (str[0] == L'&') {
+      if (str[1] == L'&') // two in a row: replace with single ampersand, move on
+        str++;
+
+      ShiftDown(str);
+    }
+    else
+      str = CharNextW(str);
+  }
+}
+
+void TextToGuid(char* str, GUID* pGUID) {
+  if (!str) return;
+  if (!pGUID) return;
+
+  DWORD d[11];
+
+  sscanf(str, "%X %X %X %X %X %X %X %X %X %X %X",
+    &d[0], &d[1], &d[2], &d[3], &d[4], &d[5], &d[6], &d[7], &d[8], &d[9], &d[10]);
+
+  pGUID->Data1 = (DWORD)d[0];
+  pGUID->Data2 = (WORD)d[1];
+  pGUID->Data3 = (WORD)d[2];
+  pGUID->Data4[0] = (BYTE)d[3];
+  pGUID->Data4[1] = (BYTE)d[4];
+  pGUID->Data4[2] = (BYTE)d[5];
+  pGUID->Data4[3] = (BYTE)d[6];
+  pGUID->Data4[4] = (BYTE)d[7];
+  pGUID->Data4[5] = (BYTE)d[8];
+  pGUID->Data4[6] = (BYTE)d[9];
+  pGUID->Data4[7] = (BYTE)d[10];
+}
+
+void GuidToText(GUID* pGUID, char* str, int nStrLen) {
+  // note: nStrLen should be set to sizeof(str).
+  if (!str) return;
+  if (!nStrLen) return;
+  str[0] = 0;
+  if (!pGUID) return;
+
+  DWORD d[11];
+  d[0] = (DWORD)pGUID->Data1;
+  d[1] = (DWORD)pGUID->Data2;
+  d[2] = (DWORD)pGUID->Data3;
+  d[3] = (DWORD)pGUID->Data4[0];
+  d[4] = (DWORD)pGUID->Data4[1];
+  d[5] = (DWORD)pGUID->Data4[2];
+  d[6] = (DWORD)pGUID->Data4[3];
+  d[7] = (DWORD)pGUID->Data4[4];
+  d[8] = (DWORD)pGUID->Data4[5];
+  d[9] = (DWORD)pGUID->Data4[6];
+  d[10] = (DWORD)pGUID->Data4[7];
+
+  sprintf(str, "%08X %04X %04X %02X %02X %02X %02X %02X %02X %02X %02X",
+    d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9], d[10]);
+}
+
+/*
+int GetPentiumTimeRaw(unsigned __int64 *cpu_timestamp)
+{
+    // returns 0 on failure, 1 on success
+    // warning: watch out for wraparound!
+
+    // note: it's probably better to use QueryPerformanceFrequency
+    // and QueryPerformanceCounter()!
+
+    // get high-precision time:
+    __try
+    {
+        *cpu_timestamp = __rdtsc();
+        return 1;
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER)
+    {
+        return 0;
+    }
+
+    return 0;
+}
+
+double GetPentiumTimeAsDouble(unsigned __int64 frequency)
+{
+    // returns < 0 on failure; otherwise, returns current cpu time, in seconds.
+    // warning: watch out for wraparound!
+
+    // note: it's probably better to use QueryPerformanceFrequency
+    // and QueryPerformanceCounter()!
+
+    if (frequency==0)
+        return -1.0;
+
+    // get high-precision time:
+    __try
+    {
+        unsigned __int64 high_perf_time = __rdtsc();
+        __int64 time_s     = (__int64)(high_perf_time / frequency);  // unsigned->sign conversion should be safe here
+        __int64 time_fract = (__int64)(high_perf_time % frequency);  // unsigned->sign conversion should be safe here
+        // note: here, we wrap the timer more frequently (once per week)
+        // than it otherwise would (VERY RARELY - once every 585 years on
+        // a 1 GHz), to alleviate floating-point precision errors that start
+        // to occur when you get to very high counter values.
+        double ret = (time_s % (60*60*24*7)) + (double)time_fract/(double)((__int64)frequency);
+        return ret;
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER)
+    {
+        return -1.0;
+    }
+
+    return -1.0;
+}
+*/
+
+void DownloadDirectX(HWND hwnd) {
+  wchar_t szUrl[] = L"http://www.microsoft.com/download/details.aspx?id=35";
+  intptr_t ret = myOpenURL(NULL, szUrl);
+  if (ret <= 32) {
+    wchar_t buf[1024];
+    switch (ret) {
+    case SE_ERR_FNF:
+    case SE_ERR_PNF:
+      swprintf(buf, wasabiApiLangString(IDS_URL_COULD_NOT_OPEN), szUrl);
+      break;
+    case SE_ERR_ACCESSDENIED:
+    case SE_ERR_SHARE:
+      swprintf(buf, wasabiApiLangString(IDS_ACCESS_TO_URL_WAS_DENIED), szUrl);
+      break;
+    case SE_ERR_NOASSOC:
+      swprintf(buf, wasabiApiLangString(IDS_ACCESS_TO_URL_FAILED_DUE_TO_NO_ASSOC), szUrl);
+      break;
+    default:
+      swprintf(buf, wasabiApiLangString(IDS_ACCESS_TO_URL_FAILED_CODE_X), szUrl, ret);
+      break;
+    }
+    MessageBoxW(hwnd, buf, wasabiApiLangString(IDS_ERROR_OPENING_URL),
+      MB_OK | MB_SETFOREGROUND | MB_TOPMOST | MB_TASKMODAL);
+  }
+}
+
+void MissingDirectX(HWND hwnd) {
+  // DIRECTX MISSING OR CORRUPT -> PROMPT TO GO TO WEB.
+  wchar_t title[128];
+  int ret = MessageBoxW(hwnd,
+#ifndef D3D_SDK_VERSION
+    -- - error; you need to #include <d3d9.h> -- -
+#endif
+#if (D3D_SDK_VERSION==120)
+    // plugin was *built* using the DirectX 9.0 sdk, therefore,
+    // the dx9.0 runtime is missing or corrupt
+    "Failed to initialize DirectX 9.0 or later.\n"
+    "Milkdrop requires d3dx9_31.dll to be installed.\n"
+    "\n"
+    "Would you like to be taken to:\n"
+    "http://www.microsoft.com/download/details.aspx?id=35,\n"
+    "where you can update DirectX 9.0?\n"
+    XXXXXXX
+#else
+    // plugin was *built* using some other version of the DirectX9 sdk, such as
+    // 9.1b; therefore, we don't know exactly what version to tell them they need
+    // to install; so we ask them to go get the *latest* version.
+    wasabiApiLangString(IDS_DIRECTX_MISSING_OR_CORRUPT_TEXT)
+#endif
+    ,
+    wasabiApiLangString(IDS_DIRECTX_MISSING_OR_CORRUPT, title, 128),
+    MB_YESNO | MB_SETFOREGROUND | MB_TOPMOST | MB_TASKMODAL);
+
+  if (ret == IDYES)
+    DownloadDirectX(hwnd);
+}
+
+bool CheckForMMX() {
+  int cpuInfo[4];
+  __cpuid(cpuInfo, 1);
+  return (cpuInfo[3] & (1 << 23)) != 0;  // Bit 23 = MMX
+}
+
+bool CheckForSSE() {
+#ifdef _WIN64
+  return true; // All x64 processors support SSE
+#else
+  /*
+  The SSE instruction set was introduced with the Pentium III and features:
+      * Additional MMX instructions such as min/max
+      * Prefetch and write-through instructions for optimizing data movement
+          from and to the L2/L3 caches and main memory
+      * 8 New 128 bit XMM registers (xmm0..xmm7) and corresponding 32 bit floating point
+          (single precision) instructions
+  */
+
+  DWORD bSSE = 0;
+  DWORD* pbSSE = &bSSE;
+  __try {
+    __asm
+    {
+      mov eax, 1
+      cpuid
+      mov edi, pbSSE
+      mov dword ptr[edi], edx
+    }
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    bSSE = 0;
+  }
+
+  if (bSSE & 0x02000000)  // check bit 25
+    return true;
+
+  return false;
+#endif
+}
+
+void GetDesktopFolder(char* szDesktopFolder) // should be MAX_PATH len.
+{
+  // returns the path to the desktop folder, WITHOUT a trailing backslash.
+  szDesktopFolder[0] = 0;
+  ITEMIDLIST pidl;
+  ZeroMemory(&pidl, sizeof(pidl));
+  if (!SHGetPathFromIDListA(&pidl, szDesktopFolder))
+    szDesktopFolder[0] = 0;
+}
+
+void ExecutePidl(LPITEMIDLIST pidl, char* szPathAndFile, char* szWorkingDirectory, HWND hWnd) {
+  // This function was based on code by Jeff Prosise.
+
+  // Note: for some reason, ShellExecuteEx fails when executing
+  // *shortcuts* (.lnk files) from the desktop, using their PIDLs.
+  // So, if that fails, we try again w/the plain old text filename
+  // (szPathAndFile).
+
+  char szVerb[] = "open";
+  char szFilename2[MAX_PATH];
+
+  sprintf(szFilename2, "%s.lnk", szPathAndFile);
+
+  // -without the "no-verb" pass,
+  //   certain icons still don't work (like shortcuts
+  //   to IE, VTune...)
+  // -without the "context menu" pass,
+  //   certain others STILL don't work (Netscape...)
+  // -without the 'ntry' pass, shortcuts (to folders/files)
+  //   don't work
+  for (int verb_pass = 0; verb_pass < 2; verb_pass++) {
+    for (int ntry = 0; ntry < 3; ntry++) {
+      for (int context_pass = 0; context_pass < 2; context_pass++) {
+        SHELLEXECUTEINFOA sei = { sizeof(sei) };
+        sei.hwnd = hWnd;
+        sei.fMask = SEE_MASK_FLAG_NO_UI;
+        if (context_pass == 1)
+          sei.fMask |= SEE_MASK_INVOKEIDLIST;
+        sei.lpVerb = (verb_pass) ? NULL : szVerb;
+        sei.lpDirectory = szWorkingDirectory;
+        sei.nShow = SW_SHOWNORMAL;
+
+        if (ntry == 0) {
+          // this case works for most non-shortcuts
+          sei.fMask |= SEE_MASK_IDLIST;
+          sei.lpIDList = pidl;
+        }
+        else if (ntry == 1) {
+          // this case is required for *shortcuts to folders* to work
+          sei.lpFile = szPathAndFile;
+        }
+        else if (ntry == 2) {
+          // this case is required for *shortcuts to files* to work
+          sei.lpFile = szFilename2;
+        }
+
+        if (ShellExecuteExA(&sei))
+          return;
+      }
+    }
+  }
+}
+
+WNDPROC        g_pOldWndProc;
+LPCONTEXTMENU2 g_pIContext2or3;
+
+LRESULT CALLBACK HookWndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
+  //UINT uItem;
+  //TCHAR szBuf[MAX_PATH];
+
+  switch (msg) {
+  case WM_DRAWITEM:
+  case WM_MEASUREITEM:
+    if (wp) break; // not menu related
+  case WM_INITMENUPOPUP:
+    g_pIContext2or3->HandleMenuMsg(msg, wp, lp);
+    return (msg == WM_INITMENUPOPUP ? 0 : TRUE); // handled
+
+    /*case WM_MENUSELECT:
+       // if this is a shell item, get its descriptive text
+       uItem = (UINT) LOWORD(wp);
+       if(0 == (MF_POPUP & HIWORD(wp)) && uItem >= 1 && uItem <= 0x7fff)
+       {
+          g_pIContext2or3->GetCommandString(uItem-1, GCS_HELPTEXT,
+             NULL, szBuf, sizeof(szBuf)/sizeof(szBuf[0]) );
+
+          // set the status bar text
+          ((CFrameWnd*)(AfxGetApp()->m_pMainWnd))->SetMessageText(szBuf);
+          return 0;
+       }
+       break;*/
+
+  default:
+    break;
+  }
+
+  // for all untreated messages, call the original wndproc
+  return ::CallWindowProc(g_pOldWndProc, hWnd, msg, wp, lp);
+}
+
+BOOL DoExplorerMenu(HWND hwnd, LPITEMIDLIST pidlMain, POINT point) {
+  LPMALLOC pMalloc;
+  LPSHELLFOLDER psfFolder, psfNextFolder;
+  LPITEMIDLIST pidlItem, pidlNextItem, * ppidl;
+  LPCONTEXTMENU pContextMenu;
+  CMINVOKECOMMANDINFO ici;
+  UINT nCount, nCmd;
+  BOOL bResult;
+  HMENU hMenu;
+
+  //
+  // Get pointers to the shell's IMalloc interface and the desktop's
+  // IShellFolder interface.
+  //
+  bResult = FALSE;
+
+  if (!SUCCEEDED(SHGetMalloc(&pMalloc)))
+    return bResult;
+
+  if (!SUCCEEDED(SHGetDesktopFolder(&psfFolder))) {
+    pMalloc->Release();
+    return bResult;
+  }
+
+  if (nCount = GetItemCount(pidlMain)) // nCount must be > 0
+  {
+    //
+    // Initialize psfFolder with a pointer to the IShellFolder
+    // interface of the folder that contains the item whose context
+    // menu we're after, and initialize pidlItem with a pointer to
+    // the item's item ID. If nCount > 1, this requires us to walk
+    // the list of item IDs stored in pidlMain and bind to each
+    // subfolder referenced in the list.
+    //
+    pidlItem = pidlMain;
+
+    while (--nCount) {
+      //
+      // Create a 1-item item ID list for the next item in pidlMain.
+      //
+      pidlNextItem = DuplicateItem(pMalloc, pidlItem);
+      if (pidlNextItem == NULL) {
+        psfFolder->Release();
+        pMalloc->Release();
+        return bResult;
+      }
+
+      //
+      // Bind to the folder specified in the new item ID list.
+      //
+      if (!SUCCEEDED(psfFolder->BindToObject(pidlNextItem, NULL, IID_IShellFolder, (void**)&psfNextFolder)))  // modified by RG
+      {
+        pMalloc->Free(pidlNextItem);
+        psfFolder->Release();
+        pMalloc->Release();
+        return bResult;
+      }
+
+      //
+      // Release the IShellFolder pointer to the parent folder
+      // and set psfFolder equal to the IShellFolder pointer for
+      // the current folder.
+      //
+      psfFolder->Release();
+      psfFolder = psfNextFolder;
+
+      //
+      // Release the storage for the 1-item item ID list we created
+      // just a moment ago and initialize pidlItem so that it points
+      // to the next item in pidlMain.
+      //
+      pMalloc->Free(pidlNextItem);
+      pidlItem = GetNextItem(pidlItem);
+    }
+
+    //
+    // Get a pointer to the item's IContextMenu interface and call
+    // IContextMenu::QueryContextMenu to initialize a context menu.
+    //
+    ppidl = &pidlItem;
+    if (SUCCEEDED(psfFolder->GetUIObjectOf(hwnd, 1, (LPCITEMIDLIST*)ppidl, IID_IContextMenu, NULL, (void**)&pContextMenu)))   // modified by RG
+    {
+      // try to see if we can upgrade to an IContextMenu3
+      // or IContextMenu2 interface pointer:
+      int level = 1;
+      void* pCM = NULL;
+      if (pContextMenu->QueryInterface(IID_IContextMenu3, &pCM) == NOERROR) {
+        pContextMenu->Release();
+        pContextMenu = (LPCONTEXTMENU)pCM;
+        level = 3;
+      }
+      else if (pContextMenu->QueryInterface(IID_IContextMenu2, &pCM) == NOERROR) {
+        pContextMenu->Release();
+        pContextMenu = (LPCONTEXTMENU)pCM;
+        level = 2;
+      }
+
+      hMenu = CreatePopupMenu();
+      if (SUCCEEDED(pContextMenu->QueryContextMenu(hMenu, 0, 1, 0x7FFF, CMF_EXPLORE))) {
+        ClientToScreen(hwnd, &point);
+
+        // install the subclassing "hook", for versions 2 or 3
+        if (level >= 2) {
+          g_pOldWndProc = (WNDPROC)SetWindowLongPtr(hwnd, GWLP_WNDPROC, (DWORD_PTR)HookWndProc);
+          g_pIContext2or3 = (LPCONTEXTMENU2)pContextMenu; // cast ok for ICMv3
+        }
+        else {
+          g_pOldWndProc = NULL;
+          g_pIContext2or3 = NULL;
+        }
+
+        //
+        // Display the context menu.
+        //
+        nCmd = TrackPopupMenu(hMenu, TPM_LEFTALIGN |
+          TPM_LEFTBUTTON | TPM_RIGHTBUTTON | TPM_RETURNCMD,
+          point.x, point.y, 0, hwnd, NULL);
+
+        // restore old wndProc
+        if (g_pOldWndProc) {
+          SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)g_pOldWndProc);
+        }
+
+        //
+        // If a command was selected from the menu, execute it.
+        //
+        if (nCmd >= 1 && nCmd <= 0x7fff) {
+          ZeroMemory(&ici, sizeof(ici));
+          ici.cbSize = sizeof(CMINVOKECOMMANDINFO);
+          //ici.fMask           = 0;
+          ici.hwnd = hwnd;
+          ici.lpVerb = MAKEINTRESOURCEA(nCmd - 1);
+          //ici.lpParameters    = NULL;
+          //ici.lpDirectory     = NULL;
+          ici.nShow = SW_SHOWNORMAL;
+          //ici.dwHotKey        = 0;
+          //ici.hIcon           = NULL;
+
+          if (SUCCEEDED(pContextMenu->InvokeCommand(&ici)))
+            bResult = TRUE;
+        }
+        /*else if (nCmd)
+        {
+            PostMessage(hwnd, WM_COMMAND, nCmd, NULL); // our command
+        }*/
+      }
+      DestroyMenu(hMenu);
+      pContextMenu->Release();
+    }
+  }
+
+  //
+  // Clean up and return.
+  //
+  psfFolder->Release();
+  pMalloc->Release();
+
+  return bResult;
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
+//  Note: a special thanks goes out to Jeff Prosise for writing & publishing
+//        the following code!
+//
+//  FUNCTION:       GetItemCount
+//
+//  DESCRIPTION:    Computes the number of item IDs in an item ID list.
+//
+//  INPUT:          pidl = Pointer to an item ID list.
+//
+//  RETURNS:        Number of item IDs in the list.
+//
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+UINT GetItemCount(LPITEMIDLIST pidl) {
+  USHORT nLen;
+  UINT nCount;
+
+  nCount = 0;
+  while ((nLen = pidl->mkid.cb) != 0) {
+    pidl = GetNextItem(pidl);
+    nCount++;
+  }
+  return nCount;
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
+//  Note: a special thanks goes out to Jeff Prosise for writing & publishing
+//        the following code!
+//
+//  FUNCTION:       GetNextItem
+//
+//  DESCRIPTION:    Finds the next item in an item ID list.
+//
+//  INPUT:          pidl = Pointer to an item ID list.
+//
+//  RETURNS:        Pointer to the next item.
+//
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+LPITEMIDLIST GetNextItem(LPITEMIDLIST pidl) {
+  USHORT nLen;
+
+  if ((nLen = pidl->mkid.cb) == 0)
+    return NULL;
+
+  return (LPITEMIDLIST)(((LPBYTE)pidl) + nLen);
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
+//  Note: a special thanks goes out to Jeff Prosise for writing & publishing
+//        the following code!
+//
+//  FUNCTION:       DuplicateItem
+//
+//  DESCRIPTION:    Makes a copy of the next item in an item ID list.
+//
+//  INPUT:          pMalloc = Pointer to an IMalloc interface.
+//                  pidl    = Pointer to an item ID list.
+//
+//  RETURNS:        Pointer to an ITEMIDLIST containing the copied item ID.
+//
+//  NOTES:          It is the caller's responsibility to free the memory
+//                  allocated by this function when the item ID is no longer
+//                  needed. Example:
+//
+//                    pidlItem = DuplicateItem (pMalloc, pidl);
+//                      .
+//                      .
+//                      .
+//                    pMalloc->lpVtbl->Free (pMalloc, pidlItem);
+//
+//                  Failure to free the ITEMIDLIST will result in memory
+//                  leaks.
+//
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+LPITEMIDLIST DuplicateItem(LPMALLOC pMalloc, LPITEMIDLIST pidl) {
+  USHORT nLen;
+  LPITEMIDLIST pidlNew;
+
+  nLen = pidl->mkid.cb;
+  if (nLen == 0)
+    return NULL;
+
+  pidlNew = (LPITEMIDLIST)pMalloc->Alloc(
+    nLen + sizeof(USHORT));
+  if (pidlNew == NULL)
+    return NULL;
+
+  CopyMemory(pidlNew, pidl, nLen);
+  *((USHORT*)(((LPBYTE)pidlNew) + nLen)) = 0;
+
+  return pidlNew;
+}
+
+//----------------------------------------------------------------------
+// A special thanks goes out to Jeroen-bart Engelen (Yeep) for providing
+// his source code for getting the position & label information for all
+// the icons on the desktop, as found below.  See his article at
+// http://www.digiwar.com/scripts/renderpage.php?section=2&subsection=2
+//----------------------------------------------------------------------
+
+void FindDesktopWindows(HWND* desktop_progman, HWND* desktopview_wnd, HWND* listview_wnd) {
+  *desktop_progman = NULL;
+  *desktopview_wnd = NULL;
+  *listview_wnd = NULL;
+
+  *desktop_progman = FindWindowW(NULL, L"Program Manager");
+  if (*desktop_progman == NULL) {
+    //MessageBox(NULL, "Unable to get the handle to the Program Manager.", "Fatal error", MB_OK|MB_ICONERROR);
+    return;
+  }
+
+  *desktopview_wnd = FindWindowExW(*desktop_progman, NULL, L"SHELLDLL_DefView", NULL);
+  if (*desktopview_wnd == NULL) {
+    //MessageBox(NULL, "Unable to get the handle to the desktopview.", "Fatal error", MB_OK|MB_ICONERROR);
+    return;
+  }
+
+  // Thanks ef_ef_ef@yahoo.com for pointing out this works in NT 4 and not the way I did it originally.
+  *listview_wnd = FindWindowExW(*desktopview_wnd, NULL, L"SysListView32", NULL);
+  if (*listview_wnd == NULL) {
+    //MessageBox(NULL, "Unable to get the handle to the folderview.", "Fatal error", MB_OK|MB_ICONERROR);
+    return;
+  }
+}
+
+//----------------------------------------------------------------------
+
+int GetDesktopIconSize() {
+  int ret = 32;
+
+  // reads the key: HKEY_CURRENT_USER\Control Panel, Desktop\WindowMetrics\Shell Icon Size
+  unsigned char buf[64];
+  unsigned long len = sizeof(buf);
+  DWORD type;
+  HKEY key;
+
+  if (ERROR_SUCCESS == RegOpenKeyExW(HKEY_CURRENT_USER, L"Control Panel\\Desktop\\WindowMetrics", 0, KEY_READ, &key)) {
+    if (ERROR_SUCCESS == RegQueryValueExW(key, L"Shell Icon Size", NULL, &type, (unsigned char*)buf, &len) &&
+      type == REG_SZ) {
+      int x = _wtoi_l((wchar_t*)buf, g_use_C_locale);
+      if (x > 0 && x <= 128)
+        ret = x;
+    }
+
+    RegCloseKey(key);
+  }
+
+  return ret;
+}
+
+//----------------------------------------------------------------------
+
+// handy functions for populating Combo Boxes:
+int SelectItemByValue(HWND ctrl, DWORD value) {
+  int count = (int)SendMessage(ctrl, CB_GETCOUNT, 0, 0);
+  for (int i = 0; i < count; i++) {
+    DWORD value_i = (DWORD)SendMessage(ctrl, CB_GETITEMDATA, i, 0);
+    if (value_i == value) {
+      SendMessage(ctrl, CB_SETCURSEL, i, 0);
+      return i;
+    }
+  }
+  return -1;
+}
+
+bool ReadCBValue(HWND hwnd, DWORD ctrl_id, int* pRetValue) {
+  if (!pRetValue)
+    return false;
+  HWND ctrl = GetDlgItem(hwnd, ctrl_id);
+  int t = (int)SendMessage(ctrl, CB_GETCURSEL, 0, 0);
+  if (t == CB_ERR)
+    return false;
+  *pRetValue = (int)SendMessage(ctrl, CB_GETITEMDATA, t, 0);
+  return true;
+}
+
+void* GetTextResource(UINT id, int no_fallback) {
+  void* data = 0;
+  HINSTANCE hinst = api_orig_hinstance;
+  HRSRC rsrc = FindResourceW(hinst, MAKEINTRESOURCEW(id), L"TEXT");
+  if (!rsrc && !no_fallback) rsrc = FindResourceW((hinst = api_orig_hinstance), MAKEINTRESOURCEW(id), L"TEXT");
+  if (rsrc) {
+    HGLOBAL resourceHandle = LoadResource(hinst, rsrc);
+    data = LockResource(resourceHandle);
+  }
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// Debug log — writes timestamped messages to debug.log in the base directory.
+// DebugLogInit rotates debug.log → debug.prev.log (keeps only current + last run).
+// ---------------------------------------------------------------------------
+static FILE* g_debugLogFile = nullptr;
+static CRITICAL_SECTION g_debugLogCS;
+static bool g_debugLogReady = false;
+static wchar_t g_debugLogDir[MAX_PATH] = {}; // log/ subdirectory path
+int g_debugLogLevel = LOG_INFO; // default: show errors + warnings + info
+int g_debugLogOutput = LOG_OUTPUT_BOTH; // default: file + OutputDebugString
+
+void DebugLogInit(const wchar_t* baseDir) {
+  InitializeCriticalSection(&g_debugLogCS);
+
+  // Create log subdirectory and store path for diag helpers
+  swprintf_s(g_debugLogDir, MAX_PATH, L"%slog\\", baseDir);
+  CreateDirectoryW(g_debugLogDir, NULL); // OK if already exists
+
+  wchar_t logPath[MAX_PATH];
+  wchar_t prevPath[MAX_PATH];
+  swprintf_s(logPath, MAX_PATH, L"%sdebug.log", g_debugLogDir);
+  swprintf_s(prevPath, MAX_PATH, L"%sdebug.prev.log", g_debugLogDir);
+
+  // Rotate: delete old prev, rename current → prev.
+  // If the previous log is huge (e.g. Verbose runaway), delete instead of
+  // MoveFile — rotating multi-GB logs can stall startup for a long time.
+  DeleteFileW(prevPath);
+  {
+    WIN32_FILE_ATTRIBUTE_DATA fad = {};
+    const ULONGLONG kMaxRotateBytes = 32ull * 1024ull * 1024ull; // 32 MB
+    if (GetFileAttributesExW(logPath, GetFileExInfoStandard, &fad)) {
+      ULONGLONG size = (ULONGLONG(fad.nFileSizeHigh) << 32) | fad.nFileSizeLow;
+      if (size > kMaxRotateBytes)
+        DeleteFileW(logPath);
+      else
+        MoveFileW(logPath, prevPath);
+    }
+  }
+
+  // Open new log file
+  g_debugLogFile = _wfopen(logPath, L"w, ccs=UTF-8");
+  if (g_debugLogFile) {
+    g_debugLogReady = true;
+    // Write header
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    static const wchar_t* levelNames[] = { L"Off", L"Error", L"Warn", L"Info", L"Verbose" };
+    int lvl = (g_debugLogLevel >= 0 && g_debugLogLevel <= 4) ? g_debugLogLevel : 0;
+    fwprintf(g_debugLogFile, L"=== MDropDX12 debug log started %04d-%02d-%02d %02d:%02d:%02d (LogLevel=%d %s) ===\n",
+             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, g_debugLogLevel, levelNames[lvl]);
+    fflush(g_debugLogFile);
+  }
+}
+
+void DebugLogSetLevel(int level) {
+  int old = g_debugLogLevel;
+  g_debugLogLevel = level;
+  if (level != old && g_debugLogReady && g_debugLogFile) {
+    static const wchar_t* levelNames[] = { L"Off", L"Error", L"Warn", L"Info", L"Verbose" };
+    int lvl = (level >= 0 && level <= 4) ? level : 0;
+    DebugLogWFmt(LOG_ERROR, L"Log level changed: %d (%s) -> %d (%s)",
+                 old, levelNames[(old >= 0 && old <= 4) ? old : 0],
+                 level, levelNames[lvl]);
+  }
+}
+
+void DebugLogSetOutput(int output) {
+  g_debugLogOutput = output;
+}
+
+void DebugLogW(const wchar_t* msg, int level) {
+  if (!msg || !msg[0])
+    return;
+  if (level > g_debugLogLevel)
+    return;
+
+  if (g_debugLogOutput & LOG_OUTPUT_ODS)
+    OutputDebugStringW(msg);
+
+  if (!(g_debugLogOutput & LOG_OUTPUT_FILE) || !g_debugLogReady || !g_debugLogFile)
+    return;
+
+  SYSTEMTIME st;
+  GetLocalTime(&st);
+
+  EnterCriticalSection(&g_debugLogCS);
+  fwprintf(g_debugLogFile, L"[%02d:%02d:%02d.%03d] %s",
+           st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, msg);
+  // Ensure line ends with newline
+  int len = lstrlenW(msg);
+  if (len > 0 && msg[len - 1] != L'\n')
+    fwprintf(g_debugLogFile, L"\n");
+  fflush(g_debugLogFile);
+  LeaveCriticalSection(&g_debugLogCS);
+}
+
+void DebugLogA(const char* msg, int level) {
+  if (!msg || !msg[0])
+    return;
+  if (level > g_debugLogLevel)
+    return;
+  wchar_t buf[2048];
+  MultiByteToWideChar(CP_ACP, 0, msg, -1, buf, 2048);
+  DebugLogW(buf, level);
+}
+
+void DebugLogWFmt(const wchar_t* fmt, ...) {
+  if (LOG_INFO > g_debugLogLevel) return;
+  wchar_t buf[2048];
+  va_list args;
+  va_start(args, fmt);
+  _vsnwprintf_s(buf, _countof(buf), _TRUNCATE, fmt, args);
+  va_end(args);
+  DebugLogW(buf, LOG_INFO);
+}
+
+void DebugLogWFmt(int level, const wchar_t* fmt, ...) {
+  if (level > g_debugLogLevel) return;
+  wchar_t buf[2048];
+  va_list args;
+  va_start(args, fmt);
+  _vsnwprintf_s(buf, _countof(buf), _TRUNCATE, fmt, args);
+  va_end(args);
+  DebugLogW(buf, level);
+}
+
+void DebugLogAFmt(const char* fmt, ...) {
+  if (LOG_INFO > g_debugLogLevel) return;
+  char buf[2048];
+  va_list args;
+  va_start(args, fmt);
+  _vsnprintf_s(buf, _countof(buf), _TRUNCATE, fmt, args);
+  va_end(args);
+  DebugLogA(buf, LOG_INFO);
+}
+
+void DebugLogAFmt(int level, const char* fmt, ...) {
+  if (level > g_debugLogLevel) return;
+  char buf[2048];
+  va_list args;
+  va_start(args, fmt);
+  _vsnprintf_s(buf, _countof(buf), _TRUNCATE, fmt, args);
+  va_end(args);
+  DebugLogA(buf, level);
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic file helpers — all files go to the log/ subdirectory.
+// ---------------------------------------------------------------------------
+
+const wchar_t* DebugLogDiagPath(const wchar_t* diagName, wchar_t* buf, size_t bufLen) {
+  swprintf_s(buf, bufLen, L"%s%s", g_debugLogDir, diagName);
+  return buf;
+}
+
+void DebugLogDiagWrite(const wchar_t* diagName, const char* content) {
+  wchar_t path[MAX_PATH];
+  DebugLogDiagPath(diagName, path, MAX_PATH);
+  FILE* f = nullptr;
+  _wfopen_s(&f, path, L"w");
+  if (f) { fputs(content, f); fclose(f); }
+}
+
+void DebugLogDiagAppend(const wchar_t* diagName, const char* content) {
+  wchar_t path[MAX_PATH];
+  DebugLogDiagPath(diagName, path, MAX_PATH);
+  FILE* f = nullptr;
+  _wfopen_s(&f, path, L"a");
+  if (f) { fputs(content, f); fclose(f); }
+}
+
+void DebugLogDiagTruncate(const wchar_t* diagName) {
+  wchar_t path[MAX_PATH];
+  DebugLogDiagPath(diagName, path, MAX_PATH);
+  FILE* f = nullptr;
+  _wfopen_s(&f, path, L"w");
+  if (f) fclose(f);
+}
+
+FILE* DebugLogDiagOpen(const wchar_t* diagName, const wchar_t* mode) {
+  wchar_t path[MAX_PATH];
+  DebugLogDiagPath(diagName, path, MAX_PATH);
+  FILE* f = nullptr;
+  _wfopen_s(&f, path, mode);
+  return f;
+}
+
+void DebugLogClearAll() {
+  if (!g_debugLogDir[0]) return;
+
+  // Delete all files in the log directory
+  wchar_t pattern[MAX_PATH];
+  swprintf_s(pattern, MAX_PATH, L"%s*", g_debugLogDir);
+  WIN32_FIND_DATAW fd;
+  HANDLE hFind = FindFirstFileW(pattern, &fd);
+  if (hFind == INVALID_HANDLE_VALUE) return;
+  do {
+    if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+    wchar_t filePath[MAX_PATH];
+    swprintf_s(filePath, MAX_PATH, L"%s%s", g_debugLogDir, fd.cFileName);
+    DeleteFileW(filePath);
+  } while (FindNextFileW(hFind, &fd));
+  FindClose(hFind);
+
+  // Re-open debug.log fresh
+  EnterCriticalSection(&g_debugLogCS);
+  if (g_debugLogFile) { fclose(g_debugLogFile); g_debugLogFile = nullptr; }
+  wchar_t logPath[MAX_PATH];
+  swprintf_s(logPath, MAX_PATH, L"%sdebug.log", g_debugLogDir);
+  g_debugLogFile = _wfopen(logPath, L"w, ccs=UTF-8");
+  if (g_debugLogFile) {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    fwprintf(g_debugLogFile, L"=== MDropDX12 debug log cleared %04d-%02d-%02d %02d:%02d:%02d ===\n",
+             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    fflush(g_debugLogFile);
+  }
+  LeaveCriticalSection(&g_debugLogCS);
+}
+
+const wchar_t* DebugLogGetDir() {
+  return g_debugLogDir;
+}
+
+// UTF-8 <-> Wide string conversion helpers
+std::wstring UTF8ToWide(const char* utf8) {
+  if (!utf8 || !utf8[0])
+    return std::wstring();
+  int len = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, nullptr, 0);
+  if (len <= 0)
+    return std::wstring();
+  std::wstring result(len - 1, L'\0'); // len includes null terminator
+  MultiByteToWideChar(CP_UTF8, 0, utf8, -1, &result[0], len);
+  return result;
+}
+
+std::wstring UTF8ToWide(const std::string& utf8) {
+  return UTF8ToWide(utf8.c_str());
+}
+
+std::string WideToUTF8(const wchar_t* wide) {
+  if (!wide || !wide[0])
+    return std::string();
+  int len = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
+  if (len <= 0)
+    return std::string();
+  std::string result(len - 1, '\0'); // len includes null terminator
+  WideCharToMultiByte(CP_UTF8, 0, wide, -1, &result[0], len, nullptr, nullptr);
+  return result;
+}
+
+std::string WideToUTF8(const std::wstring& wide) {
+  return WideToUTF8(wide.c_str());
+}

@@ -1,0 +1,255 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="library">
+      <UniqueIdentifier>{3377a26f-db8f-4eb6-8291-c31a4e1685cb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="library\headers">
+      <UniqueIdentifier>{683304f8-0e6b-4bf2-8ca5-a3be4ef14e7d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="library\sources">
+      <UniqueIdentifier>{c3cd6f6e-846a-45aa-be08-fe24caec5f06}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="library\resources">
+      <UniqueIdentifier>{d2f87be5-5f0e-4c55-b98f-23f5810cce55}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="musikcube">
+      <UniqueIdentifier>{a80939e4-d079-498f-bb43-482a4708d7d5}</UniqueIdentifier>
+      <Extensions>cpp;c;cxx;rc;def;r;odl;idl;hpj;bat</Extensions>
+    </Filter>
+    <Filter Include="library\ns-eel">
+      <UniqueIdentifier>{ad60581f-f132-4b9d-86c6-2c543b5c59da}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Spout2">
+      <UniqueIdentifier>{f96a24de-a941-4632-b3b9-924e81a488d3}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="textmgr.cpp">
+      <Filter>library\sources</Filter>
+    </ClCompile>
+    <ClCompile Include="texmgr.cpp">
+      <Filter>library\sources</Filter>
+    </ClCompile>
+    <ClCompile Include="support.cpp">
+      <Filter>library\sources</Filter>
+    </ClCompile>
+    <ClCompile Include="state.cpp">
+      <Filter>library\sources</Filter>
+    </ClCompile>
+    <ClCompile Include="milkdropfs.cpp">
+      <Filter>library\sources</Filter>
+    </ClCompile>
+    <ClCompile Include="engine.cpp">
+      <Filter>library\sources</Filter>
+    </ClCompile>
+    <ClCompile Include="menu.cpp">
+      <Filter>library\sources</Filter>
+    </ClCompile>
+    <ClCompile Include="engineshell.cpp">
+      <Filter>library\sources</Filter>
+    </ClCompile>
+    <ClCompile Include="utility.cpp">
+      <Filter>library\sources</Filter>
+    </ClCompile>
+    <ClCompile Include="wasabi.cpp">
+      <Filter>library\sources</Filter>
+    </ClCompile>
+    <ClCompile Include="dxcontext.cpp">
+      <Filter>library\sources</Filter>
+    </ClCompile>
+    <ClCompile Include="fft.cpp">
+      <Filter>library\sources</Filter>
+    </ClCompile>
+    <ClCompile Include="audio_capture.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutCopy.cpp">
+      <Filter>Spout2</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutDirectX.cpp">
+      <Filter>Spout2</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutFrameCount.cpp">
+      <Filter>Spout2</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutSenderNames.cpp">
+      <Filter>Spout2</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutSharedMemory.cpp">
+      <Filter>Spout2</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutUtils.cpp">
+      <Filter>Spout2</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX.cpp">
+      <Filter>Spout2</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12\SpoutDX12.cpp">
+      <Filter>Spout2</Filter>
+    </ClCompile>
+    <ClCompile Include="App.cpp">
+      <Filter>library\sources</Filter>
+    </ClCompile>
+    <ClCompile Include="mdropdx12.cpp">
+      <Filter>library\sources</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-compiler.c">
+      <Filter>library\ns-eel</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-cfunc.c">
+      <Filter>library\ns-eel</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-eval.c">
+      <Filter>library\ns-eel</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-ram.c">
+      <Filter>library\ns-eel</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-caltab.c">
+      <Filter>library\ns-eel</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-lextab.c">
+      <Filter>library\ns-eel</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-yylex.c">
+      <Filter>library\ns-eel</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ns-eel2\nseel-host.cpp">
+      <Filter>library\ns-eel</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="wasabi.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="utility.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="shell_defines.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="resource.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="engineshell.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="fft.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="dxcontext.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="defines.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="md_defines.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="menu.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="engine.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="render_context.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="state.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="support.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="texmgr.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="textmgr.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="AutoCharFn.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="AutoWide.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutCommon.h">
+      <Filter>Spout2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutCopy.h">
+      <Filter>Spout2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutDirectX.h">
+      <Filter>Spout2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutFrameCount.h">
+      <Filter>Spout2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutSenderNames.h">
+      <Filter>Spout2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutSharedMemory.h">
+      <Filter>Spout2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutGL\SpoutUtils.h">
+      <Filter>Spout2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX.h">
+      <Filter>Spout2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Spout2\SPOUTSDK\SpoutDirectX\SpoutDX\SpoutDX12\SpoutDX12.h">
+      <Filter>Spout2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ns-eel2\ns-eel.h">
+      <Filter>library\ns-eel</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ns-eel2\ns-eel-int.h">
+      <Filter>library\ns-eel</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ns-eel2\ns-eel-addfuncs.h">
+      <Filter>library\ns-eel</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ns-eel2\glue_x86_64_sse.h">
+      <Filter>library\ns-eel</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ns-eel2\glue_x86.h">
+      <Filter>library\ns-eel</Filter>
+    </ClInclude>
+    <ClInclude Include="mdropdx12.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="api.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="audio_capture.h">
+      <Filter>headers</Filter>
+    </ClInclude>
+    <ClInclude Include="App.h">
+      <Filter>library\headers</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="text1.bin">
+      <Filter>library\resources</Filter>
+    </None>
+    <None Include="plugin.dsp" />
+    <None Include="plugin.vcproj" />
+    <None Include="text1_page2.bin">
+      <Filter>library\resources</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="engine.rc">
+      <Filter>library\resources</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Xml Include="manifest.xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="engine_icon.ico">
+      <Filter>library\resources</Filter>
+    </Image>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,466 @@
+#include "dx12pipeline.h"
+#include "utility.h"
+#include <d3dcompiler.h>
+#include <cstdio>
+
+// Global VS bytecodes for preset PSO creation
+ID3DBlob* g_pWarpVSBlob = nullptr;
+ID3DBlob* g_pCompVSBlob = nullptr;
+ID3DBlob* g_pBlurVSBlob = nullptr;
+
+static bool CompileShaderFromString(const char* src, const char* entryPoint, const char* target,
+                                     ID3DBlob** ppBlob, UINT flags = 0) {
+    ID3DBlob* pErrors = nullptr;
+    HRESULT hr = D3DCompile(src, strlen(src), nullptr, nullptr, nullptr,
+                             entryPoint, target, flags, 0, ppBlob, &pErrors);
+    if (FAILED(hr)) {
+        if (pErrors) {
+            DebugLogA((const char*)pErrors->GetBufferPointer(), LOG_ERROR);
+            pErrors->Release();
+        }
+        return false;
+    }
+    if (pErrors) pErrors->Release();
+    return true;
+}
+
+bool DX12CreatePipelines(ID3D12Device* device, ID3D12RootSignature* rootSig,
+                          DXGI_FORMAT rtvFormat,
+                          ComPtr<ID3D12PipelineState> psoArray[PSO_COUNT]) {
+    if (!device || !rootSig) return false;
+
+    // Compile passthrough shaders
+    ID3DBlob* vsBlob = nullptr;
+    ID3DBlob* psBlob = nullptr;
+    if (!CompileShaderFromString(g_szPassthroughVS, "main", "vs_5_0", &vsBlob)) return false;
+    if (!CompileShaderFromString(g_szPassthroughPS, "main", "ps_5_0", &psBlob)) {
+        vsBlob->Release();
+        return false;
+    }
+
+    // Common PSO descriptor
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = rootSig;
+    psoDesc.VS = { vsBlob->GetBufferPointer(), vsBlob->GetBufferSize() };
+    psoDesc.PS = { psBlob->GetBufferPointer(), psBlob->GetBufferSize() };
+
+    // Input layout: WFVERTEX
+    psoDesc.InputLayout = { g_WfVertexLayout, _countof(g_WfVertexLayout) };
+
+    // Rasterizer: solid fill, no culling
+    psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    psoDesc.RasterizerState.DepthClipEnable = TRUE;
+
+    // No depth/stencil
+    psoDesc.DepthStencilState.DepthEnable = FALSE;
+    psoDesc.DepthStencilState.StencilEnable = FALSE;
+
+    // Sample desc
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.SampleDesc.Count = 1;
+
+    // Render target
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = rtvFormat;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+
+    // PSO 0: Solid, no blending
+    psoDesc.BlendState.RenderTarget[0].BlendEnable = FALSE;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    HRESULT hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_SOLID_WFVERTEX]));
+    if (FAILED(hr)) {
+        vsBlob->Release(); psBlob->Release();
+        return false;
+    }
+
+    // PSO 1: Alpha blend (SrcAlpha / InvSrcAlpha)
+    psoDesc.BlendState.RenderTarget[0].BlendEnable           = TRUE;
+    psoDesc.BlendState.RenderTarget[0].SrcBlend              = D3D12_BLEND_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].DestBlend             = D3D12_BLEND_INV_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].BlendOp               = D3D12_BLEND_OP_ADD;
+    // SRC_ALPHA, not ONE: DX9 has no separate alpha blend
+    // (D3DRS_SEPARATEALPHABLENDENABLE=FALSE), so alpha must mirror the colour
+    // factors. This is the same bug fixed on the four SPRITEVERTEX PSOs for
+    // BrainStain -- shapes/waves stamped excess ALPHA into VS1 through this
+    // PSO, and it compounded through the shape->warp->shape feedback loop.
+    // Found via martin - axon3: its random spark shape rendered "top layer too
+    // bright" (Shane's words) with the whole frame ~2x hot even at gain parity.
+    // The line/point wave PSOs inherit this blend state and are fixed with it.
+    psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha         = D3D12_BLEND_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha        = D3D12_BLEND_INV_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].BlendOpAlpha          = D3D12_BLEND_OP_ADD;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_ALPHABLEND_WFVERTEX]));
+    if (FAILED(hr)) {
+        vsBlob->Release(); psBlob->Release();
+        return false;
+    }
+
+    // ── Line topology PSOs (waveforms) ──
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+
+    // PSO: Line + alpha blend (WFVERTEX)
+    // (blend state already set to SrcAlpha/InvSrcAlpha from PSO_ALPHABLEND_WFVERTEX above)
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_LINE_ALPHABLEND_WFVERTEX]));
+    if (FAILED(hr)) { vsBlob->Release(); psBlob->Release(); return false; }
+
+    // PSO: Line + additive blend (WFVERTEX)
+    psoDesc.BlendState.RenderTarget[0].DestBlend      = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha  = D3D12_BLEND_ONE;
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_LINE_ADDITIVE_WFVERTEX]));
+    if (FAILED(hr)) { vsBlob->Release(); psBlob->Release(); return false; }
+
+    // ── Point topology PSOs (dot waveforms) ──
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT;
+
+    // PSO: Point + alpha blend (WFVERTEX) — reset dest blend back to InvSrcAlpha
+    psoDesc.BlendState.RenderTarget[0].DestBlend      = D3D12_BLEND_INV_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha  = D3D12_BLEND_INV_SRC_ALPHA;
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_POINT_ALPHABLEND_WFVERTEX]));
+    if (FAILED(hr)) { vsBlob->Release(); psBlob->Release(); return false; }
+
+    // PSO: Point + additive blend (WFVERTEX)
+    psoDesc.BlendState.RenderTarget[0].DestBlend      = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha  = D3D12_BLEND_ONE;
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_POINT_ADDITIVE_WFVERTEX]));
+    if (FAILED(hr)) { vsBlob->Release(); psBlob->Release(); return false; }
+
+    // ── Triangle + additive blend (untextured shapes) ──
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    // DestBlend is already ONE from above — keep it for additive
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_ADDITIVE_WFVERTEX]));
+    if (FAILED(hr)) { vsBlob->Release(); psBlob->Release(); return false; }
+
+    // ── Triangle + alpha blend, COLOUR ONLY (the feedback damp) ──
+    // A black quad at alpha = 1-k leaves dst*k behind, which is the scale-down
+    // the damp needs. Written as an alpha blend rather than the DestColor/Zero
+    // multiply it looks like it should be, because the multiply form was built,
+    // bound and drawn -- verified: same vertices, same target, non-null PSO,
+    // and an opaque fill through the identical code path landed exactly (a
+    // 0.25 quad measured 0.2471) -- yet left the image bit-identical. The
+    // alpha form is the blend state every shape and wave in this engine
+    // already goes through, so it is the one that is known to work here.
+    //
+    // The write mask is the reason this is a separate PSO and not just
+    // PSO_ALPHABLEND_WFVERTEX: with alpha writes enabled the same quad drags
+    // VS1's alpha down toward 1-k every frame, and shapes and waves sample
+    // VS1. That is the alpha leak already fixed once on the SPRITEVERTEX PSOs
+    // above; masking alpha off avoids reintroducing it.
+    psoDesc.BlendState.RenderTarget[0].SrcBlend       = D3D12_BLEND_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].DestBlend      = D3D12_BLEND_INV_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].BlendOp        = D3D12_BLEND_OP_ADD;
+    psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha  = D3D12_BLEND_ZERO;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].BlendOpAlpha   = D3D12_BLEND_OP_ADD;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask =
+        D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN |
+        D3D12_COLOR_WRITE_ENABLE_BLUE;
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_DAMP_WFVERTEX]));
+    if (FAILED(hr)) { vsBlob->Release(); psBlob->Release(); return false; }
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    vsBlob->Release();
+    psBlob->Release();
+
+    // ── Textured PSOs (for warp + composite passes) ──
+    ID3DBlob* texVsBlob = nullptr;
+    ID3DBlob* texPsBlob = nullptr;
+    if (!CompileShaderFromString(g_szTexturedVS, "main", "vs_5_0", &texVsBlob)) return false;
+    if (!CompileShaderFromString(g_szTexturedPS, "main", "ps_5_0", &texPsBlob)) {
+        texVsBlob->Release();
+        return false;
+    }
+
+    // Reset common state for textured PSOs
+    psoDesc.VS = { texVsBlob->GetBufferPointer(), texVsBlob->GetBufferSize() };
+    psoDesc.PS = { texPsBlob->GetBufferPointer(), texPsBlob->GetBufferSize() };
+    psoDesc.BlendState.RenderTarget[0].BlendEnable = FALSE;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    // PSO: Textured MYVERTEX (warp mesh)
+    psoDesc.InputLayout = { g_MyVertexLayout, _countof(g_MyVertexLayout) };
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_TEXTURED_MYVERTEX]));
+    if (FAILED(hr)) {
+        texVsBlob->Release(); texPsBlob->Release();
+        return false;
+    }
+
+    // PSO: Textured SPRITEVERTEX (composite quad)
+    psoDesc.InputLayout = { g_SpriteVertexLayout, _countof(g_SpriteVertexLayout) };
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_TEXTURED_SPRITEVERTEX]));
+    if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+    // PSO: Textured SPRITEVERTEX + additive blend (textured custom shapes)
+    // DX9 used X8R8G8B8 render targets (no alpha channel). DX12 uses R8G8B8A8_UNORM,
+    // so shapes must NOT write alpha — otherwise alpha < 1.0 accumulates in the feedback
+    // loop and darkens the scene (BrainStain bug). Write mask = RGB only matches DX9.
+    psoDesc.BlendState.RenderTarget[0].BlendEnable           = TRUE;
+    psoDesc.BlendState.RenderTarget[0].SrcBlend              = D3D12_BLEND_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].DestBlend             = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].BlendOp               = D3D12_BLEND_OP_ADD;
+    psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha         = D3D12_BLEND_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha        = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].BlendOpAlpha          = D3D12_BLEND_OP_ADD;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE;
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_ADDITIVE_SPRITEVERTEX]));
+    if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+    // ── Clamp-sampler variants (for textured shapes when bTexWrap=0) ──
+    // In DX9, shapes inherit the sampler address mode from the warp pass.
+    // In DX12, we need separate PSOs because samplers are static in the root signature.
+    {
+        ID3DBlob* clampPsBlob = nullptr;
+        if (CompileShaderFromString(g_szTexturedClampPS, "main", "ps_5_0", &clampPsBlob)) {
+            psoDesc.PS = { clampPsBlob->GetBufferPointer(), clampPsBlob->GetBufferSize() };
+
+            // PSO: Textured SPRITEVERTEX + alpha blend + clamp sampler
+            // RGB-only write mask: DX9 X8R8G8B8 had no alpha channel.
+            psoDesc.BlendState.RenderTarget[0].BlendEnable  = TRUE;
+            psoDesc.BlendState.RenderTarget[0].SrcBlend     = D3D12_BLEND_SRC_ALPHA;
+            psoDesc.BlendState.RenderTarget[0].DestBlend    = D3D12_BLEND_INV_SRC_ALPHA;
+            psoDesc.BlendState.RenderTarget[0].BlendOp      = D3D12_BLEND_OP_ADD;
+            psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha  = D3D12_BLEND_SRC_ALPHA;
+            psoDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+            psoDesc.BlendState.RenderTarget[0].BlendOpAlpha   = D3D12_BLEND_OP_ADD;
+            psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE;
+            hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_TEXTURED_CLAMP_SPRITEVERTEX]));
+            if (FAILED(hr)) { clampPsBlob->Release(); texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+            // PSO: Textured SPRITEVERTEX + additive + clamp sampler
+            psoDesc.BlendState.RenderTarget[0].DestBlend      = D3D12_BLEND_ONE;
+            psoDesc.BlendState.RenderTarget[0].DestBlendAlpha  = D3D12_BLEND_ONE;
+            hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_ADDITIVE_CLAMP_SPRITEVERTEX]));
+            if (FAILED(hr)) { clampPsBlob->Release(); texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+            clampPsBlob->Release();
+        }
+        // Restore wrap PS for subsequent PSOs
+        psoDesc.PS = { texPsBlob->GetBufferPointer(), texPsBlob->GetBufferSize() };
+    }
+
+    // PSO: Textured SPRITEVERTEX + premultiplied alpha blend (GDI text overlay)
+    // Restore RGBA write mask for text/UI PSOs that draw to the backbuffer.
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    psoDesc.BlendState.RenderTarget[0].SrcBlend      = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].DestBlend      = D3D12_BLEND_INV_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha  = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_PREMULALPHA_SPRITEVERTEX]));
+    if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+    // PSO: Textured SPRITEVERTEX + One/One pure additive (title text pass)
+    psoDesc.BlendState.RenderTarget[0].SrcBlend       = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].DestBlend       = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha   = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha  = D3D12_BLEND_ONE;
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_ONEONE_SPRITEVERTEX]));
+    if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+    // PSO: Textured SPRITEVERTEX + Zero/InvSrcColor darken (title shadow pass)
+    psoDesc.BlendState.RenderTarget[0].SrcBlend       = D3D12_BLEND_ZERO;
+    psoDesc.BlendState.RenderTarget[0].DestBlend       = D3D12_BLEND_INV_SRC_COLOR;
+    psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha   = D3D12_BLEND_ZERO;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha  = D3D12_BLEND_ONE;
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_DARKEN_SPRITEVERTEX]));
+    if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+    // PSO: Textured SPRITEVERTEX + Zero/Zero (MD3 sprite blend 8, "cut-off").
+    // Measured: mode 8 drives every non-keyed source to 0 regardless of the
+    // destination, i.e. it blacks the region out rather than thresholding it.
+    psoDesc.BlendState.RenderTarget[0].SrcBlend       = D3D12_BLEND_ZERO;
+    psoDesc.BlendState.RenderTarget[0].DestBlend      = D3D12_BLEND_ZERO;
+    psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha  = D3D12_BLEND_ZERO;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ONE;
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_ZERO_SPRITEVERTEX]));
+    if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+    // MD3 sprite blends 7 and 9 cannot be expressed by a blend state alone --
+    // one inverts the source, the other offsets it before multiplying into the
+    // destination -- so each gets its own pixel shader. Both restore the shared
+    // PS afterwards so later PSOs are unaffected.
+    {
+        ID3DBlob* invPsBlob = nullptr;
+        if (CompileShaderFromString(g_szSpriteInvertPS, "main", "ps_5_0", &invPsBlob)) {
+            psoDesc.PS = { invPsBlob->GetBufferPointer(), invPsBlob->GetBufferSize() };
+            psoDesc.BlendState.RenderTarget[0].SrcBlend       = D3D12_BLEND_ONE;
+            psoDesc.BlendState.RenderTarget[0].DestBlend      = D3D12_BLEND_ZERO;
+            psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha  = D3D12_BLEND_ONE;
+            psoDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
+            hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_INVERT_SPRITEVERTEX]));
+            invPsBlob->Release();
+            if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
+        }
+        ID3DBlob* dk9PsBlob = nullptr;
+        if (CompileShaderFromString(g_szSpriteDarken9PS, "main", "ps_5_0", &dk9PsBlob)) {
+            psoDesc.PS = { dk9PsBlob->GetBufferPointer(), dk9PsBlob->GetBufferSize() };
+            psoDesc.BlendState.RenderTarget[0].SrcBlend       = D3D12_BLEND_ZERO;
+            psoDesc.BlendState.RenderTarget[0].DestBlend      = D3D12_BLEND_SRC_COLOR;
+            psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha  = D3D12_BLEND_ZERO;
+            psoDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ONE;
+            hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_DARKEN9_SPRITEVERTEX]));
+            dk9PsBlob->Release();
+            if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
+        }
+        psoDesc.PS = { texPsBlob->GetBufferPointer(), texPsBlob->GetBufferSize() };
+    }
+
+    // PSO: Textured SPRITEVERTEX + SrcAlpha/InvSrcAlpha (shapes + sprites)
+    // RGB-only write mask: DX9 X8R8G8B8 had no alpha channel. Without this,
+    // shapes write alpha < 1.0 into VS[1], which compounds through the feedback
+    // loop and darkens the scene (BrainStain bug).
+    psoDesc.BlendState.RenderTarget[0].SrcBlend       = D3D12_BLEND_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].DestBlend       = D3D12_BLEND_INV_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].BlendOp         = D3D12_BLEND_OP_ADD;
+    psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha   = D3D12_BLEND_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha  = D3D12_BLEND_INV_SRC_ALPHA;
+    psoDesc.BlendState.RenderTarget[0].BlendOpAlpha    = D3D12_BLEND_OP_ADD;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE;
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_ALPHABLEND_SPRITEVERTEX]));
+    if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+    // PSO: Textured SPRITEVERTEX + SrcColor/InvSrcColor (sprite blendmode 3)
+    psoDesc.BlendState.RenderTarget[0].SrcBlend       = D3D12_BLEND_SRC_COLOR;
+    psoDesc.BlendState.RenderTarget[0].DestBlend       = D3D12_BLEND_INV_SRC_COLOR;
+    psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha   = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha  = D3D12_BLEND_ZERO;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE;
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_SRCCOLOR_SPRITEVERTEX]));
+    if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+    // PSO: Textured SPRITEVERTEX + DestColor/Zero (multiply — MD3 blend 5)
+    psoDesc.BlendState.RenderTarget[0].SrcBlend       = D3D12_BLEND_DEST_COLOR;
+    psoDesc.BlendState.RenderTarget[0].DestBlend       = D3D12_BLEND_ZERO;
+    psoDesc.BlendState.RenderTarget[0].BlendOp         = D3D12_BLEND_OP_ADD;
+    psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha   = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha  = D3D12_BLEND_ZERO;
+    psoDesc.BlendState.RenderTarget[0].BlendOpAlpha    = D3D12_BLEND_OP_ADD;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE;
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_MULTIPLY_SPRITEVERTEX]));
+    if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+    // PSO: Textured SPRITEVERTEX + One/One reverse-subtract (MD3 blend 6)
+    psoDesc.BlendState.RenderTarget[0].SrcBlend       = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].DestBlend       = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].BlendOp         = D3D12_BLEND_OP_REV_SUBTRACT;
+    psoDesc.BlendState.RenderTarget[0].SrcBlendAlpha   = D3D12_BLEND_ONE;
+    psoDesc.BlendState.RenderTarget[0].DestBlendAlpha  = D3D12_BLEND_ZERO;
+    psoDesc.BlendState.RenderTarget[0].BlendOpAlpha    = D3D12_BLEND_OP_ADD;
+    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psoArray[PSO_SUBTRACT_SPRITEVERTEX]));
+    if (FAILED(hr)) { texVsBlob->Release(); texPsBlob->Release(); return false; }
+
+    texVsBlob->Release();
+    texPsBlob->Release();
+
+    // Compile warp + comp vertex shaders for preset PSO creation
+    // Must use ENABLE_BACKWARDS_COMPATIBILITY to match the PS compiled by D3DXCompileShader shim,
+    // otherwise VS/PS get different hardware register assignments for the same semantics.
+    if (!CompileShaderFromString(g_szWarpVS, "main", "vs_5_0", &g_pWarpVSBlob, D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY)) {
+        DebugLogA("DX12: Failed to compile warp VS", LOG_ERROR);
+        return false;
+    }
+    if (!CompileShaderFromString(g_szCompVS, "main", "vs_5_0", &g_pCompVSBlob, D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY)) {
+        DebugLogA("DX12: Failed to compile comp VS", LOG_ERROR);
+        return false;
+    }
+    if (!CompileShaderFromString(g_szBlurVS, "main", "vs_5_0", &g_pBlurVSBlob, D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY)) {
+        DebugLogA("DX12: Failed to compile blur VS", LOG_ERROR);
+        return false;
+    }
+
+    return SUCCEEDED(hr);
+}
+
+ComPtr<ID3D12PipelineState> DX12CreatePresetPSO(
+    ID3D12Device* device, ID3D12RootSignature* rootSig,
+    DXGI_FORMAT rtvFormat,
+    ID3DBlob* vsBlob,
+    const void* psBytecode, UINT psSize,
+    const D3D12_INPUT_ELEMENT_DESC* layout, UINT layoutCount,
+    bool alphaBlend,
+    UINT* pMainTexSlotOut)
+{
+    if (pMainTexSlotOut) *pMainTexSlotOut = UINT_MAX;
+    if (!device || !rootSig || !vsBlob || !psBytecode || psSize == 0)
+        return nullptr;
+
+    // Reflect PS to find sampler_main texture slot and log all bound resources
+    if (pMainTexSlotOut) {
+        ID3D12ShaderReflection* psRefl = nullptr;
+        if (SUCCEEDED(D3DReflect(psBytecode, psSize, IID_PPV_ARGS(&psRefl)))) {
+            D3D12_SHADER_DESC psd;
+            psRefl->GetDesc(&psd);
+            for (UINT i = 0; i < psd.BoundResources; i++) {
+                D3D12_SHADER_INPUT_BIND_DESC rbd;
+                psRefl->GetResourceBindingDesc(i, &rbd);
+
+                // Log all bound resources for diagnostics
+                {
+                    const char* typeStr = "?";
+                    switch (rbd.Type) {
+                    case D3D_SIT_CBUFFER: typeStr = "CBuf"; break;
+                    case D3D_SIT_TEXTURE: typeStr = "Tex"; break;
+                    case D3D_SIT_SAMPLER: typeStr = "Samp"; break;
+                    default: typeStr = "Other"; break;
+                    }
+                    DLOG_VERBOSE("DIAG PSO Reflect[%u]: Name='%s' Type=%s BindPoint=%u BindCount=%u",
+                            i, rbd.Name ? rbd.Name : "(null)", typeStr, rbd.BindPoint, rbd.BindCount);
+                }
+
+                if (*pMainTexSlotOut == UINT_MAX && rbd.Type == D3D_SIT_TEXTURE) {
+                    const char* n = rbd.Name;
+                    if (!strcmp(n, "sampler_main") || !strcmp(n, "sampler_fc_main") ||
+                        !strcmp(n, "sampler_pc_main") || !strcmp(n, "sampler_fw_main") ||
+                        !strcmp(n, "sampler_pw_main")) {
+                        *pMainTexSlotOut = rbd.BindPoint;
+                    }
+                }
+            }
+            psRefl->Release();
+        }
+    }
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
+    desc.pRootSignature = rootSig;
+    desc.VS = { vsBlob->GetBufferPointer(), vsBlob->GetBufferSize() };
+    desc.PS = { psBytecode, psSize };
+    desc.InputLayout = { layout, layoutCount };
+
+    desc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    desc.RasterizerState.DepthClipEnable = TRUE;
+
+    desc.DepthStencilState.DepthEnable = FALSE;
+    desc.DepthStencilState.StencilEnable = FALSE;
+
+    desc.SampleMask = UINT_MAX;
+    desc.SampleDesc.Count = 1;
+    desc.NumRenderTargets = 1;
+    desc.RTVFormats[0] = rtvFormat;
+    desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+
+    if (alphaBlend) {
+        desc.BlendState.RenderTarget[0].BlendEnable           = TRUE;
+        desc.BlendState.RenderTarget[0].SrcBlend              = D3D12_BLEND_SRC_ALPHA;
+        desc.BlendState.RenderTarget[0].DestBlend             = D3D12_BLEND_INV_SRC_ALPHA;
+        desc.BlendState.RenderTarget[0].BlendOp               = D3D12_BLEND_OP_ADD;
+        desc.BlendState.RenderTarget[0].SrcBlendAlpha         = D3D12_BLEND_ONE;
+        desc.BlendState.RenderTarget[0].DestBlendAlpha        = D3D12_BLEND_INV_SRC_ALPHA;
+        desc.BlendState.RenderTarget[0].BlendOpAlpha          = D3D12_BLEND_OP_ADD;
+    } else {
+        desc.BlendState.RenderTarget[0].BlendEnable = FALSE;
+    }
+    desc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    ComPtr<ID3D12PipelineState> pso;
+    HRESULT hr = device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&pso));
+    if (FAILED(hr)) {
+        char buf[80];
+        sprintf_s(buf, "DX12: CreateGraphicsPipelineState FAILED hr=0x%08X\n", (unsigned)hr);
+        DebugLogA(buf, LOG_ERROR);
+        return nullptr;
+    }
+    return pso;
+}

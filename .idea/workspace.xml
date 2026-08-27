@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="BackendCodeEditorMiscSettings">
+    <option name="/Default/Housekeeping/FeatureSuggestion/FeatureSuggestionManager/DisabledSuggesters/=SwitchToGoToActionSuggester/@EntryIndexedValue" value="true" type="bool" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="9a7d5d91-3b91-441c-9578-3f7c671cde9f" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/src/mDropDX12/App.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/mDropDX12/App.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/mDropDX12/engine_input.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/mDropDX12/engine_input.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/mDropDX12/engine_visual_ui.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/mDropDX12/engine_visual_ui.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/mDropDX12/manifest.xml" beforeDir="false" afterPath="$PROJECT_DIR$/src/mDropDX12/manifest.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/mDropDX12/tcp_server.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/mDropDX12/tcp_server.cpp" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ClangdSettings">
+    <option name="formatViaClangd" value="false" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 6
+}]]></component>
+  <component name="ProjectId" id="3DU9qir2E8nEteXTD0Ezu20iyWH" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.RadMigrateCodeStyle": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.cidr.known.project.marker": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.readMode.enableVisualFormatting": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "cf.first.check.clang-format": "false",
+    "cidr.known.project.marker": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "git-widget-placeholder": "v2.8",
+    "nodejs_package_manager_path": "npm",
+    "org.rust.first.attach.projects": "true",
+    "settings.editor.selected.configurable": "configurable.group.tools",
+    "vue.rearranger.settings.migration": "true"
+  }
+}]]></component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="9a7d5d91-3b91-441c-9578-3f7c671cde9f" name="Changes" comment="" />
+      <created>1778325973520</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1778325973520</updated>
+      <workItem from="1778325975474" duration="202000" />
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+</project>

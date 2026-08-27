@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "enabled": true,
+  "overrides": {
+    "Rainbow Butterfly 1": {
+      "warp": "rainbow-butterfly1.warp.hlsl",
+      "comp": "",
+      "notes": "Wing fold. For MilkDrop2077 - Rainbow Butterfly1, whose own warp shader is a stub because MD3 PRO renders it from cache."
+    },
+    "Rainbow Butterfly 2": {
+      "warp": "rainbow-butterfly2.warp.hlsl",
+      "comp": "",
+      "notes": "Kaleidoscope tunnel. Butterfly2's MD31 resolves into a different PRO cache than Butterfly1's, so the pair is meant to differ."
+    },
+    "MD31 Family": {
+      "warp": "md31-generic.warp.hlsl",
+      "comp": "",
+      "notes": "Mild general-purpose warp for MilkDrop2077 presets whose own warp shader is a stub because MD3 PRO renders theirs from cache."
+    }
+  },
+  "rules": [
+    {
+      "tags": [
+        "butterfly1"
+      ],
+      "override": "Rainbow Butterfly 1",
+      "enabled": true
+    },
+    {
+      "tags": [
+        "butterfly2"
+      ],
+      "override": "Rainbow Butterfly 2",
+      "enabled": true
+    },
+    {
+      "tags": [
+        "md31"
+      ],
+      "override": "MD31 Family",
+      "enabled": true
+    }
+  ]
+}
