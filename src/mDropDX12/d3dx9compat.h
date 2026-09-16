@@ -628,6 +628,40 @@ public:
     // Accessors for DX12 rendering
     const BYTE* GetShadowData() const { return m_shadowCB.data(); }
     UINT GetShadowSize() const { return (UINT)m_shadowCB.size(); }
+
+    // Staging into a buffer the CALLER owns (#206).
+    //
+    // The Set* methods above write into m_shadowCB, one buffer per shader. That
+    // is fine while one thread records at a time, and wrong the moment two do:
+    // the blur shaders are engine-wide, so two surfaces recording concurrently
+    // interleave their constants into the same bytes and each uploads a mix of
+    // both. These two give a recording thread its own copy to write into, with
+    // the same layout, so nothing is shared but the layout itself.
+    void CopyShadowInto(std::vector<BYTE>& dst) const { dst = m_shadowCB; }
+
+    void WriteRawInto(std::vector<BYTE>& dst, D3DXHANDLE h,
+                      const void* data, UINT bytes) const {
+        const int idx = FindConstIndex(h);
+        if (idx < 0) return;
+        const UINT offset = m_constants[idx].desc.RegisterIndex * 16;
+        const UINT maxBytes = m_constants[idx].desc.RegisterCount * 16;
+        if (bytes > maxBytes) bytes = maxBytes;
+        if ((size_t)offset + bytes <= dst.size())
+            memcpy(&dst[offset], data, bytes);
+    }
+
+    void WriteVectorInto(std::vector<BYTE>& dst, D3DXHANDLE h,
+                         const D3DXVECTOR4& v) const {
+        WriteRawInto(dst, h, &v, 16);
+    }
+
+    // Same 64 bytes SetMatrix writes -- the preset rotation matrices go through
+    // here so a staged record does not miss them and silently upload the
+    // shader's own shadow for those four registers (#206).
+    void WriteMatrixInto(std::vector<BYTE>& dst, D3DXHANDLE h,
+                         const D3DXMATRIX& m) const {
+        WriteRawInto(dst, h, &m, 64);
+    }
 };
 
 // D3DXCreateFontW stub — Phase 5 TODO: replaced by DirectXTK12 SpriteFont.

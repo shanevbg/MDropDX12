@@ -245,6 +245,9 @@ protected:
   virtual void RestorePrimaryTexSizeFromVS() {} // Engine: clear orient-pass texsize leak
   virtual void CopyPrimaryToMirrorSrc() {} // Engine: snapshot BB before Execute
   virtual bool ShouldHideMirrorHud() const { return false; }
+  // True when THIS instance must not draw a HUD over its own output -- a
+  // child holding one display while the user watches the primary elsewhere.
+  virtual bool ShouldHideOwnHud() const { return false; }
   virtual bool AnyIndependentMirrorEnabled() const { return false; }
   virtual void DrawDeferredMessages() {}
   // The animation clock jumped by 'delta' seconds (negative when it wraps).
@@ -371,6 +374,12 @@ public:
   // reinitOsTimers: re-apply timeBeginPeriod(1), power-throttling opt-out, and recreate the
   // high-res waitable timer (needed after resume — OS may revoke timer resolution).
   void ResyncFrameTiming(bool reinitOsTimers = false);
+
+  // The current preset's own frame-rate ceiling, 0 = none (#222). Lives here
+  // rather than on Engine because EnforceMaxFPS is EngineShell's and runs on
+  // the frame path; Engine resolves it from the annotation store on load and
+  // stores the answer.
+  int  m_nPresetFpsCap = 0;
 
   void ToggleHelp();
 

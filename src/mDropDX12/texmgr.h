@@ -76,6 +76,17 @@ DDPIXELFORMAT          ddpf;
   float				   fStartTime;
   int                    nStartFrame;
   int                    nUserData;
+
+  // Retirement state (#225). A sprite that ends itself mid-frame cannot be
+  // torn down where it is noticed -- see RetireTex. Marked here, collected a
+  // frame or two later once the GPU has passed killFence.
+  //
+  // The slot deliberately stays OCCUPIED while this is set: pSurface is what
+  // LaunchSprite reads to find a free slot, so leaving it non-null is what
+  // stops the slot being reloaded -- and its descriptor rewritten -- inside
+  // the very window the retirement exists to protect.
+  bool                   bPendingKill;
+  UINT64                 killFence;
   // MD3 file-level SpriteSX/SY. Per-frame sx/sy are 1.0-based multipliers on these.
   float                  base_x;
   float                  base_y;
@@ -111,6 +122,35 @@ public:
   int  LoadTex(wchar_t* szFilename, int iSlot, char* szInitCode, char* szCode, float time, int frame, unsigned int ck);
   int  LoadTexFromPixels(const void* pixels, UINT w, UINT h, int iSlot, char* szInitCode, char* szCode, float time, int frame);
   void KillTex(int iSlot);
+
+  // Deferred KillTex, for callers that cannot safely release right now (#225).
+  //
+  // KillTex releases the texture and its upload buffer and writes a null
+  // descriptor into the LIVE shader-visible SRV heap. Doing that while a
+  // submitted command list still references the slot is a use-after-free and
+  // an illegal concurrent descriptor write -- it is the same edge that hung
+  // the GPU in #222, and DrawUserSprites reaches it from INSIDE the draw loop,
+  // with the command list open, which is strictly worse than the #222 site.
+  //
+  // fence is the value the frame being recorded will signal. Once the GPU has
+  // passed it, nothing in flight can still name this slot, and CollectRetired
+  // performs the real KillTex. Marking is idempotent: the earliest fence wins,
+  // so a slot marked on two successive frames is not held hostage by the later
+  // one.
+  void RetireTex(int iSlot, UINT64 fence);
+
+  // Release everything whose fence the GPU has passed. Once per frame, render
+  // thread. Cheap: NUM_TEX is 16 and the common case is no pending slots.
+  void CollectRetired(UINT64 completedFence);
+
+  // Is this slot live -- present and not already on its way out? Anything that
+  // draws or reports a sprite must ask this rather than testing pSurface, or a
+  // retiring sprite keeps drawing until its fence clears.
+  bool IsLive(int iSlot) const {
+    return iSlot >= 0 && iSlot < NUM_TEX &&
+           m_tex[iSlot].pSurface && !m_tex[iSlot].bPendingKill;
+  }
+
   void Finish();
 
   // Final, device-free release of the GPU objects only -- for process exit.

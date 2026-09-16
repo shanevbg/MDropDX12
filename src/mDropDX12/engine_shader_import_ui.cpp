@@ -758,7 +758,7 @@ LRESULT ShaderImportWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam
                 ofn.lpstrFile = path;
                 ofn.nMaxFile = MAX_PATH;
                 ofn.lpstrTitle = L"Select Channel Texture";
-                ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+                ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
                 if (GetOpenFileNameW(&ofn)) {
                     m_passes[m_nSelectedPass].channels[ch] = CHAN_TEXTURE_FILE;
                     m_passes[m_nSelectedPass].channelTexPaths[ch] = path;
@@ -1708,7 +1708,7 @@ void ShaderImportWindow::SaveAsPreset() {
     ofn.lpstrFile = filePath;
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrInitialDir = p->GetPresetDir();
-    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     ofn.lpstrDefExt = L"milk3";
 
     if (!GetSaveFileNameW(&ofn))
@@ -4823,7 +4823,7 @@ void ShaderImportWindow::SaveImportProject() {
     ofn.lpstrFilter = L"Shader Import (*.json)\0*.json\0All Files\0*.*\0";
     ofn.lpstrFile = filePath;
     ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     ofn.lpstrDefExt = L"json";
 
     if (!GetSaveFileNameW(&ofn))
@@ -4885,7 +4885,7 @@ void ShaderImportWindow::LoadImportProject() {
     ofn.lpstrFilter = L"Shader Import (*.json)\0*.json\0All Files\0*.*\0";
     ofn.lpstrFile = filePath;
     ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
 
     if (!GetOpenFileNameW(&ofn))
         return;

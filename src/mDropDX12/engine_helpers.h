@@ -378,8 +378,10 @@ extern bool g_bSettingsWndClassRegistered;
 #define IDC_MW_IDLE_ENABLE         2150  // Checkbox: enable idle timer
 #define IDC_MW_IDLE_TIMEOUT        2151  // Edit: timeout in minutes
 #define IDC_MW_IDLE_TIMEOUT_SPIN   2152  // Up-down spinner buddy
-#define IDC_MW_IDLE_ACTION         2153  // ComboBox: Fullscreen / Stretch-Mirror
+#define IDC_MW_IDLE_ACTION         2153  // ComboBox: Fullscreen / Stretch-Mirror / Mirror all / Load display profile
 #define IDC_MW_IDLE_AUTO_RESTORE   2154  // Checkbox: auto-restore on input
+#define IDC_MW_IDLE_PROFILE        2155  // ComboBox: display profile the Load-profile action loads
+#define IDC_MW_IDLE_FULL_OPACITY   2156  // Checkbox: take every display to 100% opacity while idle
 
 // Song Info controls (General tab)
 #define IDC_MW_SONG_SOURCE         2160  // ComboBox: SMTC / IPC / Window Title
@@ -565,6 +567,7 @@ static_assert(IDC_MW_HOTKEYS_AVAIL != IDC_MW_HOTKEYS_DELETE &&
 #define IDT_CONTROLLER_POLL         10003 // Timer ID for game controller polling (50ms)
 #define IDT_SAVE_SETTINGS_DEBOUNCE  10004 // Timer ID for debounced settings save (2s after last change)
 #define IDT_TCP_POLL                10005 // Timer ID for TCP server polling (50ms)
+#define IDT_CHILD_FADE_IN           10006 // Timer ID for a child fading up over its mirror
 #define IDT_DISPLAYS_CHILD_POLL     10007 // Timer ID: refresh the Displays list as children start
 
 #define IDC_MW_MSG_PLAY             4010   // "Play/Stop" toggle button on Messages tab
@@ -702,10 +705,12 @@ static_assert(IDC_MW_HOTKEYS_AVAIL != IDC_MW_HOTKEYS_DELETE &&
 #define IDC_MW_DISP_SPOUT_FIXED 7009   // Checkbox: Spout fixed size
 #define IDC_MW_DISP_ACTIVATE    7010   // Button: activate/deactivate mirrors
 #define IDC_MW_DISP_CLICKTHRU   7011   // Checkbox: mirror click-through
+#define IDC_MW_DISP_ONTOP       7135   // Checkbox: keep THIS display on top
 #define IDC_MW_DISP_OPACITY     7012   // Edit: mirror opacity (1-100)
 #define IDC_MW_DISP_OPACITY_SPIN 7013  // Up-down (spin) buddy for opacity
 #define IDC_MW_DISP_MIRROR_ALTS 7014   // Combo: what ALT-S does (stretch/mirror/profile)
 #define IDC_MW_DISP_PROFILE_DEFAULT 7138 // Button: make the shown profile the default
+#define IDC_MW_DISP_PROFILE_DELETE 7140 // Button: delete a saved profile (to the bin)
 #define IDC_MW_DISP_MIRROR_NOPROMPT 7015 // Checkbox: don't ask when no mirrors enabled
 #define IDC_MW_DISP_SAVE_PROFILE   7016 // Button: save display profile
 #define IDC_MW_DISP_LOAD_PROFILE   7017 // Button: load display profile
@@ -716,12 +721,16 @@ static_assert(IDC_MW_HOTKEYS_AVAIL != IDC_MW_HOTKEYS_DELETE &&
 // FPS combo and the Spout-input enable checkbox shared an id.
 #define IDC_MW_DISP_MAXFPS        7125 // Combo: independent mirror max FPS (parity/120/60/30)
 #define IDC_MW_DISP_HUD_DISABLE   7126 // Checkbox: hide HUD on mirrors (linked to System tab)
+// Checkbox: watermark THIS display. The "Mirror Watermark" button beside it is
+// the all-at-once gesture; this is the per-display state it sets.
+#define IDC_MW_DISP_WATERMARK     7127
 // Per-display child instance controls (forgejo#22).
 // 7110+ because 7022-7031 are the IDC_MW_SPINPUT_* block -- the Video Input
 // page of THIS SAME window, so a duplicate id makes GetDlgItem return the
 // wrong control and command dispatch ambiguous. 7109 was the highest in use.
 #define IDC_MW_DISP_MODE_MIRROR   7110 // Radio: this display mirrors the primary
-#define IDC_MW_DISP_MODE_CHILD    7111 // Radio: this display runs its own process
+#define IDC_MW_DISP_MODE_CHILD    7111 // Radio: its own preset, in its own process
+#define IDC_MW_DISP_MODE_PRESET   7128 // Radio: its own preset, in THIS process
 #define IDC_MW_DISP_PRESETDIR     7112 // Edit: this display's preset directory
 #define IDC_MW_DISP_PRESETDIR_BR  7113 // Button: browse for the preset directory
 #define IDC_MW_DISP_STARTUP       7114 // Edit: this display's startup preset
@@ -756,6 +765,12 @@ static_assert(IDC_MW_HOTKEYS_AVAIL != IDC_MW_HOTKEYS_DELETE &&
 #define IDC_MW_DISP_PROFILE_AUTOSTART 7129 // Checkbox: a profile starts every
                                           // display it names
 #define IDC_MW_DISP_PROFILE_ONSTART 7120 // Checkbox: load a profile at startup
+// Replaces the checkbox above with the same shape the PRESET startup uses --
+// a mode combo plus a Save that writes through (#278). The checkbox could only
+// say on/off, so "use whatever the displays are set to right now" had no way
+// to be expressed and the stored name was the only possible answer.
+#define IDC_MW_DISP_PROFILE_MODE    7136 // Combo: None / Current / <file>
+#define IDC_MW_DISP_PROFILE_MODESAVE 7137 // Button: write the choice through
 #define IDC_MW_DISP_PROFILE_PATH    7121 // Edit (read-only): the startup profile
 // Group boxes — no messages, but they need tracking for the dark theme
 #define IDC_MW_DISP_GRP_SELECTED  7122
@@ -796,6 +811,12 @@ static_assert(IDC_MW_HOTKEYS_AVAIL != IDC_MW_HOTKEYS_DELETE &&
 #define IDC_MW_PRESETS_LIST_COMBO  9027  // Combo: Preset list selector
 #define IDC_MW_PRESETS_LIST_SAVE   9028  // Button: Save current list
 #define IDC_MW_PRESETS_LIST_CLEAR  9029  // Button: Clear active list (back to directory scan)
+// Checkbox: the LIVE preset lock (m_bPresetLockedByUser), as against
+// IDC_MW_PRESET_LOCK which is the startup preference. Until this existed the
+// live lock could only be toggled by hotkey and could not be observed at all,
+// so the only way to learn its state was to press the key and watch whether
+// presets started advancing.
+#define IDC_MW_PRESETS_LOCK_NOW    9094
 
 // Sprites window controls (9040-9059)
 #define IDC_MW_SPRITES_WIN_PIN          9040
@@ -1311,6 +1332,35 @@ static_assert(IDC_MW_HOTKEYS_AVAIL != IDC_MW_HOTKEYS_DELETE &&
 // SET_MIRROR_WIPE=reinit silently did nothing for as long as it has existed.
 #define MSG_IS(msg, lit)  (wcsncmp((msg), (lit), _countof(lit) - 1) == 0)
 
+// True when nothing but whitespace follows. A bare command should still match
+// when a script or a remote's text box leaves a trailing space or newline on
+// it, so this is not a bare wcscmp.
+inline bool MsgTailBlank(const wchar_t* p) {
+  while (*p == L' ' || *p == L'\t' || *p == L'\r' || *p == L'\n') ++p;
+  return *p == L'\0';
+}
+
+// Is this IPC message this command and NOTHING else?
+//
+// Use this for a command that takes no argument, whenever any LONGER command
+// starts with the same text. MSG_IS is a prefix match, so a bare command
+// dispatched first swallows every longer one beginning with it -- and because
+// the body then returns, the longer one is not merely mis-parsed, it is
+// unreachable.
+//
+// `DIAG_GPU` did exactly that to `DIAG_GPURISK=` and `DIAG_GPUTIME=`, which
+// sit ~340 lines below it in the same function. Both answered with a
+// GPU-usage dump and changed nothing, for as long as they had existed: a
+// switch that reports success and does nothing. It cost a day of mirror
+// measurements taken with the isolation gate believed to be off, and the
+// belief was only wrong because the command reported that it had worked.
+//
+// Same failure class as the wrong wcsncmp length that MSG_IS was introduced to
+// fix, which is why it gets a macro rather than a comment asking for the
+// handlers to be kept in the right order.
+#define MSG_EQ(msg, lit)  (wcsncmp((msg), (lit), _countof(lit) - 1) == 0 && \
+                           MsgTailBlank((msg) + _countof(lit) - 1))
+
 // Annotations window: the per-preset override slots
 #define IDC_MW_ANNOT_SHADEROV        9666
 #define IDC_MW_ANNOT_VFXPROF         9667
@@ -1388,14 +1438,14 @@ static_assert(IDC_MW_HOTKEYS_AVAIL != IDC_MW_HOTKEYS_DELETE &&
 #define WM_MW_SHOW_CTRL           (WM_APP + 172) // reveal and focus one control
 #define WM_MW_CLICK_CTRL          (WM_APP + 173) // press one control
 #define WM_MW_MOVE_TO             (WM_APP + 174) // reposition, on the window's thread
-// WM_APP+175 and WM_APP+176 were WM_MW_CHILD_REVEAL and WM_MW_CHILD_KEY,
-// retired with the -child mode in #186 phase 6. Left unused rather than
-// reassigned: a stale client posting one should hit nothing, not something.
+#define WM_MW_CHILD_REVEAL        (WM_APP + 175) // a child has a frame; show it
+#define WM_MW_CHILD_KEY           (WM_APP + 176) // key pressed on a child; wParam=vk lParam=mods
 #define WM_MW_RESET_PIPELINE      (WM_APP + 27) // recreate root signature + all PSOs (aniso toggle)
 #define WM_MW_GPU_FATAL           (WM_APP + 28) // TDR / GPU hung — UI thread warns and exits
 #define WM_MW_VFX_DIRTY_CHANGED   (WM_APP + 29) // VideoFX params changed -- repaint the Save button
 #define WM_MW_MSGMODE_CHANGED     (WM_APP + 30) // Messages/Sprites enable bits changed -- resync tool window controls
 #define WM_MW_SET_FPS_CAP         (WM_APP + 31) // wParam = fps cap (0 = unlimited); SetFPSCap must run on the render thread
+#define WM_MW_RESOURCES_READY     (WM_APP + 32) // render thread has rebuilt the Resource Viewer snapshot (#352)
 
 // Milkwave Remote messages (sent via PostMessage from Milkwave Remote → IPC window → render window)
 #define WM_MW_NEXT_PRESET       (WM_APP + 100)
@@ -1423,4 +1473,5 @@ static_assert(IDC_MW_HOTKEYS_AVAIL != IDC_MW_HOTKEYS_DELETE &&
 #define WM_MW_ALWAYS_ON_TOP_TOGGLE  (WM_APP + 168) // SIGNAL|ALWAYS_ON_TOP — toggle always-on-top
 #define WM_MW_FOCUS_PRIMARY         (WM_APP + 169) // mirror click → UI thread SetForeground/SetFocus primary
 #define WM_MW_RAISE_WINDOW          (WM_APP + 170) // RAISE_WINDOW — to the top of the z-order, without taking focus
+#define WM_MW_LOWER_WINDOW          (WM_APP + 178) // LOWER_WINDOW — to the bottom, without taking focus (#237)
 #define WM_MW_SET_MINIMIZED         (WM_APP + 177) // SET_MINIMIZED=<0|1> — wParam: 1 minimise, 0 restore

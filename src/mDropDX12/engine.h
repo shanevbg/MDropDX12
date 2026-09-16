@@ -34,6 +34,8 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // SPOUT & DISPLAY OUTPUTS
 #include "spout_bridge.h" // our own Spout interface; see forgejo#4
 #include "display_output.h"
+#include "child_instances.h"
+#include "window_diag.h"  // KnownWindow, for BuildKnownWindows (#259)
 #include <queue>
 #include "hotkeys.h"
 #include <io.h> // for file existence check
@@ -91,6 +93,35 @@ struct ScriptState {
   int defaultSize = 20;
   int defaultR = 255, defaultG = 255, defaultB = 255;
   std::wstring filePath;            // current script file path
+
+  // ── Driving a TEST from a script file (#303) ──
+  //
+  // A script can already drive the engine; what it could not do was be trusted
+  // to have driven it. Anything the vocabulary does not recognise is DRAWN ON
+  // SCREEN as a message, so a typo in a test script silently becomes scenery,
+  // and nothing a script did appeared in the log at all -- so a fault could not
+  // be attributed to the step that caused it.
+  //
+  // These four fields are what a .txt needs to be a repro someone can be handed:
+  // "load this, press Play, send me log/debug.log".
+  bool   strict = false;        // STRICT: an unknown token is an error, not a message
+  int    errors = 0;            // unknown tokens seen while strict
+  bool   waitingReady = false;  // WAITREADY: hold here until the preset has loaded
+  double waitStarted = 0.0;     // when the hold began, so it can time out
+
+  // ── Sweeping and reporting from a script (#307) ──
+  //
+  // CHECK samples the preset that is currently up and tallies it; REPEAT gives
+  // the language its one bounded backward jump, so a sweep can END; LOGSUMMARY
+  // prints the tally. Together they turn "walk the presets" into "walk the
+  // presets and say what happened", which is the difference between a trace and
+  // a report.
+  double startedAt = 0.0;       // GetTime() when the run began, for LOGSUMMARY
+  int repeatLine = -1;          // which line the active REPEAT jumps to
+  int repeatsLeft = 0;          // how many jumps it has left
+  int checks = 0;               // CHECK calls
+  int checkShaderFails = 0;     // ...that found shader errors
+  int checkTextureFails = 0;    // ...that found missing textures
 };
 
 struct WindowTitleProfile {
@@ -254,6 +285,14 @@ typedef struct td_supertext {
   float	fStartTime = -1.0f; // off state
   int 	bRedrawSuperText;	// true if it needs redraw
   int 	bIsSongTitle;		// false for custom message, true for song title
+  // Which display this instance belongs to, as a 1-based DISPLAYn, or -1 for
+  // the primary (#255).
+  //
+  // The slots are one shared pool: several displays now spawn into it on their
+  // own clocks, so an instance has to say whose it is or every panel draws
+  // every message again -- which is precisely the lockstep this replaces. Set
+  // once, where the slot is allocated.
+  int   nOwnerDisplay = -1;
   //char	szText[256];
   wchar_t	szTextW[512];
   wchar_t	nFontFace[128];
@@ -566,6 +605,19 @@ struct RatingObservation {
 // Aspect-preserving long-edge cap, 16-aligned. Defined in engine_displays.cpp;
 // shared by the mirror swap-chain cap and the feedback-canvas limit.
 void CapDimToLongEdge(int& w, int& h, int maxDim);
+// The mirror swap-chain long-edge cap in effect right now. 0 means no cap.
+//
+// This is the APPLIED value, not the setting: it is normally computed by
+// Engine::RefreshMirrorSwapChainCap from the VRAM budget (#254), and
+// DIAG_MIRRORCAP can drive it directly so the capped and uncapped cases can be
+// compared without two builds (#252). The fixed 1920 it replaced was justified
+// by a TDR that was never verified and may have been a memory leak since fixed,
+// which is why it had to become measurable rather than remain a constant.
+void SetMirrorSwapChainCap(int maxDim);
+int  GetMirrorSwapChainCap();
+// The share of the VRAM budget mirror chains may occupy, for the diagnostic
+// that reports how the derived cap was arrived at.
+double MirrorVramShare();
 
 struct PresetAnnotation {
     std::wstring filename;      // fallback key — filename without path
@@ -614,6 +666,30 @@ struct PresetAnnotation {
     // limit). It can only REDUCE below the global ceiling -- never raise.
     int  canvasMax = 0;
 
+    // Frame-rate ceiling for THIS preset, 0 = inherit. Same tri-state as
+    // canvasMax below, and the same reasoning one axis over (#222).
+    //
+    // This exists for presets that are genuinely too costly for the GPU they
+    // are running on -- a heavy raymarch on a modest card -- where the user
+    // wants that one preset held to a rate it can sustain without giving up
+    // the frame rate everywhere else.
+    //
+    // It is NOT protection against a TDR, and it was originally written as
+    // though it were. The startup TDR this was built alongside turned out to
+    // be a use-after-free: a sprite texture released, and its descriptor
+    // nulled in the live shader-visible heap, while the GPU was still reading
+    // it (#222, fixed in ApplyMilk2Sprites). The measurement that seemed to
+    // support a frame-rate remedy -- 6 of 6 surviving at a 60 cap against a
+    // death on the fifth uncapped load -- was real but meant something else:
+    // fewer frames per second is fewer rolls of the same dice, so a capped run
+    // merely takes longer to reach the bad frame. Capping narrowed a race; it
+    // never addressed one. Do not reintroduce that reasoning here, and do not
+    // reach for this when a device is being removed.
+    //
+    // It only ever LOWERS the active cap, never raises it, so a preset cannot
+    // ask to run faster than the user allowed.
+    int  fpsMax = 0;
+
     // Strength of the feedback damp mitigation, 0..1, 0 = off.
     //
     // The OTHER answer to a preset that destabilises as the canvas grows, and
@@ -632,6 +708,7 @@ struct PresetAnnotation {
     bool hasVfxProfile = false;
     bool hasAudioProfile = false;
     bool hasCanvasMax = false;
+  bool hasFpsMax = false;
     bool hasFeedbackDamp = false;
     bool hasReplacementPreset = false;
 };
@@ -671,6 +748,11 @@ public:
   int  GetCurrentPresetIndex() override;
   const wchar_t* GetPresetName(int idx) override;
 
+  // The shader cache directory as an ABSOLUTE path (#289). It used to be the
+  // bare relative "cache", which Windows resolves against the process current
+  // directory -- and a common file dialog moves that unless OFN_NOCHANGEDIR is
+  // set, so opening one scattered the cache into whatever folder was browsed.
+  std::string ShaderCacheDir() const;
   void SaveShaderBytecodeToFile(ID3DXBuffer* pShaderByteCode, uint32_t checksum, char* prefix);
   ID3DXBuffer* LoadShaderBytecodeFromFile(uint32_t checksum, char* prefix);
 
@@ -724,9 +806,287 @@ public:
   // out a concurrent render-thread reallocation while it does.
   mutable std::recursive_mutex m_displayOutputsMutex;
 
+  // ── Per-display child instances (child_instances.h, forgejo#22) ──────────
+  //
+  // One MDropDX12.exe -child per display whose config has bOwnProcess set.
+  // Spawning blocks for seconds, so every request goes through a queue drained
+  // by a dedicated worker; nothing here may be driven from a ToolWindow thread.
+  std::vector<ChildInstance>  m_children;
+  mutable std::mutex          m_childrenMutex;
+
+  // Devices whose children the Stretch/Mirror hotkey stood down, so the same
+  // key can put back exactly those and nothing else. Empty means nothing is
+  // suspended. See SuspendChildrenForDisplayToggle.
+  //
+  // Touched only from the render window's message handler, which is the one
+  // thread that toggle runs on, so it needs no lock of its own -- unlike
+  // m_children, which the child worker also writes.
+  std::vector<std::wstring>   m_childrenSuspended;
+
+  // Bit (N-1) set = \\.\DISPLAYN has a child that is up and rendering.
+  //
+  // A separate atomic rather than reading m_children, because the consumer is
+  // the per-frame mirror decision on the RENDER thread and everything else
+  // about m_children is behind m_childrenMutex, which the child worker holds
+  // while it talks to a pipe. The render loop must not be able to block on
+  // that. 32 bits is not a limit worth widening: \\.\DISPLAY33 does not exist.
+  std::atomic<uint32_t>       m_childReadyMask{0};
+
   // \\.\DISPLAY3 -> 3, and 0 for anything that is not a DISPLAYn device.
   static int DisplayNumberFromDevice(const wchar_t* deviceName);
+  // True when a child owns this monitor's pixels *right now*. Deliberately
+  // false while one is still starting: the mirror is what is on screen until
+  // there is something to hand over to.
+  bool ChildOwnsDisplay(const wchar_t* deviceName) const;
+  void SetChildDisplayReady(const wchar_t* deviceName, bool bReady);
+  std::queue<ChildCommand>    m_childCmdQueue;
+  // mutable for the same reason m_childrenMutex is: the queries below answer a
+  // read-only IPC verb and have no business being non-const.
+  mutable std::mutex          m_childCmdMutex;
 
+  // Why a display with bOwnProcess has no child, which used to be
+  // unanswerable. GET_CHILDREN reported state=absent for "a spawn is in
+  // flight", for "the flag is set and nothing intends to act on it" and for
+  // "we tried and could not" alike, so a remote could only show a spinner
+  // forever -- which is what MDR_Android did (forgejo#57).
+  //
+  // Both live under m_childCmdMutex, next to the queue whose contents they
+  // describe. Vectors rather than sets: there are as many entries as there are
+  // monitors, and a linear scan of four strings needs no index.
+  std::vector<std::wstring>   m_childSpawnPending;
+  std::vector<std::pair<std::wstring, std::wstring>> m_childSpawnFailed;
+  HANDLE                      m_hChildCmdEvent = nullptr;   // auto-reset
+  HANDLE                      m_hChildWorker = nullptr;
+  std::atomic<bool>           m_bChildWorkerStop{false};
+
+  // Every child is assigned to this job, created with
+  // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. When the parent goes -- cleanly, killed,
+  // or crashed -- Windows closes its handles, the job goes with them, and the
+  // kernel terminates every child. See ChildSpawnNow.
+  HANDLE                      m_hChildJob = nullptr;
+
+  void StartChildWorker();
+  void StopChildWorker();
+  // A Spawn for this display is queued, or the worker is acting on one now.
+  bool ChildSpawnPending(const wchar_t* deviceName) const;
+  // Why the last spawn attempt for this display failed, as a stable token.
+  bool ChildSpawnFailure(const wchar_t* deviceName, std::wstring& reason) const;
+  // reason == nullptr clears the record; anything else replaces it.
+  void SetChildSpawnFailure(const wchar_t* deviceName, const wchar_t* reason);
+  void ClearChildSpawnPending(const wchar_t* deviceName);
+  // Worker health, for DIAG_CHILDREN. The whole of forgejo#57 was a dead worker
+  // that nothing could see, so it is now askable over the pipe.
+  bool ChildWorkerAlive() const { return m_hChildWorker != nullptr; }
+  size_t ChildQueueDepth() const;
+  void RequestChildSpawn(const wchar_t* deviceName);
+  void RequestChildKill(const wchar_t* deviceName);
+
+  // GPU-risk isolation (#230). A preset whose warp or comp shader carries a
+  // loop with a large literal bound costs enough per frame that rendering it on
+  // three surfaces at once exceeds the GPU watchdog -- and because every
+  // surface shares one device and one command packet, that takes the whole
+  // session rather than one display.
+  //
+  // Read the shader, not the clock: the spike arrives with no ramp, so
+  // measure-then-react is always too late. ApplyGpuRiskIsolation moves the
+  // EXTRA displays to their own process while such a preset runs and brings
+  // them back afterwards; one in-process mirror is measured safe and stays.
+  // Role and display index for each of our windows, for GET_WINDOW(S) (#259).
+  // Includes children, which live in other processes and so cannot be found by
+  // any enumeration of our own.
+  std::vector<mdrop::KnownWindow> BuildKnownWindows();
+  // Adaptive frame-rate balancing (#261), which replaced automatic isolation.
+  //
+  // A display slower than the main is either STARVED (capping the main frees
+  // GPU it can use) or simply HEAVY (its own preset costs that much, and
+  // capping the main is pure loss). No single reading separates them, so this
+  // is a PROBE: cap, re-measure, keep the cap only if the displays actually
+  // improved, and otherwise release it and rule this preset out.
+  //
+  // Two-way while held -- the ceiling tracks the current slowest display -- and
+  // the verdict is discarded when the preset changes.
+  enum class BalanceState { Idle, Probing, Holding, RuledOut };
+  BalanceState m_balanceState = BalanceState::Idle;
+  // The user's cap, held while ours is in force. -1 = not holding one. NEVER
+  // persisted: SetFPSCap writes settings.ini and moves the Settings combo, and
+  // a governor's transient value must not become a stored setting (#254's
+  // separation, same reasoning).
+  int    m_balanceUserCap = -1;
+  int    m_balanceAppliedCap = 0;
+  float  m_balanceBaseline = 0.0f;   // slowest display when the probe began
+  DWORD  m_balanceNextMs = 0;
+  bool   m_bFrameBalanceEnabled = true;
+
+  void  BalanceDisplayFrameRates();
+  void  ResetFrameRateBalancer();
+  void  ApplyBalanceCap(int fps);
+  float SlowestDisplayFps(int* countOut = nullptr) const;
+
+  // The distress ladder (#258). Three rungs, cheapest first, each engaging only
+  // when the one before it failed to recover the rate:
+  //
+  //     below 60 fps, GPU-starved   adapt the main cap to ~1 below the stable
+  //     below 20 fps                additionally shrink the canvas
+  //     below 10 fps                switch to mirror-only, if not already
+  //
+  // GPU-STARVED gates all of it, and is what stops it firing on a rate that is
+  // nobody's fault. Measured: a backgrounded window sat at 22 fps with the GPU
+  // at 47.5%, while the same preset GPU-bound ran 43.8 at 92%. A low rate with
+  // an idle GPU is Windows pacing an unfocused window -- correct behaviour we
+  // do not code around (#121) -- and no rung here can help it.
+  //
+  // Everything unwinds on a preset change ("it will go away and try again when
+  // preset changes"), and is two-way within one preset as well, because a
+  // locked preset never gets that reset.
+  int    m_ladderRung = 0;             // 0 = not engaged
+  DWORD  m_ladderNextMs = 0;
+  float  m_ladderStableFps = 0.0f;     // achievable rate, for rung 1
+  // Consecutive GPU-bound observations. Starvation near the threshold flickers
+  // tick to tick -- measured 1,0,0,1,1,0,1,0 at 82% GPU -- so climbing on a
+  // single reading would make collapsing every display to a copy depend on
+  // which tick happened to sample. Rises on a starved tick, falls on a quiet
+  // one, and only a sustained run climbs.
+  int    m_ladderStarvedRun = 0;
+  // Rung 2's mirror swap-chain clamp. Shane: "when I say mirrors I mean
+  // cheapest copy to fit" -- collapsing to copy mode is only half of it, since
+  // a copy into a chain sized from the derived cap still pays native-resolution
+  // presentation cost for an image whose source is the primary's back buffer.
+  // Set to that source's long edge. Transient, and outranked by DIAG_MIRRORCAP
+  // so an experiment can still pin the value.
+  int    m_nLadderMirrorCap = 0;
+  bool   m_bDistressLadderEnabled = true;
+
+  // Rung 3 saves exactly what it took, per display, so easing back restores the
+  // arrangement rather than turning everything into a mirror.
+  struct LadderTier { bool ownPreset = false; bool independent = false; };
+  std::map<std::wstring, LadderTier> m_ladderSavedTiers;
+  bool   m_ladderTookMirrorOnly = false;
+
+  void TickDistressLadder();
+  void ResetDistressLadder();
+  bool GpuStarved();
+  // Whether this app owns the foreground. The ladder will not act otherwise:
+  // an unfocused window is PACED by Windows (#121), and an expensive preset in
+  // the background is genuinely GPU-busy AND rate-limited, so the starvation
+  // test passes on a rate the GPU did not cause. Without this, alt-tabbing away
+  // from a heavy preset collapses the displays -- and the rung latches, so they
+  // stay collapsed until the preset changes.
+  bool RenderWindowHasFocus();
+  // The rate the USER asked for -- their cap, or 0 for uncapped -- read past
+  // whatever the ladder or balancer is currently holding.
+  int   UserFpsTarget() const;
+  // Where the mirror rung fires, relative to that target. 34 when the target is
+  // high or unset, two thirds of it below the knee. A fixed threshold is wrong
+  // both ways: 60-and-getting-30 is distress well before 20, and
+  // capped-at-30-getting-30 is not distress at all.
+  float MirrorRungTriggerFps() const;
+  // What the target-relative rule alone would choose, for the diagnostic to
+  // report alongside whatever is actually in force.
+  float DerivedMirrorRungTriggerFps() const;
+  // Explicit override for that trigger, in fps. -1 keeps the derived rule
+  // (#267). Persisted, because it is a judgement about the person watching
+  // rather than about the hardware: whether 23/25/31 fps across three displays
+  // is acceptable, or whether that should fall back to copy mirrors, is not
+  // something this code can decide. Measured here, three independent Clouds1b
+  // renders reach ~35 achievable -- one frame above the derived 34 -- so on
+  // this machine the preset that motivated the mechanism does not trip it.
+  int   m_nLadderTriggerSetting = -1;
+  // The mirror swap-chain cap, derived from the VRAM budget unless overridden
+  // (#254). Recomputed as displays come and go, since the allowance is split
+  // between the chains that will exist.
+  void RefreshMirrorSwapChainCap();
+  // What the VRAM budget alone implies, ignoring the setting and any override,
+  // so a diagnostic can show what the machine would have chosen even while
+  // something else is in force.
+  int  DeriveMirrorSwapChainCap() const;
+  // -1 derive from the budget (default), 0 no cap, >0 a fixed long edge for a
+  // machine under real contention. Persisted.
+  int  m_nMirrorScCapSetting = -1;
+  // DIAG_MIRRORCAP is driving; the derived value stops being applied so an
+  // evaluation is not silently undone on the next display pass. Not persisted.
+  bool m_bMirrorScCapOverridden = false;
+  // The GPU cost this preset is actually costing: the worst of the independent
+  // mirror surfaces and the PRIMARY's own frame. The primary is what makes a
+  // reading always available -- surfaces alone read 0 whenever none is live,
+  // which the gate could not tell from "cheap" (#245).
+  unsigned MeasuredPeakGpuUs() const;
+
+  // A random preset was asked for before the preset list existed, and is owed
+  // once the scan publishes. Startup with no configured startup preset does
+  // exactly this: it reaches LoadRandomPreset while the scan worker is still
+  // running, which used to raise "no preset files found" and show the built-in
+  // fallback on an install with 933 files -- 124 ms before one of them loaded.
+  bool m_bRandomPresetDeferred = false;
+
+  // ── Startup loading screen (#291) ──
+  //
+  // Until the first preset has ever produced a comp shader there is nothing to
+  // draw with, and the warp pass fell back to PSO_TEXTURED_MYVERTEX and drew
+  // the bare warp mesh: a screenful of triangles for about a second at startup,
+  // and longer on a slower machine or a heavier preset. RenderFrame now returns
+  // before drawing while this holds -- the same mechanism black mode uses -- so
+  // the canvas stays black, and MyRenderUI puts an elapsed-seconds counter in
+  // the middle of it.
+  //
+  // LATCHED once a comp shader exists, so a later device teardown (which
+  // clears the shaders) cannot bring the loading screen back over a session
+  // that is already running.
+  bool  m_bFirstPresetEverReady = false;
+  DWORD m_dwLoadingScreenStart = 0;
+  bool  LoadingScreenActive() const {
+    return !m_bFirstPresetEverReady;
+  }
+  float LoadingScreenSeconds() const {
+    return m_dwLoadingScreenStart
+               ? (float)(GetTickCount() - m_dwLoadingScreenStart) / 1000.0f
+               : 0.0f;
+  }
+
+  // A startup display profile supplied the primary window's preset (#284).
+  //
+  // The profile is loaded from MyReadConfig, long before AllocateMyDX9Stuff
+  // decides what the main window opens with, and that load writes the profile's
+  // primary preset into m_szPresetStartup. The decision used to test
+  // m_bEnablePresetStartup alone -- a settings.ini flag the profile has no say
+  // over -- so with it off a RANDOM preset was loaded over the one the profile
+  // had just pinned, and the main window became the one screen a display
+  // profile could not restore.
+  bool m_bProfileSuppliedStartupPreset = false;
+
+  // Worst GPU cost any mirror surface has reported for the CURRENT preset,
+  // microseconds. Published by the surface workers and reset when a preset
+  // loads. It no longer gates anything -- kept because it is the only
+  // per-surface cost figure the app can produce, and DIAG_MIRRORS reports it.
+  std::atomic<unsigned> m_nMirrorPeakGpuUs{0};
+
+  // Stand the children down so the main window can take every screen, and put
+  // them back afterwards (forgejo#61).
+  //
+  // The Stretch/Mirror hotkey exists to flip the whole arrangement with one
+  // key, and it could not do that while a display was running its own
+  // instance: mirrors are suppressed on a child-owned display, and stretch
+  // sized itself from the virtual desktop and simply covered the child.
+  //
+  // Suspending does NOT touch config.bOwnProcess -- only the processes go.
+  // That is what makes "toggle back and it returns to whatever the setting is"
+  // free: the setting was never changed, so there is nothing to restore it
+  // from but itself. RequestChildKill already works that way; it is
+  // SET_DISPLAY_MODE=<N>,mirror that clears the flag.
+  //
+  // Resume respawns exactly what was suspended, from the recorded list, rather
+  // than everything the config would allow. A display marked bOwnProcess that
+  // had no child running when the key was pressed must not acquire one because
+  // of it -- spawning a process is not something a toggle should do on its own.
+  int SuspendChildrenForDisplayToggle();
+  int ResumeChildrenAfterDisplayToggle();
+  bool ChildrenAreSuspended() const { return !m_childrenSuspended.empty(); }
+  void RequestChildReconfigure(const wchar_t* deviceName);
+  void RequestChildSend(const wchar_t* deviceName, const wchar_t* payload);
+  // Hide every live child, and put them back. The Mirror/Children toggle uses
+  // these rather than Suspend/Resume above: a child holds a preset, a cycle
+  // timer and a warm shader cache, and retiring it to clear a screen throws
+  // all three away for the sake of a keypress that is usually undone seconds
+  // later. Minimising is immediate in both directions and keeps the state.
   // szPresetDir / szStartupPreset each hold a literal path or a kDispMode*
   // sentinel. These turn one into the other; see child_instances.cpp. Call the
   // dir one FIRST -- the preset modes pick from the directory it returns.
@@ -736,12 +1096,38 @@ public:
   // key would silently un-configure every display that has it set, and the
   // cost of a misleading key is this comment while the cost of a rename is the
   // user's wall coming up wrong. The Displays window shows the honest name.
+  // Does this display show its own preset? Independent of WHERE it renders --
+  // an in-process surface holds one just as well as a child, which is the
+  // middle tier bOwnPreset exists for. bOwnProcess still counts on its own so
+  // an automatic promotion, which sets only that, does not silently turn the
+  // display back into a follower.
   bool DisplayHoldsOwnPreset(const DisplayOutputConfig& cfg) const {
     return cfg.type == DisplayOutputType::Monitor && cfg.bEnabled &&
-           cfg.bOwnProcess;
+           (cfg.bOwnPreset || cfg.bOwnProcess);
+  }
+  // Which supertexts this display draws (#255): its own when it runs its own
+  // message loop, the primary's (-1) when it is a follower showing the
+  // primary's frame. Same predicate as the preset and message clocks, so the
+  // three cannot disagree about whether a display is independent.
+  int MessageOwnerFor(const DisplayOutputConfig& cfg) const {
+    if (!DisplayHoldsOwnPreset(cfg)) return -1;
+    const int n = DisplayNumberFromDevice(cfg.szDeviceName);
+    return n > 0 ? n : -1;
   }
 
   std::wstring ResolveDisplayPresetDir(const DisplayOutputConfig& cfg) const;
+
+  // Step ONE display's own preset, in this process. Shared by DISPLAY_NEXT=/
+  // DISPLAY_PREV= and by the Displays window's Prev/Next buttons, which had
+  // drifted apart: the IPC path was widened to the in-process `preset` tier and
+  // the button was not, so pressing Next on a display set to "Own preset" was
+  // told it mirrored the main window and did nothing.
+  //
+  // Returns false with *reason set to a short code on failure, so each caller
+  // can report it in its own idiom -- a pipe reply for IPC, a notification for
+  // the UI.
+  bool StepDisplayOwnPreset(const DisplayOutputConfig& cfg, bool next,
+                            const wchar_t** reason = nullptr);
   std::wstring ResolveDisplayStartupPreset(const DisplayOutputConfig& cfg,
                                            const wchar_t* dir) const;
   // fTimeBetweenPresets < 0 means "inherit the parent's". Resolving that was
@@ -756,12 +1142,55 @@ public:
   }
   // THE way to change the user preset lock. Six unrelated things toggle it --
   // a hotkey, the scroll-lock key, a game controller, a script, the IPC verb
-  // and a display profile -- and it is global, so every one of them has to
-  // reach every display. That used to mean a pipe message to each child; a
-  // display holds its preset in process now and simply reads the flag.
+  // and a display profile -- and every one of them has to reach the children,
+  // because the lock is global and a child that ignores it goes on advancing
+  // while the main window sits still. That is what it looked like from the
+  // outside: "the parent wasn't advancing, just a child".
   //
   // Assign through here, never to m_bPresetLockedByUser directly.
   void SetUserPresetLock(bool bLocked);
+  // A child's render window has the focus but obeys nobody: forward the key to
+  // the parent so the parent's own bindings run. Returns false when there is no
+  // parent to forward to (a bare -child), which the caller treats as "swallow".
+  bool ForwardKeyToParent(unsigned int vk, unsigned int mods);
+  // Push the resolved lock to every child that has not overridden it.
+  void RelayPresetLockToChildren();
+  // Push the HUD state -- "primary only", preset info, FPS, debug overlay --
+  // to every child, and to one child at spawn. A child reads these from
+  // settings.ini once and can be told no other way, so without this a running
+  // child never hears that the setting moved. Debug info is not persisted at
+  // all, so a child could not show it under any circumstances.
+  void RelayHudStateToChildren();
+  void SendHudStateToChild(const wchar_t* device);
+  int  GetChildCount() const;
+  bool GetChildInfo(const wchar_t* deviceName, ChildInstance& out) const;
+  // Is this display's preset held by a READY child rather than by a surface
+  // in this process? (#236)
+  //
+  // The addressed display verbs each had to choose between the primary and an
+  // in-process surface, and a child-owned display fits neither: it has a
+  // preset of its own, but in another process, so MirrorSurfaceFor returns
+  // nothing and the caller was told no_surface. That refused exactly the
+  // displays that HAVE their own preset -- DISPLAY_NEXT/PREV were dead on them
+  // from MDR_Android while a raw DISPLAY|N|SIGNAL|NEXT_PRESET relay worked
+  // fine.
+  //
+  // bReady matters: a child that has been asked for but has not answered its
+  // pipe yet cannot be sent anything, and treating it as owner would swallow
+  // the command silently rather than fall through to the surface.
+  bool ChildOwnsDisplayForIpc(const wchar_t* deviceName) const {
+    ChildInstance ci;
+    return GetChildInfo(deviceName, ci) && ci.bReady;
+  }
+  void SetChildCurrentPreset(DWORD pid, const wchar_t* presetPath);
+  // The rate a child reported for itself, from the same poll (#246). Nothing
+  // else can see it: a child renders in another process and every per-surface
+  // figure the parent measures is in-process.
+  void SetChildFps(DWORD pid, float fps);
+  // Send one message to every ready child. Used for next/prev, where each child
+  // then picks its OWN next-or-random preset -- a nudge, not an assignment, so
+  // a wall of children does not go into lockstep.
+  void BroadcastToChildren(const wchar_t* message);
   ComPtr<ID3D12CommandAllocator>     m_mirrorCmdAllocators[DXC_FRAME_COUNT];
   ComPtr<ID3D12GraphicsCommandList>  m_mirrorCmdList;
   // Opposite-orient milk2/classic: skippable lagged pass. Own list + fence.
@@ -887,6 +1316,10 @@ public:
   std::atomic<int> m_diagOrientDtMaxUs{0};
   std::atomic<int> m_diagOrientDtAvgUs{0};
   std::atomic<int> m_diagOrientLockMaxUs{0}; // spin-wait for m_mirrorEngineMutex
+  // Microseconds per worker iteration spent waiting for THIS surface's own
+  // previous GPU frame. The other half of "what bounds the worker's rate"
+  // alongside the lock wait (#189).
+  std::atomic<int> m_diagOrientFenceMsAvg{0};
   std::atomic<int> m_diagOrientLockAvgUs{0};
   std::atomic<int> m_diagOrientRecMaxUs{0};  // record under the engine lock
   std::atomic<int> m_diagOrientRecAvgUs{0};
@@ -937,8 +1370,11 @@ public:
   // window they mirror. Free-running the worker made them run visibly faster
   // (2026-08-23: 160 fps worker against a 40 fps capped primary).
   std::atomic<unsigned>              m_nPrimaryFrameSeq{0};
-  UINT m_diagOrientAspectBad = 0;   // flicker hunt: ctx shape draws w/ wrong aspect
-  UINT m_diagOrientAspectGood = 0;
+  // ATOMIC: incremented from every mirror worker, so a plain UINT here was a
+  // read-modify-write race (#206). Undercounting a flicker hunt is exactly the
+  // way to make it look less frequent than it is.
+  std::atomic<UINT> m_diagOrientAspectBad{0};   // ctx shape draws w/ wrong aspect
+  std::atomic<UINT> m_diagOrientAspectGood{0};
   // Leader panel's RAW dims (pre 1920-cap, pre 16-align). The sim grid takes
   // its aspect from these: the rounded pipe (1920x1088 = 1.7647) vs the panel
   // (2560x1440 = 1.7778) reads as slightly-flat circles otherwise.
@@ -967,6 +1403,12 @@ public:
     bool bActive = false;
     bool primaryWasMinimized = false;
     bool primaryWasFullscreen = false;
+    struct ChildState {
+      std::wstring device;
+      bool wasMinimized = false;
+      bool wasFullscreen = false;
+    };
+    std::vector<ChildState> children;
   };
   AllFullscreenSnapshot m_allFullscreenSnapshot;
   bool m_bMirrorWatermarkActive = false; // True while in mirror watermark mode (App.cpp manages)
@@ -1005,7 +1447,13 @@ public:
   int  m_mirrorDiagCompPso = 0;
   unsigned m_mirrorDiagAllocHr = 0;
   unsigned m_mirrorDiagListHr = 0;
-  unsigned m_mirrorDiagSkipFrames = 0;
+  // Frames the closed-loop pacer declined to submit because the GPU had not
+  // yet earned them back (#230). Atomic because every surface worker
+  // increments it. This was reported as skipFrames= by DIAG_MIRRORS for a long
+  // time while NOTHING anywhere incremented it -- so a reader checking whether
+  // mirror frames were being dropped got a confident zero from a counter that
+  // could not have said anything else.
+  std::atomic<unsigned> m_mirrorDiagSkipFrames{0};
   unsigned m_mirrorDiagFrameCounter = 0;
   unsigned m_mirrorDiagAuxUsed = 0;
   int  m_mirrorDiagSlotCount = 0;
@@ -1084,6 +1532,21 @@ public:
   // Phase 3 makes it a collection. Phase 4 gives each entry a preset of its
   // own; until then every surface still follows the primary, so N surfaces
   // render the same preset and the picture is unchanged.
+  // What a pass actually bound, so the primary's and a mirror's resolution of
+  // the same CShaderParams can be diffed. Declared here rather than beside the
+  // primary's copy because MirrorSurface holds a set per surface (#206): it was
+  // ONE engine-wide array that all N workers stamped every frame, so the one
+  // diagnostic built to catch a wrong binding reported a shuffle of several
+  // surfaces' tables -- and it was a plain data race besides.
+  struct BindSnapshot {
+    UINT slots[32];       // resolved SRV heap index per t-register
+    UINT bindingSrv[32];  // params->m_texture_bindings[i].dx12SrvIndex
+    int  texcode[32];     // tex_code per t-register
+    bool valid;
+  };
+  enum { BINDSNAP_WARP = 0, BINDSNAP_COMP, BINDSNAP_OLDWARP, BINDSNAP_OLDCOMP,
+         BINDSNAP_COUNT };
+
   struct MirrorSurface {
     std::wstring device;              // the display this serves; the key
 
@@ -1121,15 +1584,6 @@ public:
     std::mutex   requestMutex;
     std::wstring requestedPreset;
     bool         requestPending = false;
-    // What this display is SHOWING, published by the worker after a successful
-    // adopt and read by everything that reports on displays -- the Displays
-    // panel, the list, GET_CHILDREN (#186 phase 6).
-    //
-    // A copy under requestMutex rather than a read of sim.loadedOwnPath, which
-    // is the worker's own and is assigned while the UI and the IPC threads are
-    // free to be looking at it. Publishing costs one string copy per preset
-    // change; reading the live one costs a torn std::wstring eventually.
-    std::wstring shownPreset;
 
     // Cycling, render-thread only. Kept here rather than read off the sim
     // because the sim's clock is advanced by the worker; the render thread
@@ -1138,6 +1592,22 @@ public:
     // Sequential order's position in the directory. Atomic because DISPLAY_NEXT
     // arrives on the IPC thread while the cycle timer runs on the render one.
     std::atomic<int> seqIndex{-1};
+
+    // This display's own MESSAGE clock (#255), beside its preset clock and for
+    // the same reason: a display holding its own preset is its own visual
+    // world, and messages arriving in lockstep across every panel was one of
+    // the things the own-PROCESS path got right for free, because a child is a
+    // whole engine with its own message pump.
+    //
+    // The message STORE stays global -- same messages.ini, same playback order,
+    // same overrides. Only the timing, the placement and the live instances are
+    // per display, which is what makes each panel look independent while still
+    // being configured in one place.
+    //
+    // -1 means "not scheduled yet"; the tick arms it on first use, exactly as
+    // m_fNextAutoMsgTime does for the primary.
+    double nextMsgAt = -1.0;
+    int    nextMsgSeq = 0;
 
     // ── This surface's own recording objects (#186 phase 5b) ──────────
     //
@@ -1151,12 +1621,91 @@ public:
     ComPtr<ID3D12GraphicsCommandList> workList;
     ComPtr<ID3D12Fence>               workFence;
     UINT64                            workSubmitted = 0;
+    // Which early return the worker last took, reported as gate= in
+    // DIAG_MIRRORS. Four gates can each produce "zero frames forever" and they
+    // are indistinguishable from outside, which is what made #197 unfalsifiable
+    // by inspection. 0 = ran to the sim.
+    std::atomic<int>                  lastGate{0};
+    std::atomic<int>                  stepAttempts{0};  // got past the pacing gate
+    std::atomic<int>                  stepRecords{0};   // recorded and submitted
     HANDLE                            fenceEvt = nullptr;
+    // What THIS surface's record bound, for DIAG_BINDINGS (#206). Written by
+    // this surface's worker only; read unsynchronised by the IPC thread, same
+    // diagnostic-only contract as the counters above.
+    BindSnapshot                      bindSnap[BINDSNAP_COUNT] = {};
 
     bool WorkIdle() const {
       return !workFence || workSubmitted == 0 ||
              workFence->GetCompletedValue() >= workSubmitted;
     }
+
+    // Closed-loop pacing (#230).
+    //
+    // The pacing gate below picks the mirror's rate OPEN LOOP: parity asks for
+    // one mirror frame per primary frame, and maxFps asks for a fixed number,
+    // and neither has ever asked whether the GPU can actually deliver that
+    // many. For nearly every preset it can, and this costs nothing. For one
+    // that cannot -- Clouds1b's warp shader is ~1089 transcendental iterations
+    // per pixel, and an independent mirror renders the WHOLE preset -- the
+    // engine keeps demanding the primary's rate from a GPU already at 100%,
+    // work queues, and a submission eventually sits on the hardware longer
+    // than the ~2 second TDR watchdog allows. Measured: at a 45 fps cap the
+    // mirrors delivered 7 fps, orientDt averaged 844 ms and peaked at 2469 ms,
+    // and the device was removed with DXGI_ERROR_DEVICE_HUNG on a mirror's own
+    // warp draw. At a 20 fps cap the same preset and the same two mirrors ran
+    // 60 seconds flat.
+    //
+    // So the rate becomes a measurement rather than a wish: stamp the
+    // submission, and when the fence proves it complete, lastWorkUs is what
+    // the GPU actually took. nextSubmitQpc then holds this surface off until
+    // the hardware has had that long again, shared out among the live
+    // surfaces, so N heavy mirrors cannot between them ask for more than one
+    // GPU's worth. A cheap preset measures microseconds and is never delayed.
+    LONGLONG workSubmitQpc = 0;   // QPC at ExecuteCommandLists, 0 = none pending
+    unsigned lastWorkUs    = 0;   // submit -> fence complete, last frame
+    LONGLONG nextSubmitQpc = 0;   // earliest QPC this surface may submit again
+
+    // What the GPU was actually ASKED to do for this surface's last frame.
+    //
+    // workUs says a frame took 3.2 seconds. It cannot say whether that was one
+    // shader running long or a hundred million extra fragments, and those need
+    // opposite fixes -- a cheaper shader, or geometry that stopped being
+    // degenerate. Chasing Clouds1b (#230) stalled exactly there: shrinking the
+    // canvas helped and lowering the frame rate helped, and both are consistent
+    // with either story, so neither discriminated.
+    //
+    // PSInvocations against this surface's own pixel count settles it in one
+    // reading. A ratio near 1 means each pixel was shaded about once and the
+    // shader is simply expensive; a ratio in the hundreds means the warp mesh
+    // is covering the screen many times over and the geometry is the fault.
+    //
+    // Per surface because each surface records its own list -- a shared query
+    // heap could not attribute the counters to anyone.
+    ComPtr<ID3D12QueryHeap>              statHeap;
+    ComPtr<ID3D12Resource>               statReadback;
+    D3D12_QUERY_DATA_PIPELINE_STATISTICS lastStats = {};
+    bool                                 statsPending = false;
+
+    // GPU time for the same frame, against workUs' WALL time.
+    //
+    // Pipeline statistics showed a Clouds1b mirror frame shading the same
+    // 4.18M fragments whether it cost 10 us or 492 ms, so the frame is not
+    // doing more work -- it is stalling. Wall time alone cannot say whether
+    // the GPU was busy with our shader or whether our submission was simply
+    // not being serviced, and those are different bugs:
+    //
+    //   gpuUs ~= workUs   the hardware really was executing this frame that
+    //                     whole time -- the shader is pathologically slow on
+    //                     this data
+    //   gpuUs << workUs   the work was queued and waiting -- contention or
+    //                     scheduling, and the shader is innocent
+    //
+    // Timestamps sit on THIS surface's own list, so they measure this
+    // surface's execution and nothing else.
+    ComPtr<ID3D12QueryHeap>              timeHeap;
+    ComPtr<ID3D12Resource>               timeReadback;
+    UINT64                               timeFreq = 0;
+    unsigned                             lastGpuUs = 0;
 
     int lastWrite    = -1;            // worker-only
     // The face THIS wake recorded, held until the submit succeeds. With one
@@ -1192,6 +1741,19 @@ public:
     // paced every surface; a thread per surface has to pace itself.
     LONGLONG          lastOrientQpc = 0;
     unsigned          seenPrimaryFrame = 0;
+    // Primary frames this surface never got to (#189).
+    //
+    // The parity gate steps once per advance of m_nPrimaryFrameSeq and then
+    // assigns `seenPrimaryFrame = pf`, which SILENTLY DISCARDS however many
+    // advances happened while the worker was busy. One step per wake is
+    // correct -- it cannot render a frame it missed -- but the discard is why
+    // parity can collapse to half with nothing reporting it, and why this was
+    // originally attributed to a mirror on/off toggle that turns out to have
+    // nothing to do with it.
+    //
+    // This counts what was dropped, so the ceiling is a number anyone can read
+    // off DIAG_MIRRORS live rather than something only a capped sweep reveals.
+    std::atomic<unsigned> parityMissed{0};
     // Was a function-local static std::map keyed by device -- one map mutated
     // by every worker. One thread per surface owns this outright.
     std::wstring      lastShapeLogKey;
@@ -1269,21 +1831,6 @@ public:
   // sequential order, at random otherwise. Empty when the directory has none.
   std::wstring PickDisplayPreset(const std::wstring& dir, bool sequential,
                                  int& seqIndex) const;
-  // Step one display to its next (or previous) preset, in process.
-  //
-  // Shared by the IPC verbs and the Displays window's own buttons. It used to
-  // exist twice, because the window sent SIGNAL|NEXT_PRESET down a child's pipe
-  // while the IPC verb did the work here -- two paths to one behaviour, and
-  // only one of them survived the children (#186 phase 6).
-  //
-  // err is a stable token on failure: "no_surface" or "no_presets".
-  bool AdvanceDisplayPreset(DisplayOutput& out, bool next,
-                            const wchar_t*& err, std::wstring& detail);
-  // Step EVERY own-preset display, for the global Next/Prev. A nudge, not an
-  // assignment: each picks its own next-or-random preset from its own
-  // directory, so a wall of displays does not fall into lockstep (forgejo#22).
-  // Was a SIGNAL|NEXT_PRESET broadcast down every child's pipe.
-  void StepOwnPresetDisplays(bool next);
 
   // The surface serving `device`, created on first use. RENDER THREAD ONLY:
   // the worker walks this list, so growing it from another thread would move
@@ -1314,16 +1861,37 @@ public:
       if (!sp->WorkIdle()) return false;
     return true;
   }
+  // Block until every surface's submitted work is off the GPU.
+  //
+  // DXContext::WaitForGpu signals and waits on m_commandQueue. The mirror
+  // workers submit to m_mirrorQueue with their OWN per-surface fences, so
+  // WaitForGpu says nothing about them -- and anything that frees a GPU
+  // resource a worker may have recorded needs both. See CreateDX12PresetPSOs,
+  // where releasing the outgoing PSOs while a mirror list still referenced
+  // them was a use-after-free that reached the GPU as a page fault at VA 0
+  // (#206).
+  //
+  // RENDER THREAD ONLY, same reason as AllSurfacesIdle. Waiting on a fence
+  // cannot deadlock against a worker blocked on m_mirrorEngineMutex: the GPU
+  // drains a submitted list whether or not that thread ever runs again.
+  void WaitForSurfaceWork(DWORD timeoutMs = 2000);
 
-  // What a display is showing, for the UI and for the IPC replies that used to
-  // describe a child process (#186 phase 6). haveSurface separates "this
-  // display is not rendering" from "it is, and it is following the primary".
-  struct DisplayPresetInfo {
-    bool         haveSurface = false;
-    bool         ready = false;     // it has produced an image
-    std::wstring preset;            // its own preset; empty means it follows
-  };
-  DisplayPresetInfo DisplayPresetStatus(const wchar_t* device) const;
+  // What that wait actually costs, because it runs on the RENDER THREAD at
+  // every preset commit and a stall there is a visible hitch (#206).
+  //
+  // The wait is on a fence for work already submitted, so the expectation is
+  // GPU time -- a few ms -- and not the mirror's frame interval, which is
+  // pacing. An expectation is not a measurement, hence these. Reported by
+  // DIAG_MIRRORS as surfWait(last,max,n); diagnostic-only, same unsynchronised
+  // contract as the other counters here.
+  std::atomic<int>  m_diagSurfaceWaitUs{0};      // most recent call
+  std::atomic<int>  m_diagSurfaceWaitMaxUs{0};   // worst since start
+  std::atomic<UINT> m_diagSurfaceWaitCount{0};   // calls that actually waited
+  // ENTRIES, not costs. A contention window measured on an idle system reads
+  // zero, and zero is indistinguishable from "free" -- so count how often the
+  // path RAN as well as what it cost, and an unexercised path is then visibly
+  // unexercised rather than silently cheap.
+  std::atomic<UINT> m_diagSurfaceWaitCalls{0};
 
   // Phase 4's entry point; returns nullptr when that display has no surface.
   MirrorSurface* MirrorSurfaceFor(const wchar_t* device) const {
@@ -1337,6 +1905,59 @@ public:
     std::lock_guard<std::mutex> lock(m_mirrorSurfacesMutex);
     return m_mirrorSurfaces.size();
   }
+  // Lock-free copy of the above, maintained at the two sites that resize
+  // m_mirrorSurfaces. The closed-loop pacer (#230) divides the GPU between
+  // the live surfaces on every worker wake and must not take a mutex to do it.
+  std::atomic<int> m_nLiveMirrorSurfaces{0};
+  // Closed-loop mirror pacer on/off, for DIAG_MIRRORPACE (#230). On by
+  // default; the only reason to turn it off is to demonstrate the failure it
+  // prevents, which cannot be shown any other way once it works.
+  std::atomic<bool> m_bMirrorPacer{true};
+
+  // Orient-pipe SRV bind ranges handed back by retired surfaces.
+  //
+  // bindBase is a pure bump allocation out of m_nextFreeSrvSlot and nothing
+  // ever returned it. A surface rebuilding its OWN pipe reuses its range via
+  // the stillReserved test, but a surface that is RETIRED and recreated --
+  // which is exactly what a mirror mode switch does -- abandons its block and
+  // takes a fresh one. Every reconfiguration therefore burned kBindSlots
+  // permanently.
+  //
+  // NOTE: this is a real gap but it was NOT what exhausted the heap on
+  // 2026-09-12. That log shows only two bindBase allocations ever made and no
+  // "no longer reserved" warnings, so nothing had been abandoned -- the heap
+  // was simply too small to hold a third orient pipe. DXC_MAX_SRV carries that
+  // fix and the measurements behind it.
+  //
+  // Kept because retiring a surface genuinely does drop its range, so the
+  // allocator can still only climb across a long session of display changes.
+  // Every range is the same size, so a plain free list is enough. Render
+  // thread only: EnsureOrientPipeline bars workers outright, and retirement
+  // runs there too.
+  std::vector<UINT> m_freeOrientBindBases;
+  UINT              m_freeOrientBindEpoch = 0;
+
+  // How many SRV descriptors ONE orient pipe reserves at pipe.bindBase.
+  //
+  // ONE definition, because there were three and two of them were wrong. The
+  // allocation log said "5x32 slots" and DIAG_BINDINGS computed orientBindEnd
+  // as bindBase + 6*BINDING_BLOCK_SIZE, while the reservation has been
+  // (6 + blur) blocks since #209 -- 576 on this build, not 160 or 192.
+  //
+  // That is not a cosmetic drift. Those numbers exist to answer exactly one
+  // question -- "is this slot inside a reserved range?" -- and #354 is that
+  // question: two live surfaces 11 slots apart look fine until you know the
+  // range is 576 wide. A reader was told 192 and would have concluded they
+  // did not overlap.
+  static UINT OrientBindSlots() {
+    return (6 + DXC_FRAME_COUNT * DXContext::MAX_BLUR_PASSES) *
+           DXContext::BINDING_BLOCK_SIZE;
+  }
+  // How many pairs of LIVE surfaces have intersecting reservations. Always a
+  // defect when non-zero: both fill the same descriptors, so both displays
+  // draw whichever wrote last (#354).
+  int OrientBindOverlapCount() const;
+
   bool EnsureOrientPipeline(MirrorSurface& surf, int w, int h);
   void ReleaseOrientPipeline(MirrorSurface& surf);
   // Every surface at once, for device teardown and shutdown.
@@ -1350,7 +1971,6 @@ public:
   bool RenderClassicOrientPipeline(MirrorSurface& surf,
                                    ID3D12GraphicsCommandList* cmdList, int outW, int outH);
   // When set, textured shapes sample this instead of m_dx12VS[0] (orient re-render).
-  const DX12Texture* m_pShapeVsOverride = nullptr;
 
   // The frame number a mirror's record publishes to presets, or < 0 for "use
   // the engine's" (#111).
@@ -1401,7 +2021,6 @@ public:
 
   // Classic orient: true when re-rendering opposite aspect (more work already in aux).
   // Same-orient re-render can spend more of the aux buffer on shapes.
-  bool m_bOrientOppositeAspect = false;
   // Stretch-blit latest orient imgFb → mirror RT (full clear + full viewport).
   // Safe source: never samples a flip-model back buffer (that caused leader-only
   // ghost bands after running a while when peers blitted from leader.bb).
@@ -1414,20 +2033,40 @@ public:
   // surface (sampling flip BB between Execute and Present ghosts mirrors).
   DX12Texture m_mirrorSrcTex;
   bool m_bMirrorSrcCopiedThisFrame = false;
+  // Rebuild the snapshot next frame, WITHOUT freeing it now. The primary-geom
+  // handler used to invalidate it by releasing the resource outright, in the
+  // middle of a frame that had already recorded a CopyResource into it (#195).
+  bool m_bMirrorSrcRecreateNextFrame = false;
   // Copy flip BB → m_mirrorSrcTex on the *primary* list while still RT,
   // before Execute. SendToDisplayOutputs must not touch the flip BB.
   void CopyPrimaryToMirrorSrc();
-  bool ShouldHideMirrorHud() const override { return m_bDisableMirrorHud && m_bMirrorsActive; }
+  // "Disable HUD on mirrors" means, in practice, "HUD only on the display the
+  // user is actually looking at". m_bMirrorsActive alone did not deliver that:
+  // a display set to its own process is a CHILD instance, which does not think
+  // of itself as a mirror -- m_bMirrorsActive is false there -- so the setting
+  // never reached it and independent preset displays kept their HUD. The child
+  // already reads bDisableMirrorHud from the shared settings.ini; it simply
+  // never applied it.
+  bool ShouldHideMirrorHud() const override {
+    return m_bDisableMirrorHud && (m_bMirrorsActive || m_bChildMode);
+  }
+  // The same setting turned on a child's OWN output. A child renders as a
+  // primary would, so nothing above suppresses the HUD it draws for itself --
+  // this is what the mirror-side gate in DrawOverlaysToMirror cannot reach.
+  bool ShouldHideOwnHud() const override {
+    return m_bDisableMirrorHud && m_bChildMode;
+  }
   bool AnyIndependentMirrorEnabled() const override;
   void OnAnimationTimeRebased(float delta) override;
   void DrawDeferredMessages() override;
   // Supertext messages + HUD (+ optional sprites) onto a mirror RT.
+  // ownerFilter: which supertexts this surface draws (#255) -- its own display
+  // number when it runs its own message loop, or -1 (the primary's) when it is
+  // a follower showing the primary's frame.
   void DrawOverlaysToMirror(ID3D12GraphicsCommandList* cmdList, int monW, int monH,
-                            bool drawSprites = true);
+                            bool drawSprites = true, int ownerFilter = -1);
   // Clear every mirror SC back buffer (PRESENT/COMMON → clear → restore). Stops
   // flip-chain ghosts when switching landscape stretch → portrait orient.
-  void ClearMirrorSwapChainAllBuffers(ID3D12GraphicsCommandList* cmdList,
-                                      MonitorMirrorState& ms, UINT keepAsRtvIndex);
 
   // Blit main BB → mirror RT. mainBB must be PIXEL_SHADER_RESOURCE.
   // scaleMode: 0 = stretch-fill, 1 = letterbox/fit (bars), 2 = cover/crop (fill, no bars).
@@ -1438,10 +2077,14 @@ public:
   void ToggleMirrorIndependentRender();
   void SetMirrorIndependentRender(bool enable); // absolute set (IPC SET_MIRROR_INDEPENDENT=)
   void RefreshDisplaysTab();
-  // What the Displays list would say about the own-preset displays right
-  // now. Polled on a timer so the list can notice a change without being
-  // rebuilt every second. Was ChildListSignature (#186 phase 6).
-  std::wstring DisplayListSignature() const;
+  // What a display's window should look like once the watermark overlay is
+  // resolved: click-through, alpha and z-order. THE one place that decides it
+  // (#286) -- three sites dressed a mirror window and only one of them knew
+  // about the watermark, so a display watermarked in displays.json or in a
+  // profile came up opaque, clickable and behind everything.
+  void ResolveMirrorWindowStyle(const DisplayOutputConfig& cfg,
+                                bool& clickThru, int& opacity,
+                                bool& onTop) const;
   void ApplyMirrorWindowStyles();   // apply click-through + opacity to all active mirrors (render thread only)
   // A profile describes the whole display state. The two optional sections are
   // for capturing a test setup: the primary's preset settings, and the
@@ -1502,6 +2145,17 @@ public:
   // Save a timestamped snapshot into the folder. Returns its full path, or an
   // empty string on failure.
   std::wstring SaveDisplayProfileSnapshot();
+
+  // Which entry the Profiles startup combo should show: 0 None, 1 Current,
+  // 2 the named file (#278).
+  //
+  // Only 0 and 2 are ever PERSISTED states. "Current" is a verb rather than a
+  // setting -- choosing it and pressing Save snapshots the displays as they are
+  // into a new profile and makes that the startup one -- so by the time the
+  // combo is next read, that choice has already become a file name.
+  int DisplayProfileStartupMode() const {
+    return m_bLoadDisplayProfileOnStart ? 2 : 0;
+  }
   // Load whatever szStartupDisplayProfile names. Used by ALT-S in profile mode
   // and by its own hotkey.
   bool LoadDefaultDisplayProfile();
@@ -1517,6 +2171,7 @@ public:
   void UpdateDisplaysTabSelection(int sel);
   // Cheap "has anything the Displays list shows about children changed", so a
   // timer can refresh only when it would say something different.
+  std::wstring ChildListSignature() const;
   // Which view the Displays list is showing: 0 the monitor arrangement,
   // 1 the detail lines. Lives on the engine rather than the window so it
   // survives the window being closed and reopened.
@@ -1607,16 +2262,77 @@ public:
   int m_nextUserHotkeyId = USER_HOTKEY_ID_BASE;
   int  AddUserHotkey(UserHotkeyType type);          // returns index in m_userHotkeys
   void RemoveUserHotkey(int index);
-  void LaunchOrFocusApp(const std::wstring& path);
+  // `args` empty keeps the original behaviour exactly: focus the app if it is
+  // already running, else start it. With arguments it always STARTS -- see the
+  // definition for why focusing would be wrong there.
+  void LaunchOrFocusApp(const std::wstring& path, const std::wstring& args = L"");
 
   // Idle timer (screensaver mode)
   bool m_bIdleTimerEnabled = false;
   int  m_nIdleTimeoutMinutes = 5;     // 1-60 minutes
-  int  m_nIdleAction = 0;             // 0 = Fullscreen, 1 = Stretch/Mirror, 2 = Mirror all
+  int  m_nIdleAction = 0;             // 0 = Fullscreen, 1 = Stretch/Mirror, 2 = Mirror all,
+                                      // 3 = Load display profile
   bool m_bIdleAutoRestore = true;     // True = restore on mouse/keyboard; false = manual hotkey only
   bool m_bIdleActivated = false;      // True when idle timer triggered activation
+  // The display profile action 3 loads. A bare name, resolved through
+  // ResolveDisplayProfilePath the same way every other profile verb resolves one.
+  wchar_t m_szIdleProfile[MAX_PATH] = {};
+  // Take every screen to 100% opacity while idle, independently of the action.
+  // Composes with all four: a set of displays left in watermark mode is dim, and
+  // nobody is looking THROUGH them once the user has walked away.
+  bool m_bIdleFullOpacity = false;
+  // The action that ACTUALLY fired. Restore must branch on this and never on
+  // m_nIdleAction: the two disagree the moment the dropdown is changed while
+  // idle is on screen, and restoring through the wrong branch strands whatever
+  // the right one had set up.
+  int  m_nIdleActionFired = -1;
+  // True between IdleEnter and IdleExit when a profile was really loaded, so the
+  // exit knows whether there is a _idle_restore.json to put back. False on the
+  // same-profile short circuit, which loads nothing and so has nothing to undo.
+  bool m_bIdleProfileRestorePending = false;
+  // Baseline for RESET_IDLE_TIMER. The countdown is otherwise read from the
+  // SYSTEM-wide GetLastInputInfo, which no application can move.
+  DWORD m_nIdleResetTick = 0;
+  // What IdleSnapshotOpacity banked. Kept in memory rather than in the restore
+  // PROFILE because a display profile does not carry nWatermarkOpacity -- see
+  // display_output.h, where it is the field that says what a watermarked display
+  // looks like, and SaveDisplayProfile, which does not write it. Without this the
+  // watermark opacity would not survive a round trip through idle.
+  struct IdleOpacitySnap {
+    std::wstring device;
+    int nOpacity = 100;
+    int nWatermarkOpacity = -1;
+  };
+  std::vector<IdleOpacitySnap> m_idleOpacitySnap;
+  float m_fIdlePrevOpacity = 1.0f;
+  bool  m_bIdlePrevAlwaysOnTop = false;
+  bool  m_bIdleOpacitySnapValid = false;
+  // How long the idle countdown considers the machine to have been idle:
+  // the smaller of the system's last-input age and the time since the last
+  // RESET_IDLE_TIMER. Both terms are unsigned tick DELTAS, so this stays correct
+  // across the 49.7-day GetTickCount wrap -- comparing the raw ticks would not.
+  DWORD IdleElapsedMs() const;
   void LoadIdleTimerSettings();
   void SaveIdleTimerSettings();
+  // The one place that formats the IDLE_TIMER= reply, so the six verbs that
+  // answer with it cannot come to disagree about its shape.
+  void SendIdleTimerReply();
+  // Snapshot / apply / restore for the idle timer's opacity and z-order, which
+  // are transient and must never reach displays.json. Defined beside
+  // ApplyMirrorWindowStyles, because they drive the same three legs it does.
+  void IdleSnapshotOpacity();
+  void IdleApplyFullOpacity();
+  void IdleRaiseToTop();
+  void IdleRestoreOpacity();
+  // DisplayProfileDir() + L"_idle_restore.json": where the pre-idle display state
+  // is banked so waking up can reload it. The leading underscore is what keeps it
+  // out of ListDisplayProfiles.
+  std::wstring IdleRestoreProfilePath() const;
+  // Write that file, creating the folder if it has never held a profile.
+  // Returning false is what refuses the idle profile load: applying one with no
+  // way back is a permanent change to the user's setup, arrived at by walking
+  // away from the machine.
+  bool IdleBankDisplayState();
   // =========================================================
 
   /// CONFIG PANEL SETTINGS THAT WE'VE ADDED (TAB #2)
@@ -1888,7 +2604,30 @@ public:
   // the real file rather than the temp one this writes.
   bool ApplyPresetTextToState(const std::wstring& milkText, int nSide = 0);
 
+  // What the texture cache is holding, published by the RENDER THREAD at every
+  // mutation and read by anyone (#352).
+  //
+  // DIAG_GPU used to answer by walking m_textures itself, on the IPC thread,
+  // while the render thread push_backs into it (a reallocation) and erases
+  // from it. Same defect as the Resource Viewer's, different reader -- and a
+  // diagnostic that reports a torn number is worse than one that reports
+  // none, because the number is what a measurement run then reasons from.
+  std::atomic<int>       m_texCacheCount{0};
+  std::atomic<long long> m_texCacheBytes{0};        // a cache can exceed 2 GB
+  std::atomic<long long> m_texCacheEvictableBytes{0};
+  void PublishTextureCacheStats();   // RENDER THREAD ONLY
+
   bool EvictSomeTexture();
+  // Evict until the texture cache fits MaxBytes/MaxImages (#312). EvictSomeTexture
+  // had no callers at all and neither cap was ever compared against anything, so
+  // the cache grew for the life of the process -- 3.2 GB after 50 presets,
+  // against a configured 2 GB, and 13.4 GB of process VRAM after 1,270.
+  void EnforceTextureCacheBudget();
+  // Is this texture's SRV named by any shader set that could draw next frame?
+  // A stronger liveness test than preset age, which says nothing about a .milk2
+  // second preset, a mirror surface on its own schedule, or a substituted
+  // fallback shader (#312).
+  bool TextureIsBound(const TexInfo& t) const;
   typedef std::vector<TexInfo> TexInfoList;
   TexInfoList     m_textures;
   bool m_bNeedRescanTexturesDir;
@@ -1986,42 +2725,33 @@ public:
   // thread and the preset has to change on the render thread.
   void ApplyPrimaryProfilePreset(const std::wstring& path);
 
-  // Which field a deliberate edit is clearing. Not an enum class: these are
-  // passed from plain C-style config code that has no using-declaration.
-  enum {
-    kPrimaryOverrideDir = 0,
-    kPrimaryOverrideStartup,
-    kPrimaryOverrideTime,
-    kPrimaryOverrideOrder,
-    kPrimaryOverrideLock,
-  };
-  struct PrimaryOverride {
-    bool    has = false;
-    wchar_t presetDir[MAX_PATH] = {};
-    wchar_t presetStartup[MAX_PATH] = {};
-    float   timeBetweenPresets = 0.0f;
-    bool    sequentialOrder = false;
-    bool    presetLocked = false;
-    // Which fields the profile actually took over. Anything false here reads
-    // and saves from the live member as normal.
-    bool    hasDir = false, hasStartup = false, hasTime = false;
-    bool    hasOrder = false, hasLock = false;
-  };
-  PrimaryOverride m_primaryOverride;
-
-  // Remember the global before a profile replaces it, and mark that field
-  // overridden. PER FIELD, and only the first time that field is taken over:
+  // ── There is ONE value per setting ───────────────────────────────────────
   //
-  //   * per field, because a profile may override the preset and leave the
-  //     timing alone, and a struct-wide "already stashed" flag then blocks the
-  //     timing from ever recording its own global -- the next profile to take
-  //     the timing would restore a value from two profiles ago;
-  //   * only the first time, because a second profile loaded over the first
-  //     must not record the FIRST profile's value as the global to restore.
-  void StashPrimaryGlobal(int field);
-  // A deliberate user edit: this field's global is now the live value again.
-  void ClearPrimaryOverride(int field);   // see kPrimaryOverride* below
-  // The value the settings save should write for each field.
+  // A PrimaryOverride struct used to live here, with StashPrimaryGlobal and
+  // ClearPrimaryOverride. Loading a display profile was a SESSION-ONLY LOAN:
+  // the user's own value was stashed and the profile's lent to the running
+  // session, so shutdown could put the original back.
+  //
+  // Removed (#358). Shane, after it produced the same class of bug twice in
+  // one afternoon: "the profile and the gload setting should be the same
+  // having them be out of sync is too confusing and I never said to do that."
+  //
+  // He is right beyond the confusion. Two values for one setting means every
+  // reader picks one, and they did not agree -- the shutdown save persisted
+  // the stash, SaveDisplayProfile recorded the live value, the Displays radios
+  // showed the live value, and only some writers cleared the loan. #356 fixed
+  // it in one direction and immediately broke it in the other, which is what
+  // settled the question: there is no assignment of "which value wins" that
+  // makes a two-value setting behave.
+  //
+  // Loading a profile is now an ordinary settings change and is persisted like
+  // one. If something genuinely needs to restore state afterwards, do it the
+  // way the idle timer does -- an explicit, named snapshot on disk
+  // (_idle_restore.json) that a person can see and reason about -- not an
+  // invisible second copy of a live setting.
+  //
+  // These four are kept as names because eleven call sites read better saying
+  // what they mean; each now returns the member.
   const wchar_t* GlobalPresetDir() const;
   float GlobalTimeBetweenPresets() const;
   bool  GlobalSequentialOrder() const;
@@ -2051,20 +2781,67 @@ public:
   // keyboard ignored, settings.ini shielded, presets.json frozen, the idle
   // timer stopped. It does not need this one.
   //
-  // Written only by SetTestingMode. Read only by
+  // Written only by SetTestingMode, as (bOn && !m_bChildMode). Read only by
   // AutoPresetChangesAllowed(). Everything else about testing mode stays keyed
   // to m_bTestingMode and must stay that way.
   bool    m_bSuppressAutoPresetChanges = false;
 
+  // ── Child test windows ────────────────────────────────────────────────────
+  //
+  // A display in own-process mode spawns a child that goes borderless
+  // FULLSCREEN on the monitor it is given. Correct for real use, ruinous for
+  // testing: the display suites spawn and retire children repeatedly, so a
+  // test run blacks out real screens over and over. Reported as "the current
+  // test harness is giving me a headache now with all the children going
+  // fullscreen every commit", and before that as the strobing and the
+  // foreground stealing.
+  //
+  // Window SIZE therefore joins placement and focus as something testing mode
+  // makes disposable, for the same reason: covering a monitor is done for the
+  // benefit of a human who is looking, and during a test nobody is.
+  //
+  //   kChildWindowNormal   borderless fullscreen, real use, unchanged
+  //   kChildWindowTiny     a small window, at the bottom of the z-order, on
+  //                        the display it was assigned -- so WHERE it landed
+  //                        is still observable, which is the point
+  //   kChildWindowHidden   never shown at all; the quietest, for tests about
+  //                        preset/profile plumbing rather than placement
+  //
+  // Tiny rather than hidden is the default under testing mode because the
+  // display assignment is the thing most worth testing, and a window that
+  // was never shown cannot be checked for where it went.
+  enum {
+    kChildWindowNormal = 0,
+    kChildWindowTiny   = 1,
+    kChildWindowHidden = 2,
+    kChildWindowAuto   = -1,   // follow testing mode; the default
+  };
+  int     m_nChildTestWindows = kChildWindowAuto;
+
+  // Resolves kChildWindowAuto against testing mode. The one place that decides,
+  // so the spawn command line and ChildPlaceNow cannot disagree -- and they
+  // would: ChildPlaceNow re-sends the monitor rect on a poll, so a child built
+  // tiny and then placed by the old path snapped to fullscreen a second later.
+  int     EffectiveChildWindowMode() const;
+
+  // Where a tiny child goes on the display it was given. The config's
+  // rcTestWindow when the harness has chosen one, else a small rect in that
+  // monitor's corner. Returns false if the display is not one we know.
+  bool    TestChildRect(const wchar_t* deviceName, RECT& out) const;
+
+  // Default size of a tiny child, in pixels. Big enough that the renderer has
+  // a sane aspect and a capture is readable; small enough to be ignorable.
+  static const int kTestChildW = 320;
+  static const int kTestChildH = 180;
 
   // ── Restraints ────────────────────────────────────────────────────────────
   //
   // Testing mode and child mode are two PROFILES over one set of named
-  // behaviours, not one flag with exceptions bolted on. The second profile was
-  // child mode, whose evidence was that SetTestingMode had to write
-  // "&& !m_bChildMode" twice: once so a child could cycle its own presets, once
-  // so a child was not pinned to 60fps. #186 phase 6 removed that profile; the
-  // table stays because the next divergence should be a row, not a special case.
+  // behaviours, not one flag with exceptions bolted on. The evidence that a
+  // single boolean was doing two jobs is that SetTestingMode had to write
+  // "&& !m_bChildMode" twice: once so a child can cycle its own presets, once
+  // so a child is not pinned to 60fps. As data those are one line each, and
+  // the next divergence is a table entry rather than a third special case.
   //
   // Deliberately NARROW. Only the behaviours that actually differ are routed
   // through here; everything else about testing mode stays keyed to
@@ -2081,6 +2858,8 @@ public:
       kPrompts    = 1u << 3,   // dialogs that WAIT FOR A PERSON: the scoped
                                // VFX Keep/Discard window
                                // (engine_video_effects_ui.cpp)
+      kStartupDisplay = 1u << 4, // claiming a whole monitor unasked at startup:
+                               // the start_fullscreen restore in App.cpp
     };
   };
 
@@ -2097,20 +2876,40 @@ public:
   // answer, and VFX_SCOPED_KEEP / VFX_SCOPED_DISCARD still deliver one, so a
   // harness that means to exercise Keep can. Answering on the harness's behalf
   // is not the same thing as not asking, and only the second is wanted here.
+  // kStartupDisplay is here because a harness launch happens beside somebody
+  // working, many times a day, and settings.ini is shared -- so start_fullscreen
+  // sent every one of those launches borderless-fullscreen onto a real monitor
+  // before anything could object. It restrains only the UNASKED startup claim;
+  // SET_ALL_FULLSCREEN, the hotkey and ToggleFullscreen still work, so a test
+  // that means to exercise fullscreen asks for it, exactly as kPrompts
+  // restrains the window without answering the question.
   static constexpr unsigned kTestingRestraints =
       restraint::kAutoPreset | restraint::kFpsCap | restraint::kMessages |
-      restraint::kPrompts;
+      restraint::kPrompts | restraint::kStartupDisplay;
 
   // What a child REFUSES even while in testing mode. A child renders a real
   // display for a real viewer: it has to advance its own presets (forgejo#22),
   // run at the rate its panel can do -- or a child-vs-mirror benchmark measures
   // the pin instead of the cost -- and show the messages the user configured.
   //
-  // A SECOND profile stood beside the testing one: kChildVetoes, the set of
-  // testing-mode restraints a -child instance lifted again, because a child
-  // held testing mode permanently and still had to cycle its own presets, run
-  // uncapped and spawn its own messages. #186 phase 6 deleted -child, so there
-  // is one profile again and the table has one row.
+  // kMessages is the third entry, and the reason it is a table entry rather
+  // than a fourth "&& !m_bChildMode": a child inherits nSpriteMessagesMode and
+  // messages.ini from the parent's folder, so it already HAD the messages and
+  // a working draw path. Only the spawn timer was frozen, by a gate written for
+  // a capture harness, so a display handed to a child went silent while every
+  // other display kept its text. Each child keeps its own autoplay clock, so
+  // messages are staggered across displays rather than synchronised.
+  // kStartupDisplay is vetoed too, and it is the one entry here that is about
+  // a FALLBACK rather than the normal path. A child told its display sizes
+  // itself to that monitor directly and sets m_bStartFullscreen false, so it
+  // never reaches the restrained code at all. But a child whose display cannot
+  // be found falls back to the saved geometry, and that path may legitimately
+  // restore fullscreen -- a child holds testing mode permanently, so without
+  // the veto that fallback would be silently disabled for real multi-display
+  // use, where covering the monitor is the entire point of a child.
+  static constexpr unsigned kChildVetoes =
+      restraint::kAutoPreset | restraint::kFpsCap | restraint::kMessages |
+      restraint::kStartupDisplay;
 
   std::atomic<unsigned> m_restraints{restraint::kNone};
 
@@ -2157,14 +2956,24 @@ public:
   }
   void RecomputeRestraints() {
     unsigned r = m_bTestingMode ? kTestingRestraints : restraint::kNone;
+    if (m_bChildMode) r &= ~kChildVetoes;
     m_restraints.store(r, std::memory_order_relaxed);
     m_bSuppressAutoPresetChanges = (r & restraint::kAutoPreset) != 0;
   }
 
-  // -child, and every field that configured one -- the display it covered,
-  // its slot, its fade, its test rect, whether it hid its window or took
-  // the foreground, its parent's pid, and the -nostartupchildren latch that
-  // suppressed the spawns -- lived here. #186 phase 6 deleted the mode.
+  // Child mode: this instance renders one display and is driven entirely by a
+  // parent instance over IPC (-child on the command line). See docs/Scripts.md.
+  //
+  // It turns testing mode on permanently and for the same reasons: the keyboard
+  // must be ignored (a keystroke aimed at the parent's window must not reach a
+  // child), auto-advance and the idle timer must not fire (the parent decides
+  // what is on screen), settings writes must be shielded (children share the
+  // parent's folder in the common case), and nothing may be recorded in
+  // presets.json (the parent owns that database).
+  //
+  // What it adds beyond testing mode: no Welcome window on a fresh folder, and
+  // it exits when its parent does, so a crashed parent cannot strand windows.
+  bool    m_bChildMode = false;
 
   // -test on the command line: come up as a test instance. See IsTestInstance.
   bool    m_bTestSwitch = false;
@@ -2182,13 +2991,81 @@ public:
   // site -- the window title and the TCP server -- which is exactly the shape
   // that lets a third site be added and quietly not get the check.
   bool IsTestInstance() const;
-
+  // DISPLAYn a -child was told to cover, 0 when it was not told.
+  //
+  // A child shares the parent's settings.ini, so left to itself it restores the
+  // MAIN window's saved geometry and appears on the main window's monitor for
+  // the seconds before the parent can move it -- a flash on the wrong display
+  // every time one starts. Knowing the target up front means it is built on the
+  // right monitor, at the right size, and never drawn anywhere else.
+  int     m_nChildDisplay = 0;
+  // 1-based slot the parent assigned this child, and the N in its window
+  // caption MDXChild_<N>_<parentpid>. 0 when not told, which is treated as 1.
+  //
+  // Deliberately not the display number, though both start at 1: a child is
+  // identified by which child it is, and the display it covers can be changed
+  // under it. The parent hands out the lowest free slot, so retiring one and
+  // starting another reuses the number rather than counting upward.
+  int     m_nChildIndex = 0;
+  // Milliseconds to dissolve in over the mirror being replaced; 0 = appear at
+  // once. Decided by the parent, which is the only side that knows whether
+  // there is a mirror on that display to dissolve FROM.
+  int     m_nChildFadeMs = 0;
+  // -rect=<x>,<y>,<w>,<h>: build this child's window here, small, rather than
+  // covering the display it was given. Empty (right <= left) when not asked
+  // for, which is every real run -- the parent only sends it under testing
+  // mode. Read once, at window creation; the parent re-asserts the same rect
+  // from ChildPlaceNow so the placement poll cannot undo it.
   // The process was launched SW_SHOWNOACTIVATE: come up without taking the
   // foreground, and keep not taking it. On Engine rather than as an App.cpp
   // global because the activations are NOT all in App.cpp -- suppressing every
   // one of them there still stole focus, because RaiseMirrorSurfaces in
   // engine_input.cpp calls SetForegroundWindow too, and startup raises mirrors.
   bool    m_bQuietLaunch = false;
+  RECT    m_rcChildTestWindow = {};
+  // -hidewindow: build the window and never reveal it. The render loop, the
+  // pipe and the preset timer all run as usual; only the ShowWindow at first
+  // frame is skipped, so a display can be tested for WHAT it is playing with
+  // nothing appearing on any monitor.
+  bool    m_bChildHideWindow = false;
+  // -foreground: take the OS foreground once, at reveal, instead of merely
+  // raising the z-order. Sent only when the display this child was given is
+  // configured fullscreen and the PARENT was not in test mode at spawn time --
+  // see ChildSpawnNow. A child is always launched SW_SHOWNOACTIVATE so enabling
+  // a display never yanks focus from ordinary use, which made m_bQuietLaunch
+  // permanently true inside a child and unusable as this flag's gate; the
+  // parent decides instead, the same way it decides -rect=/-hidewindow.
+  // forgejo#85.
+  bool    m_bChildForegroundOnReveal = false;
+  // -nostartupchildren: come up occupying no display but the render window's.
+  //
+  // A LATCH, not a mode. It is checked in RequestChildSpawn and dropped once
+  // startup has finished, so a spawn asked for afterwards -- over IPC, by a
+  // profile load, by the Displays checkbox -- still works. A run that could
+  // never make a child could not test one either.
+  //
+  // Gated at the queue rather than at each caller because startup has two:
+  // the promotion loop in engine.cpp, and the startup display profile, which
+  // reaches RequestChildSpawn from LoadDisplayProfile. Gating only the visible
+  // one left the children appearing exactly as before.
+  //
+  // For the harness, which shares the user's settings.ini and therefore
+  // restores HIS arrangement on startup: two displays marked OwnProcess, one of
+  // them the primary, each getting a borderless-fullscreen instance over
+  // whatever he was doing. Every launch, and a session launches many times.
+  // "why do you keep coming to the foreground?"
+  //
+  // Loading the harness's display profile afterwards is not enough on its own.
+  // That closes the window to a second or two rather than to nothing, and a
+  // second or two of fullscreen on the primary is exactly what he sees.
+  bool    m_bNoStartupChildren = false;
+  // False only while a child is still hidden or mid-fade. The parent retires
+  // the mirror on this, so it must not go true until the child is opaque:
+  // handing the display over during the fade would show the desktop through
+  // it. True by default, so anything that is not a deferred child -- the main
+  // window, a bare -child -- is simply always "revealed".
+  std::atomic<bool> m_bChildRevealComplete{true};
+  DWORD   m_nParentPid = 0;      // 0 = not launched as a child
   // The frame cap in force before testing mode pinned it, so leaving testing
   // mode gives the user's cap back. -1 = nothing to restore.
   int     m_nFpsCapBeforeTesting = -1;
@@ -2264,6 +3141,15 @@ public:
   // Shader compile errors recorded since this load began.  Zero at apply time
   // is what licenses ClearPresetShaderError to retract a stale error flag.
   std::atomic<int> m_nShaderErrorsThisLoad{0};
+  // Textures this preset asked for and did not get (#307). Reset alongside the
+  // shader errors above, for the same reason: a sweep wants to attribute a miss
+  // to the preset that caused it, and a running total cannot do that.
+  //
+  // A missing texture is not a compile failure -- the preset renders, just
+  // wrongly -- so it is invisible to every check that asks "did the shaders
+  // build". It is the fault #299 was about, and the one a report most needs to
+  // surface, because nothing else will.
+  std::atomic<int> m_nTextureMissesThisLoad{0};
   float   m_fLoadStartTime = 0;              // GetTime() when async load began (for timeout)
   float   m_fShaderCompileTimeout = 8.0f;    // seconds before auto-skipping a stuck compilation
   bool    m_bLoadingShadertoyMode = false;    // true when async load is for a .milk3 Shadertoy preset
@@ -2747,6 +3633,14 @@ public:
   void PrevPreset(float fBlendTime);
   void PrevPresetLocal(float fBlendTime);   // this instance only, no child broadcast
   void NextPreset(float fBlendTime);  // if not retracing our former steps, it will choose a random one.
+  // Step every display that holds its own preset IN THIS PROCESS (#341).
+  //
+  // The other half of what NextPreset/PrevPreset mean by "every independent
+  // display steps with us". BroadcastToChildren covers the ones running in
+  // their own process; this covers the middle tier #186 phase 4 added, which
+  // holds its own preset on an in-process surface and is in no child registry
+  // for a broadcast to find.
+  void StepOwnPresetDisplays(bool next);
   void OnFinishedLoadingPreset();
   // ── Audio mixer (audio_mixer.*, engine_mixer.cpp) ──
   // Off by default and inert in a child instance. The engine only ever talks
@@ -2941,9 +3835,9 @@ public:
   // within the last few seconds -- because each poll walks every GPU engine
   // instance on the machine. See gpu_usage.h.
   //
-  // Was deliberately NOT gated on child mode, unlike the subsystems that own an
-  // external interface: a child measuring its OWN pid was the entire point when
-  // the question was what a parent plus N children cost. One process now.
+  // NOT gated on m_bChildMode, unlike the subsystems that own an external
+  // interface: a child measuring its OWN pid is the entire point when the
+  // question is what a parent plus N children costs.
   mdrop::GpuUsageSampler m_gpuUsage;
   ULONGLONG              m_gpuWantedUntilTick = 0;   // set by DIAG_GPU
   bool GpuUsageWanted() const {
@@ -3085,7 +3979,16 @@ public:
   int               m_nBlurTexW[NUM_BLUR_TEX];
   int               m_nBlurTexH[NUM_BLUR_TEX];
 #endif
-  int m_nHighestBlurTexUsedThisFrame;
+  // Reset at the top of EVERY primary frame, in every mode -- despite what the
+  // old name promised, it was only ever written through max() with no
+  // assignment of 0 anywhere, so one preset sampling blur3 raised the pyramid
+  // depth for the rest of the session (#208). It also had no initialiser.
+  //
+  // "in every mode" is load-bearing and was wrong once already: the first fix
+  // reset it via the classic path's scan, which the shadertoy branch returns
+  // before, so a .milk3 preset went on accumulating exactly as before. The
+  // reset now sits above that branch.
+  int m_nHighestBlurTexUsedThisFrame = 0;
 
 #define NUM_SUPERTEXTS 10
   td_supertext m_supertexts[NUM_SUPERTEXTS];
@@ -3272,7 +4175,10 @@ public:
   // no preset-state branching -- it is the same separable-blur loop either way
   // -- so the value here is that the weights, the progressive scale/bias maths
   // and the per-pass constant layout stop existing twice.
-  int  ScanHighestBlurUsed(bool bBlending) const;
+  // rc supplies THIS surface's shader set. Without it the scan read the
+  // engine's m_shaders, so an own-preset mirror sized its blur pyramid from the
+  // PRIMARY's preset (#208). Null means the primary, which is the engine's.
+  int  ScanHighestBlurUsed(bool bBlending, const RenderContext* rc = nullptr) const;
   void RenderBlurPasses(const RenderContext& ctx);
   // Long-edge clamp + 16-align for the MIRROR's own feedback canvas. The
   // mirror simulates into its own textures, so a canvasMax that only shrank
@@ -3337,6 +4243,13 @@ public:
   // with no recorded path is not missing -- it is unlocated, which is not the
   // same thing and must never be deleted on that basis.
   bool IsAnnotationKnownMissing(const PresetAnnotation& a) const;
+  // Does this entry carry anything a purge would destroy for good? (#192)
+  //
+  // A dead path is evidence about a PATH, never about the preset -- and a
+  // rating, a note or twenty hours of play history cannot be rebuilt by
+  // finding the file again. Entries with none of it are pure bookkeeping and
+  // cost nothing to drop.
+  static bool AnnotationCarriesUserValue(const PresetAnnotation& a);
 
   int RemoveMissingAnnotations();
 
@@ -3389,6 +4302,52 @@ public:
   // is one place that knows "only post WM_MW_WATERMARK when the state is
   // actually changing" rather than two copies that could disagree.
   void SetWatermark(bool want);
+  // The command list a draw should record into (#206).
+  //
+  // A context that carries one IS the list -- a mirror worker records into its
+  // own, handed to it on the RenderContext. Only the primary, which has no
+  // context, falls back to the engine's active list.
+  //
+  // Tests the VALUE, never merely that a context exists: the primary's warp and
+  // comp contexts carry time, fps and audio but no command list, and treating
+  // "a context exists" as "it has a list" is the fault 43e807c7 had to fix for
+  // the canvas at ten sites and miss at the eleventh.
+  //
+  // One helper rather than the ternary at each site, for the reason
+  // MirrorZOrder gives: a rule repeated at N sites is a rule a new site can
+  // quietly not follow.
+  ID3D12GraphicsCommandList* CmdListFor(const RenderContext* rc) const {
+    if (rc && rc->cmdList)
+      return rc->cmdList;
+    return m_lpDX ? m_lpDX->GetActiveCmdList() : nullptr;
+  }
+
+  void SetMirrorWatermark(bool want);
+
+  // Where a mirror window belongs in the Z ORDER, in one place.
+  //
+  // HWND_NOTOPMOST is NOT "leave it where it was". It puts the window at the
+  // FRONT of the non-topmost band -- above everything the user has open. So
+  // the TOPMOST -> NOTOPMOST hop every mirror raise performs is a real raise
+  // that persists; only the sticky always-on-top BIT is given up. Shane,
+  // 2026-09-10: "no they were on top, they just were not sticky."
+  //
+  // That also means WS_EX_TOPMOST is worthless as a check here -- it reads
+  // clear after the hop either way. Measure the actual z-order instead
+  // (EnumWindows enumerates front to back).
+  //
+  // Testing mode sends mirrors to the BACK at every site, because a test never
+  // needs to be in front: PrintWindow captures a fully obscured window
+  // correctly, and most assertions need no window at all.
+  HWND MirrorZOrder(bool wantTop) const {
+    if (m_bTestingMode)
+      return HWND_BOTTOM;
+    return wantTop ? HWND_TOPMOST : HWND_NOTOPMOST;
+  }
+  // True when the TOPMOST -> NOTOPMOST hop should be performed at all. In
+  // testing mode the first call already put it at the back; the second would
+  // only undo that.
+  bool MirrorZOrderHop() const { return !m_bTestingMode; }
   // Hotkey diagnostics: DIAG_HOTKEYS / _BIND= / _CONFLICTS= (forgejo#72).
   // Also an early-return helper -- the else-if chain is at MSVC's nesting limit.
   bool HandleHotkeyDiagIPC(const wchar_t* sMessage);
@@ -3409,6 +4368,21 @@ public:
   std::wstring FindPresetByName(const std::wstring& bareFilename);
   bool HandleDisplayPresetIPC(const wchar_t* sMessage);
 
+  // Child worker internals — child_instances.cpp. All but PushChildCommand run
+  // on the worker thread only.
+  static unsigned __stdcall ChildWorkerThread(void* pParam);
+  void ChildWorkerLoop();
+  bool ChildSpawnNow(const wchar_t* deviceName);
+  void ChildKillNow(const wchar_t* deviceName);
+  // bInitial: this is a first configure, so the child may be moved onto its
+  // display and sent its startup preset. A later reconfigure must not.
+  void ChildConfigureNow(ChildInstance& ci, bool bInitial);
+  // Put a child onto its monitor. Deliberately separate from ChildConfigureNow
+  // and called only once the child has answered a request -- see its comment.
+  void ChildPlaceNow(const ChildInstance& ci);
+  void ChildPollAll();
+  void PushChildCommand(ChildCmd c, const wchar_t* deviceName,
+                        const wchar_t* payload = nullptr);
 
   DX12Texture m_canvasSrcTex;                        // back-buffer copy sampled by the canvas metric reduction
   DX12Texture m_canvasReduceTex;                     // 8x8 reduction target for the canvas metric
@@ -3430,6 +4404,18 @@ public:
   // Custom channel textures from Shader Import (user-selected texture files)
   DX12Texture m_dx12ChannelTex[4];           // loaded textures for sampler_chtex0..3
   std::wstring m_szChannelTexPath[4];        // file paths (set by Import UI)
+  // Shadertoy feedback targets are allocated on demand and given back when no
+  // .milk3 has been on screen for a while (#344). Ten FLOAT32 targets at render
+  // resolution is 160 bytes a pixel, ~1.33 GB at 2160x3840, and they used to be
+  // created at device init whether or not a .milk3 was ever loaded.
+  void EnsureShadertoyFeedbackTargets();
+  bool ShadertoyFeedbackAllocated() const;
+  // GetTime() when Shadertoy mode was last left, or 0 when it is in use or
+  // nothing is held. The delay is what keeps stepping through a mixed library
+  // from rebuilding every device resource on each .milk3 -> .milk transition.
+  double m_shadertoyIdleSince = 0.0;
+  static constexpr double kShadertoyReleaseDelaySec = 30.0;
+
   bool m_bHasBufferA = false;                        // true when preset has a Buffer A shader
   bool m_bHasBufferB = false;                        // true when preset has a Buffer B shader
   bool m_bHasBufferC = false;                        // true when preset has a Buffer C shader
@@ -3466,6 +4452,32 @@ public:
       VID_SOURCE_FILE   = 3
   };
   int     m_nVideoInputSource = VID_SOURCE_NONE; // active source type
+
+  // ── Spout from the command line (#213) ──
+  //
+  // A launch switch is an override for THIS RUN, not a configuration change.
+  // Testing Spout needs two instances -- one sending, one receiving -- and
+  // doing that by editing settings.ini means a test run leaves the user's
+  // Spout turned on. So these apply AFTER the settings load, and the value
+  // each one displaced is what gets written back at save time.
+  //
+  //   -spoutout             Spout OUTPUT on. The sender name is hardcoded
+  //                         "MDropDX12", so only one instance may send.
+  //   -spoutin[=<sender>]   Spout INPUT on, from <sender>; without a name,
+  //                         whatever the settings already hold.
+  static bool    s_bCmdLineSpoutOut;
+  static bool    s_bCmdLineSpoutIn;
+  static wchar_t s_szCmdLineSpoutInSender[256];
+  bool    m_bSpoutOutDisplaced = false;   // what -spoutout displaced
+  int     m_nVideoSourceDisplaced = VID_SOURCE_NONE;
+  wchar_t m_szSpoutSenderDisplaced[256] = L"";
+  void    ApplyCommandLineSpout();
+
+  // Resolve the current preset's fpsMax into m_nPresetFpsCap (#222). Called
+  // when a preset is applied; the limiter reads the cached value rather than
+  // touching the annotation store on the frame path.
+  void    ResolvePresetFpsCap();
+  void    SetPresetFpsMaxByFile(const wchar_t* filenameOnly, int fps);
 
   // Webcam / Video File capture (Media Foundation)
   std::unique_ptr<class VideoCaptureSource> m_videoCapture;
@@ -3681,11 +4693,10 @@ public:
   UINT              m_adapterId;
   MYVERTEX* m_verts;
   MYVERTEX* m_verts_temp;
-  // Warp-mesh indexed submission scratch (see DrawWarpMeshIndexed).
-  // m_warpVertsStaged holds one cDecay-tinted copy of m_verts; m_warpIdx16All is the
-  // full triangle list as 16-bit indices, built once; m_warpIdx16 is the culled subset.
-  MYVERTEX* m_warpVertsStaged = nullptr;
-  UINT16*   m_warpIdx16 = nullptr;
+  // Warp-mesh indexed submission (see DrawWarpMeshIndexed). m_warpIdx16All is the
+  // full triangle list as 16-bit indices, built once and thereafter only read, so
+  // it can stay engine-wide. The tinted vertex copy and the culled index subset
+  // are written during a record, and are thread_local inside that function (#206).
   UINT16*   m_warpIdx16All = nullptr;
   int       m_warpIdx16AllCount = 0;
   void DrawWarpMeshIndexed(const MYVERTEX* srcVerts, DWORD cDecay,
@@ -3883,7 +4894,10 @@ public:
   bool		ReversePropagatePoint(float fx, float fy, float* fx2, float* fy2);
   int 		HandleRegularKey(WPARAM wParam);
   void    SaveCurrentPresetToQuicksave(bool altDir);
-  void		LaunchCustomMessage(int nMsgNum);
+  // ownerDisplay: -1 for the primary, or a 1-based DISPLAYn whose own message
+  // loop spawned this one (#255). Stamped on the instance so the draw side
+  // shows it on that display only.
+  void		LaunchCustomMessage(int nMsgNum, int ownerDisplay = -1);
   // bStrict: the connection asked for an unmatched keyword to come back as an
   // error instead of falling through to the script engine (issue 102). False
   // for every caller that did not ask, which is every existing one.
@@ -3926,10 +4940,19 @@ public:
                         const RenderContext* rc = nullptr);
   // pState/warpVerts overrides: mirror sim ctx (blend alpha comes from ITS
   // wipe mesh at its aspect); nulls = primary members.
-  void        UpdateCompMeshBlendColors(const DWORD cShade[4],
+  // Both halves of the comp mesh take the staging buffer explicitly (#206).
+  // UpdateCompMeshBlendColors returns the buffer it filled -- per recording
+  // thread, because m_comp_verts is one engine-wide array and the blend path
+  // rewrites every vertex's Diffuse in it immediately before DrawCompMesh
+  // reads it back. m_comp_verts is now the pristine geometry template:
+  // positions and UVs, written once in AllocateMyDX9Stuff and thereafter only
+  // read, so every thread can copy from it freely.
+  const MYVERTEX* UpdateCompMeshBlendColors(const DWORD cShade[4],
                                         CState* pState = nullptr,
                                         const MYVERTEX* warpVerts = nullptr);
-  void        DrawCompMesh(bool bCullTiles, bool bFlipCulling, ID3D12GraphicsCommandList* cmdList = nullptr);
+  void        DrawCompMesh(const MYVERTEX* compVerts, bool bCullTiles,
+                           bool bFlipCulling,
+                           ID3D12GraphicsCommandList* cmdList = nullptr);
   void    DrawOnTopSprites() override { if (SpritesEnabled()) DrawUserSprites(1); }
   // SendToDisplayOutputs is declared with the display output members above
   void		MergeSortPresets(PresetList& v, int left, int right);
@@ -4085,6 +5108,13 @@ public:
   void        SaveMsgAutoplaySettings();
   void        LoadMsgAutoplaySettings();
   void        ScheduleNextAutoMessage();
+  // One turn of the message autoplay loop for ONE display (#255). The primary
+  // passes its own fields; a display running its own preset passes the clock
+  // on its surface and its own maxOnScreen. Shared store, separate timing.
+  void        TickMessageAutoplay(int ownerDisplay, double& nextAt,
+                                  int& nextSeq, int maxOnScreen);
+  // The arm interval, shared by every clock so they cannot drift apart.
+  float       NextAutoMessageInterval();
   void        UpdateMsgPreview(HWND hSettingsWnd, int sel);
   bool        ShowMessageEditDialog(HWND hParent, int msgIndex, bool isNew);
 
@@ -4167,6 +5197,25 @@ public:
   bool RemoveFallbackPathAt(int index);   // false when the index is stale
   wchar_t m_szRandomTexDir[MAX_PATH] = {};    // Dedicated random textures directory
   wchar_t m_szContentBasePath[MAX_PATH] = {};  // Base path for textures, sprites, etc.
+
+  // Every immediate subdirectory of the preset directory's PARENT, for the
+  // last-resort texture search (#299).
+  //
+  // Presets written for MilkDrop 2 and the Milkwave builds name a texture and
+  // expect the engine to find it in a folder BESIDE the preset folder --
+  // "../<whatever subdirectory>" was a working convention there. This engine
+  // only ever tried one such folder, and only if it was called exactly
+  // "textures", so a library laid out any other way lost its textures:
+  // MilkDrop 3 PRO keeps them in "sprites", so a preset in
+  // Milkdrop3\presets1\ naming 'spirale3' could not find
+  // Milkdrop3\sprites\Spirale3.jpg one folder over.
+  //
+  // Cached because it is a directory listing and the miss path runs per texture
+  // per extension. Rebuilt when the preset directory changes; see
+  // RefreshSiblingResourceDirs.
+  std::vector<std::wstring> m_siblingResourceDirs;
+  wchar_t m_szSiblingDirsFor[MAX_PATH] = {};   // preset dir the cache was built for
+  const std::vector<std::wstring>& SiblingResourceDirs();
   // (ResetToFactory, ResetToUserDefaults, UpdateVisualUI, UpdateColorsUI,
   //  RefreshIPCList, NavigatePresetDirUp/Into moved to SettingsWindow)
 
@@ -4201,18 +5250,76 @@ public:
   bool    m_bMsgOverrideRandomHue = false;
   bool    m_bMsgIgnorePerMsgRandom = false;
 
-  // Resource Viewer
+  // ── Resource Viewer ────────────────────────────────────────────────────
+  //
+  // The window runs on the Settings ToolWindow thread and used to read engine
+  // state straight out from under the render thread (#352): m_textures, which
+  // the render thread push_backs into and -- since #312/#314 gave
+  // EvictSomeTexture its first callers -- ERASES from on most preset changes;
+  // m_shaders.warp/comp.CT, COM constant tables released on every preset load,
+  // so GetDesc() on one is a use-after-free; and SiblingResourceDirs(), a
+  // mutating cache that hands back a reference to a vector it clears and
+  // rebuilds.
+  //
+  // So the two halves are split by thread and the boundary is this snapshot.
+  // The RENDER thread reads engine state -- which it owns, so no lock is
+  // needed on that side -- and copies what the viewer needs into
+  // m_resourceSnapshot. The UI thread copies the snapshot out and does the
+  // rest: the per-texture disk search and the ListView, touching nothing the
+  // render thread can write.
+  //
+  // The disk search deliberately stays on the UI side. It is up to 8
+  // extensions x 6 directories per custom texture, a few hundred
+  // GetFileAttributesW per refresh, and paying that on the render thread to
+  // fill a list nobody is watching frame-to-frame would be a hitch for
+  // nothing.
+  struct ResourceRow {
+    std::wstring sType;      // "Noise", "Custom Tex", ...
+    std::wstring sName;      // display name, or the sampler name
+    std::wstring sPath;      // literal path text; ignored when bSearchPath
+    std::wstring sDetails;   // "1024x1024", "ps_5_0", ...
+    bool         bValid = false;
+    // Custom textures only: the UI probes the disk for sLookup and writes the
+    // path it finds into the row. Nothing else can, because only the UI thread
+    // may block on file I/O here.
+    bool         bSearchPath = false;
+    std::wstring sLookup;
+  };
+  struct ResourceSnapshot {
+    std::vector<ResourceRow>  rows;
+    // Copies, not pointers into the engine. m_sz*Path are rewritten by the
+    // render thread on preset load, and SiblingResourceDirs() rebuilds its
+    // cache in place -- both are read here only as of the moment the snapshot
+    // was taken.
+    std::wstring              sMilkdrop2Path, sPresetDir, sRandomTexDir, sContentBasePath;
+    std::vector<std::wstring> fallbackPaths;
+    std::vector<std::wstring> siblingDirs;
+    bool                      bEverBuilt = false;
+  };
+  mdrop::Guarded<ResourceSnapshot> m_resourceSnapshot;
+  // One rebuild in flight at a time. Leaning on Refresh, or reopening the
+  // window while a rebuild is queued, would otherwise queue a command per
+  // click and redraw the list once per answer.
+  std::atomic<bool> m_bResourceSnapshotPending{false};
+
   HWND        m_hResourceWnd = NULL;
   HWND        m_hResourceList = NULL;
   static LRESULT CALLBACK ResourceViewerWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
   void        OpenResourceViewer();
+  // UI thread: ask the render thread for a fresh snapshot, then draw whatever
+  // one is on hand. The answer arrives as WM_MW_RESOURCES_READY a frame later
+  // and redraws; showing the previous snapshot meanwhile is what keeps the
+  // list from blinking empty on every Refresh.
   void        PopulateResourceViewer();
+  void        DrawResourceViewerRows();   // UI thread: snapshot -> disk -> ListView
+  void        BuildResourceSnapshot();    // RENDER THREAD ONLY
   void        LayoutResourceViewer();
 
   //void  ResetWindowSizeOnDisk();
   bool		LaunchSprite(int nSpriteNum, int nSlot);
   void		KillSprite(int iSlot);
-  int         GetNextFreeSupertextIndex();
+  void		RetireFinishedSprites();   // #225: release sprites whose fence has passed
+  int         GetNextFreeSupertextIndex(int ownerDisplay = -1);
   void        DoCustomSoundAnalysis();
   void        DX12_DrawMotionVectors();
 
@@ -4238,8 +5345,17 @@ public:
   // The mouse this surface should report, rescaled from the primary's
   // pixels to a canvas of w x h so mouse/texsize is preserved.
   void        FillMouseInputs(RenderContext& rc, int w, int h);
+  // `stage`, when given, is where the constants go INSTEAD of the shader's own
+  // DX12ConstantTable shadow buffer (#206). The shadow is one buffer per
+  // shader object, and the warp/comp shaders are engine-wide whenever a mirror
+  // falls back to the engine set -- which the shared fallback shaders make
+  // reachable, since PShaderInfo::CloneFrom shares the constant table. Two
+  // threads then write the same bytes and each uploads a blend of both. Same
+  // remedy RenderBlurPasses already uses; callers that cannot race (the milk3
+  // buffer passes, the primary-only paths) pass nothing and are unchanged.
   void        ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CState* pState,
-                                const RenderContext* rc = nullptr);
+                                const RenderContext* rc = nullptr,
+                                std::vector<BYTE>* stage = nullptr);
   // bNoPrimaryFallback: when true, never fall back to primary m_dx12Feedback* (orient pipe).
   void        BuildBindingSlots(CShaderParams* params, const DX12Texture& vsTex, UINT outSlots[32], const DX12Texture* feedbackTex = nullptr, const DX12Texture* imageFeedbackTex = nullptr, const DX12Texture* bufferBTex = nullptr, const DX12Texture* bufferCTex = nullptr, const DX12Texture* bufferDTex = nullptr, bool bNoPrimaryFallback = false);
   // ── Binding-slot snapshots (DIAG_BINDINGS over the pipe) ─────────────────
@@ -4253,16 +5369,8 @@ public:
   // Written under m_mirrorEngineMutex (both the primary frame and the mirror
   // record hold it), read unsynchronised by the IPC thread — diagnostic only,
   // same contract as DIAG_MIRRORS.
-  struct BindSnapshot {
-    UINT slots[32];       // resolved SRV heap index per t-register
-    UINT bindingSrv[32];  // params->m_texture_bindings[i].dx12SrvIndex
-    int  texcode[32];     // tex_code per t-register
-    bool valid;
-  };
-  enum { BINDSNAP_WARP = 0, BINDSNAP_COMP, BINDSNAP_OLDWARP, BINDSNAP_OLDCOMP,
-         BINDSNAP_COUNT };
+  // Declared up at MirrorSurface, which now carries a set of its own.
   BindSnapshot m_bindSnapPrimary[BINDSNAP_COUNT] = {};
-  BindSnapshot m_bindSnapMirror[BINDSNAP_COUNT] = {};
   static void CaptureBindSnapshot(BindSnapshot& dst, const CShaderParams* params,
                                   const UINT slots[32]);
 
@@ -4299,6 +5407,11 @@ public:
   void ToggleAlwaysOnTop(HWND hwnd);
   void SetOpacity(HWND hwnd);
   bool IsBorderlessFullscreen(HWND hWnd);
+  // The rect that counts as fullscreen for this window: a child's OWN display
+  // in full (taskbar included), anything else the nearest monitor's work area.
+  // The test above and ToggleBorderlessFullscreen must agree on it -- #240 is
+  // what happens when they do not.
+  RECT FullscreenTargetRect(HWND hWnd) const;
   virtual LRESULT MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lParam);
   void KillAllSprites();
   void KillAllSupertexts();

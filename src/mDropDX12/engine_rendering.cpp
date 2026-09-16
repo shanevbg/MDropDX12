@@ -78,6 +78,8 @@ void Engine::CopyBackbufferToFeedback()
 
 void Engine::RenderInjectEffect()
 {
+  if (m_lpDX) m_lpDX->BeginStage("injectfx");   // #222 stage map
+
   // Post-process pass: applies the F11 inject effect and (for non-shader presets)
   // per-preset brighten/darken/solarize/invert on the composite back buffer.
   // Copies the back buffer to an intermediate texture, then draws it back with an effect shader.
@@ -504,6 +506,50 @@ void Engine::MyRenderUI(
   LPD3DXFONT pFont = GetFont(DECORATIVE_FONT);
   int h = GetFontHeight(DECORATIVE_FONT);
 
+  // ── Startup loading screen (#291) ──
+  //
+  // RenderFrame returns before drawing while the first preset is still
+  // compiling, so the canvas behind this is black; all that is left to do is
+  // say how long it has been. Tenths, at Shane's asking -- the wait is around a
+  // second on this machine, so whole seconds would show 0 and then 1 and look
+  // stuck, and a machine slow enough to need the number is the one that most
+  // needs to see it moving.
+  //
+  // FIRST in this function and it returns: a preset name, an FPS figure or a
+  // battery percentage over an empty screen is noise, and half of them would be
+  // reporting on a preset that is not up yet.
+  //
+  // LOADING_FONT, a slot of its own at 160pt. There is no per-draw glyph scale
+  // in this text path -- size comes from the atlas -- so "large" has to be a
+  // font that is already large, and the biggest existing slot (SONGTITLE_FONT,
+  // 40pt) is a speck on a 2160x3840 panel.
+  if (LoadingScreenActive()) {
+    SelectFont(LOADING_FONT);
+    wchar_t szWait[32];
+    FormatTo(szWait, L"%.1f", LoadingScreenSeconds());
+
+    // MEASURED, then placed -- the same two-step every MyTextOut macro uses.
+    //
+    // DT_VCENTER is not honoured by this text path (glyphs are queued against
+    // the rect's top edge), so asking for it put the counter hard against the
+    // top of the screen while DT_CENTER placed it correctly across. Measured
+    // rather than assumed: it was photographed up there.
+    const DWORD fmt = DT_NOPREFIX | DT_SINGLELINE | DT_CENTER;
+    SetRect(&r, xL, 0, xR, 4096);
+    m_text.DrawTextW(pFont, szWait, -1, &r, fmt | DT_CALCRECT,
+                     0xFFFFFFFF, false, 0xFF000000);
+    const int tw = r.right - r.left;
+    const int th = r.bottom - r.top;
+    // The corner cursors at their starting values bound the drawable area,
+    // which is why this block runs before anything moves them.
+    const int cx = (xL + xR) / 2;
+    const int cy = (*upper_left_corner_y + *lower_left_corner_y) / 2;
+    SetRect(&r, cx - tw / 2, cy - th / 2, cx + tw / 2, cy + th / 2);
+    m_text.DrawTextW(pFont, szWait, -1, &r, fmt,
+                     0xFFFFFFFF, false, 0xFF000000);
+    return;
+  }
+
   // 1. render text in upper-right corner - EXCEPT USER MESSAGE - it goes last b/c it draws a box under itself
   //                                        and it should be visible over everything else (usually an error msg)
   {
@@ -603,20 +649,21 @@ void Engine::MyRenderUI(
       }
 
       {
-        const wchar_t* action = (m_nIdleAction == 2) ? L"mirror-all"
+        const wchar_t* action = (m_nIdleAction == 3) ? L"profile"
+          : (m_nIdleAction == 2) ? L"mirror-all"
           : (m_nIdleAction == 1) ? L"stretch" : L"fullscreen";
         if (!m_bIdleTimerEnabled) {
           FormatTo(buf, L"idle off");
         } else if (m_bIdleActivated) {
           FormatTo(buf, L"idle active  %s%s", action, m_bIdleAutoRestore ? L"  auto" : L"");
         } else {
-          DWORD remainMs = (DWORD)m_nIdleTimeoutMinutes * 60u * 1000u;
-          LASTINPUTINFO lii = { sizeof(lii) };
-          if (GetLastInputInfo(&lii)) {
-            DWORD idleMs = GetTickCount() - lii.dwTime;
-            DWORD timeoutMs = (DWORD)m_nIdleTimeoutMinutes * 60u * 1000u;
-            remainMs = (idleMs >= timeoutMs) ? 0 : (timeoutMs - idleMs);
-          }
+          // The SAME helper the countdown in App.cpp uses. Reading
+          // GetLastInputInfo here independently is how the HUD would come to
+          // disagree with the timer about how long is left after a
+          // RESET_IDLE_TIMER, and the HUD is the only place that figure shows.
+          const DWORD idleMs = IdleElapsedMs();
+          const DWORD timeoutMs = (DWORD)m_nIdleTimeoutMinutes * 60u * 1000u;
+          const DWORD remainMs = (idleMs >= timeoutMs) ? 0 : (timeoutMs - idleMs);
           unsigned sec = remainMs / 1000u;
           FormatTo(buf, L"idle %u:%02u  %s", sec / 60u, sec % 60u, action);
         }

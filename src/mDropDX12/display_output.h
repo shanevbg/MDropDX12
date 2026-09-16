@@ -45,14 +45,62 @@ inline constexpr const wchar_t* kDispModeBrowse  = L"<Browse...>";
 struct DisplayOutputConfig {
     DisplayOutputType type = DisplayOutputType::Spout;
     bool bEnabled = false;
+    // NOT PERSISTED for monitors: the friendly name comes from the enumeration,
+    // which reports the device present NOW. See rcMonitor for the contract.
     wchar_t szName[128] = {};          // Friendly name (monitors) or sender name (Spout)
 
     // Monitor-specific
     wchar_t szDeviceName[32] = {};     // e.g. L"\\\\.\\DISPLAY2"
     bool bFullscreen = true;
+    // NOT PERSISTED. Filled by the monitor enumeration and absent from
+    // displays.json, so a config built by the LOADER has it zeroed.
+    //
+    // That matters to anyone copying one config over another: assigning a
+    // loaded config wholesale onto an enumerated entry zeroes this, and a
+    // display with no rect cannot be placed -- the Displays window's layout
+    // panel simply stopped drawing display 2 (#297). LoadDisplayOutputSettings
+    // saves and restores it, along with szName and rcTestWindow; those three
+    // are the entire set that does NOT come from the file.
     RECT rcMonitor = {};               // Cached monitor rect
     int nOpacity = 100;                // 1-100%; per-mirror opacity
     bool bClickThrough = false;        // Per-mirror click-through
+    // Keep THIS display above other windows, independently of the global
+    // always-on-top and of watermark mode (#276).
+    //
+    // Click-through without it is close to useless: the window cannot be
+    // clicked, so nothing the user does will ever raise it, and the first
+    // thing opened on that monitor buries it permanently. Watermark mode
+    // forces on-top for exactly this reason, but that also forces
+    // click-through and the watermark opacity, so there was no way to say
+    // "on top, and otherwise leave it alone". The style pass's own comment
+    // named the gap: the global flag "cannot express this one".
+    bool bAlwaysOnTop = false;
+    // Watermark this ONE display: click-through, always on top, and the
+    // watermark opacity, without disturbing what the display was set to
+    // otherwise.
+    //
+    // Watermark used to exist only as a global gesture that looped over every
+    // monitor writing bClickThrough = true and nOpacity = the watermark value
+    // straight into each config. That is why it could not be set per display
+    // and why turning it on destroyed whatever click-through and opacity each
+    // display already had -- there was no watermark STATE to turn off, only
+    // two overwritten fields with no memory of what they had been.
+    //
+    // As its own flag it composes instead of clobbering: the style pass reads
+    // it, and bClickThrough / nOpacity keep saying what the user chose for
+    // when the watermark comes off again.
+    bool bWatermark = false;
+    // This display's watermark opacity, 1-100. -1 means "use the global
+    // watermark opacity" (#276).
+    //
+    // Separate from nOpacity rather than replacing it, because the two answer
+    // different questions and both have to survive: nOpacity is what the
+    // display looks like NORMALLY and is what watermark mode restores on the
+    // way out, so watermark cannot simply write its value there. Without a
+    // second field the Opacity spinner edited nOpacity while the style pass
+    // ignored it, which is exactly what "I can't adjust the opacity in
+    // watermark mode" looked like from outside: a live control with no effect.
+    int nWatermarkOpacity = -1;
     // When true: same-orient blits primary; opposite orientation runs a lagged
     // warp+comp (classic/milk2) or Image (milk3) at panel aspect. Not frame-locked.
     // When false: copy/stretch main. Audio is always shared.
@@ -63,6 +111,31 @@ struct DisplayOutputConfig {
     // exclusive with bIndependentRender: that is the in-process mirror sim,
     // which re-renders the PRIMARY's preset at another orientation and cannot
     // hold a preset of its own.
+    // This display shows a preset of its OWN rather than following the
+    // primary. Says nothing about where it renders.
+    //
+    // Splitting this out is what makes a middle tier possible. The machinery
+    // for an in-process surface to hold its own preset was built by #186 phase
+    // 4 -- ownPresetPath, PostSurfacePreset, per-surface cycling and lock --
+    // and it runs, but DisplayHoldsOwnPreset asked for bOwnProcess, so wanting
+    // a different preset on a display always cost a whole second instance. The
+    // in-process surface would pick the preset up, render it, and then stand
+    // down as soon as the child was ready ("mirror stands down").
+    //
+    // Three tiers now, cheapest first:
+    //   neither          mirror: follows the primary, one render and N blits
+    //   bOwnPreset       its own preset, in process: a thread and a sim
+    //   + bOwnProcess    its own preset, in its own instance
+    bool bOwnPreset = false;
+
+    // Render this display in its own MDropDX12.exe -child process. Implies
+    // bOwnPreset in practice.
+    //
+    // ALWAYS the user's choice now. bAutoOwnProcess sat beside this and marked
+    // a display the ENGINE had moved, so an automatic move could be undone
+    // without clearing a child the user had chosen; the cost gate that made
+    // those moves is gone (#261), nothing sets it, and the two flags have
+    // collapsed back into one.
     bool bOwnProcess = false;
     // A literal path, or one of the kDispMode* sentinels above. Empty is the
     // pre-v3 form and reads as <Default> for the dir, <Random> for the preset.
@@ -76,6 +149,17 @@ struct DisplayOutputConfig {
     // a display that has never been touched must follow the main window rather
     // than pin a value nobody chose.
     int     nPresetLock = -1;
+
+    // How many messages this display may show at once: -1 inherit the global
+    // Messages setting, otherwise 1..NUM_SUPERTEXTS. Third field with this
+    // shape, for the reason above (#255).
+    //
+    // Per display rather than global because a display running its own preset
+    // now runs its own message loop, and the supertext SLOTS are one shared
+    // pool -- so without a per-display limit one busy panel can take every slot
+    // and the others fall silent. The limit is what keeps the loops
+    // independent in practice and not just in principle.
+    int     nMsgMaxOnScreen = -1;
 
     // Where this display's child window goes when the harness has asked for
     // TEST WINDOWS -- small and out of the way rather than covering a monitor.

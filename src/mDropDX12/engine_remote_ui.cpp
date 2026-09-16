@@ -416,7 +416,7 @@ LRESULT RemoteWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrInitialDir = sLastDir;
     ofn.lpstrDefExt = L"png";
-    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     ofn.lpstrTitle = L"Save Screenshot";
 
     if (GetSaveFileNameW(&ofn)) {

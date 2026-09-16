@@ -162,10 +162,63 @@ void Engine::BuildPresetPath(int idx, wchar_t* szOut, int nMax) const {
     swprintf(szOut, nMax, L"%s%s", m_szPresetDir, fn);
 }
 
+// Every display that holds its own preset in THIS process steps too (#341).
+//
+// "Every independent display steps with us" was implemented as
+// BroadcastToChildren, which walks m_children -- actual child PROCESSES. That
+// was the whole population when own-preset meant own-process. #186 phase 4 added
+// the middle tier -- a display holding its own preset on an in-process surface
+// -- and the nudge was never widened to it, so a display set to "Own preset"
+// was simply left behind by Next and Prev.
+//
+// Reported as "the next command is only working for the main render when I have
+// a profile loaded that has independent presets that have a profile with a named
+// preset to use", and measured: SIGNAL|NEXT_PRESET left both own-preset displays
+// on their preset while DISPLAY_NEXT=<N> moved them. The config in that report is
+// what makes it VISIBLE rather than what causes it -- timeBetweenPresets=0 means
+// never (only a negative value inherits), so a display pinned to a named startup
+// preset has no clock of its own and the global Next is the only thing that
+// would ever move it.
+//
+// The same bug, in the same function, a second time: engine_input.cpp's
+// RenderCmd::NextPreset comment records the first round, when calling
+// LoadRandomPreset instead of NextPreset "meant a remote pressing Next moved the
+// primary and left every independent display where it was".
+//
+// StepDisplayOwnPreset, not a signal: it is the in-process step the addressed
+// DISPLAY_NEXT=/DISPLAY_PREV= and the Displays window's buttons already share,
+// so all three paths pick a preset the same way and cannot drift apart again.
+// Still a nudge and not an assignment -- each display picks from its OWN
+// directory at its OWN sequence position, so a wall of screens does not fall
+// into lockstep.
+void Engine::StepOwnPresetDisplays(bool next)
+{
+  if (m_bChildMode) return;
+  // m_displayOutputsMutex: #27. Recursive, so the callees may take it again.
+  std::lock_guard<std::recursive_mutex> lkDisp(m_displayOutputsMutex);
+  for (auto& out : m_displayOutputs) {
+    if (!DisplayHoldsOwnPreset(out.config)) continue;
+    // A READY child already had the broadcast, and stepping it here as well
+    // would advance that display twice for one keypress. Not bOwnProcess:
+    // a display asked for a child that has not answered its pipe yet still
+    // has its in-process surface, and skipping it would swallow the step.
+    if (ChildOwnsDisplayForIpc(out.config.szDeviceName)) continue;
+    const wchar_t* why = nullptr;
+    if (!StepDisplayOwnPreset(out.config, next, &why)) {
+      // Not an error worth showing anyone: a display whose surface is not up
+      // yet, or whose directory is empty, simply does not step. Logged because
+      // "Next did nothing on one screen" is otherwise invisible.
+      DLOG_INFO("display %ls did not step its own preset: %ls",
+                out.config.szDeviceName, why ? why : L"unknown");
+    }
+  }
+}
+
 void Engine::PrevPreset(float fBlendTime) {
-  // Every own-preset display steps with us. A nudge, not an assignment: each
-  // picks its OWN previous preset from its OWN directory, so a wall of
-  // displays does not fall into lockstep (forgejo#22).
+  // Every independent display steps with us. A nudge, not an assignment: each
+  // child picks its OWN previous preset from its OWN directory and history, so
+  // a wall of displays does not fall into lockstep (forgejo#22).
+  BroadcastToChildren(L"SIGNAL|PREV_PRESET");
   StepOwnPresetDisplays(false);
   PrevPresetLocal(fBlendTime);
 }
@@ -211,11 +264,14 @@ void Engine::PrevPresetLocal(float fBlendTime) {
 
 void Engine::NextPreset(float fBlendTime)  // if not retracing our former steps, it will choose a random one.
 {
-  // See PrevPreset: each own-preset display advances to its own next-or-random
-  // preset. Here rather than inside LoadRandomPreset, because that is also the
-  // auto-advance timer's entry point and every display runs its own cycle
-  // clock -- stepping them from there would make all of them jump whenever the
-  // MAIN window's interval elapsed, which is the lockstep this avoids.
+  // See PrevPreset: each child advances to its own next-or-random preset.
+  // Broadcast here rather than inside LoadRandomPreset, because that is also
+  // the auto-advance timer's entry point and a child runs its own timer -- a
+  // broadcast from there would make every child jump whenever the PARENT's
+  // interval elapsed, which is the lockstep this feature exists to avoid.
+  BroadcastToChildren(L"SIGNAL|NEXT_PRESET");
+  // And the displays holding their own preset in THIS process, which no
+  // broadcast can reach -- see StepOwnPresetDisplays (#341).
   StepOwnPresetDisplays(true);
   LoadRandomPreset(fBlendTime);
 }
@@ -228,6 +284,29 @@ void Engine::LoadRandomPreset(float fBlendTime) {
 
   // make sure file list is ok
   if (m_nPresets - m_nDirs == 0) {
+    // An empty list while the scan is STILL RUNNING is not an empty directory,
+    // it is a list that has not arrived yet, and the two must not be confused.
+    //
+    // Measured on Shane's install, 933 .milk files present and nPresetFilter=1:
+    //
+    //   09:34:40.440  StartupPreset: none configured, loading random
+    //   09:34:40.440  ERROR: No preset files found in ...\presets1\*.milk
+    //   09:34:40.564  LoadPreset: Evet + Geiss ... why=startup
+    //
+    // The scan published 124 ms later and a preset from that very directory
+    // loaded fine. So the error was pure noise, and the built-in fallback it
+    // put up was a flash of the wrong preset on every cold start. The list is
+    // built on a worker (g_bThreadAlive) and startup reaches here before it
+    // finishes, so this raced by construction rather than by accident.
+    if (!m_bAnyPresetEverShown && g_bThreadAlive) {
+      // Deferred, NOT dropped. The flag is what the pending-list swap in
+      // engine.cpp looks for; without it this return leaves the screen with no
+      // preset at all, which is worse than the false error it replaced.
+      m_bRandomPresetDeferred = true;
+      DLOG_INFO("LoadRandomPreset: preset list still being built; deferring "
+                "until the scan publishes rather than declaring it empty");
+      return;
+    }
     // Only step in if NOTHING has ever been shown this session (first run /
     // empty dir from the very start). If a preset -- real or the built-in
     // fallback -- is already up, just silently stay on it.
@@ -1251,7 +1330,17 @@ void Engine::ApplyMilk2BlendPattern(const BlendPatternTarget& tgt) {
   int savedMixType = m_nMixType;
   m_nMixType = m_nMilk2MixType;
   m_bMilk2UseSavedRandoms = m_bMilk2HasRandoms;
-  RandomizeBlendPattern();
+  // tgt, NOT the no-arg overload. This whole function takes a
+  // BlendPatternTarget so a mirror can fill ITS canvas at ITS aspect -- and
+  // then the procedural fallback called RandomizeBlendPattern(), which is
+  // RandomizeBlendPattern(PrimaryBlendTarget()), i.e. { m_vertinfo,
+  // m_fAspectX, m_fAspectY }. So for every .milk2 whose pattern has no
+  // recovered analytic form, a mirror wrote its wipe across the PRIMARY's
+  // field at the PRIMARY's aspect, and its own field stayed all-zero -- which
+  // reads as alpha 0 everywhere, so the mirror's blend never happened at all.
+  // The analytic path above (ComputeMilk2BlendField) always honoured tgt,
+  // which is why this only showed on patterns that fall through to here.
+  RandomizeBlendPattern(tgt);
   m_bMilk2UseSavedRandoms = false;
   m_nMixType = savedMixType;
 
@@ -2521,6 +2610,30 @@ std::wstring Engine::CurrentPresetDir() const {
 }
 
 void Engine::ClearPreset() {
+  // Under the mirror engine mutex, and behind a GPU wait (#214).
+  //
+  // This rotates the shader sets, reloads them in place and rebuilds the
+  // preset PSOs -- the same mutation LoadPresetTick's commit performs. That one
+  // is safe because MyRenderFn runs INSIDE the MirrorEngineGuard and waits the
+  // GPU first; this one is reached from the CLEARPRESET IPC verb, which arrives
+  // as a PostMessage to the render window and therefore runs on the render
+  // thread but OUTSIDE the guard, with mirror workers free to be mid-record.
+  //
+  // Both halves are needed and they answer different questions. WaitForGpu
+  // covers work already SUBMITTED that names the outgoing PSOs and textures --
+  // the #229 finding, measured as 2 device removals in 4 runs before it was
+  // added to the commit path. The mutex covers a worker that is mid-RECORD and
+  // reading m_shaders as it is rotated; no fence can help with that, because
+  // nothing has been submitted yet.
+  //
+  // Rare and user-driven, so the cost of holding both is nothing.
+  if (m_lpDX)
+    m_lpDX->WaitForGpu();
+  LockMirrorEngine();
+  struct Unlocker {
+    Engine* e;
+    ~Unlocker() { e->UnlockMirrorEngine(); }
+  } unlocker{ this };
 
   m_pState->Default(STATE_ALL);
   CopyTo(m_szCurrentPresetFile, m_pState->m_szDesc);
@@ -3290,6 +3403,7 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
 
   m_nLoadingPreset = 1;
   m_nShaderErrorsThisLoad = 0;  // see ClearPresetShaderError
+  m_nTextureMissesThisLoad = 0; // per preset, so a sweep can attribute one (#307)
   m_bPresetLoadReady = false;
   m_bMilk2FrozenBlend = false;  // clear frozen blend from any previous .milk2
   m_fLoadingPresetBlendTime = fBlendTime;
@@ -3529,6 +3643,25 @@ void Engine::OnFinishedLoadingPreset() {
 
   m_bAnyPresetEverShown = true;
 
+  // Forget the previous preset's measured cost, then re-decide (#230).
+  //
+  // The decision is no longer made here on the shader text -- see
+  // PresetRisksTheDevice, which reads gpuUs -- so this call's job is to bring
+  // displays BACK from their own processes when a cheap preset arrives. With
+  // the peak cleared there is no measurement yet, the predicate is false, and
+  // any surfaces isolated for the previous preset are released. If this one is
+  // also expensive, the first mirror frames say so within a frame or two and
+  // the periodic re-check isolates again.
+  m_nMirrorPeakGpuUs.store(0, std::memory_order_relaxed);
+  // The rate balancer's verdict belongs to the preset that earned it, so a new
+  // preset starts from scratch (#261). In particular a preset marked "capping
+  // the main did not help" must not carry that finding onto the next one.
+  ResetFrameRateBalancer();
+  // Rungs 2 and 3 latch for the life of a preset -- a recovered rate is
+  // evidence the rung is working, not permission to undo it -- so the preset
+  // change is the ONLY thing that gives the canvas and the display tiers back.
+  ResetDistressLadder();
+
   // Clear stale notifications from previous preset (issue #17)
   ClearErrors(ERR_NOTIFY);
 
@@ -3671,6 +3804,42 @@ void Engine::LoadPresetTick() {
       m_presetLoadThread.join();
     m_bPresetLoadReady = false;
 
+    // Nothing below may run while a mirror list is still on the GPU (#206).
+    //
+    // Committing a preset releases the outgoing preset's textures and swaps
+    // its shaders and PSOs. A mirror worker records against those, submits to
+    // m_mirrorQueue and releases the engine lock -- so the lock says the
+    // record is over while the GPU has not started it. texmgr::KillTex is the
+    // sharpest edge: it calls ResetResource() on the texture AND overwrites
+    // that slot's descriptor in the LIVE shader-visible heap, which is why the
+    // fault arrives as a page fault at VA 0 rather than at a freed address.
+    //
+    // Measured, not assumed. Two independent mirrors with a preset load every
+    // 1.2s died in 5 of 6 ninety-second soaks; the same churn with NO mirrors
+    // passed, and the same mirrors with NO churn passed. It is the pair.
+    //
+    // Once per committed load, so it costs nothing per frame.
+    //
+    // WaitForGpu, NOT WaitForSurfaceWork (#214). The mirror wait alone was
+    // half the answer: it drains the MIRROR queues and says nothing about the
+    // main one, so with no mirrors configured it waited for nothing at all --
+    // and then the commit below rotates the shader sets, replaces the preset
+    // PSOs and releases the outgoing preset's textures while the main queue
+    // still has a frame or two in flight naming them.
+    //
+    // Measured: churning presets at an uncapped frame rate killed the device
+    // in 2 of 4 ninety-second runs with no mirrors anywhere near it, faulting
+    // on the comp mesh draw of a blending frame at page fault VA 0 -- the same
+    // nulled-underneath signature as #222 and #225. With this it is 0 of 8.
+    //
+    // WaitForGpu is a strict superset: it runs the aux waiter (which IS
+    // WaitForSurfaceWork) before waiting on the main queue, so nothing the
+    // original call covered is lost.
+    if (m_lpDX)
+      m_lpDX->WaitForGpu();
+    else
+      WaitForSurfaceWork();
+
     // An AUTO-initiated load races the freeze: the timer can start compiling,
     // testing mode (or preset lock) lands, and the finished load would still
     // apply and change the frame under whoever asked for it to hold still.
@@ -3736,6 +3905,9 @@ void Engine::LoadPresetTick() {
     m_nConsecutiveLoadFailures = 0;
 
     // Log which preset is now actively rendering (visible at LogLevel=2)
+    // The new preset's own frame-rate ceiling, resolved once here rather than
+    // on the frame path (#222).
+    ResolvePresetFpsCap();
     {
       const wchar_t* name = CurrentPresetLeaf();
       float elapsed = GetTime() - m_fLoadStartTime;
@@ -3866,6 +4038,28 @@ void Engine::LoadPresetTick() {
         m_bCompUsesFeedback = true;
       if (m_shaders.comp.params.m_texcode[i] == TEX_IMAGE_FEEDBACK)
         m_bCompUsesImageFeedback = true;
+    }
+
+    // The Shadertoy feedback targets are allocated HERE, not at device init,
+    // and only for the buffers this preset actually declares (#344).
+    //
+    // They used to be ten unconditional R32G32B32A32_FLOAT targets at full
+    // render resolution -- 160 bytes a pixel, about 62% of the primary's entire
+    // VRAM footprint, ~1.33 GB at 2160x3840 -- created whether or not a .milk3
+    // was ever loaded. Most sessions never load one.
+    //
+    // This runs after the flags above precisely because it reads them, and on
+    // the render thread for the same reason they are only written here.
+    // Idempotent, so a preset that needs the same set as the last one allocates
+    // nothing.
+    if (m_bShadertoyMode) {
+      m_shadertoyIdleSince = 0.0;       // in use again; cancel any pending release
+      EnsureShadertoyFeedbackTargets();
+    } else if (ShadertoyFeedbackAllocated() && m_shadertoyIdleSince == 0.0) {
+      // Start the clock rather than releasing now: stepping through a mixed
+      // library would otherwise rebuild every device resource on each .milk3 ->
+      // .milk transition, and the rebuild is not cheap.
+      m_shadertoyIdleSince = GetTime();
     }
 
     // MD3 3.25+ [SPRITE*] overlays ride with .milk and .milk2. Kill the previous
@@ -4733,9 +4927,12 @@ bool TryDescendIntoPresetSubdirHelper(wchar_t* szDir) {
 //----------------------------------------------------------------------
 
 void Engine::KillAllSprites() {
+  // Retire rather than release (#225): this is reachable from the CLEARSPRITES
+  // IPC verb and the KillSprites hotkey, neither of which can know whether a
+  // submitted frame still references these textures.
   for (int x = 0; x < NUM_TEX; x++)
     if (m_texmgr.m_tex[x].pSurface)
-      m_texmgr.KillTex(x);
+      KillSprite(x);
 }
 
 void Engine::KillAllSupertexts() {

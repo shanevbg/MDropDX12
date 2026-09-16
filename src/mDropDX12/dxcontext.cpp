@@ -28,6 +28,8 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include "DXContext.h"
+#include <dbghelp.h>   // #222: resolve each draw's return address to file:line
+#include <intrin.h>    // _ReturnAddress
 #include "utility.h"
 #include "shell_defines.h"
 #include "format_to.h"
@@ -458,6 +460,17 @@ bool DXContext::BeginFrame()
 
     hr = m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), nullptr);
     m_cmdListRecording = SUCCEEDED(hr);
+    if (SUCCEEDED(hr)) {
+        // Read LAST time this frame index ran, before the counter is reset --
+        // MoveToNextFrame has already waited for that fence, so the numbers are
+        // there and mapping them costs nothing (#230).
+        ReportGpuTimestamps();
+        ReadFrameTimestamp();     // #245: the whole-frame pair, same fence rule
+        m_tsCount = 0;
+        ResetStageMap();          // #222: a new frame's worth of draws
+        CollectRetiredObjects();  // #214: release what the GPU has finished with
+        BeginFrameTimestamp();    // first thing recorded, so it covers the frame
+    }
     if (FAILED(hr)) {
         const HRESULT reason = m_device ? m_device->GetDeviceRemovedReason() : S_OK;
         char buf[256];
@@ -502,6 +515,10 @@ void DXContext::ExecuteCommandList()
     barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_PRESENT;
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     m_commandList->ResourceBarrier(1, &barrier);
+
+    // Last thing recorded, so it covers every stage (#230).
+    ResolveGpuTimestamps();
+    EndFrameTimestamp();      // #245: closes the whole-frame pair and resolves it
 
     // Close and execute the DX12 command list.
     HRESULT hrClose = m_commandList->Close();
@@ -700,8 +717,6 @@ void DXContext::EnsureMultiSwapChainFrameLatency(int presentOpsPerFrame, bool se
 
 void DXContext::WaitForGpu()
 {
-    if (!m_commandQueue || !m_fence || !m_fenceEvent) return;
-
     // After sleep/hibernate the device may be dead — don't block on fences.
     if (g_bPowerSuspended.load() || g_bGpuHung.load())
         return;
@@ -712,6 +727,16 @@ void DXContext::WaitForGpu()
             return; // TDR — Signal/wait would stall 5s and freeze the UI
         }
     }
+
+    // Every OTHER queue this process submits to, first -- see the note on
+    // m_waitForAuxQueues. This runs before the main-queue wait so that a
+    // caller which is about to free a GPU object is covered even when the main
+    // queue has nothing outstanding, and so that the missing-objects early
+    // return below cannot skip it (#206).
+    if (m_waitForAuxQueues)
+        m_waitForAuxQueues();
+
+    if (!m_commandQueue || !m_fence || !m_fenceEvent) return;
 
     // Signal a fence value from the GPU
     UINT64 fenceValue = m_fenceValues[m_frameIndex];
@@ -963,21 +988,40 @@ void DXContext::FreeMirrorRtvBlock(UINT base, UINT count)
 
 D3D12_CPU_DESCRIPTOR_HANDLE DXContext::AllocateSrvCpu()
 {
+    // A recycled slot in preference to a fresh one (#312). Without this the
+    // heap only ever grows, and evicting textures so they can be re-loaded
+    // exhausts it inside a few hundred distinct images.
+    if (!m_freeSrvSlots.empty()) {
+        m_pendingSrvSlot = m_freeSrvSlots.back();
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
+        handle.ptr += (SIZE_T)m_pendingSrvSlot * m_srvDescriptorSize;
+        return handle;   // AllocateSrvGpu pops it
+    }
     if (m_nextFreeSrvSlot >= DXC_MAX_SRV) {
         DebugLogA("ERROR: SRV heap overflow in AllocateSrvCpu!", LOG_ERROR);
         assert(false && "SRV heap overflow");
         // Clamp to last valid slot to avoid out-of-bounds write
+        m_pendingSrvSlot = DXC_MAX_SRV - 1;
         D3D12_CPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
         handle.ptr += (SIZE_T)(DXC_MAX_SRV - 1) * m_srvDescriptorSize;
         return handle;
     }
+    m_pendingSrvSlot = m_nextFreeSrvSlot;
     D3D12_CPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
     handle.ptr += (SIZE_T)m_nextFreeSrvSlot * m_srvDescriptorSize;
-    return handle;  // does NOT bump — caller must call AllocateSrvGpu to bump
+    return handle;  // does NOT consume — caller must call AllocateSrvGpu
 }
 
 D3D12_GPU_DESCRIPTOR_HANDLE DXContext::AllocateSrvGpu()
 {
+    // Consumes whatever AllocateSrvCpu set aside: a recycled slot is popped,
+    // a fresh one bumps the high-water mark.
+    if (!m_freeSrvSlots.empty() && m_pendingSrvSlot == m_freeSrvSlots.back()) {
+        m_freeSrvSlots.pop_back();
+        D3D12_GPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetGPUDescriptorHandleForHeapStart();
+        handle.ptr += (SIZE_T)m_pendingSrvSlot * m_srvDescriptorSize;
+        return handle;
+    }
     if (m_nextFreeSrvSlot >= DXC_MAX_SRV) {
         DebugLogA("ERROR: SRV heap overflow in AllocateSrvGpu!", LOG_ERROR);
         assert(false && "SRV heap overflow");
@@ -991,10 +1035,392 @@ D3D12_GPU_DESCRIPTOR_HANDLE DXContext::AllocateSrvGpu()
     return handle;
 }
 
+// Release a texture's GPU memory and hand its descriptor slots back (#312).
+//
+// NULLED BEFORE RELEASED, and that order is the entire safety argument. Every
+// descriptor this texture owns is pointed at m_nullTexture first, so a command
+// list already recorded against one of those slots samples the null texture
+// rather than freed memory. Releasing first is what produced
+// "DRED: page fault VA = 0x0" when eviction was first attempted.
+//
+// The caller is still responsible for the other half: no eviction may happen
+// while the GPU has work in flight that could be referencing this texture. See
+// Engine::EnforceTextureCacheBudget, which drains first.
+void DXContext::RecycleTexture(DX12Texture& tex)
+{
+    if (!m_device) return;
+
+    const bool haveNull = (m_nullTexture.srvIndex != UINT_MAX);
+    D3D12_CPU_DESCRIPTOR_HANDLE nullSrvCpu = {};
+    if (haveNull) {
+        nullSrvCpu.ptr = m_srvHeapCpu->GetCPUDescriptorHandleForHeapStart().ptr +
+                         (SIZE_T)m_nullTexture.srvIndex * m_srvDescriptorSize;
+    }
+
+    auto pointAtNull = [&](UINT slot) {
+        if (!haveNull || slot == UINT_MAX) return;
+        D3D12_CPU_DESCRIPTOR_HANDLE dst;
+        dst.ptr = m_srvHeap->GetCPUDescriptorHandleForHeapStart().ptr +
+                  (SIZE_T)slot * m_srvDescriptorSize;
+        m_device->CopyDescriptorsSimple(1, dst, nullSrvCpu,
+                                        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        // The readable mirror too, or a later CreateBindingBlockForTexture
+        // would copy this slot's stale descriptor out of it (forgejo#16).
+        D3D12_CPU_DESCRIPTOR_HANDLE mirror;
+        mirror.ptr = m_srvHeapCpu->GetCPUDescriptorHandleForHeapStart().ptr +
+                     (SIZE_T)slot * m_srvDescriptorSize;
+        m_device->CopyDescriptorsSimple(1, mirror, nullSrvCpu,
+                                        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    };
+
+    if (tex.bindingBlockStart != UINT_MAX) {
+        for (UINT i = 0; i < BINDING_BLOCK_SIZE; i++)
+            pointAtNull(tex.bindingBlockStart + i);
+        m_freeBindingBlocks.push_back(tex.bindingBlockStart);
+    }
+    if (tex.srvIndex != UINT_MAX) {
+        pointAtNull(tex.srvIndex);
+        m_freeSrvSlots.push_back(tex.srvIndex);
+    }
+
+    tex.Reset();   // releases the resource: this is the VRAM coming back
+}
+
 // Dump DRED after a device removal: the last GPU ops still in flight, and the
 // page-fault VA with the resources that lived there. "Recent freed" entries are
 // the tell for a use-after-free / aliasing bug — the resource the GPU faulted on
 // had already been destroyed on the CPU side.
+void DXContext::RetireComObject(const ComPtr<IUnknown>& obj)
+{
+    if (!obj) return;
+    std::lock_guard<std::mutex> lk(m_retiredMutex);
+    m_retiredObjects.emplace_back(CurrentFrameFenceValue(), obj);
+}
+
+void DXContext::CollectRetiredObjects()
+{
+    std::unique_lock<std::mutex> lk(m_retiredMutex);
+    if (m_retiredObjects.empty())
+        return;
+
+    // The mirrors run their own queue and their own fence, so the main-queue
+    // value says nothing about them. Ask, and if any is still busy leave the
+    // whole queue for the next frame -- these are a handful of objects and a
+    // frame is a millisecond.
+    if (m_auxQueuesIdle && !m_auxQueuesIdle()) {
+        // Unless the queue is running away, which would mean a surface that
+        // never reports idle. Bound it rather than let it grow without limit:
+        // drain both queues once, release everything, and say so. A silent,
+        // unbounded buffer of GPU resources is the worse failure, and a log
+        // line here names a real bug rather than papering over it.
+        if (m_retiredObjects.size() < 256)
+            return;
+        char buf[160];
+        sprintf(buf, "DX12: retired GPU objects reached %u with a mirror never "
+                     "idle -- draining (#214)", (unsigned)m_retiredObjects.size());
+        DebugLogA(buf, LOG_WARN);
+        lk.unlock();
+        WaitForGpu();
+        lk.lock();
+        m_retiredObjects.clear();
+        return;
+    }
+
+    // Compact in place, keeping only what the GPU has not finished with. The
+    // skipped entries are released as they are overwritten or as the vector
+    // shrinks. Guard the self-assignment: when nothing has been dropped yet,
+    // keep == i and moving an element onto itself is not safe for ComPtr.
+    const UINT64 done = CompletedFenceValue();
+    size_t keep = 0;
+    for (size_t i = 0; i < m_retiredObjects.size(); i++) {
+        if (m_retiredObjects[i].first <= done)
+            continue;
+        if (keep != i)
+            m_retiredObjects[keep] = std::move(m_retiredObjects[i]);
+        keep++;
+    }
+    m_retiredObjects.resize(keep);
+}
+
+bool DXContext::CreateGpuTimingResources()
+{
+    if (!m_device || !m_commandQueue) return false;
+    if (m_tsHeap) return true;
+
+    D3D12_QUERY_HEAP_DESC qd = {};
+    qd.Type  = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+    qd.Count = kMaxStamps;
+    if (FAILED(m_device->CreateQueryHeap(&qd, IID_PPV_ARGS(&m_tsHeap)))) {
+        DebugLogA("GPU timing: CreateQueryHeap failed", LOG_ERROR);
+        return false;
+    }
+
+    D3D12_HEAP_PROPERTIES hp = {};
+    hp.Type = D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC rd = {};
+    rd.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+    rd.Width            = sizeof(UINT64) * kMaxStamps;
+    rd.Height           = 1;
+    rd.DepthOrArraySize = 1;
+    rd.MipLevels        = 1;
+    rd.SampleDesc.Count = 1;
+    rd.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    for (int i = 0; i < DXC_FRAME_COUNT; i++) {
+        if (FAILED(m_device->CreateCommittedResource(
+                &hp, D3D12_HEAP_FLAG_NONE, &rd,
+                D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                IID_PPV_ARGS(&m_tsReadback[i])))) {
+            DebugLogA("GPU timing: readback buffer failed", LOG_ERROR);
+            m_tsHeap.Reset();
+            return false;
+        }
+    }
+
+    // Ticks per second on the QUEUE's clock. Not the CPU's, and not constant
+    // between queues, so it is read from the queue the stamps are written on.
+    if (FAILED(m_commandQueue->GetTimestampFrequency(&m_tsFrequency)) ||
+        m_tsFrequency == 0) {
+        DebugLogA("GPU timing: GetTimestampFrequency failed", LOG_ERROR);
+        m_tsHeap.Reset();
+        return false;
+    }
+    return true;
+}
+
+void DXContext::EnableGpuStageTiming(bool on)
+{
+    if (on && !CreateGpuTimingResources()) {
+        m_bGpuTiming = false;
+        return;
+    }
+    m_bGpuTiming = on;
+    char buf[96];
+    sprintf(buf, "GPU timing: %s (report >= %.0f ms)",
+            on ? "ON" : "off", m_gpuTimingReportMs);
+    DebugLogA(buf, LOG_ERROR);
+}
+
+// ─── Whole-frame GPU time for the primary (#245) ───────────────────────────
+//
+// Same shape as a mirror surface's pair, and created lazily for the same
+// reason: the timestamp frequency has to be asked of the QUEUE, and asking
+// once before the queue exists leaves it 0 forever -- which is how gpuUs read
+// 0 on the surfaces until it was moved to record time.
+bool DXContext::CreateFrameTimingResources()
+{
+    if (m_frameTsHeap) return true;
+    if (!m_device) return false;
+
+    D3D12_QUERY_HEAP_DESC td = {};
+    td.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+    td.Count = 2;                       // one at entry, one at exit
+    if (FAILED(m_device->CreateQueryHeap(&td, IID_PPV_ARGS(&m_frameTsHeap))))
+        return false;
+
+    for (int i = 0; i < DXC_FRAME_COUNT; i++) {
+        D3D12_HEAP_PROPERTIES hp = {};
+        hp.Type = D3D12_HEAP_TYPE_READBACK;
+        D3D12_RESOURCE_DESC rd = {};
+        rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        rd.Width = sizeof(UINT64) * 2;
+        rd.Height = 1;
+        rd.DepthOrArraySize = 1;
+        rd.MipLevels = 1;
+        rd.Format = DXGI_FORMAT_UNKNOWN;
+        rd.SampleDesc.Count = 1;
+        rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        if (FAILED(m_device->CreateCommittedResource(
+                &hp, D3D12_HEAP_FLAG_NONE, &rd,
+                D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                IID_PPV_ARGS(&m_frameTsReadback[i])))) {
+            m_frameTsHeap.Reset();
+            return false;
+        }
+    }
+    return true;
+}
+
+void DXContext::BeginFrameTimestamp()
+{
+    if (!m_commandList || !m_cmdListRecording) return;
+    if (!CreateFrameTimingResources()) return;
+    // Asked of the QUEUE, and at record time rather than at creation: the
+    // queue may not exist when the resources are first made.
+    if (m_frameTsFreq == 0 && m_commandQueue &&
+        FAILED(m_commandQueue->GetTimestampFrequency(&m_frameTsFreq)))
+        m_frameTsFreq = 0;
+    if (m_frameTsFreq == 0) return;
+    m_commandList->EndQuery(m_frameTsHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0);
+}
+
+void DXContext::EndFrameTimestamp()
+{
+    if (!m_commandList || !m_cmdListRecording) return;
+    if (!m_frameTsHeap || m_frameTsFreq == 0) return;
+    m_commandList->EndQuery(m_frameTsHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 1);
+    m_commandList->ResolveQueryData(m_frameTsHeap.Get(),
+                                    D3D12_QUERY_TYPE_TIMESTAMP, 0, 2,
+                                    m_frameTsReadback[m_frameIndex].Get(), 0);
+    m_frameTsPending[m_frameIndex] = true;
+}
+
+void DXContext::ReadFrameTimestamp()
+{
+    if (!m_frameTsHeap || m_frameTsFreq == 0) return;
+    if (!m_frameTsPending[m_frameIndex]) return;
+    m_frameTsPending[m_frameIndex] = false;
+    // Safe to map without stalling: this runs from BeginFrame for THIS frame
+    // index, and MoveToNextFrame has already waited out its fence.
+    D3D12_RANGE rr = { 0, sizeof(UINT64) * 2 };
+    void* p = nullptr;
+    if (FAILED(m_frameTsReadback[m_frameIndex]->Map(0, &rr, &p)) || !p) return;
+    const UINT64* ts = (const UINT64*)p;
+    if (ts[1] > ts[0]) {
+        m_lastFrameGpuUs.store(
+            (unsigned)((ts[1] - ts[0]) * 1000000ull / m_frameTsFreq),
+            std::memory_order_relaxed);
+    }
+    D3D12_RANGE none = { 0, 0 };
+    m_frameTsReadback[m_frameIndex]->Unmap(0, &none);
+}
+
+void DXContext::ResolveGpuTimestamps()
+{
+    if (!m_bGpuTiming || !m_tsHeap || m_tsCount <= 0) return;
+    if (!m_commandList || !m_cmdListRecording) return;
+    m_commandList->ResolveQueryData(m_tsHeap.Get(),
+                                    D3D12_QUERY_TYPE_TIMESTAMP, 0,
+                                    (UINT)m_tsCount,
+                                    m_tsReadback[m_frameIndex].Get(), 0);
+    m_tsPending[m_frameIndex] = m_tsCount;
+    for (int i = 0; i < m_tsCount && i < kMaxStamps; i++)
+        m_tsPendingNames[m_frameIndex][i] = m_tsNames[i];
+}
+
+void DXContext::ReportGpuTimestamps()
+{
+    if (!m_bGpuTiming || !m_tsHeap) return;
+    const int n = m_tsPending[m_frameIndex];
+    if (n < 2) return;                       // need a pair to measure anything
+    m_tsPending[m_frameIndex] = 0;
+
+    // Safe to map: this runs from BeginFrame for THIS frame index, and
+    // MoveToNextFrame has already waited for that frame's fence, so the resolve
+    // that wrote these values has completed.
+    void* p = nullptr;
+    D3D12_RANGE rr = { 0, sizeof(UINT64) * (size_t)n };
+    if (FAILED(m_tsReadback[m_frameIndex]->Map(0, &rr, &p)) || !p) return;
+    const UINT64* ticks = (const UINT64*)p;
+
+    double worstMs = 0.0;
+    const char* worstName = nullptr;
+    double totalMs = 0.0;
+    for (int i = 1; i < n; i++) {
+        if (ticks[i] < ticks[i - 1]) continue;          // clock reset; ignore
+        const double ms = (double)(ticks[i] - ticks[i - 1]) * 1000.0
+                        / (double)m_tsFrequency;
+        totalMs += ms;
+        if (ms > worstMs) {
+            worstMs = ms;
+            worstName = m_tsPendingNames[m_frameIndex][i - 1];
+        }
+    }
+    D3D12_RANGE none = { 0, 0 };
+    m_tsReadback[m_frameIndex]->Unmap(0, &none);
+
+    // Only the frames that matter. A normal frame prints nothing at all, so
+    // this can be left on while waiting for a device to die.
+    if (worstMs >= m_gpuTimingReportMs) {
+        char buf[256];
+        sprintf(buf, "GPU timing: frame %.1f ms total, WORST STAGE '%s' %.1f ms "
+                     "(%d stamps)",
+                totalMs, worstName ? worstName : "?", worstMs, n);
+        DebugLogA(buf, LOG_ERROR);
+    }
+}
+
+void DXContext::ResetStageMap()
+{
+    // Carry the finished frame over before clearing: the GPU is typically a
+    // frame behind, so when a hang is noticed the interesting map is this one.
+    m_prevStageMarkCount = m_stageMarkCount;
+    m_prevFrameDrawCount = m_frameDrawOrdinal;
+    for (int i = 0; i < m_stageMarkCount; i++)
+        m_prevStageMarks[i] = m_stageMarks[i];
+    for (int i = 0; i < kMaxTrackedDraws; i++) {
+        m_prevDrawRet[i] = m_frameDrawRet[i];
+        m_frameDrawRet[i] = nullptr;
+    }
+    m_stageMarkCount = 0;
+    m_frameDrawOrdinal = 0;
+}
+
+void DXContext::BeginStage(const char* name)
+{
+    // Only the primary list is mapped. Mirror workers record into their own
+    // command lists on their own threads, and interleaving their stages into
+    // one shared array would produce a map that describes no frame at all.
+    //
+    // Tests the THREAD-LOCAL override, not m_cmdListOverride. That member has
+    // zero assignments anywhere in the tree, so this guard never once fired:
+    // mirror workers fell straight through it, appended their stages to the
+    // shared map (which is why a DRED stage map shows three warp passes), and
+    // -- once #230 added timestamps here -- called EndQuery on the PRIMARY's
+    // command list from a worker thread while the render thread was recording
+    // into it. A command list is not thread-safe, so that is a data race, and
+    // the timings it produced described no single list.
+    if (t_cmdListOverride || m_cmdListOverride) return;
+
+    // A timestamp at the same boundary (#230). The stage map says WHICH stage
+    // issued a draw; this says how long the GPU spent in it, which is the half
+    // that was missing.
+    if (m_bGpuTiming && m_tsHeap && m_tsCount < kMaxStamps &&
+        m_commandList && m_cmdListRecording) {
+        m_commandList->EndQuery(m_tsHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP,
+                                (UINT)m_tsCount);
+        m_tsNames[m_tsCount] = name;
+        m_tsCount++;
+    }
+
+    if (m_stageMarkCount >= kMaxStageMarks) return;
+    m_stageMarks[m_stageMarkCount].draw = m_frameDrawOrdinal;
+    m_stageMarks[m_stageMarkCount].name = name;   // literal, not copied
+    m_stageMarkCount++;
+}
+
+// D3D12_AUTO_BREADCRUMB_OP as a name. The raw integers are unreadable and are
+// easy to decode wrongly from memory -- DRAWINSTANCED (3) and
+// CLEARDEPTHSTENCILVIEW (14) in particular have been mixed up here before,
+// which sends an investigation at the wrong stage entirely.
+static const char* DredOpName(int op)
+{
+    static const char* kNames[] = {
+        "SETMARKER", "BEGINEVENT", "ENDEVENT", "DRAWINSTANCED",
+        "DRAWINDEXEDINSTANCED", "EXECUTEINDIRECT", "DISPATCH",
+        "COPYBUFFERREGION", "COPYTEXTUREREGION", "COPYRESOURCE", "COPYTILES",
+        "RESOLVESUBRESOURCE", "CLEARRENDERTARGETVIEW",
+        "CLEARUNORDEREDACCESSVIEW", "CLEARDEPTHSTENCILVIEW", "RESOURCEBARRIER",
+        "EXECUTEBUNDLE", "PRESENT", "RESOLVEQUERYDATA", "BEGINSUBMISSION",
+        "ENDSUBMISSION", "DECODEFRAME", "PROCESSFRAMES",
+        "ATOMICCOPYBUFFERUINT", "ATOMICCOPYBUFFERUINT64",
+        "RESOLVESUBRESOURCEREGION", "WRITEBUFFERIMMEDIATE", "DECODEFRAME1",
+        "SETPROTECTEDRESOURCESESSION", "DECODEFRAME2", "PROCESSFRAMES1",
+        "BUILDRAYTRACINGACCELERATIONSTRUCTURE",
+        "EMITRAYTRACINGACCELERATIONSTRUCTUREPOSTBUILDINFO",
+        "COPYRAYTRACINGACCELERATIONSTRUCTURE", "DISPATCHRAYS",
+        "INITIALIZEMETACOMMAND", "EXECUTEMETACOMMAND", "ESTIMATEMOTION",
+        "RESOLVEMOTIONVECTORHEAP", "SETPIPELINESTATE1",
+        "INITIALIZEEXTENSIONCOMMAND", "EXECUTEEXTENSIONCOMMAND",
+        "DISPATCHMESH", "ENCODEFRAME", "RESOLVEENCODEROUTPUTMETADATA",
+        "BARRIER", "BEGIN_COMMAND_LIST", "DISPATCHGRAPH", "SETPROGRAM",
+    };
+    if (op >= 0 && op < (int)(sizeof(kNames) / sizeof(kNames[0])))
+        return kNames[op];
+    static char other[32];
+    sprintf(other, "op#%d", op);
+    return other;
+}
+
 void DXContext::DumpDredToLog(const char* whence)
 {
     if (!m_device)
@@ -1013,6 +1439,65 @@ void DXContext::DumpDredToLog(const char* whence)
         sprintf(who, "DRED: dump triggered from %s (removed reason=0x%08X)",
                 whence ? whence : "<unspecified>", (unsigned)m_device->GetDeviceRemovedReason());
         DebugLogA(who, LOG_ERROR);
+    }
+
+    // The stage map first: it is what makes the breadcrumbs below readable
+    // (#222). Draw ordinals count DRAWINSTANCED and DRAWINDEXEDINSTANCED only,
+    // so match them against the DRAW ops in the dump, not against op indices —
+    // barriers, clears and copies occupy op slots but no draw ordinal.
+    {
+        char sbuf[512];
+        auto dumpMap = [&](const StageMark* marks, int count, UINT draws,
+                           const char* which) {
+            if (count <= 0) return;
+            sprintf(sbuf, "DRED: stage map (%s frame, %u draws):", which, draws);
+            DebugLogA(sbuf, LOG_ERROR);
+            for (int i = 0; i < count; i++) {
+                const UINT end = (i + 1 < count) ? marks[i + 1].draw : draws;
+                if (end == marks[i].draw)
+                    continue;                      // stage emitted no draws
+                sprintf(sbuf, "DRED:   draw[%u..%u] = %s",
+                        marks[i].draw, end - 1, marks[i].name ? marks[i].name : "?");
+                DebugLogA(sbuf, LOG_ERROR);
+            }
+        };
+        dumpMap(m_prevStageMarks, m_prevStageMarkCount, m_prevFrameDrawCount, "previous");
+        dumpMap(m_stageMarks, m_stageMarkCount, m_frameDrawOrdinal, "current");
+
+        // Per-draw call sites. This is the authoritative half of the map: the
+        // stage names above are a convenience, these are ground truth.
+        HANDLE proc = GetCurrentProcess();
+        SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
+        SymInitialize(proc, nullptr, TRUE);   // harmless if already initialised
+        auto dumpSites = [&](void* const* rets, UINT count, const char* which) {
+            if (count == 0) return;
+            sprintf(sbuf, "DRED: draw call sites (%s frame):", which);
+            DebugLogA(sbuf, LOG_ERROR);
+            const UINT n = (count < kMaxTrackedDraws) ? count : kMaxTrackedDraws;
+            for (UINT i = 0; i < n; i++) {
+                if (!rets[i]) continue;
+                const DWORD64 addr = (DWORD64)rets[i];
+                char symBuf[sizeof(SYMBOL_INFO) + 256] = {};
+                SYMBOL_INFO* sym = (SYMBOL_INFO*)symBuf;
+                sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+                sym->MaxNameLen   = 255;
+                DWORD64 disp = 0;
+                const char* name = SymFromAddr(proc, addr, &disp, sym) ? sym->Name : "?";
+                IMAGEHLP_LINE64 line = {};
+                line.SizeOfStruct = sizeof(line);
+                DWORD lineDisp = 0;
+                if (SymGetLineFromAddr64(proc, addr, &lineDisp, &line)) {
+                    const char* base = strrchr(line.FileName, '\\');
+                    sprintf(sbuf, "DRED:   draw[%u] <- %s (%s:%lu)", i, name,
+                            base ? base + 1 : line.FileName, line.LineNumber);
+                } else {
+                    sprintf(sbuf, "DRED:   draw[%u] <- %s", i, name);
+                }
+                DebugLogA(sbuf, LOG_ERROR);
+            }
+        };
+        dumpSites(m_prevDrawRet, m_prevFrameDrawCount, "previous");
+        dumpSites(m_frameDrawRet, m_frameDrawOrdinal, "current");
     }
 
     ComPtr<ID3D12DeviceRemovedExtendedData1> dred;
@@ -1036,13 +1521,50 @@ void DXContext::DumpDredToLog(const char* whence)
             sprintf(buf, "DRED: list '%s' completed %u of %u ops", nameA, done, n->BreadcrumbCount);
             DebugLogA(buf, LOG_ERROR);
             // The ops around the stall are the ones that matter.
-            const UINT lo = (done > 3) ? done - 3 : 0;
-            const UINT hi = (done + 4 < n->BreadcrumbCount) ? done + 4 : n->BreadcrumbCount;
+            //
+            // pLastBreadcrumbValue is a COUNT of completed operations, and
+            // pCommandHistory is indexed from zero. So ops [0, done) finished
+            // and pCommandHistory[done] is the FIRST ONE THAT DID NOT -- the
+            // op the GPU faulted on.
+            //
+            // This used to tag index `done` as "last completed", which is off
+            // by one in the worst possible direction: it reads as an alibi for
+            // precisely the operation that crashed. #195 was a CopyResource
+            // whose destination had been freed mid-frame, and the breadcrumb
+            // said that copy had completed successfully, so the investigation
+            // went looking at the ops after it instead. Three of five parallel
+            // investigators were sent the same wrong way by the same label.
+            // Print the WHOLE list, decoded, not a window around the fault
+            // (#222). A window is enough when you already know what the list
+            // contains; it is useless when the question IS what the list
+            // contains. The #222 frame is 21 ops and every hang produces the
+            // identical list, so the full dump identifies the faulting stage
+            // outright -- from the window alone it was guesswork, and two
+            // plausible stages were blamed and exonerated in turn.
+            //
+            // Bounded at 128: a Shadertoy or heavy-shape frame runs to
+            // thousands of ops and the tail is what matters there, so past the
+            // bound this falls back to the window around the fault.
+            const bool full = (n->BreadcrumbCount <= 128);
+            const UINT lo = full ? 0 : ((done > 3) ? done - 3 : 0);
+            const UINT hi = full ? n->BreadcrumbCount
+                                 : ((done + 4 < n->BreadcrumbCount) ? done + 4
+                                                                    : n->BreadcrumbCount);
+            if (!full)
+                DebugLogA("DRED:   (list too long to dump whole -- window around the fault)",
+                          LOG_ERROR);
             for (UINT i = lo; i < hi; i++) {
-                sprintf(buf, "DRED:   op[%u] = %d%s", i, (int)n->pCommandHistory[i],
-                        (i == done) ? "   <-- last completed" : "");
+                const char* tag = "";
+                if (done > 0 && i == done - 1)
+                    tag = "   <-- last completed";
+                else if (i == done && done < n->BreadcrumbCount)
+                    tag = "   <-- FAULTED HERE (first op that did not complete)";
+                const int op = (int)n->pCommandHistory[i];
+                sprintf(buf, "DRED:   op[%u] = %-26s%s", i, DredOpName(op), tag);
                 DebugLogA(buf, LOG_ERROR);
             }
+            if (done >= n->BreadcrumbCount)
+                DebugLogA("DRED:   (every op on this list completed)", LOG_ERROR);
         }
     }
 
@@ -1187,7 +1709,7 @@ DX12Texture DXContext::CreateRenderTargetTexture(UINT width, UINT height, DXGI_F
         return tex;
     }
     D3D12_CPU_DESCRIPTOR_HANDLE srvCpuHandle = AllocateSrvCpu();
-    tex.srvIndex = m_nextFreeSrvSlot;
+    tex.srvIndex = PendingSrvSlot();
 
     CreateSRV2D(m_device.Get(), tex.resource.Get(), format, srvCpuHandle,
                 GetSrvCpuHandleAtReadable(tex.srvIndex));
@@ -1268,8 +1790,16 @@ bool DXContext::CreateRootSignature()
     //   s1 = _samp_lc  (LINEAR + CLAMP)  — fc_main, blur
     //   s2 = _samp_pc  (POINT  + CLAMP)  — pc_main
     //   s3 = _samp_pw  (POINT  + WRAP)   — pw_main
-    D3D12_STATIC_SAMPLER_DESC staticSamplers[4] = {};
-    for (int i = 0; i < 4; i++) {
+    //   s4 = _samp_lm  (LINEAR + MIRROR) — presets' own sampler_state blocks
+    //   s5 = _samp_pm  (POINT  + MIRROR)
+    //
+    // The mirror pair exists because DX9 presets declare their addressing
+    // inline -- `sampler X = sampler_state { AddressU = mirror; }` -- and
+    // MIRROR is the mode that had nowhere to go (#318). Without it the state
+    // block was simply dropped and the texture sampled WRAP, which is a
+    // different picture, silently.
+    D3D12_STATIC_SAMPLER_DESC staticSamplers[6] = {};
+    for (int i = 0; i < 6; i++) {
         staticSamplers[i].Filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
         staticSamplers[i].AddressU         = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         staticSamplers[i].AddressV         = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -1289,19 +1819,30 @@ bool DXContext::CreateRootSignature()
     staticSamplers[2].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
     // s3: POINT + WRAP
     staticSamplers[3].Filter   = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    // s4: LINEAR + MIRROR
+    staticSamplers[4].AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+    staticSamplers[4].AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+    staticSamplers[4].AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+    // s5: POINT + MIRROR
+    staticSamplers[5].Filter   = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    staticSamplers[5].AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+    staticSamplers[5].AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+    staticSamplers[5].AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
 
-    // Anisotropic filtering: upgrade LINEAR samplers (s0, s1) to ANISOTROPIC
+    // Anisotropic filtering: upgrade LINEAR samplers (s0, s1, s4) to ANISOTROPIC
     if (m_bAnisotropicFiltering) {
         staticSamplers[0].Filter = D3D12_FILTER_ANISOTROPIC;
         staticSamplers[0].MaxAnisotropy = 16;
         staticSamplers[1].Filter = D3D12_FILTER_ANISOTROPIC;
         staticSamplers[1].MaxAnisotropy = 16;
+        staticSamplers[4].Filter = D3D12_FILTER_ANISOTROPIC;
+        staticSamplers[4].MaxAnisotropy = 16;
     }
 
     D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
     rootSigDesc.NumParameters     = 2;
     rootSigDesc.pParameters       = rootParams;
-    rootSigDesc.NumStaticSamplers = 4;
+    rootSigDesc.NumStaticSamplers = 6;
     rootSigDesc.pStaticSamplers   = staticSamplers;
     rootSigDesc.Flags             = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
@@ -1507,6 +2048,17 @@ void DXContext::SelectUploadRing(BYTE*& basePtr, ID3D12Resource*& baseRes,
     bufSize = UPLOAD_BUFFER_SIZE;
 }
 
+thread_local ID3D12GraphicsCommandList* DXContext::t_cmdListOverride = nullptr;
+
+void DXContext::NoteActiveCmdListOnWorker() const
+{
+  const UINT n = m_activeCmdListOnWorker.fetch_add(1, std::memory_order_relaxed);
+  if (n == 0)
+    DebugLogA("GetActiveCmdList called on a MIRROR WORKER thread -- that site "
+              "should take its list from its RenderContext (#206). Counted in "
+              "DIAG_MIRRORS as workerCmdList=.\n", LOG_ERROR);
+}
+
 void DXContext::ResetUploadBuffer()
 {
     m_uploadBufferOffset[m_frameIndex] = 0;
@@ -1558,6 +2110,11 @@ void DXContext::DrawVertices(D3D12_PRIMITIVE_TOPOLOGY topology, const void* vert
     cl->IASetPrimitiveTopology(topology);
     cl->IASetVertexBuffers(0, 1, &vbv);
     cl->DrawInstanced(vertexCount, 1, 0, 0);
+    if (!m_cmdListOverride) {                       // #222 stage map
+        if (m_frameDrawOrdinal < kMaxTrackedDraws)
+            m_frameDrawRet[m_frameDrawOrdinal] = _ReturnAddress();
+        m_frameDrawOrdinal++;
+    }
 }
 
 void DXContext::DrawIndexedVertices(D3D12_PRIMITIVE_TOPOLOGY topology,
@@ -1619,6 +2176,11 @@ void DXContext::DrawIndexedVertices(D3D12_PRIMITIVE_TOPOLOGY topology,
     cl->IASetVertexBuffers(0, 1, &vbv);
     cl->IASetIndexBuffer(&ibv);
     cl->DrawIndexedInstanced(indexCount, 1, 0, 0, 0);
+    if (!m_cmdListOverride) {                       // #222 stage map
+        if (m_frameDrawOrdinal < kMaxTrackedDraws)
+            m_frameDrawRet[m_frameDrawOrdinal] = _ReturnAddress();
+        m_frameDrawOrdinal++;
+    }
 }
 
 D3D12_GPU_VIRTUAL_ADDRESS DXContext::UploadConstantBuffer(const void* data, UINT sizeBytes) {
@@ -1872,7 +2434,7 @@ bool DXContext::CreateNullTexture(int fallbackStyle)
 
     // Create SRV for the null texture
     D3D12_CPU_DESCRIPTOR_HANDLE srvCpuHandle = AllocateSrvCpu();
-    m_nullTexture.srvIndex = m_nextFreeSrvSlot;
+    m_nullTexture.srvIndex = PendingSrvSlot();
 
     CreateSRV2D(m_device.Get(), m_nullTexture.resource.Get(), DXGI_FORMAT_R8G8B8A8_UNORM,
                 srvCpuHandle, GetSrvCpuHandleAtReadable(m_nullTexture.srvIndex));
@@ -1998,7 +2560,7 @@ bool DXContext::CreateNullTexture(int fallbackStyle)
     WaitForSingleObject(m_fenceEvent, INFINITE);
 
     D3D12_CPU_DESCRIPTOR_HANDLE fbSrvCpu = AllocateSrvCpu();
-    m_fallbackTexture.srvIndex = m_nextFreeSrvSlot;
+    m_fallbackTexture.srvIndex = PendingSrvSlot();
 
     CreateSRV2D(m_device.Get(), m_fallbackTexture.resource.Get(), DXGI_FORMAT_R8G8B8A8_UNORM,
                 fbSrvCpu, GetSrvCpuHandleAtReadable(m_fallbackTexture.srvIndex));
@@ -2196,7 +2758,7 @@ DX12Texture DXContext::CreateTextureFromPixels(const void* pixels, UINT width, U
 
     // 7. Create SRV descriptor (exposing the whole mip chain when present)
     D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = AllocateSrvCpu();
-    tex.srvIndex = m_nextFreeSrvSlot;
+    tex.srvIndex = PendingSrvSlot();
 
     CreateSRV2D(m_device.Get(), tex.resource.Get(), format, srvCpu,
                 GetSrvCpuHandleAtReadable(tex.srvIndex), mipLevels);
@@ -2329,7 +2891,7 @@ DX12Texture DXContext::CreateVolumeTextureFromPixels(const void* pixels, UINT wi
 
     // 7. Create SRV descriptor (TEXTURE3D)
     D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = AllocateSrvCpu();
-    tex.srvIndex = m_nextFreeSrvSlot;
+    tex.srvIndex = PendingSrvSlot();
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Format                        = format;
@@ -2354,54 +2916,380 @@ DX12Texture DXContext::CreateVolumeTextureFromPixels(const void* pixels, UINT wi
 }
 
 // ---------------------------------------------------------------------------
+// DecodeDDS / DecodeTGA — the two formats WIC hands back nothing for (#319)
+//
+// `texture_exts` offers dds and tga alongside jpg and png, so the search finds
+// such a file, the load returns empty, and the caller reports "texture NOT
+// found" about a file that is sitting right there. Two different holes:
+//
+//   TGA   Windows ships no TGA codec at all — WINCODEC_ERR_COMPONENTNOTFOUND.
+//   DDS   there IS a DDS codec, and it rejects 24bpp with BADHEADER. It maps a
+//         DDS onto a DXGI format, and DXGI has no 24-bit format to map to. A
+//         block-compressed or 32bpp DDS goes through WIC fine, so only the
+//         uncompressed mask-described flavours are handled here.
+//
+// Both decode to tightly packed BGRA, which is what the WIC path produces and
+// what CreateTextureFromPixels expects, so there is one upload path and disk
+// textures keep their mip chain either way.
+// ---------------------------------------------------------------------------
+namespace {
+
+bool ReadWholeFile(const wchar_t* path, std::vector<BYTE>& out)
+{
+    HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size{};
+    bool ok = GetFileSizeEx(h, &size) && size.QuadPart > 0 &&
+              size.QuadPart < (LONGLONG)256 * 1024 * 1024;
+    if (ok) {
+        out.resize((size_t)size.QuadPart);
+        DWORD got = 0;
+        ok = ReadFile(h, out.data(), (DWORD)out.size(), &got, nullptr) &&
+             got == out.size();
+    }
+    CloseHandle(h);
+    if (!ok) out.clear();
+    return ok;
+}
+
+// A channel mask describes where a component sits and how wide it is. Widths
+// other than 8 have to be rescaled so that "all ones" comes out as 255 rather
+// than as whatever the narrow value happened to be.
+struct Channel {
+    // Not named `max`: windows.h defines that as a macro unless NOMINMAX is set.
+    UINT mask = 0, shift = 0, maxVal = 0;
+    void Set(UINT m) {
+        mask = m;
+        if (!m) return;
+        while (!((m >> shift) & 1)) shift++;
+        maxVal = m >> shift;
+    }
+    BYTE Get(UINT px) const {
+        if (!mask) return 255;
+        const UINT v = (px & mask) >> shift;
+        return maxVal == 255 ? (BYTE)v : (BYTE)((v * 255 + maxVal / 2) / maxVal);
+    }
+};
+
+bool DecodeDDS(const std::vector<BYTE>& f, std::vector<BYTE>& bgra,
+               UINT& outW, UINT& outH, const char** why)
+{
+    *why = nullptr;
+    if (f.size() < 128 || memcmp(f.data(), "DDS ", 4) != 0) { *why = "not a DDS"; return false; }
+
+    UINT hdrSize, flags, h, w, pitchOrLinear;
+    memcpy(&hdrSize, &f[4], 4);  memcpy(&flags, &f[8], 4);
+    memcpy(&h, &f[12], 4);       memcpy(&w, &f[16], 4);
+    memcpy(&pitchOrLinear, &f[20], 4);
+    if (hdrSize != 124) { *why = "header size is not 124"; return false; }
+    if (!w || !h || w > 16384 || h > 16384) { *why = "implausible dimensions"; return false; }
+
+    UINT pfFlags, bits, rm, gm, bm, am;
+    memcpy(&pfFlags, &f[80], 4);  memcpy(&bits, &f[88], 4);
+    memcpy(&rm, &f[92], 4);       memcpy(&gm, &f[96], 4);
+    memcpy(&bm, &f[100], 4);      memcpy(&am, &f[104], 4);
+
+    if (pfFlags & 0x4) { *why = "block-compressed (WIC's job)"; return false; }
+    if (bits != 8 && bits != 16 && bits != 24 && bits != 32) {
+        *why = "unsupported bit depth"; return false;
+    }
+
+    // DDPF_LUMINANCE and DDPF_ALPHA carry no usable RGB masks; treat a single
+    // 8-bit channel as grey so a height/mask texture still arrives.
+    const bool luminance = (pfFlags & 0x20000) != 0 || ((pfFlags & 0x2) && bits == 8);
+    if (!(pfFlags & 0x40) && !luminance) { *why = "no RGB or luminance channels"; return false; }
+
+    Channel cr, cg, cb, ca;
+    if (luminance) { cr.Set(rm ? rm : 0xFF); cg = cb = cr; ca.Set(am); }
+    else           { cr.Set(rm); cg.Set(gm); cb.Set(bm); ca.Set(am); }
+
+    const UINT bpp = bits / 8;
+    // DDSD_PITCH says the stride is explicit; otherwise rows are tightly packed.
+    const UINT pitch = ((flags & 0x8) && pitchOrLinear) ? pitchOrLinear : w * bpp;
+    // 'DX10' would put another 20 bytes here, but that is always a fourCC and
+    // fourCC was rejected above, so the data starts right after the header.
+    const size_t start = 128;
+    if (pitch < w * bpp || start + (size_t)pitch * h > f.size()) {
+        *why = "truncated pixel data"; return false;
+    }
+
+    bgra.resize((size_t)w * h * 4);
+    for (UINT y = 0; y < h; y++) {
+        const BYTE* src = f.data() + start + (size_t)pitch * y;
+        BYTE* dst = bgra.data() + (size_t)w * 4 * y;
+        for (UINT x = 0; x < w; x++, src += bpp, dst += 4) {
+            UINT px = 0;
+            memcpy(&px, src, bpp);          // little-endian, fewer bytes than a UINT
+            dst[0] = cb.Get(px);
+            dst[1] = cg.Get(px);
+            dst[2] = cr.Get(px);
+            dst[3] = am ? ca.Get(px) : 255;
+        }
+    }
+    outW = w; outH = h;
+    return true;
+}
+
+bool DecodeTGA(const std::vector<BYTE>& f, std::vector<BYTE>& bgra,
+               UINT& outW, UINT& outH, const char** why)
+{
+    *why = nullptr;
+    if (f.size() < 18) { *why = "shorter than a TGA header"; return false; }
+
+    const BYTE idLen = f[0], cmapType = f[1], imgType = f[2];
+    UINT16 cmapLen; memcpy(&cmapLen, &f[5], 2);
+    const BYTE cmapBits = f[7];
+    UINT16 w16, h16; memcpy(&w16, &f[12], 2); memcpy(&h16, &f[14], 2);
+    const BYTE bits = f[16], desc = f[17];
+    const UINT w = w16, h = h16;
+
+    // 2/10 truecolour, 3/11 greyscale; the 10s and 11s are run-length encoded.
+    const bool rle  = (imgType == 10 || imgType == 11);
+    const bool grey = (imgType == 3  || imgType == 11);
+    if (imgType != 2 && imgType != 3 && imgType != 10 && imgType != 11) {
+        *why = "colour-mapped or unknown image type"; return false;
+    }
+    if (!w || !h || w > 16384 || h > 16384) { *why = "implausible dimensions"; return false; }
+    if (bits != 8 && bits != 16 && bits != 24 && bits != 32) {
+        *why = "unsupported bit depth"; return false;
+    }
+
+    size_t p = 18 + (size_t)idLen;
+    if (cmapType) p += (size_t)cmapLen * ((cmapBits + 7) / 8);
+    if (p >= f.size()) { *why = "no pixel data after the header"; return false; }
+
+    const UINT bpp = bits / 8;
+    const size_t count = (size_t)w * h;
+    bgra.assign(count * 4, 0);
+
+    // One pixel, whatever the depth, expanded into BGRA.
+    auto emit = [&](const BYTE* s, BYTE* d) {
+        if (grey)            { d[0] = d[1] = d[2] = s[0]; d[3] = 255; }
+        else if (bits == 16) {                       // A1R5G5B5, little-endian
+            const UINT v = (UINT)s[0] | ((UINT)s[1] << 8);
+            d[0] = (BYTE)(((v & 0x001F) * 255 + 15) / 31);
+            d[1] = (BYTE)((((v >> 5) & 0x1F) * 255 + 15) / 31);
+            d[2] = (BYTE)((((v >> 10) & 0x1F) * 255 + 15) / 31);
+            // Bit 15 is a 1-bit alpha that writers set inconsistently, and a
+            // texture that came out fully transparent would read as a bug.
+            d[3] = 255;
+        }
+        else { d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = (bits == 32) ? s[3] : 255; }
+    };
+
+    size_t done = 0;
+    if (!rle) {
+        if (p + count * bpp > f.size()) { *why = "truncated pixel data"; return false; }
+        for (; done < count; done++) emit(&f[p + done * bpp], &bgra[done * 4]);
+    } else {
+        while (done < count) {
+            if (p >= f.size()) { *why = "truncated RLE stream"; return false; }
+            const BYTE packet = f[p++];
+            const UINT run = (packet & 0x7F) + 1u;
+            if (done + run > count) { *why = "RLE run overruns the image"; return false; }
+            if (packet & 0x80) {                      // one pixel, repeated
+                if (p + bpp > f.size()) { *why = "truncated RLE run"; return false; }
+                for (UINT i = 0; i < run; i++) emit(&f[p], &bgra[(done + i) * 4]);
+                p += bpp;
+            } else {                                  // `run` literal pixels
+                if (p + (size_t)run * bpp > f.size()) { *why = "truncated RLE literals"; return false; }
+                for (UINT i = 0; i < run; i++) emit(&f[p + (size_t)i * bpp], &bgra[(done + i) * 4]);
+                p += (size_t)run * bpp;
+            }
+            done += run;
+        }
+    }
+
+    // Bit 5 of the descriptor means the first row stored is the TOP row. It is
+    // clear far more often than not, and getting it wrong flips the picture.
+    if (!(desc & 0x20)) {
+        std::vector<BYTE> row((size_t)w * 4);
+        for (UINT y = 0; y < h / 2; y++) {
+            BYTE* a = &bgra[(size_t)y * w * 4];
+            BYTE* b = &bgra[(size_t)(h - 1 - y) * w * 4];
+            memcpy(row.data(), a, row.size());
+            memcpy(a, b, row.size());
+            memcpy(b, row.data(), row.size());
+        }
+    }
+
+    outW = w; outH = h;
+    return true;
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
 // LoadTextureFromFile — WIC-based image loading to DX12 texture
 // ---------------------------------------------------------------------------
+// See the note on the declaration (#349). Clamped, not trusted: a tiny cap
+// would make every texture a smear, and a negative one is meaningless. 0 is
+// deliberately allowed through as "no cap".
+static std::atomic<int> g_maxTextureDim{ 1024 };
+
+void SetMaxTextureDim(int maxDim)
+{
+    if (maxDim < 0) maxDim = 0;
+    if (maxDim > 0 && maxDim < 64) maxDim = 64;
+    if (maxDim > 16384) maxDim = 16384;
+    g_maxTextureDim.store(maxDim, std::memory_order_relaxed);
+}
+
+int GetMaxTextureDim()
+{
+    return g_maxTextureDim.load(std::memory_order_relaxed);
+}
+
 DX12Texture DXContext::LoadTextureFromFile(const wchar_t* szFilename)
 {
     DX12Texture tex;
     if (!szFilename || !szFilename[0]) return tex;
 
     HRESULT hr;
+    UINT w = 0, h = 0;
+    std::vector<BYTE> pixels;         // BGRA, tightly packed
+    const char* step = nullptr;       // which WIC call failed, for the log
 
     // 1. Create WIC factory
     ComPtr<IWICImagingFactory> wicFactory;
     hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
                           IID_PPV_ARGS(&wicFactory));
-    if (FAILED(hr)) return tex;
+    if (FAILED(hr)) step = "CoCreateInstance(WICImagingFactory)";
 
     // 2. Create decoder from file
     ComPtr<IWICBitmapDecoder> decoder;
-    hr = wicFactory->CreateDecoderFromFilename(szFilename, nullptr,
-                                                GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder);
-    if (FAILED(hr)) return tex;
+    if (!step) {
+        hr = wicFactory->CreateDecoderFromFilename(szFilename, nullptr,
+                                                    GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder);
+        if (FAILED(hr)) step = "CreateDecoderFromFilename";
+    }
 
     // 3. Get first frame
     ComPtr<IWICBitmapFrameDecode> frame;
-    hr = decoder->GetFrame(0, &frame);
-    if (FAILED(hr)) return tex;
+    if (!step) {
+        hr = decoder->GetFrame(0, &frame);
+        if (FAILED(hr)) step = "GetFrame";
+    }
 
     // 4. Convert to 32bpp BGRA
     ComPtr<IWICFormatConverter> converter;
-    hr = wicFactory->CreateFormatConverter(&converter);
-    if (FAILED(hr)) return tex;
-
-    hr = converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppBGRA,
-                                WICBitmapDitherTypeNone, nullptr, 0.0,
-                                WICBitmapPaletteTypeCustom);
-    if (FAILED(hr)) return tex;
+    if (!step) {
+        hr = wicFactory->CreateFormatConverter(&converter);
+        if (FAILED(hr)) step = "CreateFormatConverter";
+    }
+    if (!step) {
+        hr = converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppBGRA,
+                                    WICBitmapDitherTypeNone, nullptr, 0.0,
+                                    WICBitmapPaletteTypeCustom);
+        if (FAILED(hr)) step = "FormatConverter::Initialize";
+    }
 
     // 5. Get dimensions and copy pixels
-    UINT w, h;
-    converter->GetSize(&w, &h);
+    if (!step) {
+        converter->GetSize(&w, &h);
+        pixels.resize((size_t)w * 4 * h);
+        hr = converter->CopyPixels(nullptr, w * 4, (UINT)pixels.size(), pixels.data());
+        if (FAILED(hr)) step = "CopyPixels";
+    }
 
-    UINT rowPitch = w * 4;
-    std::vector<BYTE> pixels(rowPitch * h);
-    hr = converter->CopyPixels(nullptr, rowPitch, (UINT)pixels.size(), pixels.data());
-    if (FAILED(hr)) return tex;
+    // 5b. WIC declined. It has no TGA codec at all, and its DDS codec rejects
+    // 24bpp because no DXGI format matches — yet both extensions are offered by
+    // texture_exts, so without this the caller says "texture NOT found" about a
+    // file that exists and is perfectly good (#319).
+    if (step) {
+        const HRESULT wicHr = hr;
+        const char* why = "unreadable";
+        std::vector<BYTE> raw;
+        bool got = false;
+        if (ReadWholeFile(szFilename, raw)) {
+            // A DDS says so in its first four bytes; a TGA has no magic number
+            // at all, so it is only ever the second thing tried.
+            const char* ddsWhy = nullptr;
+            const char* tgaWhy = nullptr;
+            const bool isDds = raw.size() >= 4 && memcmp(raw.data(), "DDS ", 4) == 0;
+            got = isDds ? DecodeDDS(raw, pixels, w, h, &ddsWhy)
+                        : DecodeTGA(raw, pixels, w, h, &tgaWhy);
+            if (!got) why = isDds ? ddsWhy : tgaWhy;
+            if (!why) why = "no decoder";
+        } else {
+            why = "could not be read";
+        }
+
+        if (!got) {
+            DebugLogWFmt(LOG_WARN, L"DX12: texture load failed: %s (WIC %S hr=0x%08X, %S)",
+                         szFilename, step, (unsigned)wicHr, why);
+            return tex;
+        }
+        DebugLogWFmt(LOG_INFO, L"DX12: %s decoded without WIC (%ux%u; WIC %S hr=0x%08X)",
+                     szFilename, w, h, step, (unsigned)wicHr);
+    }
+
+    // 5c. Cap the longest edge (#349).
+    //
+    // Nothing used to limit this, so a texture cost whatever the camera
+    // produced. Measured on the live random-texture library: ~2,500 photos at
+    // 4160x3120, which is 66 MB of VRAM EACH once mipped, whether the JPEG on
+    // disk is 0.7 MB or 8.6 MB. A preset naming two to five of them cost
+    // 100-300 MB, and because the selection is random the cache never scored a
+    // hit -- it filled with one-shot textures and churned at its cap.
+    //
+    // A MilkDrop texture is sampled across a warped mesh at render resolution,
+    // so anything above that is decoded, uploaded, mipped, evicted and reloaded
+    // without ever reaching a pixel. Measured: capping that same photo to 1024
+    // and sampling it 1:1 with no warp -- the hardest case for a downscale to
+    // survive -- is BIT-IDENTICAL at 1200x1600 and at 2160x3840. Max absolute
+    // difference zero across every channel.
+    //
+    // Box filter rather than anything cleverer: each destination pixel averages
+    // exactly the source rect it covers, which is what a mip reduction does
+    // anyway, and CreateTextureFromPixels builds the real chain from the result.
+    if (GetMaxTextureDim() > 0 &&
+        (w > (UINT)GetMaxTextureDim() || h > (UINT)GetMaxTextureDim())) {
+        const UINT cap = (UINT)GetMaxTextureDim();
+        const UINT longest = (w > h) ? w : h;
+        UINT nw = (UINT)(((UINT64)w * cap) / longest);
+        UINT nh = (UINT)(((UINT64)h * cap) / longest);
+        if (nw < 1) nw = 1;
+        if (nh < 1) nh = 1;
+        std::vector<BYTE> shrunk((size_t)nw * 4 * nh);
+        for (UINT y = 0; y < nh; y++) {
+            const UINT sy0 = (UINT)(((UINT64)y * h) / nh);
+            UINT sy1 = (UINT)(((UINT64)(y + 1) * h) / nh);
+            if (sy1 <= sy0) sy1 = sy0 + 1;
+            for (UINT x = 0; x < nw; x++) {
+                const UINT sx0 = (UINT)(((UINT64)x * w) / nw);
+                UINT sx1 = (UINT)(((UINT64)(x + 1) * w) / nw);
+                if (sx1 <= sx0) sx1 = sx0 + 1;
+                UINT32 acc[4] = { 0, 0, 0, 0 };
+                UINT n = 0;
+                for (UINT sy = sy0; sy < sy1 && sy < h; sy++) {
+                    const BYTE* row = pixels.data() + (size_t)sy * w * 4;
+                    for (UINT sx = sx0; sx < sx1 && sx < w; sx++) {
+                        const BYTE* p = row + (size_t)sx * 4;
+                        acc[0] += p[0]; acc[1] += p[1];
+                        acc[2] += p[2]; acc[3] += p[3];
+                        n++;
+                    }
+                }
+                if (!n) n = 1;
+                BYTE* d = shrunk.data() + ((size_t)y * nw + x) * 4;
+                d[0] = (BYTE)(acc[0] / n); d[1] = (BYTE)(acc[1] / n);
+                d[2] = (BYTE)(acc[2] / n); d[3] = (BYTE)(acc[3] / n);
+            }
+        }
+        DebugLogWFmt(LOG_INFO, L"DX12: capped %s %ux%u -> %ux%u (%.1f MB -> %.1f MB)",
+                     szFilename, w, h, nw, nh,
+                     (double)w * h * 4 * 4 / 3 / 1048576.0,
+                     (double)nw * nh * 4 * 4 / 3 / 1048576.0);
+        pixels.swap(shrunk);
+        w = nw;
+        h = nh;
+    }
 
     // 6. Upload via CreateTextureFromPixels (BGRA matches DXGI_FORMAT_B8G8R8A8_UNORM).
     // genMips: disk textures need the full chain for preset LOD-blur sampling.
-    tex = CreateTextureFromPixels(pixels.data(), w, h, rowPitch,
+    tex = CreateTextureFromPixels(pixels.data(), w, h, w * 4,
                                   DXGI_FORMAT_B8G8R8A8_UNORM, true);
 
     if (tex.resource) {
@@ -2417,12 +3305,21 @@ void DXContext::CreateBindingBlockForTexture(DX12Texture& tex)
 {
     if (m_nullTexture.srvIndex == UINT_MAX || tex.srvIndex == UINT_MAX) return;
 
-    // Reserve 32 contiguous SRV slots for this texture's binding block
-    if (m_nextFreeSrvSlot + BINDING_BLOCK_SIZE > DXC_MAX_SRV) {
-        DebugLogA("ERROR: SRV heap overflow in CreateBindingBlockForTexture!", LOG_ERROR);
-        return;
+    // A recycled block first (#312). Blocks must be contiguous, so they are
+    // kept on their own free list and never satisfied from single slots.
+    bool recycled = false;
+    if (!m_freeBindingBlocks.empty()) {
+        tex.bindingBlockStart = m_freeBindingBlocks.back();
+        m_freeBindingBlocks.pop_back();
+        recycled = true;
+    } else {
+        // Reserve 32 contiguous SRV slots for this texture's binding block
+        if (m_nextFreeSrvSlot + BINDING_BLOCK_SIZE > DXC_MAX_SRV) {
+            DebugLogA("ERROR: SRV heap overflow in CreateBindingBlockForTexture!", LOG_ERROR);
+            return;
+        }
+        tex.bindingBlockStart = m_nextFreeSrvSlot;
     }
-    tex.bindingBlockStart = m_nextFreeSrvSlot;
 
     // Sources are m_srvHeapCpu (readable mirror), not m_srvHeap -- reading
     // m_srvHeap's own CPU handles as a copy source is invalid D3D12 usage
@@ -2439,12 +3336,15 @@ void DXContext::CreateBindingBlockForTexture(DX12Texture& tex)
     for (UINT i = 0; i < BINDING_BLOCK_SIZE; i++) {
         D3D12_CPU_DESCRIPTOR_HANDLE dst;
         dst.ptr = m_srvHeap->GetCPUDescriptorHandleForHeapStart().ptr +
-                  (SIZE_T)m_nextFreeSrvSlot * m_srvDescriptorSize;
+                  (SIZE_T)(tex.bindingBlockStart + i) * m_srvDescriptorSize;
         // Slot 0 = the actual texture, slots 1-31 = null (safe placeholder)
         m_device->CopyDescriptorsSimple(1, dst, (i == 0) ? texSrvCpu : nullSrvCpu,
                                          D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-        m_nextFreeSrvSlot++;
     }
+    // Only a FRESH block advances the high-water mark; a recycled one was
+    // already accounted for when it was first handed out.
+    if (!recycled)
+        m_nextFreeSrvSlot += BINDING_BLOCK_SIZE;
 }
 
 D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetBindingBlockGpuHandle(const DX12Texture& tex)
@@ -2673,14 +3573,23 @@ bool DXContext::AllocateBlurBindings()
     return true;
 }
 
-void DXContext::UpdateBlurPassBinding(UINT passIndex, UINT sourceSrvIndex)
+void DXContext::UpdateBlurPassBinding(UINT passIndex, UINT sourceSrvIndex,
+                                      UINT baseOverride)
 {
-    if (m_blurBindingBase == UINT_MAX || passIndex >= MAX_BLUR_PASSES) return;
+    if (passIndex >= MAX_BLUR_PASSES) return;
+    if (baseOverride == UINT_MAX && m_blurBindingBase == UINT_MAX) return;
 
-    // Each frame gets MAX_BLUR_PASSES × 16 slots
-    UINT blockBase = m_blurBindingBase +
-                     m_frameIndex * MAX_BLUR_PASSES * BINDING_BLOCK_SIZE +
-                     passIndex * BINDING_BLOCK_SIZE;
+    // A caller with its own blocks brings its own base, already carrying its
+    // frame rotation -- and note m_frameIndex is NOT read on that path. It is
+    // the render thread's, written non-atomically, so a mirror worker reading
+    // it mid-record could bind a block it never wrote (#209).
+    //
+    // Each frame gets MAX_BLUR_PASSES x BINDING_BLOCK_SIZE slots.
+    const UINT blockBase = (baseOverride != UINT_MAX)
+        ? baseOverride + passIndex * BINDING_BLOCK_SIZE
+        : m_blurBindingBase +
+          m_frameIndex * MAX_BLUR_PASSES * BINDING_BLOCK_SIZE +
+          passIndex * BINDING_BLOCK_SIZE;
 
     // Sources are m_srvHeapCpu, not m_srvHeap -- forgejo#16. Also runs every
     // frame (MAX_BLUR_PASSES x 32 slots), the second-largest contributor
@@ -2709,11 +3618,14 @@ void DXContext::UpdateBlurPassBinding(UINT passIndex, UINT sourceSrvIndex)
     }
 }
 
-D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetBlurPassBindingGpuHandle(UINT passIndex)
+D3D12_GPU_DESCRIPTOR_HANDLE DXContext::GetBlurPassBindingGpuHandle(UINT passIndex,
+                                                                   UINT baseOverride)
 {
-    UINT slot = m_blurBindingBase +
-                m_frameIndex * MAX_BLUR_PASSES * BINDING_BLOCK_SIZE +
-                passIndex * BINDING_BLOCK_SIZE;
+    UINT slot = (baseOverride != UINT_MAX)
+        ? baseOverride + passIndex * BINDING_BLOCK_SIZE
+        : m_blurBindingBase +
+          m_frameIndex * MAX_BLUR_PASSES * BINDING_BLOCK_SIZE +
+          passIndex * BINDING_BLOCK_SIZE;
     D3D12_GPU_DESCRIPTOR_HANDLE h;
     h.ptr = m_srvHeap->GetGPUDescriptorHandleForHeapStart().ptr +
             (SIZE_T)slot * m_srvDescriptorSize;

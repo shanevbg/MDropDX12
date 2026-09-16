@@ -1,5 +1,198 @@
 # MDropDX12 Changelog
 
+## v3.1.0 (2026-09-16)
+
+**Video memory stopped growing without bound.** A long unattended session used
+to exhaust the card and close the visualiser — which looked like a clean exit
+and was really a leak arriving. Four separate causes, each only visible once
+the one before it was gone.
+
+- **The texture cache now evicts.** Both of its limits were read at startup,
+  written back at shutdown, and compared against nothing in between; the
+  eviction function had no callers at all. Fifty presets took the cache from
+  2 MB to 3,228 MB against a configured 2,000 MB, and a 1,270-preset sweep
+  reached 13.4 GB before the low-VRAM guard closed the app.
+- A texture is never evicted while a shader that could draw next frame still
+  has it bound. Age alone is a poor proxy for "unused": a `.milk2` keeps two
+  presets resident, and a display running its own preset is on its own
+  timeline.
+- **Texture sizes are measured from the graphics device**, not from
+  width x height x 4. The old figure counted the base image and ignored the
+  mip chain, so `MaxBytes=2000` was really holding about 2.8 GB. The plateau
+  fell by 794 MB, and it explained a long-unaccounted ~750 MB that had been
+  attributed to several other things.
+- **Textures loaded from disk are capped at 1024 pixels on the longest edge**,
+  downscaled on load. A 4000-pixel photo sampled onto a mesh costs 16x the
+  memory of a 1024 version and looks the same. Raisable over IPC. A real
+  library's plateau moved from ~3,100 MB to ~1,455 MB.
+- **Shadertoy feedback buffers are allocated on demand and given back.** A
+  `.milk3` can declare four; the engine allocated all four, in 32-bit float,
+  per rendering surface, from startup, for the life of the process — 128 bytes
+  a pixel per surface. Now only the ones the preset declares, released after a
+  debounced delay with no `.milk3` on screen.
+- **The descriptor heap holds an independent mirror on every display.** Exactly
+  two fitted before; the third failed 76 times with "heap full" and drew the
+  missing-texture placeholder. Retired displays hand their reservations back.
+- Mirror swap chains size themselves from the VRAM budget rather than a fixed
+  number.
+
+**A lost graphics device is recovered from, not fatal.** A GPU timeout used to
+close the visualiser. It now rebuilds and carries on — the intended design; the
+exit was a regression.
+
+- Sprite textures are retired on a fence instead of being freed mid-frame while
+  a submitted command list still names them.
+- Loading a preset no longer frees GPU state a display's render list is using.
+- A mirror's own snapshot is no longer freed mid-frame.
+- A device removal now reports which draw call hung and which surface submitted
+  it, instead of a generic error.
+- **A per-preset frame-rate ceiling**, so one expensive preset lowers its own
+  rate rather than running the machine into a timeout. The heaviest preset in
+  the test library costs 26-31.8 ms of GPU a frame against 75-130 us for an
+  ordinary one.
+
+**Displays rendering their own presets stopped writing into each other.** The
+composite mesh, the warp and composite constants, the blur passes, the texture
+bindings and the `.milk2` blend field were engine-wide and are now per display.
+The visible symptom was "presets are rendering but they're incorrect", which is
+what a shader reading another preset's textures looks like.
+
+- Two displays each set to their own preset no longer render the *same* preset.
+  Their reservations in the descriptor heap could overlap, and whichever wrote
+  last won — while each display's own bookkeeping stayed entirely correct,
+  which is what made it hard to see.
+- The Resource Viewer and the cache diagnostic read a snapshot the render
+  thread publishes, rather than walking engine state from a window thread while
+  it is being rewritten.
+
+**Separate processes per display are gone, and that was the performance win.**
+The belief that heavy presets should be isolated into their own process had
+survived weeks on plausible reasoning and no measurement. Measured, it was
+backwards: Windows holds an unfocused window to about 66 fps, so an isolated
+display ran at a third of the requested rate however much hardware was idle.
+
+- Three independent simulations in one process cost +100 MB of VRAM (0.66% of a
+  15 GB budget) and 75-130 us of GPU per surface. Moving the heaviest preset
+  back in-process took the side displays from 15.4 and 15.8 fps to 26.1, GPU
+  per surface down 3.6x. See `docs/multidisplay_cost.md`.
+- **Adaptive frame-rate balancing** replaces automatic isolation: a short ladder
+  that lowers the cap, then falls back to the cheapest copy that fits.
+- Starvation must be sustained rather than sampled — one slow frame is not a
+  problem.
+- The ladder does not react to a rate Windows imposed. A backgrounded window at
+  22 fps with the GPU at 20% is unfocused, not distressed, and treating it as
+  starvation made it worse.
+- Ladder triggers scale with the frame rate you asked for instead of assuming
+  60.
+- The engine no longer holds its mirror lock across presenting a frame, and
+  mirrors are paced on measured GPU time rather than wall clock.
+
+**A setting stays where you put it.** A loaded display profile used to *lend*
+its main-window settings — preset order, cycle interval — to the session,
+keeping your own values hidden underneath to be restored at shutdown. Different
+parts of the program then disagreed about which value was real: saving a profile
+recorded one, shutting down recorded the other, and only some of the ways you
+can change the setting cleared the loan.
+
+- Loading a profile now changes the setting like any other change, and saving
+  records what is actually in use.
+- **Keep on top** for a display is applied when set, rather than stored and
+  ignored until toggled off and on.
+- **Next preset** no longer skips displays holding their own preset.
+- The display loader no longer drops per-display settings, destroying them.
+
+**Presets that would not load before.** Sampler declaration lists,
+`sampler_rand` in all four spellings, `tex1D`, preset-declared sampler
+addressing, struct member defaults and preset-level globals.
+
+- DDS and TGA files that Windows' own imaging component refuses to decode.
+- Textures kept in a folder *beside* the preset folder, an older MilkDrop
+  convention this engine had stopped looking in.
+- Random textures with a prefix reach your own collection, not only the bundled
+  set.
+- The shader cache no longer follows the working directory.
+- A blank startup screen with an elapsed-second counter, so a slow first load
+  looks like work rather than a hang.
+- Startup no longer reports an empty preset directory that has 933 files in it.
+
+**The zip now comes with something to look at.** 93 community MilkDrop presets
+and 25 photographs, so a fresh install does something on first run instead of
+asking you to go and find a preset library.
+
+- Classic-lineage `.milk` presets — Flexi, Geiss, Se7enSlasher, martin,
+  fiShbRaiN, Stahlregen, Rovastar, Cope, Zylot, Aderrasi, Krash and others,
+  credited in full in `resources/CREDITS.md`.
+- No Shadertoy or GLSL Sandbox conversions. Those carry their original authors'
+  terms and some forbid redistribution outright.
+- No preset in the bundle needs a texture that cannot ship: each uses either no
+  image or the `randNN` slots, which the bundled photographs fill.
+- The photographs are the author's own, downscaled to 1024 pixels on the longest
+  edge — the engine's new default cap, past which the detail is invisible once
+  an image is sampled onto a warp mesh.
+- Nothing in it is required. Point the app at your own library from
+  Settings → Files, and it still starts on a preset compiled into the exe.
+
+**Scripts can drive a test and report on it**, including sweeping a library and
+reporting which presets failed to compile. `GET_WINDOW` / `GET_WINDOWS` report
+where the program's windows are and tell the render windows apart.
+
+**Mirror watermark survives being used.** It worked exactly once per session:
+turning it off and back on left every panel frozen on the single frame the
+first draw managed, and on some machines the toggle took the GPU down with it
+and closed the visualiser. Both are fixed, along with the stale frames that
+showed up as tearing on a mirrored display.
+
+- Mirror watermark can be turned off and on as often as you like. A display
+  whose simulation had been torn down never restarted it, so the panel froze
+  on its first frame and stayed there.
+- Toggling mirror watermark no longer removes the graphics device. The
+  visualiser detected the loss and exited cleanly, which looked like it had
+  simply vanished.
+- Mirrored displays no longer show bands of an older frame after a resize or
+  a display-profile load. The wipe that clears them had not run since August.
+- **Delete a display profile** from the Displays window. Profiles could be
+  saved but only removed by finding the folder by hand. Deleted profiles go to
+  the Recycle Bin, and the startup profile is cleared if it was the one
+  deleted.
+- Loading a display profile no longer changes what Alt-S does. Setting Alt-S
+  to "Load profile" and pressing it put the setting back to whatever the
+  profile was saved with, so the choice could never survive being used.
+- A display profile no longer brings back every own-preset display as a
+  mirror.
+
+**Walking away can set the whole room up.** The idle timer could put one window
+fullscreen or turn the mirrors on, and that was the extent of it — so a setup
+left in watermark mode stayed dim, and screens nobody was looking through any
+more went on being see-through.
+
+- **The idle timer can load a display profile.** A fourth action, with the
+  profile chosen from a dropdown beside it, so the walk-away state can be a
+  whole arrangement of screens — which display plays what, in which mode — and
+  not just a window going fullscreen.
+- **All displays to 100% opacity**, as a separate option that applies with any
+  of the four actions. It reaches displays running in their own process too,
+  which the existing mirror-opacity control never did: those kept whatever
+  they were started with.
+- Idle also brings the screens to the front, and puts the z-order back on wake.
+- **The same profile is not reloaded.** If the profile idle wants is the one
+  already loaded, only the opacity and the z-order change. Reloading would have
+  torn down and respawned a display's own process purely to brighten screens
+  that were already arranged correctly.
+- **The idle timer is configurable from a remote**: timeout, action, profile
+  and the opacity option, plus `RESET_IDLE_TIMER` to restart the countdown.
+  Previously only the on/off switch was reachable.
+- Turning the idle timer off from the Settings window no longer strands what it
+  had put on screen. Unticking the box forgot that idle was active without
+  undoing it, so the fullscreen and the mirrors stayed up with nothing left
+  that knew how to take them down.
+- Changing the Action while idle is on screen no longer restores through the
+  wrong branch. Restore now follows the action that actually fired.
+- With the action set to Fullscreen and the window already fullscreen, the idle
+  timer no longer re-fires every second for as long as you are away.
+- A crash while the idle timer had a profile applied no longer leaves that
+  profile as your normal setup: the previous state is banked first and restored
+  at the next start.
+
 ## v3.0.0 (2026-09-09)
 
 **Every screen gets its own preset.** That is the release in one line, and

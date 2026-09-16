@@ -255,7 +255,7 @@ IDS_FILE_ALREADY_EXISTS_OVERWRITE_IT
 "This file already exists.  Overwrite it?  [y/N]"
 IDS_FILE_IN_QUESTION_X_MILK "(file in question: %s.milk)"
 IDS_ERROR_NO_PRESET_FILE_FOUND_IN_X_MILK
-"ERROR: No preset files found in %s*.milk"
+"ERROR: No preset files found in %s*.milk, *.milk2 or *.milk3"
 IDS_LOAD_WHICH_PRESET_PLUS_COMMANDS
 "Load which preset?  (arrow keys to scroll; Esc/close, Enter/select, INS/rename; DEL/delete)"
 END

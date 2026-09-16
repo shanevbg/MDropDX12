@@ -2,6 +2,7 @@
 
 #include <windows.h>
 #include <string>
+#include <vector>
 
 // Looking at a tool window from outside the process (issue 154).
 //
@@ -51,7 +52,57 @@ void SendWindowControlDump(const std::wstring& title);
 // Reports WINDOW_CAPTURE=ERROR with a reason on failure.
 void SendWindowCapture(const std::wstring& title, const std::wstring& baseDir);
 
-// Handles DIAG_WINDOW= and CAPTURE_WINDOW=; true when it took the message.
+// What only the engine knows about one of its windows.
+//
+// EnumWindows can find a window and measure it, but it cannot say what the
+// window is FOR, and with several displays that is the whole question: the
+// primary render window, an in-process mirror and a child's render window are
+// three different things that look alike from outside. Worse, a child runs in
+// its own PROCESS, so an enumeration filtered to our own pid cannot see it at
+// all -- it has to be contributed here or it is simply missing.
+struct KnownWindow {
+  HWND         hWnd = nullptr;   // null when a child's window is not up yet
+  std::wstring role;             // render | mirror | child
+  int          display = 0;      // 1-based, matching GET_DISPLAY_MODE; 0 = none
+  std::wstring device;           // \\.\DISPLAYn, or empty
+  DWORD        pid = 0;          // non-zero only for another process's window
+};
+
+// Every top-level window this process owns, with where it is: one WINDOW| line
+// per window, then WINDOWS_END (#259).
+//
+//   WINDOW|title=|class=|x=|y=|w=|h=|client=WxH|display=|visible=|minimized=
+//         |maximized=|topmost=|dpi=
+//
+// Screen coordinates, because that is the frame a layout reasons in. client=
+// is not redundant with w/h: the render cost, the swap chain and every capture
+// are client-sized, while a layout has to reserve the FRAME, and on a tool
+// window the two differ by the caption and border.
+//
+// Hidden windows are listed with visible=0 rather than filtered -- a child in
+// hidden mode is a real window with a real rect. Zero-area windows are dropped:
+// the IME plumbing Windows attaches to every process has a title and would
+// otherwise be three rows of noise. A CLOSED tool window does not appear at
+// all, because ToolWindow::Close destroys it rather than hiding it.
+//
+// `known` labels the rows: anything matched by HWND gets its role, display
+// index and device name, anything else is role=tool, and any entry belonging
+// to another process is appended, since the enumeration cannot reach it.
+void SendWindowList(const std::vector<KnownWindow>& known);
+
+// One window: the render window when title is empty, else a title match.
+// Sends WINDOW|… or WINDOW=NOTFOUND.
+void SendWindowGeometry(const std::wstring& title,
+                        const std::vector<KnownWindow>& known);
+
+// Handles GET_WINDOWS, GET_WINDOW[=], DIAG_WINDOW= and CAPTURE_WINDOW=;
+// true when it took the message.
+//
+// hRender is passed in rather than reached for. This file is deliberately
+// standalone -- format_to.h and pipe_server.h and nothing else -- so that it
+// stays compilable in isolation and cheap to reason about; including engine.h
+// for one handle would undo that for no gain. baseDir arrives the same way and
+// for the same reason.
 //
 // A dispatcher of its own, consulted beside HandleDisplayModeIPC and the rest,
 // rather than two more arms on LaunchMessage's else-if chain. That is not a
@@ -61,6 +112,7 @@ void SendWindowCapture(const std::wstring& title, const std::wstring& baseDir);
 //
 // so that chain is AT the compiler's limit and cannot take another arm. Any
 // new IPC command needs a small handler like this one.
-bool HandleWindowDiagIPC(const wchar_t* sMessage, const std::wstring& baseDir);
+bool HandleWindowDiagIPC(const wchar_t* sMessage, const std::wstring& baseDir,
+                         const std::vector<KnownWindow>& known);
 
 }  // namespace mdrop

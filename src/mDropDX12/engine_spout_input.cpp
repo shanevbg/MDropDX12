@@ -246,7 +246,7 @@ void Engine::CompositeVideoInputFX(bool isBackground, DX12Texture& tex, UINT src
     if (!m_pVideoFX_PSO_Alpha)
         return;
 
-    auto* cmdList = m_lpDX->GetActiveCmdList();
+    auto* cmdList = CmdListFor(rc);
     if (!cmdList)
         return;
 
@@ -443,6 +443,13 @@ void Engine::DestroySpoutInput()
     if (!m_spoutInput) return;
     auto& si = *m_spoutInput;
 
+    // The comp pass and every mirror sample dx12InputTex, so a submitted list
+    // can still be reading it (#214). Drain first -- WaitForGpu takes the
+    // mirror queues with it. This runs on a source change or at shutdown, not
+    // per frame, so the stall is the cheap remedy rather than the wrong one.
+    if (m_lpDX)
+        m_lpDX->WaitForGpu();
+
     si.dx12InputTex.Reset();
     si.pReceivedTexture.Reset();
 
@@ -469,6 +476,19 @@ void Engine::UpdateSpoutInputTexture()
     }
 
     auto& si = *m_spoutInput;
+
+    // COPY_DEST for the receive, here rather than after the composite (#213).
+    //
+    // Receive() is what needs this state, and it runs on the render thread,
+    // once. It used to be restored at the END of compositing instead -- by
+    // whichever recorder got there, including mirror workers -- which is how a
+    // shared texture's state ended up being written from several threads. Doing
+    // it immediately before the call that needs it keeps the whole COPY_DEST
+    // window on one thread and leaves the texture in PIXEL_SHADER_RESOURCE for
+    // the rest of the frame, which is when mirrors sample it.
+    if (si.dx12InputTex.IsValid())
+        m_lpDX->TransitionResource(si.dx12InputTex,
+                                   D3D12_RESOURCE_STATE_COPY_DEST);
 
     // Receive from Spout sender
     ID3D12Resource* pRaw = si.pReceivedTexture.Get();
@@ -534,6 +554,24 @@ void Engine::UpdateSpoutInputTexture()
         wchar_t msg[] = L"Spout Input: Sender disconnected";
         AddNotification(msg);
     }
+
+    // Park it in PIXEL_SHADER_RESOURCE before anyone samples it (#213).
+    //
+    // This function is the ONLY writer of this texture's state now, and it runs
+    // on the render thread. Recorders -- the primary and every mirror surface --
+    // used to each transition it to PIXEL_SHADER_RESOURCE to sample and back to
+    // COPY_DEST afterwards, which meant N threads read-modify-writing one
+    // DX12Texture::currentState for one resource. A barrier built from a stale
+    // read disagrees with the resource's real state, and in Release that is
+    // silent until it is a device removal.
+    //
+    // Leaving it here costs nothing: Receive() above is what needs COPY_DEST,
+    // and it happens before this line, once, on this thread. Every transition a
+    // recorder still asks for now finds the state already correct and returns
+    // early, so what was a write from many threads is a read from many threads.
+    if (si.dx12InputTex.IsValid())
+        m_lpDX->TransitionResource(si.dx12InputTex,
+                                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }
 
 // ---------------------------------------------------------------------------
@@ -548,9 +586,9 @@ void Engine::CompositeSpoutInput(bool isBackground)
 
     auto& si = *m_spoutInput;
     CompositeVideoInput(isBackground, si.dx12InputTex, si.nSenderWidth, si.nSenderHeight);
-
-    // Transition back to COPY_DEST for next frame's Receive()
-    m_lpDX->TransitionResource(si.dx12InputTex, D3D12_RESOURCE_STATE_COPY_DEST);
+    // No transition back. UpdateSpoutInputTexture takes COPY_DEST immediately
+    // before the Receive() that needs it, so the state is owned by one thread
+    // and the texture stays sampleable for every recorder in between (#213).
 }
 
 // ---------------------------------------------------------------------------
@@ -562,7 +600,7 @@ void Engine::CompositeVideoInput(bool isBackground, DX12Texture& tex, UINT srcW,
     if (!tex.IsValid() || !m_pSpoutInputPSO || !srcW || !srcH)
         return;
 
-    auto* cmdList = m_lpDX->GetActiveCmdList();
+    auto* cmdList = CmdListFor(rc);
     if (!cmdList)
         return;
 
@@ -853,11 +891,19 @@ void Engine::SaveSpoutInputSettings()
     swprintf(buf, 64, L"%.2f", m_fSpoutInputLumaSoftness);
     Config().SetString(L"SpoutInput", L"LumaSoftness", buf);
 
-    Config().SetString(L"SpoutInput", L"SenderName", m_szSpoutInputSender);
+    // What -spoutin DISPLACED, not what it set (#213). A launch override must
+    // not turn into a configuration change, or a test run leaves the user's
+    // Spout input enabled and pointed at a test sender.
+    const wchar_t* senderToSave = Engine::s_bCmdLineSpoutIn
+        ? m_szSpoutSenderDisplaced : m_szSpoutInputSender;
+    const int srcToSave = Engine::s_bCmdLineSpoutIn
+        ? m_nVideoSourceDisplaced : m_nVideoInputSource;
+
+    Config().SetString(L"SpoutInput", L"SenderName", senderToSave);
 
     // Video input source
     wchar_t srcBuf[8];
-    swprintf(srcBuf, 8, L"%d", m_nVideoInputSource);
+    swprintf(srcBuf, 8, L"%d", srcToSave);
     Config().SetString(L"SpoutInput", L"Source", srcBuf);
 
     Config().SetString(L"SpoutInput", L"WebcamDevice", m_szWebcamDevice);
@@ -889,3 +935,42 @@ void Engine::SaveSpoutInputSettings()
 // (SaveVideoFXProfile / LoadVideoFXProfile, in engine_video_effects_ui.cpp).
 
 } // namespace mdrop
+
+bool    mdrop::Engine::s_bCmdLineSpoutOut = false;
+bool    mdrop::Engine::s_bCmdLineSpoutIn = false;
+wchar_t mdrop::Engine::s_szCmdLineSpoutInSender[256] = L"";
+
+// Apply the command-line Spout switches, AFTER LoadSpoutInputSettings so they
+// win over the persisted values, and remembering what they displaced so the
+// save path can put it back (#213).
+//
+// Deliberately no SaveSpoutInputSettings() call here -- that is the whole
+// point. The IPC verb SPOUTINPUT= does save, because a user asking for it over
+// the pipe is changing their configuration; a launch flag is not.
+void mdrop::Engine::ApplyCommandLineSpout()
+{
+    if (s_bCmdLineSpoutOut) {
+        m_bSpoutOutDisplaced = bSpoutOut;
+        bSpoutOut = true;
+        // WARN, not INFO: these put the app in a non-default state for the
+        // whole run, and the default log level is 2. A switch whose only
+        // record is filtered out is a switch you cannot tell fired.
+        DebugLogA("-spoutout: Spout output on for this run; not saved\n", LOG_WARN);
+    }
+    if (s_bCmdLineSpoutIn) {
+        m_nVideoSourceDisplaced = m_nVideoInputSource;
+        wcsncpy_s(m_szSpoutSenderDisplaced, m_szSpoutInputSender, _TRUNCATE);
+        if (s_szCmdLineSpoutInSender[0])
+            wcsncpy_s(m_szSpoutInputSender, s_szCmdLineSpoutInSender, _TRUNCATE);
+        m_nVideoInputSource = VID_SOURCE_SPOUT;
+        m_bSpoutInputEnabled = true;
+        // NOT InitSpoutInput() here. This runs from MyReadConfig, before
+        // the DX12 device exists, so an eager call only logs "SpoutInput:
+        // No DX12 device" and achieves nothing. UpdateSpoutInputTexture
+        // already lazy-inits on its first call, which is after the device
+        // is up -- that is the path that actually brings the receiver in.
+        DebugLogW((std::wstring(L"-spoutin: Spout input on for this run, sender='")
+                   + (m_szSpoutInputSender[0] ? m_szSpoutInputSender : L"(any)")
+                   + L"'; not saved\n").c_str(), LOG_WARN);
+    }
+}

@@ -529,7 +529,7 @@ void WorkspaceLayoutWindow::ApplyLayout() {
                 // Unreachable in a child today -- tool windows are refused in
                 // child mode -- but the rule lives in one place so it cannot
                 // drift if that ever changes.
-                SetWindowLongPtrW(hRender, GWL_EXSTYLE, RenderWindowTaskbarExStyle(false));
+                SetWindowLongPtrW(hRender, GWL_EXSTYLE, RenderWindowTaskbarExStyle(p->m_bChildMode));
                 SetWindowPos(hRender, HWND_TOPMOST, rc.left, rc.top, mw, mh,
                              SWP_DRAWFRAME | SWP_FRAMECHANGED);
                 p->SetVariableBackBuffer(mw, mh);

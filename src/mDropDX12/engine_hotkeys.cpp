@@ -666,10 +666,11 @@ static bool AnotherFullInstanceIsRunning()
 // Which of the three things a registration pass does in this process.
 //
 // The whole point of routing both the pass and the diagnostics through one
-// function is that they cannot disagree. Do not re-test IsTestInstance() at a
-// call site; ask here.
+// function is that they cannot disagree. Do not re-test m_bChildMode or
+// IsTestInstance() at a call site; ask here.
 GlobalHotkeyMode Engine::GlobalHotkeyRegistrationMode() const
 {
+    if (m_bChildMode)    return GHKMODE_NONE;
     if (IsTestInstance()) return GHKMODE_PROBE;
     return GHKMODE_REGISTER;
 }
@@ -1074,7 +1075,11 @@ bool Engine::DispatchHotkeyAction(int actionId)
         SendSettingsInfoToMDropDX12Remote();
         return true;
     case HK_TOGGLE_RANDOM:
-        m_bSequentialPresetOrder = !m_bSequentialPresetOrder;
+        // Through the one writer, so the change takes the value back off a
+        // display profile's session-only loan (#356). A bare flip left the
+        // loan standing, and both the profile save and the shutdown save then
+        // wrote the profile's value rather than the one just chosen.
+        SetMainRenderOrder(!m_bSequentialPresetOrder);
         AddNotification(m_bSequentialPresetOrder ? L"Preset order: Sequential" : L"Preset order: Random");
         m_presetHistory[0] = m_szCurrentPresetFile;
         m_presetHistoryPos = 0;
@@ -1281,11 +1286,17 @@ bool Engine::DispatchHotkeyAction(int actionId)
     case HK_FPS_CYCLE:
         if (hRender) PostMessage(hRender, WM_MW_HOTKEY_ACTION, (WPARAM)actionId, 0);
         return true;
+    // The three HUD toggles relay their RESOLVED state to the children, so
+    // one keypress moves every screen rather than only the primary's. Sent
+    // after the flip, not as a toggle: a child that missed a message would
+    // otherwise end up showing the inverse of what the parent shows.
     case HK_SHOW_PRESET_INFO:
         m_bShowPresetInfo = !m_bShowPresetInfo;
+        RelayHudStateToChildren();
         return true;
     case HK_SHOW_FPS:
         m_bShowFPS = !m_bShowFPS;
+        RelayHudStateToChildren();
         return true;
     case HK_SHOW_BATTERY:
         SetShowBattery(!m_bShowBattery);
@@ -1554,6 +1565,10 @@ bool Engine::DispatchHotkeyAction(int actionId)
     // ── Misc ──
     case HK_DEBUG_INFO:
         m_bShowDebugInfo = !m_bShowDebugInfo;
+        // Each process reports its OWN gpu3d/gpu share in this overlay, so
+        // relaying it is what makes per-process GPU cost readable at a glance:
+        // one figure per screen, from the process actually driving it.
+        RelayHudStateToChildren();
         return true;
     case HK_SPRITE_MODE:
         if (m_nNumericInputMode == NUMERIC_INPUT_MODE_SPRITE) {
@@ -1624,10 +1639,45 @@ static void ForceForegroundWindow(HWND hwnd)
         AttachThreadInput(foreThread, targetThread, FALSE);
 }
 
-void Engine::LaunchOrFocusApp(const std::wstring& path)
+void Engine::LaunchOrFocusApp(const std::wstring& path, const std::wstring& args)
 {
     if (path.empty()) {
         AddNotification(L"No app configured");
+        return;
+    }
+
+    // With ARGUMENTS this always starts a new process, and never focuses one
+    // that is already up.
+    //
+    // Focusing is the right answer for "open my music player" -- the app is a
+    // place, and a second copy is not wanted. It is the wrong answer for
+    // "run this command", which is what arguments turn the verb into: the
+    // arguments ARE the request, and handing focus to a process started earlier
+    // with different ones silently does nothing the caller asked for. The
+    // comparison script relies on this -- it invokes a Python helper, and a
+    // previous run's window must not stand in for the run being asked for.
+    if (!args.empty()) {
+        SHELLEXECUTEINFOW sei = {};
+        sei.cbSize = sizeof(sei);
+        sei.fMask  = SEE_MASK_NOCLOSEPROCESS;
+        sei.lpVerb = L"open";
+        sei.lpFile = path.c_str();
+        sei.lpParameters = args.c_str();
+        // SW_SHOWNORMAL, not hidden: a console helper that asks a question or
+        // fails should be visible rather than leaving the script to look hung.
+        sei.nShow  = SW_SHOWNORMAL;
+        if (ShellExecuteExW(&sei)) {
+            if (sei.hProcess) CloseHandle(sei.hProcess);
+            DLOG_INFO("LAUNCH: started '%ls' with arguments '%ls'",
+                      path.c_str(), args.c_str());
+        } else {
+            wchar_t msg[MAX_PATH + 64];
+            swprintf(msg, MAX_PATH + 64, L"Could not launch %s (%lu)",
+                     path.c_str(), GetLastError());
+            AddNotification(msg);
+            DLOG_ERROR("LAUNCH failed: '%ls' args '%ls' err=%lu",
+                       path.c_str(), args.c_str(), GetLastError());
+        }
         return;
     }
 
@@ -1814,8 +1864,15 @@ void Engine::LoadIdleTimerSettings()
     if (m_nIdleTimeoutMinutes < 1) m_nIdleTimeoutMinutes = 1;
     if (m_nIdleTimeoutMinutes > 60) m_nIdleTimeoutMinutes = 60;
     m_nIdleAction = Config().GetInt(L"IdleTimer", L"Action", 0);
-    if (m_nIdleAction < 0 || m_nIdleAction > 2) m_nIdleAction = 0;
+    if (m_nIdleAction < 0 || m_nIdleAction > 3) m_nIdleAction = 0;
     m_bIdleAutoRestore = Config().GetInt(L"IdleTimer", L"AutoRestore", 1) != 0;
+    Config().GetStringTo(L"IdleTimer", L"Profile", L"", m_szIdleProfile);
+    m_bIdleFullOpacity = Config().GetInt(L"IdleTimer", L"FullOpacity", 0) != 0;
+    // The countdown is "time since the last input OR the last reset, whichever is
+    // shorter", and with no reset yet issued the second term is the app's uptime.
+    // Starting the baseline here means a freshly started app reads zero idle,
+    // which is what just having been launched means.
+    m_nIdleResetTick = GetTickCount();
 }
 
 void Engine::SaveIdleTimerSettings()
@@ -1828,6 +1885,21 @@ void Engine::SaveIdleTimerSettings()
     swprintf(buf, 64, L"%d", m_nIdleAction);
     Config().SetString(L"IdleTimer", L"Action", buf);
     Config().SetString(L"IdleTimer", L"AutoRestore", m_bIdleAutoRestore ? L"1" : L"0");
+    Config().SetString(L"IdleTimer", L"Profile", m_szIdleProfile);
+    Config().SetString(L"IdleTimer", L"FullOpacity", m_bIdleFullOpacity ? L"1" : L"0");
+}
+
+DWORD Engine::IdleElapsedMs() const
+{
+    // Both terms are unsigned DELTAS, never raw ticks, so the 49.7-day
+    // GetTickCount wrap cannot turn a short idle into a 49-day one. Comparing
+    // lii.dwTime against m_nIdleResetTick directly would do exactly that.
+    const DWORD now = GetTickCount();
+    const DWORD sinceReset = now - m_nIdleResetTick;
+    LASTINPUTINFO lii = { sizeof(lii) };
+    if (!GetLastInputInfo(&lii)) return sinceReset;
+    const DWORD sysIdle = now - lii.dwTime;
+    return (sysIdle < sinceReset) ? sysIdle : sinceReset;
 }
 
 std::wstring Engine::FormatHotkeyDisplay(UINT modifiers, UINT vk) const
@@ -2220,9 +2292,8 @@ bool Engine::HandleHotkeyDiagIPC(const wchar_t* sMessage)
     // held=1 means two different things on two different instances and the
     // reply cannot be interpreted without knowing which one sent it.
     wchar_t buf[1024];
-    // child=0 always: -child is gone (#186 phase 6), field kept for clients.
-    FormatTo(buf, L"HOTKEYS|global=%d,held=%d,failed=%d,child=0,mode=%s",
-             (int)states.size(), held, failed,
+    FormatTo(buf, L"HOTKEYS|global=%d,held=%d,failed=%d,child=%d,mode=%s",
+             (int)states.size(), held, failed, m_bChildMode ? 1 : 0,
              GlobalHotkeyModeName(GlobalHotkeyRegistrationMode()));
     g_pipeServer.Send(buf);
 

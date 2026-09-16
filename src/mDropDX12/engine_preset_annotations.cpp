@@ -165,6 +165,7 @@ static bool IsDeadAutoErrorRecord(const PresetAnnotation& a) {
     if (a.rating != 0 || !a.ratings.empty()) return false;
     if (a.useCount != 0 || a.secondsShown != 0 || !a.lastUsed.empty()) return false;
     if (a.hasShaderOverride || a.hasVfxProfile || a.hasAudioProfile || a.hasCanvasMax ||
+        a.hasFpsMax ||
         a.hasReplacementPreset)
         return false;
     return true;
@@ -306,6 +307,10 @@ void Engine::LoadPresetAnnotations()
             a.hasFeedbackDamp = true;
             a.feedbackDamp = item[L"feedbackDamp"].asFloat();
         }
+        if (item.has(L"fpsMax")) {
+            a.hasFpsMax = true;
+            a.fpsMax = item[L"fpsMax"].asInt();
+        }
 
         if (a.rating < 0) a.rating = 0;
         if (a.rating > 5) a.rating = 5;
@@ -410,6 +415,50 @@ bool Engine::IsAnnotationKnownMissing(const PresetAnnotation& a) const
 
     if (!named) return false;                       // no evidence either way
     return ResolveAnnotationPath(a).empty();        // named, and none survive
+}
+
+//----------------------------------------------------------------------
+// AnnotationCarriesUserValue - is there anything here that cannot be rebuilt?
+//
+// #192: a purge removed 105 entries carrying 638 plays and 21 hours of watch
+// time, including a rating-4 preset with a canvasMax override and the note
+// "Canvas-size feedback runaway -- the documented one". Not one of those files
+// had been deleted. They had been MOVED, by a rehome that left every recorded
+// path pointing at an abandoned directory -- which is exactly what a
+// path-existence test reports as "gone".
+//
+// The lesson is not that the path test is wrong; it answers its own question
+// honestly. It is that "no surviving path" is not sufficient grounds to
+// DESTROY something. A path can be re-learned the next time the preset plays.
+// A rating, a note, a play count and a shader error cannot be re-learned at
+// all.
+//
+// So this decides what a purge may not touch. Counters included deliberately:
+// useCount and secondsShown are measurements, and the issue's own table is the
+// argument -- 2935 plays down to 2592, 309,344 seconds down to 302,305, gone
+// in one write with nothing logged.
+bool Engine::AnnotationCarriesUserValue(const PresetAnnotation& a)
+{
+    if (a.rating != 0)            return true;
+    if (!a.ratings.empty())       return true;   // dated per-version observations
+    if (a.flags != 0)             return true;   // favourite / error / skip / broken
+    if (!a.notes.empty())         return true;
+    if (!a.tags.empty())          return true;
+    if (!a.errorText.empty())     return true;   // captured shader error
+    if (a.useCount > 0)           return true;
+    if (a.secondsShown > 0)       return true;
+    if (!a.lastUsed.empty())      return true;
+    // The override slots. Each is tri-state, so the has* flag is the question,
+    // not whether the string is empty -- present-and-empty means "explicitly
+    // none", which is itself a decision somebody made.
+    if (a.hasShaderOverride)      return true;
+    if (a.hasVfxProfile)          return true;
+    if (a.hasAudioProfile)        return true;
+    if (a.hasCanvasMax)           return true;
+    if (a.hasFpsMax)              return true;
+    if (a.hasFeedbackDamp)        return true;
+    if (a.hasReplacementPreset)   return true;
+    return false;
 }
 
 //----------------------------------------------------------------------
@@ -600,11 +649,34 @@ int Engine::RemoveMissingAnnotations()
     // Survey and erase in ONE lock hold. Two holds would let another thread
     // insert between them, and the second pass would erase a key the first
     // pass judged on different content.
+    size_t spared = 0;
+    std::vector<std::wstring> sparedNames;   // for the log, outside the lock
     const size_t removed = m_annot.with([&](AnnotStore& s) {
         std::vector<std::wstring> doomed;
-        for (auto& kv : s.byKey)
-            if (IsAnnotationKnownMissing(kv.second))
-                doomed.push_back(kv.first);
+        for (auto& kv : s.byKey) {
+            if (!IsAnnotationKnownMissing(kv.second))
+                continue;
+            // A dead path is not grounds to destroy annotation that cannot be
+            // rebuilt (#192). The file may be one rehome away, and the next
+            // play re-learns the path by itself.
+            if (AnnotationCarriesUserValue(kv.second)) {
+                ++spared;
+                if (sparedNames.size() < 12)
+                    sparedNames.push_back(kv.second.filename);
+                continue;
+            }
+            // Same content, different path, already known here: the preset is
+            // demonstrably present under another entry, so this one is a stale
+            // duplicate rather than a missing preset.
+            if (!kv.second.hash.empty()) {
+                auto it = s.byHash.find(kv.second.hash);
+                if (it != s.byHash.end() && it->second != kv.first) {
+                    ++spared;
+                    continue;
+                }
+            }
+            doomed.push_back(kv.first);
+        }
 
         for (const std::wstring& key : doomed)
             s.byKey.erase(key);
@@ -615,6 +687,19 @@ int Engine::RemoveMissingAnnotations()
         }
         return doomed.size();
     });
+
+    // SAY SO. The purge in #192 removed 105 entries and wrote not one line to
+    // debug.log, which is why it was found by diffing a git commit six weeks
+    // later instead of by anyone noticing at the time. A destructive operation
+    // on user data that leaves no record is one nobody can audit.
+    if (removed || spared) {
+        DLOG_WARN("Annotations: purge removed %d entr%s, kept %d that carry "
+                  "ratings/notes/history despite a dead path",
+                  (int)removed, removed == 1 ? L"y" : L"ies", (int)spared);
+        for (const std::wstring& n : sparedNames)
+            DLOG_INFO("Annotations:   kept %ls", n.c_str());
+    }
+
     // Outside the guard: SavePresetAnnotations writes a file.
     if (removed) SavePresetAnnotations();
     return (int)removed;
@@ -882,6 +967,8 @@ void Engine::SavePresetAnnotations()
         // explicit "no limit", which is a different state.
         if (a.hasCanvasMax)
             ss << L"      \"canvasMax\": " << a.canvasMax << L",\n";
+        if (a.hasFpsMax && a.fpsMax > 0)
+            ss << L"      \"fpsMax\": " << a.fpsMax << L",\n";
         if (a.hasFeedbackDamp)
             ss << L"      \"feedbackDamp\": " << a.feedbackDamp << L",\n";
         ss << L"      \"lastUsed\": \"" << JsonEscape(a.lastUsed) << L"\",\n";
@@ -2001,6 +2088,10 @@ Engine::ParseAnnotationsFile(const wchar_t* path)
             a.hasFeedbackDamp = true;
             a.feedbackDamp = item[L"feedbackDamp"].asFloat();
         }
+        if (item.has(L"fpsMax")) {
+            a.hasFpsMax = true;
+            a.fpsMax = item[L"fpsMax"].asInt();
+        }
         if (a.rating < 0) a.rating = 0;
         if (a.rating > 5) a.rating = 5;
         if (!a.filename.empty())
@@ -2591,6 +2682,21 @@ bool Engine::HandlePresetBrowseIPC(const wchar_t* sMessage) {
         return true;
     }
 
+    if (MSG_IS(sMessage, L"LOWER_WINDOW")) {
+        // The counterpart RAISE_WINDOW never had (#237). A display given over
+        // to the visualiser could be raised over someone's editor from a
+        // remote and then only minimised -- which blanks the screen -- or left
+        // where it was.
+        //
+        // Posted to the render window rather than done here: the window
+        // belongs to the render thread, and the raise goes the same way.
+        HWND hRender = m_lpDX ? m_lpDX->GetHwnd() : nullptr;
+        if (hRender)
+            PostMessage(hRender, WM_MW_LOWER_WINDOW, 0, 0);
+        g_pipeServer.Send(L"LOWERED=1");
+        return true;
+    }
+
     if (MSG_IS(sMessage, L"GET_PRESET_FOLDERS")) {
         // These counts sum to MORE than the number of entries, deliberately: a
         // preset in two places is in both folders. Not a partition.
@@ -2928,3 +3034,72 @@ bool Engine::HandlePresetBrowseIPC(const wchar_t* sMessage) {
 
 } // namespace mdrop
 
+
+
+//----------------------------------------------------------------------
+// SetPresetFpsMaxByFile - per-preset frame-rate ceiling (#222)
+//
+// The same shape as SetPresetCanvasMaxByFile, one axis over. 0 CLEARS the
+// flag rather than storing a zero, because absent and zero are different
+// states: absent means "inherit the user's cap", and a stored 0 would read as
+// "this preset wants unlimited", which is the one thing a ceiling must never
+// be able to say.
+//----------------------------------------------------------------------
+void mdrop::Engine::SetPresetFpsMaxByFile(const wchar_t* filenameOnly, int fps)
+{
+    if (!filenameOnly || !*filenameOnly) return;
+
+    // A scratch preset has no identity to hang this on -- same refusal the
+    // canvas setter makes, for the same reason.
+    const wchar_t* curPath = CurrentPresetLeaf();
+    if (_wcsicmp(curPath, filenameOnly) == 0 &&
+        IsScratchPreset(m_szCurrentPresetFile))
+        return;
+
+    const bool changed = m_annot.with([&](AnnotStore& s) {
+        PresetAnnotation* a = FindLocked(s, filenameOnly, /*create=*/true);
+        if (!a) return false;
+        a->fpsMax = fps;
+        a->hasFpsMax = (fps > 0);
+        s.dirty = true;
+        return true;
+    });
+    if (changed) SavePresetAnnotations();
+
+    // Only re-resolve when this is the preset actually on screen; setting a
+    // ceiling on some other preset in the browser must not change the live cap.
+    if (_wcsicmp(CurrentPresetLeaf(), filenameOnly) == 0)
+        ResolvePresetFpsCap();
+}
+
+//----------------------------------------------------------------------
+// ResolvePresetFpsCap - cache the current preset's ceiling for the limiter
+//
+// Resolved on preset apply, not per frame: EnforceMaxFPS runs on the frame
+// path and must not take the annotation lock there. Hash first, filename as
+// the fallback, exactly as EffectiveCanvasLimit does -- so a preset that moved
+// keeps its ceiling.
+//----------------------------------------------------------------------
+void mdrop::Engine::ResolvePresetFpsCap()
+{
+    int cap = 0;
+    bool found = false;
+    const char* h = m_pState ? m_pState->m_szPresetHash : "";
+    if (h && *h) {
+        const std::wstring wHash(h, h + strlen(h));
+        found = WithAnnotationByHash(wHash, [&](const PresetAnnotation& a) {
+            if (a.hasFpsMax) cap = a.fpsMax;
+        });
+    }
+    if (!found) {
+        // create=false: resolving a ceiling must not conjure an entry.
+        WithAnnotation(CurrentPresetLeaf(), /*create=*/false,
+                       [&](PresetAnnotation& a) {
+            if (a.hasFpsMax) cap = a.fpsMax;
+        });
+    }
+    if (cap != m_nPresetFpsCap) {
+        m_nPresetFpsCap = cap;
+        DLOG_INFO("Preset fps ceiling: %d (0 = inherit)", cap);
+    }
+}

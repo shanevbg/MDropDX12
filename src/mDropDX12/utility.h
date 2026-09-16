@@ -55,6 +55,24 @@ void    RemoveExtension(wchar_t* str);
 void    RemoveSingleAmpersands(wchar_t* str);
 void    TextToGuid(char* str, GUID* pGUID);
 void    GuidToText(GUID* pGUID, char* str, int nStrLen);
+// When this EXE was built, read from the exe itself rather than from
+// __DATE__/__TIME__.
+//
+// Those two expand when a TRANSLATION UNIT is compiled, not when the binary is
+// linked, so every file that uses them reports its own last compile and an
+// incremental build leaves most of them stale. Measured: VERSION said
+// "Sep 12 13:43:10" from ipc_help.cpp while the exe had been linked on Sep 14
+// at 04:34:27, and the About tab -- built from a different file again -- showed
+// a third value. A build time that is really "when this one source file last
+// compiled" is worse than none, because it is read as the former.
+//
+// The file's last-write time is set once per link and is the same answer no
+// matter who asks. Format matches what __DATE__ " " __TIME__ produced
+// ("Mmm dd yyyy HH:MM:SS") so nothing reading these strings has to change.
+//
+// Computed once and cached; returns a static buffer.
+const wchar_t* BuildTimestampW();
+
 void    MissingDirectX(HWND hwnd);
 bool    CheckForMMX();
 bool    CheckForSSE();
@@ -119,6 +137,19 @@ void DebugLogWFmt(const wchar_t* fmt, ...);
 void DebugLogWFmt(int level, const wchar_t* fmt, ...);
 void DebugLogAFmt(const char* fmt, ...);
 void DebugLogAFmt(int level, const char* fmt, ...);
+
+// VRAM checkpoints (#344): what LOCAL VRAM reads RIGHT NOW, and the delta since
+// the previous mark. m_vramUsageBytes is resampled about every two seconds,
+// which is far too coarse to sit between two allocations and say which one
+// cost what -- and "which call allocated this" was unanswerable without it.
+//
+// Off by default and cheap when off: QueryVideoMemoryInfo is a real call, so a
+// mark in a per-frame path would be a cost of its own. Turn it on for a run
+// with DIAG_VRAMMARK=1 and read log/debug.log.
+void VramMarkSetEnabled(bool on);
+bool VramMarkEnabled();
+void VramMark(const char* tag);
+#define VMARK(tag) do { if (VramMarkEnabled()) VramMark(tag); } while(0)
 
 // Diagnostic file helpers — all files written to log/ subdirectory
 const wchar_t* DebugLogDiagPath(const wchar_t* diagName, wchar_t* buf, size_t bufLen);

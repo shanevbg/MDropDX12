@@ -86,6 +86,13 @@ DWORD ToolWindow::GetCommonControlFlags() const {
 }
 
 void ToolWindow::Open() {
+  // A child instance is a render surface driven over IPC, not a UI. Every tool
+  // window would open on whichever display the child owns, steal focus from the
+  // parent (ToolWindow::Open calls SetForegroundWindow), and offer controls that
+  // write settings the child's testing-mode shield then discards. Refused at the
+  // one door they all come through, rather than at twenty call sites.
+  if (m_pEngine && m_pEngine->m_bChildMode) return;
+
   if (m_hWnd && IsWindow(m_hWnd)) {
     OnAlreadyOpen();
     return;
@@ -3448,7 +3455,7 @@ class ActionEditDialog : public ModalDialog {
       ofn.hwndOwner = hDlg;
       ofn.lpstrFile = szFile;
       ofn.nMaxFile = MAX_PATH;
-      ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+      ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
 
       switch (act) {
       case ButtonAction::LoadPreset:

@@ -370,6 +370,7 @@
     <ClCompile Include="preset_hash.cpp" />
     <ClCompile Include="preset_replacements.cpp" />
     <ClCompile Include="shader_overrides.cpp" />
+    <ClCompile Include="child_instances.cpp" />
     <ClCompile Include="spout_bridge.cpp" />
     <ClCompile Include="audio_profile_store.cpp" />
     <ClCompile Include="vfx_profile_store.cpp" />
@@ -392,7 +393,6 @@
     <ClCompile Include="mdropdx12.cpp" />
     <ClCompile Include="engine.cpp" />
     <ClCompile Include="engine_input.cpp" />
-    <ClCompile Include="display_presets.cpp" />
     <ClCompile Include="engine_displays.cpp" />
     <ClCompile Include="mirror_sim.cpp" />
     <ClCompile Include="engine_hotkeys.cpp" />
@@ -509,6 +509,7 @@
     <ClInclude Include="preset_hash.h" />
     <ClInclude Include="preset_replacements.h" />
     <ClInclude Include="shader_overrides.h" />
+    <ClInclude Include="child_instances.h" />
     <ClInclude Include="spout_bridge.h" />
     <ClInclude Include="audio_profile_store.h" />
     <ClInclude Include="vfx_profile_store.h" />

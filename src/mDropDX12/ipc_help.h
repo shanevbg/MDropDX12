@@ -50,8 +50,21 @@
 //   8  SET_VSYNC=/GET_VSYNC -- the one render setting with no IPC form, which
 //      made every automated frame-rate measurement read the monitor rather
 //      than the engine, because it defaults on (#121)
+//   9  SET_MIRROR_WATERMARK= -- the absolute form for mirror watermark, so a
+//      remote can drive a switch instead of reading, comparing and toggling
+//      (#196)
+//  10  the idle timer is configurable and resettable from a remote:
+//      SET_IDLE_TIMEOUT=, SET_IDLE_ACTION= (now 0-3, the fourth loading a
+//      display profile), SET_IDLE_PROFILE=, SET_IDLE_FULL_OPACITY= and
+//      RESET_IDLE_TIMER. IDLE_TIMER= carries two more fields, appended
+//      (#334)
 //
-#define MDROP_IPC_PROTOCOL 8
+//  11  SET_TEXCAP=/GET_TEXCAP -- the longest edge a texture loaded from disk
+//      keeps. Bumped rather than slipped in quietly because it is a SETTING a
+//      client can offer, not a diagnostic: it changes what the engine puts on
+//      the GPU and a remote can reasonably draw a control for it (#349)
+//
+#define MDROP_IPC_PROTOCOL 11
 
 // ── Named capabilities, for a client that degrades per FEATURE ───────────
 //
@@ -98,12 +111,7 @@ const IpcCommandDoc* ScriptCommands(size_t& count);  // reached via the fallback
 const IpcCommandDoc* SignalCommands(size_t& count);  // SIGNAL|<name>
 
 // One line: version, build, protocol, pid.
-//
-// The reply still carries child=0. #186 phase 6 deleted the -child mode it
-// reported, but an unrecognised keyword falls through to the script engine and
-// a REMOVED FIELD is just as silent as a removed verb -- a client parsing by
-// key would simply stop finding it. It is pinned rather than dropped.
-std::wstring Identity();
+std::wstring Identity(bool bChildMode);
 
 // Handles HELP, HELP=<name>, HELP=<group>, HELP=JSON, COMMANDS,
 // LIST_COMMANDS, GET_VERSION and an exact-match VERSION.
@@ -111,7 +119,7 @@ std::wstring Identity();
 // Returns false if `msg` is none of those, leaving `reply` untouched, so the
 // caller falls through to the rest of the dispatcher unchanged. On true,
 // `reply` holds the messages to send in order; the caller appends END_BATCH.
-bool Handle(const wchar_t* msg, std::vector<std::wstring>& reply);
+bool Handle(const wchar_t* msg, bool bChildMode, std::vector<std::wstring>& reply);
 
 }  // namespace ipc_help
 

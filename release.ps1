@@ -129,6 +129,35 @@ $releaseFiles = @(
     @{ Src = (Join-Path $PSScriptRoot "docs\Changes.md");                 Dst = "docs\Changes.md" }
 )
 
+# -- 4b. The demo bundle -----------------------------------------------------
+#
+# bundle/ ships as resources/presets and resources/textures, because that is
+# where the engine looks: m_szMilkdrop2Path is <exe>\resources\, and the preset
+# and texture searches hang off it.
+#
+# It is a SEPARATE directory in the repository on purpose. resources/presets is
+# a runtime working directory -- the app writes imports into it -- and it is
+# gitignored for that reason, after twenty-five .milk3 files once ended up
+# tracked there, twelve of them conversions of other people's published
+# shaders. bundle/ is curated, tracked, and nothing writes to it; see
+# bundle/CREDITS.md for the four conditions every preset in it meets.
+#
+# Not gated behind -WithPresets. That switch packages whatever happens to be
+# sitting in the working directory, which is the thing that went wrong; this is
+# a reviewed set and ships by default.
+$bundleDir = Join-Path $PSScriptRoot "bundle"
+foreach ($sub in @("presets", "textures")) {
+    $srcDir = Join-Path $bundleDir $sub
+    if (-not (Test-Path $srcDir)) { continue }
+    foreach ($f in (Get-ChildItem -Path $srcDir -File)) {
+        $releaseFiles += @{ Src = $f.FullName; Dst = "resources\$sub\$($f.Name)" }
+    }
+}
+if (Test-Path (Join-Path $bundleDir "CREDITS.md")) {
+    $releaseFiles += @{ Src = (Join-Path $bundleDir "CREDITS.md");
+                        Dst  = "resources\CREDITS.md" }
+}
+
 # Demo presets. OFF BY DEFAULT -- pass -WithPresets to include them.
 #
 # Since the preset files were untracked (they are .gitignore'd now), a clean
@@ -148,9 +177,14 @@ if ($WithPresets -and (Test-Path $presetSrcDir)) {
         Where-Object { $_.Name -notmatch '^(test|Quicksave)' })
 }
 
+# -LiteralPath, not -Path. PowerShell treats [ and ] in a -Path as a wildcard
+# character class, so "Flexi - color drops [another jelly attempt].milk" is a
+# pattern that matches nothing and the file reports as missing. Every entry
+# here is a literal filename, never a pattern, and MilkDrop preset names use
+# brackets constantly -- four of the first demo bundle's ninety-three.
 $missing = @()
 foreach ($f in $releaseFiles) {
-    if (-not (Test-Path $f.Src)) {
+    if (-not (Test-Path -LiteralPath $f.Src)) {
         $missing += $f.Src
     }
 }
@@ -171,7 +205,20 @@ foreach ($p in $bundledPresets) {
 
 # -- 5. Stage and create zip -------------------------------------------------
 $zipName = "MDropDX12-v$version-Portable.zip"
-$zipPath = Join-Path $PSScriptRoot $zipName
+
+# Into releases\, not the repository root.
+#
+# Every release dropped its zip at the top level and left it there: twelve of
+# them, 22 MB, sitting alongside README.md and the solution file. releases\
+# already existed and held exactly one (v2.1.0), which is how the habit of
+# leaving them at the root went unnoticed. *.zip is gitignored either way, so
+# this changes nothing about what is committed -- only where a build puts its
+# output, which is the thing that kept re-cluttering the root.
+$releasesDir = Join-Path $PSScriptRoot "releases"
+if (-not (Test-Path $releasesDir)) {
+    New-Item -ItemType Directory -Path $releasesDir -Force | Out-Null
+}
+$zipPath = Join-Path $releasesDir $zipName
 
 if ($DryRun) {
     Write-Host ""
@@ -179,7 +226,7 @@ if ($DryRun) {
     Write-Host ""
     Write-Host "Contents:" -ForegroundColor White
     foreach ($f in $releaseFiles) {
-        $size = [math]::Round((Get-Item $f.Src).Length / 1KB, 1)
+        $size = [math]::Round((Get-Item -LiteralPath $f.Src).Length / 1KB, 1)
         Write-Host "  $($f.Dst)  ($($size) KB)" -ForegroundColor DarkGray
     }
     foreach ($p in $bundledPresets) {
@@ -204,7 +251,7 @@ foreach ($f in $releaseFiles) {
     if ($dstDir -and -not (Test-Path $dstDir)) {
         New-Item -ItemType Directory -Path $dstDir -Force | Out-Null
     }
-    Copy-Item $f.Src $dst
+    Copy-Item -LiteralPath $f.Src -Destination $dst
 }
 
 if ($bundledPresets.Count -gt 0) {
@@ -250,7 +297,12 @@ if ($verifyExeSize -ne $srcExeSize) {
     exit 1
 }
 
-$fileCount = (Get-ChildItem $verifyDir -File).Count
+# -Recurse: without it this counts only the files at the ROOT of the zip, so it
+# reported 4 when the package held 8 (docs\ and tools\ were already there) and
+# would report 4 for the 127 the demo bundle brings. A validation line that
+# under-reports by two orders of magnitude is worse than none -- it reads as
+# confirmation that the extra content is missing.
+$fileCount = (Get-ChildItem $verifyDir -File -Recurse).Count
 Remove-Item $verifyDir -Recurse -Force
 
 Write-Host "[5/6] Zip validated ($fileCount files, exe size matches)." -ForegroundColor Green
@@ -271,12 +323,14 @@ Write-Host "============================================" -ForegroundColor Green
 Write-Host "   Release package created successfully" -ForegroundColor Green
 Write-Host "============================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  File: $zipName" -ForegroundColor White
+Write-Host "  File: releases\$zipName" -ForegroundColor White
 Write-Host "  Size: $zipSizeMB MB" -ForegroundColor White
 Write-Host ""
 Write-Host "  Contents:" -ForegroundColor White
 foreach ($f in $releaseFiles) {
-    $size = [math]::Round((Get-Item $f.Src).Length / 1KB, 1)
+    # -LiteralPath, as everywhere else that touches these paths: a preset name
+    # containing [ ] is a wildcard to -Path and resolves to nothing.
+    $size = [math]::Round((Get-Item -LiteralPath $f.Src).Length / 1KB, 1)
     Write-Host "    $($f.Dst)  ($($size) KB)" -ForegroundColor DarkGray
 }
 Write-Host ""
@@ -297,7 +351,11 @@ if ($GitHubRelease) {
     $changesFile = Join-Path $PSScriptRoot "docs\Changes.md"
     $releaseBody = ""
     if (Test-Path $changesFile) {
-        $lines = Get-Content $changesFile
+        # -Encoding UTF8, because this script runs under WINDOWS PowerShell
+        # (powershell.exe 5.1), where Get-Content defaults to the ANSI codepage.
+        # docs/Changes.md is UTF-8 and full of em dashes, so the default read
+        # turned every one into mojibake and published it as the release notes.
+        $lines = Get-Content $changesFile -Encoding UTF8
         $inSection = $false
         $bodyLines = @()
         foreach ($line in $lines) {
@@ -321,7 +379,10 @@ if ($GitHubRelease) {
 
     # Write body to temp file to avoid shell escaping issues
     $notesFile = Join-Path $env:TEMP "MDropDX12-release-notes.md"
-    Set-Content -Path $notesFile -Value $releaseBody -Encoding UTF8
+    # NOT Set-Content -Encoding UTF8: on PowerShell 5.1 that writes a BYTE ORDER
+    # MARK, and GitHub renders it as a stray character at the very top of the
+    # release notes. WriteAllText with UTF8Encoding($false) omits it.
+    [System.IO.File]::WriteAllText($notesFile, $releaseBody, (New-Object System.Text.UTF8Encoding($false)))
 
     $tag = "v$version"
     # --repo is REQUIRED. Without it gh resolves to the current directory's

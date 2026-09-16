@@ -176,13 +176,34 @@ bool Engine::MirrorSimAdoptPreset(MirrorSimContext& c)
     const bool own = !c.ownPresetPath.empty();
 
     const uint32_t ver = m_presetBundleVersion.load(std::memory_order_acquire);
+    // "Already showing it" must mean the COMPILE is still there, not merely
+    // that the path matches.
+    //
+    // These tests were `return c.pState != nullptr`, which conflates two
+    // different answers: "nothing to do" and "the thing I was asked for is
+    // gone". A teardown -- CleanUpMyDX9Stuff on the resize that mirror
+    // watermark performs -- frees pState while leaving this context, its
+    // ownPresetPath and its loadedOwnPath all intact and equal. From then on
+    // this returned false forever: the path said the preset was loaded so it
+    // never re-imported, and pState stayed null so it never reported success.
+    // MirrorThreadDrawAndPresent bails on a false return, so the surface never
+    // simulated again and the panel froze on whatever single frame the first
+    // draw managed (#197).
+    //
+    // Falling through instead re-imports, which is exactly what a context whose
+    // compiled state was freed underneath it needs. Plain MIRROR off/on never
+    // hit this because it does not resize the window and so never tears the
+    // mirror stack down -- which is why this looked watermark-specific.
     if (own) {
-        // Already showing it. Without this the resolve would reload every frame.
-        if (c.ownPresetPath == c.loadedOwnPath)
-            return c.pState != nullptr;
+        if (c.ownPresetPath == c.loadedOwnPath && c.pState != nullptr)
+            return true;
     } else {
-        if (ver == 0 || ver == c.presetVersion)
+        // ver == 0 means nothing has been broadcast yet, so there is genuinely
+        // nothing to adopt; that answer is unchanged.
+        if (ver == 0)
             return c.pState != nullptr;
+        if (ver == c.presetVersion && c.pState != nullptr)
+            return true;
     }
 
     MirrorPresetBundle b;

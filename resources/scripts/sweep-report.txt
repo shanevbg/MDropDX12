@@ -1,0 +1,80 @@
+# MDropDX12 preset sweep and report
+#
+# Walks your preset list, checks every preset, and writes a report to
+# log\debug.log. Load it from Settings -> Script (or the Script tool window),
+# press Play, and read the summary at the end.
+#
+# ===========================================================================
+# THE TWO KNOBS, both on the first line below
+# ===========================================================================
+#
+#   BPM=6000   FAST. An unattended scan -- as quick as the engine will go.
+#              There is nothing to watch: each preset is checked and replaced
+#              before it has drawn a frame.
+#   BPM=240    WATCH. About a third of a second per preset, so you can see
+#              each one on screen as it is checked.
+#
+#   REPEAT=<count>,3 on the loop line is how many presets to sweep. Raise it
+#   past the size of your library to sweep all of it.
+#
+# Both knobs are on ONE line each and nothing else needs changing.
+#
+# WHY BPM IS ON THE FIRST LINE
+#
+# A command takes effect when it EXECUTES, and the script advances one line per
+# beat. A BPM line further down means every line above it runs at the default
+# BPM=120|BEATS=4 -- two seconds each. Four lines of preamble at that pace is
+# eight seconds gone before the sweep starts. On the first line, the new pace
+# applies to everything after it.
+#
+# WHAT A FAST SWEEP CAN AND CANNOT FIND
+#
+# Both things it reports happen when a preset LOADS -- shaders are compiled,
+# textures are looked up -- and WAITREADY waits for that either way. So a fast
+# sweep gives the same answers as a slow one; only the idle time goes.
+#
+# What it cannot see is anything needing the preset to RUN: a per-frame
+# expression fault, a preset that comes up black, anything visual. Use BPM=240
+# and watch for those.
+#
+# WHAT IT REPORTS PER PRESET
+#
+#   shader_errors     the warp or comp shader failed to compile
+#   textures_missing  the preset asked for an image that could not be found
+#
+# The second matters because nothing else will tell you: a preset with a missing
+# texture compiles, renders, and is simply wrong. Any check that only asks "did
+# the shaders build" scores it a pass.
+#
+# BEFORE YOU START
+#
+# Point the app at the library you want -- this sweeps the current preset
+# directory. Turn Random OFF (Sequential), or it wanders over the same presets
+# and misses others.
+#
+# AFTER IT FINISHES -- CHECK THE COUNT
+#
+# If "checked" is far larger than the number of presets in the folder, or the
+# log repeats one preset name, the sweep looped without advancing and a clean
+# result means nothing. That has happened: 4,777 checks, zero failures, one
+# preset.
+#
+#   SCRIPT SUMMARY: checked=4771 shader_failures=0 texture_failures=0 unknown_commands=0 elapsed=430.0s per_preset=0.09s
+#
+# ---------------------------------------------------------------------------
+# The loop is TWO lines, deliberately: one line per beat, so every extra line
+# costs a beat per preset. It cannot be ONE -- every command on a line runs in
+# the same tick, so NEXT|WAITREADY|CHECK would check before the wait happened
+# and report on the previous preset.
+#
+# Lines are counted from 0, ignoring comments and counting blank ones, so line 3
+# is the NEXT|WAITREADY below. If you add a line above it, move the 3.
+# ---------------------------------------------------------------------------
+STRICT|BPM=6000|BEATS=1
+LOG==== preset sweep begins ===
+LOGSTATE
+NEXT|WAITREADY
+CHECK|REPEAT=5000,3
+LOG==== preset sweep ends ===
+LOGSUMMARY
+STOP

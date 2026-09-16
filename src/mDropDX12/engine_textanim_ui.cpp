@@ -882,7 +882,7 @@ LRESULT TextAnimWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
     ofn.lpstrFile = szFile;
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = L"ini";
-    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     ofn.lpstrTitle = L"Export Animation Profiles";
     // Default to app directory
     wchar_t szInitDir[MAX_PATH];
@@ -908,7 +908,7 @@ LRESULT TextAnimWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
     ofn.lpstrFilter = L"INI Files (*.ini)\0*.ini\0All Files (*.*)\0*.*\0";
     ofn.lpstrFile = szFile;
     ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     ofn.lpstrTitle = L"Import Animation Profiles";
     wchar_t szInitDir[MAX_PATH];
     CopyTo(szInitDir, p->m_szBaseDir);

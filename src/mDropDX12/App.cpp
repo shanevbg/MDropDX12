@@ -293,6 +293,7 @@ static bool borderless = false;
 // boundary, hence atomic and hence a posted message rather than a direct
 // ShowWindow -- this file already avoids cross-thread window calls from the
 // render thread because they have deadlocked (see WM_MW_RAISE_PRIMARY).
+static std::atomic<bool> g_bChildRevealPending{false};
 
 // How long a child takes to dissolve in over the mirror it is replacing, and
 // how often the alpha is stepped.
@@ -304,6 +305,10 @@ static bool borderless = false;
 // here is a matter of taste and the only way to pick it is to watch it.
 //
 // 16ms is one frame at 60Hz, which is as fine as the compositor can show.
+static const DWORD kChildFadeDefaultMs = 1500;
+static const UINT  kChildFadeStepMs    = 16;
+static DWORD g_nChildFadeMs      = kChildFadeDefaultMs;
+static DWORD g_nChildFadeStartMs = 0;
 static bool clickthrough = false;
 
 // ShowCursor() is a per-thread display counter. Hide-on-fullscreen used to
@@ -316,6 +321,20 @@ static void ForceCursorVisible()
 }
 static bool watermarkMode = false;
 static float watermarkPrevOpacity = 1.0f;
+// What watermark mode itself turned ON, so leaving it turns off only that.
+//
+// The opacity beside these has always been remembered and put back; the other
+// three states were not, they were forced to a fixed value on the way out. So
+// leaving watermark mode did not restore the window, it OVERWROTE it with
+// "windowed, not click-through, not on top" regardless of how it arrived.
+//
+// A child instance is where that does visible damage: it owns a display and is
+// borderless-fullscreen over it before watermark is ever mentioned, so entering
+// watermark changed nothing and leaving it dropped the child out of fullscreen
+// onto restore geometry it never had.
+static bool watermarkEnteredFullscreen = false;
+static bool watermarkEnteredClickthrough = false;
+static bool watermarkEnteredAlwaysOnTop = false;
 // Idle Stretch/Mirror (and Fullscreen) must not exit FS on restore if the
 // primary was already fullscreen before the timer fired.
 static bool idleEnteredFullscreen = false;
@@ -364,6 +383,13 @@ static float mirrorWM_prevOpacity = 1.0f;
 static bool mirrorWM_prevAlwaysOnTop = false;
 static bool mirrorWM_prevClickthrough = false;
 static RECT mirrorWM_prevWindowRect = {};
+// True between phase 1 and phase 2 of the ENTER sequence. The flag that says
+// watermark is on (m_bMirrorWatermarkActive) is not set until phase 2, so
+// without this a second request arriving in that gap re-runs phase 1 -- which
+// saves the four mirrorWM_prev* values above a second time, this time reading
+// the half-converted window. Exiting would then "restore" watermark state as
+// if the user had chosen it (#196).
+static bool mirrorWM_entering = false;
 
 static RECT lastRect = { 0 };
 
@@ -687,6 +713,44 @@ static bool QueryLocalVramBudget(UINT64* outBudget, UINT64* outUsage, float* out
   return true;
 }
 
+// VRAM checkpoints (#344). Lives here because g_pDxgiAdapter does.
+//
+// ~1.9 GB of LOCAL VRAM is committed the first time mirror rendering is
+// switched on, and nothing in the tree allocates anything like that directly:
+// the app has 30 CreateCommittedResource sites and none is fixed-size and huge.
+// Attributing it meant changing one variable at a time from outside the
+// process, because the engine's own sample is two seconds coarse and there was
+// no way to ask "what did THIS call cost".
+static std::atomic<bool> g_vramMarkOn{false};
+static std::atomic<unsigned long long> g_vramMarkPrev{0};
+
+void VramMarkSetEnabled(bool on) {
+  g_vramMarkOn.store(on, std::memory_order_release);
+  // Re-baseline on every enable, so the first mark of a run reports the level
+  // rather than a delta against whenever it was last switched off.
+  g_vramMarkPrev.store(0, std::memory_order_release);
+}
+
+bool VramMarkEnabled() {
+  return g_vramMarkOn.load(std::memory_order_acquire);
+}
+
+void VramMark(const char* tag) {
+  UINT64 budget = 0, usage = 0;
+  float pct = 0.0f;
+  if (!QueryLocalVramBudget(&budget, &usage, &pct))
+    return;
+  const unsigned long long prev = g_vramMarkPrev.exchange(usage);
+  char buf[224];
+  if (prev == 0)
+    sprintf(buf, "VMARK %-40s %9.1f MB\n", tag, usage / 1048576.0);
+  else
+    sprintf(buf, "VMARK %-40s %9.1f MB  (%+9.1f MB)\n", tag,
+            usage / 1048576.0,
+            ((double)usage - (double)prev) / 1048576.0);
+  DebugLogA(buf, LOG_WARN);
+}
+
 // Poll VRAM budget; update engine sample fields; exit cleanly if below threshold.
 // Also samples when debug overlay is on so budget/available% are visible live.
 static void PollVramBudgetAndMaybeExit(HWND hwnd) {
@@ -712,11 +776,12 @@ static void PollVramBudgetAndMaybeExit(HWND hwnd) {
     }
   }
 
-  const bool watchExit = (g_engine.m_nMinAvailableVramPercent > 0);
-  const bool watchDebug = g_engine.m_bShowDebugInfo;
-  if (!watchExit && !watchDebug)
-    return;
-
+  // The sample itself is unconditional now. It used to run only when the
+  // low-VRAM exit or the debug overlay wanted it, which meant that on a default
+  // configuration m_vramBudgetBytes stayed 0 for the whole session -- and the
+  // mirror swap-chain cap derives from it (#254), so it would have silently
+  // fallen back to the fixed 1920 it exists to replace. One DXGI query every two
+  // seconds is not worth gating.
   static DWORD s_lastPollMs = 0;
   static int s_lowSamples = 0;
   DWORD now = GetTickCount();
@@ -732,8 +797,10 @@ static void PollVramBudgetAndMaybeExit(HWND hwnd) {
   g_engine.m_vramBudgetBytes = budget;
   g_engine.m_vramUsageBytes = usage;
   g_engine.m_vramAvailablePercent = availablePct;
+  // Cheap: returns immediately unless the derived cap actually moved.
+  g_engine.RefreshMirrorSwapChainCap();
 
-  if (!watchExit)
+  if (g_engine.m_nMinAvailableVramPercent <= 0)
     return;
 
   if (availablePct < (float)g_engine.m_nMinAvailableVramPercent) {
@@ -786,7 +853,7 @@ void ToggleStretch(HWND hwnd) {
     g_engine.SetVariableBackBuffer(width, height);
     // DX12: swap chain resize is triggered by the WM_SIZE handler after SetWindowPos.
     SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
-    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, RenderWindowTaskbarExStyle(false));
+    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, RenderWindowTaskbarExStyle(g_engine.m_bChildMode));
     SetWindowPos(hwnd, HWND_NOTOPMOST, left, top, width, height, QuietSwp(SWP_DRAWFRAME | SWP_FRAMECHANGED));
     SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
     DragAcceptFiles(hwnd, TRUE);
@@ -860,11 +927,15 @@ static void ToggleBorderlessFullscreen(HWND hWnd) {
     // Check if Shift is pressed
     bool isShiftPressed = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
 
-    // Get the work area of the monitor (excluding the taskbar)
-    MONITORINFO monitorInfo = { sizeof(MONITORINFO) };
-    HMONITOR hMonitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
-    if (GetMonitorInfo(hMonitor, &monitorInfo)) {
-      RECT workArea = monitorInfo.rcWork;
+    // Where fullscreen means, for THIS window: the nearest monitor's work area
+    // normally, but a child's own display in full. Shared with
+    // IsBorderlessFullscreen so the test and the action cannot disagree --
+    // when they did, SET_BORDERLESS_FS=1 on a correctly placed child "entered"
+    // fullscreen by shrinking it to the work area, 48px short on the monitor
+    // holding the taskbar, and pinned it to whichever monitor it was nearest
+    // rather than the one it owns (#240).
+    {
+      RECT workArea = g_engine.FullscreenTargetRect(hWnd);
 
       // Check if the window is already in borderless fullscreen mode
       RECT currentRect;
@@ -892,9 +963,26 @@ static void ToggleBorderlessFullscreen(HWND hWnd) {
           g_engine.m_WindowWidth /= 2;
           g_engine.m_WindowHeight /= 2;
 
-          // Center the window
-          g_engine.m_WindowX = (workArea.right - workArea.left - g_engine.m_WindowWidth) / 2;
-          g_engine.m_WindowY = (workArea.bottom - workArea.top - g_engine.m_WindowHeight) / 2;
+          // Center the window ON THIS MONITOR.
+          //
+          // workArea.left/top are the monitor's ORIGIN in virtual-desktop
+          // coordinates and have to be added back: the expression in
+          // parentheses is an offset within the monitor, not a position.
+          // Without them the window is centred on whatever monitor has its
+          // origin at (0,0) -- the primary -- from wherever it actually was.
+          //
+          // Invisible on the primary, because there the origin IS (0,0), which
+          // is why this survived. On any other monitor the window jumps.
+          // Measured on a child covering DISPLAY1 at (0,-1440)-(2560,0):
+          // halved to 1280x720, then placed at ((2560-1280)/2,
+          // (1440-720)/2) = (640,360) -- which is the middle of the PRIMARY.
+          // Reported as "turn on/off watermark and try to reactivate the
+          // screen on display1 ... it moves to display3 as centered windowed
+          // screen"; display3 was simply the monitor at the origin.
+          g_engine.m_WindowX = workArea.left +
+              (workArea.right - workArea.left - g_engine.m_WindowWidth) / 2;
+          g_engine.m_WindowY = workArea.top +
+              (workArea.bottom - workArea.top - g_engine.m_WindowHeight) / 2;
         }
 
         SetWindowPos(
@@ -1040,7 +1128,7 @@ static void ToggleFullScreen(HWND hwnd) {
     int height = info.rcMonitor.bottom - info.rcMonitor.top;
 
     SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
-    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, RenderWindowTaskbarExStyle(false));
+    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, RenderWindowTaskbarExStyle(g_engine.m_bChildMode));
     // Respect Always On Top preference — do not force TOPMOST (mirror mode used to
     // leave the window topmost while m_bAlwaysOnTop stayed false, so the toggle
     // looked stuck).
@@ -1492,6 +1580,7 @@ static void ShowAudioDeviceDialog(HWND hParent) {
 // If bKeepMirrorsActive is true, mirrors stay active (for watermark→regular mirror transition).
 static void ExitMirrorWatermark(HWND hWnd, bool bKeepMirrorsActive = false) {
   if (!g_engine.m_bMirrorWatermarkActive) return;
+  mirrorWM_entering = false;
 
   // Restore render window clickthrough
   if (clickthrough)
@@ -1573,12 +1662,29 @@ static void StretchMirrorHotkey(HWND hWnd, int id) {
   // inverts.
   const bool turningOn = doMirror ? !g_engine.m_bMirrorsActive : !stretch;
 
-  // Standing the CHILDREN down used to happen here, for stretch only: stretch
-  // sizes itself from the whole virtual desktop and simply covered the child
-  // processes, so those displays had to be genuinely free. #186 phase 6 removed
-  // them, and a display that holds its own preset now renders through the same
-  // mirror path as any other -- so turning the mirrors off frees the display,
-  // and there is nothing else occupying it to stand down.
+  // Stand the children down on the way in -- STRETCH ONLY.
+  //
+  // Stretch sizes itself from the whole virtual desktop and simply covers the
+  // children, so the displays have to be genuinely free. Their display settings
+  // are untouched, so the way back needs no memory of what they were -- see
+  // SuspendChildrenForDisplayToggle.
+  //
+  // Mirror no longer does this. A display set to Own process is meant to run
+  // its own instance, and retiring it so a mirror could take that screen made
+  // the key contradict the setting -- and threw away the child's preset, timer
+  // and shader cache to do it. WM_MW_TOGGLE_MIRROR_MODE now minimises and
+  // restores them instead, which also covers the Displays window button and the
+  // idle timer; doing it here as well would stand them down and then ask the
+  // toggle to un-hide processes that no longer exist.
+  //
+  // Not waited on. Retirement is asynchronous, and the per-frame mirror
+  // decision already handles a child that is still going: the mirror appears
+  // when ChildOwnsDisplay stops being true. Blocking here would freeze the
+  // window for the seconds a shutdown takes.
+  int suspended = 0;
+  if (turningOn && doStretch)
+    suspended = g_engine.SuspendChildrenForDisplayToggle();
+
   if (doMirror) {
     PostMessage(hWnd, WM_MW_TOGGLE_MIRROR_MODE, 0, 0);
   } else if (doStretch) {
@@ -1586,6 +1692,22 @@ static void StretchMirrorHotkey(HWND hWnd, int id) {
     ToggleStretch(hWnd);
   }
 
+  // And back on the way out, to whatever each display is set to now. A display
+  // the user has since changed to mirror or off keeps that -- the toggle puts
+  // back what it took, it does not overrule a decision made in between.
+  //
+  // Unconditional on the mode: the list is empty unless a stretch press filled
+  // it, and leaving a stretch-suspended child stranded because the way back out
+  // happened to be a mirror press is exactly the asymmetry this guards.
+  if (!turningOn)
+    g_engine.ResumeChildrenAfterDisplayToggle();
+
+  if (suspended) {
+    wchar_t buf[96];
+    FormatTo(buf, L"%d display%ls handed back for this mode",
+             suspended, suspended == 1 ? L"" : L"s");
+    g_engine.AddNotification(buf);
+  }
   ForegroundUnlessQuietStartup(hWnd);
 }
 
@@ -1713,11 +1835,9 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
       // Scaled by the number of children rather than raised to a flat 30s,
       // because with no children there is nothing to wait for and an app that
       // takes half a minute to close on a wedged render thread is its own bug.
-      // A flat 5 s since #186 phase 6. The grace period scaled by the child
-      // count existed because retiring each child was a SHUTDOWN over its pipe
-      // and a wait; with the displays in process there is no second process to
-      // shut down and nothing left for the extra seconds to buy.
-      const DWORD waitMs = 5000;
+      const DWORD kChildGraceMs = 9000;   // ChildKillNow's 8s, plus the pipe
+      const DWORD waitMs = 5000 + kChildGraceMs *
+                           (DWORD)max(0, g_engine.GetChildCount());
       mdropdx12.LogInfo(L"WM_CLOSE: Waiting for render thread to exit...");
       if (WaitForSingleObject(g_hDX12RenderThread, waitMs) != WAIT_OBJECT_0)
         DebugLogA("WM_CLOSE: render thread did not finish in time; children "
@@ -2152,17 +2272,44 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
       if (!g_engine.m_bIdleTimerEnabled || g_engine.m_bTestingMode)
         return 0;
 
-      LASTINPUTINFO lii = { sizeof(lii) };
-      if (GetLastInputInfo(&lii)) {
-        DWORD idleMs = GetTickCount() - lii.dwTime;
-        DWORD timeoutMs = (DWORD)g_engine.m_nIdleTimeoutMinutes * 60 * 1000;
+      // Engine::IdleElapsedMs, not GetLastInputInfo directly: the system's
+      // last-input tick is machine-wide and no application can move it, so
+      // RESET_IDLE_TIMER needs a second term it CAN move. The HUD countdown
+      // reads the same helper, which is what keeps the two from disagreeing.
+      const DWORD idleMs = g_engine.IdleElapsedMs();
+      const DWORD timeoutMs = (DWORD)g_engine.m_nIdleTimeoutMinutes * 60 * 1000;
 
-        if (!g_engine.m_bIdleActivated && idleMs >= timeoutMs) {
-          PostMessage(hWnd, WM_MW_IDLE_ACTIVATE, 0, 0);
-        }
-        else if (g_engine.m_bIdleAutoRestore && g_engine.m_bIdleActivated && idleMs < 1000) {
-          PostMessage(hWnd, WM_MW_IDLE_RESTORE, 0, 0);
-        }
+      if (!g_engine.m_bIdleActivated && idleMs >= timeoutMs) {
+        PostMessage(hWnd, WM_MW_IDLE_ACTIVATE, 0, 0);
+      }
+      else if (g_engine.m_bIdleAutoRestore && g_engine.m_bIdleActivated && idleMs < 1000) {
+        PostMessage(hWnd, WM_MW_IDLE_RESTORE, 0, 0);
+      }
+      return 0;
+    }
+    if (wParam == IDT_CHILD_FADE_IN) {
+      // Linear ramp to the opacity this instance is configured for -- NOT
+      // always 255. A display set to 60% should arrive at 60%, and the fade is
+      // how it gets there rather than something layered on top of it.
+      const DWORD elapsed = GetTickCount() - g_nChildFadeStartMs;
+      float t = (g_nChildFadeMs > 0) ? (float)elapsed / (float)g_nChildFadeMs
+                                     : 1.0f;
+      if (t > 1.0f) t = 1.0f;
+      // Smoothstep, not linear. A linear ramp of ALPHA is not a linear ramp of
+      // apparent brightness, so it appears to rush the middle and then crawl;
+      // easing both ends is what makes it read as a dissolve rather than a
+      // wipe of the brightness slider.
+      const float e = t * t * (3.0f - 2.0f * t);
+      float target = g_engine.fOpacity;
+      if (target < 0.0f) target = 0.0f;
+      if (target > 1.0f) target = 1.0f;
+      const BYTE alpha = (BYTE)(target * e * 255.0f + 0.5f);
+      SetLayeredWindowAttributes(hWnd, 0, alpha, LWA_ALPHA);
+      if (t >= 1.0f) {
+        KillTimer(hWnd, IDT_CHILD_FADE_IN);
+        // Only now may the parent retire the mirror underneath.
+        g_engine.m_bChildRevealComplete.store(true);
+        mdropdx12.LogInfo(L"child: faded in; the mirror can stand down");
       }
       return 0;
     }
@@ -2188,12 +2335,42 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
   {
     if (g_engine.m_bIdleActivated) return 0;
 
+    // The action that ACTUALLY fires, recorded before anything acts on it.
+    // Restore branches on this and never on m_nIdleAction: change the dropdown
+    // while idle is on screen and the two disagree, so restore would run the
+    // wrong branch and strand whatever the right one had set up. Harmless-ish
+    // when that meant a fullscreen toggle; with a profile-loading action it
+    // would leave the user's whole display arrangement replaced.
+    g_engine.m_nIdleActionFired = g_engine.m_nIdleAction;
+
     idleEnteredFullscreen = false;
-    if (g_engine.m_nIdleAction == 0) {
-      // Fullscreen
-      if (IsAnyFullscreen(hWnd)) return 0;  // Already fullscreen, nothing to do
-      ToggleFullScreen(hWnd);
-      idleEnteredFullscreen = true;
+    // Whether the mirrors were ALREADY up, for every action -- the exact
+    // counterpart of idleEnteredFullscreen, and it was missing.
+    //
+    // Only action 2 recorded this (via IdleSnapshotDisplays); action 1 assumed
+    // idle had raised the mirrors and restore switched them off flat. For a
+    // user whose displays are mirroring as their NORMAL setup, walking away and
+    // coming back therefore turned their screens off -- #340.
+    //
+    // It was latent before the early return went: activate used to bail out
+    // when the mirrors were already active WITHOUT setting m_bIdleActivated, so
+    // restore's own guard meant it never ran. Idle simply did nothing for those
+    // users, which hid this.
+    idlePrevMirrorsActive = g_engine.m_bMirrorsActive;
+    if (g_engine.m_nIdleAction == 3) {
+      // Load display profile -- the profile decides the arrangement, so there
+      // is no fullscreen or mirror gesture of our own to make here. The work
+      // happens on the render thread; see the IdleEnter command below.
+    } else if (g_engine.m_nIdleAction == 0) {
+      // Fullscreen. Already fullscreen means nothing to do HERE -- it does not
+      // mean nothing to do at all, so this no longer bails out of the whole
+      // handler. The opacity and z-order below apply to every action, and
+      // returning early also left m_bIdleActivated false, which had the timer
+      // re-posting this message every tick for as long as the user was away.
+      if (!IsAnyFullscreen(hWnd)) {
+        ToggleFullScreen(hWnd);
+        idleEnteredFullscreen = true;
+      }
     } else if (g_engine.m_nIdleAction == 2) {
       // Mirror all — every physical display, ignoring current enable checkboxes.
       if (!g_engine.m_bMirrorsActive)
@@ -2219,8 +2396,9 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
     } else {
       // Stretch/Mirror — same as Displays "Activate Mirrors": primary FS + mirrors.
       // Do not exit FS on restore if the primary was already fullscreen.
-      if (g_engine.m_bMirrorsActive) return 0;  // Already active
-      {
+      // Mirrors already active means nothing to do HERE, for the same reason
+      // the Fullscreen branch above no longer returns early.
+      if (!g_engine.m_bMirrorsActive) {
         const LONG_PTR style = GetWindowLongPtrW(hWnd, GWL_STYLE);
         const bool alreadyPopupFS = (style & WS_POPUP) &&
             !(style & (WS_CAPTION | WS_THICKFRAME | WS_SYSMENU)) &&
@@ -2228,10 +2406,24 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
         EnsureFullScreen(hWnd);
         if (!alreadyPopupFS)
           idleEnteredFullscreen = true;
+        g_engine.m_bMirrorsActive = true;
+        g_engine.m_bRaiseMirrorsNextFrame.store(true);
       }
-      g_engine.m_bMirrorsActive = true;
-      g_engine.m_bRaiseMirrorsNextFrame.store(true);
     }
+
+    // The display-state half of every action, on the render thread: it rewrites
+    // m_displayOutputs, which is the same reason LoadDisplayProfile is queued
+    // rather than called (#27). One command, not two, because the snapshot it
+    // takes has to happen before either the profile load or the opacity change.
+    {
+      RenderCommand rc;
+      rc.cmd = RenderCmd::IdleEnter;
+      rc.iParam1 = g_engine.m_bIdleFullOpacity ? 1 : 0;
+      if (g_engine.m_nIdleAction == 3 && g_engine.m_szIdleProfile[0])
+        rc.sParam = g_engine.ResolveDisplayProfilePath(g_engine.m_szIdleProfile);
+      g_engine.EnqueueRenderCmd(rc);
+    }
+
     g_engine.m_bIdleActivated = true;
     g_engine.AddNotification(L"Idle timer activated");
     return 0;
@@ -2242,10 +2434,17 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
     if (!g_engine.m_bIdleActivated) return 0;
     g_engine.m_bIdleActivated = false;
 
-    if (g_engine.m_nIdleAction == 0) {
+    // m_nIdleActionFired, NOT m_nIdleAction -- see the comment where it is set.
+    // -1 means this restore arrived without a matching activate (a setting was
+    // loaded mid-session, say), in which case only the render-thread half below
+    // has anything to undo.
+    const int firedAction = g_engine.m_nIdleActionFired;
+    if (firedAction == 3) {
+      // Was load-display-profile — the profile goes back on the render thread.
+    } else if (firedAction == 0) {
       // Was fullscreen — leave FS only if this idle session entered it
       if (idleEnteredFullscreen && fullscreen) ToggleFullScreen(hWnd);
-    } else if (g_engine.m_nIdleAction == 2) {
+    } else if (firedAction == 2) {
       IdleRestoreDisplays();
       g_engine.m_nDeferMirrorActivate.store(0);
       g_engine.m_bMirrorsActive = idlePrevMirrorsActive;
@@ -2253,16 +2452,23 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
       g_engine.RaiseMirrorSurfaces(hWnd);
       if (idleEnteredFullscreen && fullscreen) ToggleFullScreen(hWnd);
       g_engine.RefreshDisplaysTab();
-    } else {
-      // Was stretch/mirror — drop mirrors; keep primary FS unless we entered it
+    } else if (firedAction == 1) {
+      // Was stretch/mirror — put the mirrors back where they WERE, which is not
+      // the same as switching them off (#340). A user whose displays mirror as
+      // their normal setup had them turned off by walking away and coming back.
       if (g_engine.m_bMirrorsActive) {
         g_engine.m_nDeferMirrorActivate.store(0);
-        g_engine.m_bMirrorsActive = false;
+        g_engine.m_bMirrorsActive = idlePrevMirrorsActive;
+        g_engine.m_bMirrorStylesDirty.store(true);
         g_engine.RaiseMirrorSurfaces(hWnd);
         if (idleEnteredFullscreen && fullscreen) ToggleFullScreen(hWnd);
       }
     }
+
+    g_engine.EnqueueRenderCmd(RenderCmd::IdleExit);
+
     idleEnteredFullscreen = false;
+    g_engine.m_nIdleActionFired = -1;
     g_engine.AddNotification(L"Idle timer restored");
     return 0;
   }
@@ -2294,6 +2500,8 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
         for (auto& out : g_engine.m_displayOutputs) {
           if (out.config.type != DisplayOutputType::Monitor) continue;
           if (!out.config.bEnabled || out.bSkippedSameMonitor) continue;
+          if (out.config.bOwnProcess &&
+              g_engine.ChildOwnsDisplay(out.config.szDeviceName)) continue;
           nMirrors++;
         }
         wchar_t buf[128];
@@ -2307,11 +2515,49 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
       return 0;
     }
 
-    // Minimising and restoring the CHILD processes used to happen here, so
-    // that the three callers of this message -- the Displays window button,
-    // the ALT-S hotkey and the idle timer -- all did the same thing to them.
-    // #186 phase 6 removed the children; every enabled display, own preset or
-    // not, is a mirror surface now and this message already covers all of them.
+    // The children, handled HERE rather than in the callers.
+    //
+    // Three places reach this message -- the Displays window button, the ALT-S
+    // hotkey and the idle timer -- and only the hotkey ever did anything about
+    // child instances. So "Deactivate Mirrors" dropped the mirrors and left
+    // every own-process display still rendering, which is not what a display
+    // toggle looks like from the room. Putting it at the one point they all go
+    // through is the same rule ChildSpawnNow already follows.
+    //
+    // Each display gets what it is CONFIGURED for, which is what makes a loaded
+    // display profile take effect through this key as well: a profile writes
+    // m_displayOutputs, so following the config is following the profile. An
+    // own-process display keeps its own instance and never gets a mirror; every
+    // other enabled display mirrors.
+    //
+    // RETIRE the children, the same Suspend/Resume pair the stretch key uses.
+    //
+    // This used to minimise them instead, on the reasoning that the toggle
+    // clears the screens "for a moment" and a child holds a preset, a cycle
+    // timer and a warm shader cache that a process round trip throws away.
+    // Every word of that is true and it optimised for the wrong thing: the
+    // toggle is pressed to make the screens go away, and a child that lingers
+    // has not done that. Shane, seeing one still on screen: "I can still see
+    // the window, probably better to just shut the children down when not
+    // active."
+    //
+    // Two attempts at keeping the process and hiding its window failed first,
+    // both because a child is deliberately WS_EX_TOOLWINDOW -- off the taskbar
+    // and out of Alt+Tab. Minimising such a window gives Windows nowhere to
+    // put it, so it parks a 160x28 caption stub on the desktop wearing the
+    // internal MDXChild_<N>_<parentpid> name; hiding was better and still not
+    // enough in practice.
+    //
+    // Suspend records which displays had a child, and Resume puts one back
+    // ONLY where the display still wants one -- so changing a display to
+    // mirror or off between the two presses is not overruled by this key.
+    {
+      const bool turningOn = !g_engine.m_bMirrorsActive &&
+                             !g_engine.m_bMirrorWatermarkActive;
+      if (turningOn) g_engine.ResumeChildrenAfterDisplayToggle();
+      else           g_engine.SuspendChildrenForDisplayToggle();
+    }
+
     if (g_engine.m_bMirrorWatermarkActive) {
       // Transition from watermark mirror → regular mirror:
       // Exit watermark state but keep mirrors active with default settings
@@ -2530,11 +2776,19 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
     if (!watermarkMode) {
       // Enter watermark: borderless FS + always on top + clickthrough + low opacity
       watermarkPrevOpacity = g_engine.fOpacity;
-      if (!g_engine.IsBorderlessFullscreen(hWnd))
+      // Record what watermark mode actually CHANGES, so leaving it can put
+      // back only that. Each of these three was previously forced on the way
+      // out regardless of how the window arrived.
+      watermarkEnteredFullscreen = !g_engine.IsBorderlessFullscreen(hWnd);
+      watermarkEnteredClickthrough = !clickthrough;
+      watermarkEnteredAlwaysOnTop = !g_engine.m_bAlwaysOnTop;
+      if (watermarkEnteredFullscreen)
         ToggleBorderlessFullscreen(hWnd);
-      g_engine.m_bAlwaysOnTop = true;
-      g_engine.ToggleAlwaysOnTop(hWnd);
-      if (!clickthrough)
+      if (watermarkEnteredAlwaysOnTop) {
+        g_engine.m_bAlwaysOnTop = true;
+        g_engine.ToggleAlwaysOnTop(hWnd);
+      }
+      if (watermarkEnteredClickthrough)
         ToggleClickThrough(hWnd);
       g_engine.fOpacity = g_engine.m_WindowWatermarkModeOpacity;
       g_engine.SetOpacity(hWnd);
@@ -2549,14 +2803,26 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
       }
     } else {
       // Exit watermark: restore clickthrough, opacity, always-on-top, borderless
-      if (clickthrough)
+      // Undo only what entering actually did. In particular a window that was
+      // ALREADY borderless-fullscreen keeps it: a child owns its display and
+      // covers it, and un-fullscreening it here is what moved it off that
+      // display entirely -- ToggleBorderlessFullscreen halves the size and
+      // re-centres, so the child came back as a 1280x720 window on the
+      // primary. "turn on/off watermark and try to reactivate the screen on
+      // display1 ... it moves to display3 as centered windowed screen".
+      if (watermarkEnteredClickthrough && clickthrough)
         ToggleClickThrough(hWnd);
       g_engine.fOpacity = watermarkPrevOpacity;
       g_engine.SetOpacity(hWnd);
-      g_engine.m_bAlwaysOnTop = false;
-      g_engine.ToggleAlwaysOnTop(hWnd);
-      if (g_engine.IsBorderlessFullscreen(hWnd))
+      if (watermarkEnteredAlwaysOnTop) {
+        g_engine.m_bAlwaysOnTop = false;
+        g_engine.ToggleAlwaysOnTop(hWnd);
+      }
+      if (watermarkEnteredFullscreen && g_engine.IsBorderlessFullscreen(hWnd))
         ToggleBorderlessFullscreen(hWnd);
+      watermarkEnteredFullscreen = false;
+      watermarkEnteredClickthrough = false;
+      watermarkEnteredAlwaysOnTop = false;
       watermarkMode = false;
       g_engine.m_bWatermarkActive = false;
     }
@@ -2573,7 +2839,26 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
     // parent's foreground -- restoring several children at once must not fight
     // over the focus, and must not take it from whatever the user is doing.
     if (wParam) {
-      ShowWindow(hWnd, SW_MINIMIZE);
+      // A CHILD is HIDDEN, not minimised.
+      //
+      // A child is deliberately WS_EX_TOOLWINDOW so it keeps off the taskbar
+      // and out of Alt+Tab (daae267). Minimising a window with no taskbar
+      // button leaves Windows nowhere to put it, so it parks a caption stub on
+      // the desktop instead -- measured at 160x28 with style
+      // WS_POPUP|WS_MINIMIZE|WS_VISIBLE, sitting bottom-left of the primary
+      // and wearing the internal MDXChild_<N>_<parentpid> caption, which
+      // exists to identify a stray process and was never meant to be read by
+      // anyone. Reported as "child mode processes have little floating window
+      // bars when Alt-S used to exit full screen multi monitor mode".
+      //
+      // This is the SET_MINIMIZED= verb and the SET_ALL_FULLSCREEN restore,
+      // not the display toggle -- that one retires its children outright now
+      // (WM_MW_TOGGLE_MIRROR_MODE). A client that asks a child to minimise
+      // still gets something sensible rather than a caption stub.
+      //
+      // The restore path below needs no change: SW_SHOWNOACTIVATE un-hides
+      // just as it un-minimises.
+      ShowWindow(hWnd, g_engine.m_bChildMode ? SW_HIDE : SW_MINIMIZE);
     } else {
       ShowWindow(hWnd, SW_SHOWNOACTIVATE);
       PostMessage(hWnd, WM_MW_BORDERLESS_FS, MW_FS_ENTER, 0);
@@ -2605,6 +2890,24 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
     SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
     if (!g_engine.m_bAlwaysOnTop)
       SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+    return 0;
+  }
+
+  case WM_MW_LOWER_WINDOW: {
+    // The counterpart to the raise above (#237): put this window behind the
+    // others on its monitor, without taking focus and without blanking the
+    // screen the way SET_MINIMIZED=1 does.
+    //
+    // The always-on-top drop is not optional. HWND_BOTTOM only orders a window
+    // within its own band, so a topmost window sent to the bottom lands at the
+    // bottom OF THE TOPMOST BAND -- still above every ordinary window, and the
+    // command looks like it did nothing. Leave the flag itself alone though:
+    // this is a one-off placement, and a user who set always-on-top should get
+    // it back on the next raise, exactly as the raise restores it here.
+    const UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+    if (g_engine.m_bAlwaysOnTop)
+      SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+    SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, flags);
     return 0;
   }
 
@@ -2661,6 +2964,111 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
     g_engine.RaiseMirrorSurfaces(hWnd);
     return 0;
 
+  case WM_MW_CHILD_KEY:
+    // A key pressed on a child display, posted by that child. The parent's own
+    // bindings decide what it means -- a child has no hotkey table, and giving
+    // it one would mean two places to configure the same key.
+    //
+    // LookupLocalHotkey, not a synthesised WM_KEYDOWN: the modifiers travelled
+    // with the message because GetKeyState here would report THIS process's
+    // keyboard state, which is not where the key was pressed.
+    g_engine.LookupLocalHotkey((UINT)wParam, (UINT)lParam);
+    return 0;
+
+  case WM_MW_CHILD_REVEAL:
+    // A -child built hidden on its own display has drawn its first frame.
+    //
+    // It comes up at alpha 0 over the mirror and fades in, so the handover is a
+    // dissolve from the mirrored image to the display's own preset rather than
+    // a jump. The mirror is still underneath for the whole fade -- the parent
+    // does not retire it until m_bChildRevealComplete, or the desktop would
+    // show through the half-faded window.
+    //
+    // SHOWNOACTIVATE: a display coming to life must not take the keyboard away
+    // from whatever the user is typing into. Then raised once, because a window
+    // shown without activating lands at the BOTTOM of the z-order -- on a
+    // monitor somebody is working on that means it renders perfectly underneath
+    // their editor and the display looks dead. Once and no more: pinning a
+    // child topmost was tried and covered everything with no way past it.
+    //
+    // A -hidewindow child stops here, and MUST still report the reveal
+    // complete: the parent waits on that flag before retiring the mirror, so a
+    // child that simply never answered would leave a mirror up for good and
+    // look like a hang rather than like a quiet test.
+    if (g_engine.m_bChildHideWindow) {
+      g_engine.m_bChildRevealComplete.store(true);
+      mdropdx12.LogInfo(L"child: first frame drawn, staying hidden (-hidewindow)");
+      return 0;
+    }
+    ShowWindow(hWnd, SW_SHOWNOACTIVATE);
+    {
+      const UINT zf = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+      // A test window goes to the BOTTOM and stays there. The raise below
+      // exists so a child on a monitor somebody is working on is not buried
+      // under their editor -- which is exactly the behaviour a test must not
+      // have, because the monitor it would come to the front of is the one the
+      // user is still using. Same reasoning as ChildPlaceNow's missing
+      // RAISE_WINDOW.
+      const RECT& tw = g_engine.m_rcChildTestWindow;
+      if (tw.right > tw.left && tw.bottom > tw.top) {
+        SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, zf);
+      } else {
+        SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, zf);
+        if (!g_engine.m_bAlwaysOnTop)
+          SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, zf);
+      }
+    }
+    // Fullscreen, real use: worth the interruption once, unlike the merely
+    // raised case above. -foreground only ever arrives on a real (non-test)
+    // spawn of a display configured fullscreen -- see ChildSpawnNow.
+    //
+    // AllowSetForegroundWindow (also called from ChildSpawnNow) is NOT enough
+    // on its own -- measured. Its grant is silently revoked the moment the
+    // foreground changes for ANY reason before it is spent, and several
+    // seconds separate the spawn from this reveal: the pipe coming up, shader
+    // compilation, the first frame. Across two real measurements one steal
+    // succeeded and one landed on a THIRD process, neither the child nor
+    // whatever held the foreground at spawn time -- ordinary activity in that
+    // window was enough to drop the grant. AttachThreadInput is evaluated
+    // fresh, right here, so it does not depend on nothing having happened in
+    // between; it is the standard technique other Windows software uses for
+    // exactly this "another process, not currently foreground, needs to
+    // activate itself" case. forgejo#85.
+    if (g_engine.m_bChildForegroundOnReveal) {
+      HWND hCur = GetForegroundWindow();
+      if (hCur != hWnd) {
+        DWORD curTid = hCur ? GetWindowThreadProcessId(hCur, nullptr) : 0;
+        DWORD myTid = GetCurrentThreadId();
+        bool attached = (curTid && curTid != myTid) &&
+                        AttachThreadInput(myTid, curTid, TRUE) != FALSE;
+        SetForegroundWindow(hWnd);
+        BringWindowToTop(hWnd);
+        if (attached)
+          AttachThreadInput(myTid, curTid, FALSE);
+      }
+    }
+    g_nChildFadeMs = (g_engine.m_nChildFadeMs > 0)
+                         ? (DWORD)g_engine.m_nChildFadeMs : 0;
+    if (g_nChildFadeMs > 10000) g_nChildFadeMs = 10000;
+    if (g_nChildFadeMs == 0) {
+      // Nothing underneath to dissolve from, so just be there.
+      SetLayeredWindowAttributes(hWnd, 0,
+          (BYTE)(max(0.0f, min(1.0f, g_engine.fOpacity)) * 255.0f + 0.5f),
+          LWA_ALPHA);
+      g_engine.m_bChildRevealComplete.store(true);
+      mdropdx12.LogInfo(L"child: first frame drawn, shown (no fade)");
+      return 0;
+    }
+    g_nChildFadeStartMs = GetTickCount();
+    SetTimer(hWnd, IDT_CHILD_FADE_IN, kChildFadeStepMs, NULL);
+    {
+      wchar_t msg[96];
+      FormatTo(msg, L"child: first frame drawn, fading in over %lums",
+               (unsigned long)g_nChildFadeMs);
+      mdropdx12.LogInfo(msg);
+    }
+    return 0;
+
   case WM_MW_FOCUS_PRIMARY:
     // Mirror window was clicked (render thread) — take keyboard focus so local hotkeys work.
     // Must run on this (UI) thread; SetForegroundWindow from the render thread is unsafe.
@@ -2677,7 +3085,29 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
     // Phase 1 (wParam=0): go fullscreen + set render window watermark
     // Phase 2 (wParam=1): activate mirrors (deferred so fullscreen resize completes first)
 
+    // Absolute forms: wParam 2 = ON, 3 = OFF (#196).
+    //
+    // They resolve HERE rather than in the caller, because the state they have
+    // to compare against only makes sense here. Entering is two phases and
+    // m_bMirrorWatermarkActive stays false until the second, so a caller that
+    // compared the flag would see "off" during the transition and start the
+    // sequence again. Once resolved, an absolute request that needs a change
+    // IS the toggle, so it falls through to it.
+    if (wParam == 2 || wParam == 3) {
+      const bool want = (wParam == 2);
+      const bool effective = g_engine.m_bMirrorWatermarkActive || mirrorWM_entering;
+      if (effective == want)
+        return 0;              // already there, or already on the way there
+      wParam = 0;              // needs a change: that is exactly the toggle
+    }
+
+    // Ignore a toggle that arrives mid-enter, for the same reason: phase 1 is
+    // not idempotent. The sequence completes and the next request is honoured.
+    if (mirrorWM_entering && wParam == 0)
+      return 0;
+
     if (!g_engine.m_bMirrorWatermarkActive && wParam == 0) {
+      mirrorWM_entering = true;
       // Re-enumerate displays to ensure fresh monitor rects/device names
       g_engine.EnumerateDisplayOutputs();
 
@@ -2770,6 +3200,7 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
       g_engine.m_bMirrorStylesDirty.store(true);
       g_engine.m_bRaiseMirrorsNextFrame.store(true);
       g_engine.m_bMirrorWatermarkActive = true;
+      mirrorWM_entering = false;
       g_engine.SaveDisplayOutputSettings();
       g_engine.RefreshDisplaysTab();
       g_engine.AddNotification(L"Mirror watermark ON");
@@ -2811,6 +3242,33 @@ static bool IsDeviceHungOrRemoved() {
       return true;
   }
   return false;
+}
+
+// Is this device loss the UNRECOVERABLE kind?
+//
+// DEVICE_HUNG is: the adapter is poisoned FOR THIS PROCESS and stays that way.
+// Measured on v3.1-tdr-recover -- after a hang, InitD3d was refused for 120
+// seconds while the process held nothing at all, while the harness relaunched
+// and had a working device in about 22 seconds. No amount of letting go helps.
+//
+// Everything else is not that: DEVICE_REMOVED (a driver update, a reset, an
+// adapter change), DEVICE_RESET, DRIVER_INTERNAL_ERROR. Those are what the
+// pre-August code recovered from, and the commit that disabled recovery
+// (a15765c0) folded all four together -- so a driver update killed the
+// visualizer as surely as a hang.
+static bool DeviceLossIsHung() {
+  auto reasonOf = [](ID3D12Device* d) -> HRESULT {
+    return d ? d->GetDeviceRemovedReason() : S_OK;
+  };
+  HRESULT r = reasonOf(pD3DDevice.Get());
+  if (r == S_OK && g_engine.m_lpDX)
+    r = reasonOf(g_engine.m_lpDX->m_device.Get());
+  // m_lastErr is the API's generic return, not the reason -- Present answers
+  // DEVICE_REMOVED for a hang too -- so it is only consulted when the device
+  // itself has nothing to say.
+  if (r == S_OK && g_engine.m_lpDX)
+    r = g_engine.m_lpDX->m_lastErr;
+  return r == DXGI_ERROR_DEVICE_HUNG;
 }
 
 // Backstop for the GPU-fatal path. WM_CLOSE already bounds its own wait on the
@@ -2862,10 +3320,19 @@ static void PerformDeviceRecovery() {
     return;
   }
 
-  if (IsDeviceHungOrRemoved()) {
+  // Only a HANG is fatal here. This used to refuse every device loss, so the
+  // recoverable ones -- a driver update above all -- exited with the same
+  // finality as a poisoned adapter, and the recovery machinery below never ran
+  // for the cases it was written for.
+  if (g_bGpuHung.load() || DeviceLossIsHung()) {
+    DebugLogA("Device Recovery: DEVICE_HUNG — not recoverable in process, "
+              "exiting\n", LOG_ERROR);
     RequestGpuFatalExit();
     return;
   }
+  if (IsDeviceHungOrRemoved())
+    DebugLogA("Device Recovery: device lost but NOT hung — recovering\n",
+              LOG_ERROR);
 
   static bool s_tornDown = false;
   static int s_attempt = 0;
@@ -2911,7 +3378,10 @@ static void PerformDeviceRecovery() {
   InitD3d(hwnd, w, h);
   if (!pD3DDevice || !pCommandQueue) {
     DeinitD3d();
-    if (s_attempt >= 3 || IsDeviceHungOrRemoved()) {
+    // DeviceLossIsHung, not IsDeviceHungOrRemoved: the latter also answers yes
+    // to the stale generic DEVICE_REMOVED left in m_lastErr from the loss being
+    // recovered FROM, which aborts the retry after a single attempt.
+    if (s_attempt >= 6 || DeviceLossIsHung()) {
       DebugLogA("Device Recovery: InitD3d failed — exiting\n", LOG_ERROR);
       s_tornDown = false;
       s_attempt = 0;
@@ -2919,8 +3389,11 @@ static void PerformDeviceRecovery() {
       RequestGpuFatalExit();
       return;
     }
-    DWORD wait = 400u * (unsigned)s_attempt;
-    if (wait > 2000) wait = 2000;
+    // 500, 1000, 1500 ... as the pre-August implementation did. A driver that
+    // has just been replaced does not answer instantly: "the first
+    // CreateDevice often fails for 1-3s while the driver recovers".
+    DWORD wait = 500u * (unsigned)s_attempt;
+    if (wait > 3000) wait = 3000;
     s_nextTryMs = now + wait;
     g_engine.m_bDeviceRecoveryPending = true;
     return;
@@ -2932,7 +3405,7 @@ static void PerformDeviceRecovery() {
   if (!ok) {
     DebugLogA("Device Recovery: PluginInitialize FAILED\n", LOG_ERROR);
     DeinitD3d();
-    if (s_attempt >= 3 || IsDeviceHungOrRemoved()) {
+    if (s_attempt >= 6 || DeviceLossIsHung()) {
       s_tornDown = false;
       s_attempt = 0;
       s_nextTryMs = 0;
@@ -3352,6 +3825,14 @@ unsigned __stdcall RenderThreadProc(void* data) {
         }
         consecutiveExceptions = 0; // successful frame resets counter
 
+        // First real frame: let the child be seen, and hand its display over.
+        // exchange(), so this fires exactly once however many frames follow.
+        if (g_bChildRevealPending.load() && !safeMode) {
+          if (g_bChildRevealPending.exchange(false)) {
+            if (HWND hRender = g_hRenderWindow.load())
+              PostMessage(hRender, WM_MW_CHILD_REVEAL, 0, 0);
+          }
+        }
       } catch (const std::exception& e) {
         consecutiveExceptions++;
         try {
@@ -3412,14 +3893,33 @@ unsigned __stdcall RenderThreadProc(void* data) {
   // moment it is changed rather than waiting for shutdown. The same reasoning
   // covers the VFX profile store, which saves the current profile on exit if a
   // run left it dirty.
-  if (g_engine.m_bTestingModeUsedThisSession) {
-    mdropdx12.LogInfo(L"RenderThread: skipping the shutdown auto-save -- this "
-                      L"session used testing mode, so the settings in memory "
-                      L"are a test run's, not the user's");
+  //
+  // A CHILD skips it for the same reason and a stronger one (#338): it shares
+  // the parent's settings.ini, owns no settings UI, and every value in its
+  // memory arrived from the parent -- so writing 117 keys back is all risk and
+  // no benefit. Its window geometry is whatever the parent placed it at, and
+  // its m_bAlwaysOnTop is whatever the parent told this DISPLAY to be, so a
+  // child exiting could turn per-display Keep on top into the main window's
+  // global Always On Top at the next launch. A child owns no external
+  // interface, and the shared config file is one.
+  if (g_engine.m_bTestingModeUsedThisSession || g_engine.m_bChildMode) {
+    mdropdx12.LogInfo(g_engine.m_bChildMode
+                      ? L"RenderThread: skipping the shutdown auto-save -- a "
+                        L"child shares the parent's settings.ini and has "
+                        L"nothing of its own to persist"
+                      : L"RenderThread: skipping the shutdown auto-save -- this "
+                        L"session used testing mode, so the settings in memory "
+                        L"are a test run's, not the user's");
   } else {
     g_engine.SaveVideoFXOnExit();
     g_engine.MyWriteConfig();
   }
+  // Children go here, not in CleanUpMyNonDx9Stuff, because PluginQuit is also
+  // the teardown half of a device recovery and this is the only real exit
+  // (forgejo#57). Before PluginQuit for the reason the old call site gave:
+  // retiring a child is a SHUTDOWN over its pipe and a wait, and it must
+  // happen before the display teardown, not after it.
+  g_engine.StopChildWorker();
   g_engine.PluginQuit();
   DeinitD3d();
 
@@ -3508,6 +4008,17 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   // is off the taskbar and out of Alt+Tab, so its caption in Task Manager or a
   // debugger is the only place left where a stray one identifies itself.
   //
+  // Set BEFORE the [TEST] tag below, deliberately, so a child of a test
+  // instance still says so. An unexplained extra process is exactly what the
+  // tag exists to prevent, and a child is no less confusing than its parent.
+  wchar_t childTitle[64];
+  if (g_engine.m_bChildMode) {
+    FormatTo(childTitle, L"MDXChild_%d_%lu",
+             g_engine.m_nChildIndex > 0 ? g_engine.m_nChildIndex : 1,
+             (unsigned long)g_engine.m_nParentPid);
+    baseTitle = childTitle;
+  }
+
   // An instance running from a *_test copy of the exe says so, in its title.
   //
   // The harness launches a renamed copy so build.ps1 -- which frees the binary
@@ -3588,12 +4099,85 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   // right place still shows a grey rectangle and then a black one while D3D
   // starts. The mirror is still covering that display and keeps covering it
   // until the child has something better to show -- replace, not remove.
-  // A -child instance built its window on the display it was given, hidden,
-  // and faded in over the mirror. #186 phase 6 removed that mode: a display
-  // holding its own preset is a mirror surface in this process, and the
-  // render window is placed from its own saved geometry like any other.
-  {
+  bool bChildDeferShow = false;
+  if (g_engine.m_bChildMode && g_engine.m_nChildDisplay > 0) {
+    wchar_t want[32];
+    FormatTo(want, L"\\\\.\\DISPLAY%d", g_engine.m_nChildDisplay);
+    struct Find { const wchar_t* want; RECT rc; bool got; } f = { want, {}, false };
+    EnumDisplayMonitors(NULL, NULL,
+      [](HMONITOR h, HDC, LPRECT, LPARAM lp) -> BOOL {
+        Find* fp = (Find*)lp;
+        MONITORINFOEXW info = { { sizeof(MONITORINFOEXW) } };
+        if (GetMonitorInfoW(h, &info) && wcscmp(info.szDevice, fp->want) == 0) {
+          fp->rc = info.rcMonitor;
+          fp->got = true;
+          return FALSE;
+        }
+        return TRUE;
+      }, (LPARAM)&f);
 
+    // A test rect replaces the monitor rect and nothing else. Everything below
+    // -- borderless via WS_POPUP, hidden until the first frame, skipping the
+    // settings.ini sanity check -- applies unchanged, because all of it is
+    // about being built in the right place at the right moment rather than
+    // about being large. The display is still resolved first, and the rect is
+    // still checked against it, so "which display did this child land on"
+    // remains a question with an answer.
+    const RECT& tw = g_engine.m_rcChildTestWindow;
+    const bool haveTestRect = tw.right > tw.left && tw.bottom > tw.top;
+
+    if (f.got && haveTestRect) {
+      g_engine.m_WindowX = tw.left;
+      g_engine.m_WindowY = tw.top;
+      g_engine.m_WindowWidth = tw.right - tw.left;
+      g_engine.m_WindowHeight = tw.bottom - tw.top;
+      g_engine.m_WindowBorderless = true;
+      g_engine.m_bStartFullscreen = false;
+      borderless = true;
+      bChildDeferShow = true;
+      {
+        wchar_t msg[160];
+        FormatTo(msg, L"CreateWindowAndRun: child starts as a %dx%d test "
+                      L"window at (%d,%d) on its own display",
+                 g_engine.m_WindowWidth, g_engine.m_WindowHeight,
+                 tw.left, tw.top);
+        mdropdx12.LogInfo(msg);
+      }
+    } else if (f.got && f.rc.right > f.rc.left && f.rc.bottom > f.rc.top) {
+      g_engine.m_WindowX = f.rc.left;
+      g_engine.m_WindowY = f.rc.top;
+      g_engine.m_WindowWidth = f.rc.right - f.rc.left;
+      g_engine.m_WindowHeight = f.rc.bottom - f.rc.top;
+      // The whole monitor, not its work area: a display handed to a child is
+      // covered completely, taskbar included. Same rule ChildPlaceNow applies.
+      //
+      // Borderless is applied by CREATING the window WS_POPUP, not by the usual
+      // ToggleBorderlessWindow afterwards: that sets the style to
+      // WS_POPUP | WS_VISIBLE, and the WS_VISIBLE bit would make a window we
+      // are deliberately keeping hidden report itself as visible -- which is
+      // the exact flag the parent waits on before retiring the mirror. Setting
+      // `borderless` here keeps the later toggle from undoing it.
+      g_engine.m_WindowBorderless = true;
+      g_engine.m_bStartFullscreen = false;
+      borderless = true;
+      bChildDeferShow = true;
+      mdropdx12.LogInfo(L"CreateWindowAndRun: child starts hidden on its own display");
+    } else {
+      mdropdx12.LogInfo(L"CreateWindowAndRun: child was given a display that "
+                        L"could not be found; falling back to saved geometry");
+    }
+  }
+
+  // Skipped entirely for a child that was told its display: everything below
+  // sanity-checks a rectangle read out of settings.ini, and a rectangle taken
+  // from a live monitor a moment ago needs none of it. It actively breaks it.
+  // A full-monitor rect trips RectLooksLikeFullscreen, which sets
+  // m_bStartFullscreen and then resolves the monitor from m_FullscreenHintX/Y
+  // -- read from the SHARED settings.ini, so it names the main window's
+  // display. The child was built correctly on its own monitor and then sent
+  // fullscreen onto the parent's. Measured: visible on the wrong display for
+  // 1.8s, which is the flash this was meant to remove.
+  if (!bChildDeferShow) {
     // Validate saved window position — ensure it's mostly on a visible monitor.
     const int savedX = g_engine.m_WindowX;
     const int savedY = g_engine.m_WindowY;
@@ -3701,11 +4285,14 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   // by default, so a child needs WS_EX_TOOLWINDOW to stay off it even before
   // anything writes WS_EX_APPWINDOW.
   //
+  // Keyed on m_bChildMode rather than bChildDeferShow: a child whose display
+  // could not be found falls through to saved geometry with bChildDeferShow
+  // false, and is still a child that the parent drives.
   HWND hwnd = CreateWindowExW(
-    0,
+    (DWORD)(g_engine.m_bChildMode ? WS_EX_TOOLWINDOW : 0),
     L"Direct3DWindowClass",
     VisualizerWindowTitle,
-    WS_OVERLAPPEDWINDOW, // SPOUT
+    bChildDeferShow ? WS_POPUP : WS_OVERLAPPEDWINDOW, // SPOUT
     //dwStyle,
     g_engine.m_WindowX,
     g_engine.m_WindowY,
@@ -3745,25 +4332,32 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   if (g_szCmdLinePipeBase[0] && !PipeNameBaseIsValid(g_szCmdLinePipeBase))
     mdropdx12.LogInfo(L"-pipe= refused: letters, digits and underscore only, "
                       L"under 40 characters");
-  g_pipeServer.Start(hwnd, WM_MW_IPC_MESSAGE, 0x8000 /*WM_APP*/, 0);
+  g_pipeServer.Start(hwnd, WM_MW_IPC_MESSAGE, 0x8000 /*WM_APP*/,
+                     g_engine.m_bChildMode,
+                     g_engine.m_bChildMode ? g_engine.m_nParentPid : 0);
 
-  // A -test instance dispatches STRICTLY: an unmatched keyword comes back as
-  // an error instead of becoming a script line drawn over the render (issue
-  // 102). -child was the other one, and is gone (#186 phase 6).
+  // -child and -test dispatch STRICTLY: an unmatched keyword comes back as an
+  // error instead of becoming a script line drawn over the render (issue 102).
   //
-  // Only as the default a NEW connection starts at. A test instance talks to
-  // its harness and would rather be told about a typo than have it painted
-  // across a frame it is about to capture. Every other instance keeps the
-  // fall-through Milkwave Remote needs, and any client can set its own with
-  // STRICT=0 / STRICT=1.
+  // Only these two, and only as the default a NEW connection starts at. A child
+  // talks to its parent and a test instance to its harness; both would rather
+  // be told about a typo than have it painted across a frame they are about to
+  // capture. Every other instance keeps the fall-through Milkwave Remote needs,
+  // and any client can set its own with STRICT=0 / STRICT=1.
   // IsTestInstance(), not m_bTestSwitch: the harness runs a COPY named
   // MDropDX12_test.exe and usually passes no -test switch at all, so the flag
   // alone would have left every instance the harness drives on the lenient
   // path -- the exact instances this is for.
-  g_pipeServer.SetStrictDefault(g_engine.IsTestInstance());
+  g_pipeServer.SetStrictDefault(g_engine.m_bChildMode || g_engine.IsTestInstance());
 
   // TCP server for Android remote.
   //
+  // A -child instance never serves it. The parent owns every external
+  // interface: a child that started the server would bind a second port and
+  // advertise itself over mDNS, offering the Android remote a second endpoint
+  // that controls exactly one display. Children are driven by the parent over
+  // the named pipe, which is the only inbound channel they need.
+  if (!g_engine.m_bChildMode)
   {
     const wchar_t* pIni = g_engine.GetConfigIniFile();
     g_tcpServer.LoadAuthorizedDevices(pIni);
@@ -3886,6 +4480,11 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   // the RectLooksLikeFullscreen trap above: a heuristic for recognising a
   // remembered state, fooled by a state we created on purpose.
   //
+  // Keyed on m_bChildMode as well, for the reason already written out at the
+  // CreateWindowExW call above: "a child whose display could not be found
+  // falls through to saved geometry with bChildDeferShow false, and is still
+  // a child that the parent drives." That is exactly the case this missed.
+  //
   // Measured on DISPLAY3, 2026-09-09: MDXChild_2 sat at alpha=76 of 255 --
   // 0.298, i.e. WindowWatermarkModeOpacity to the byte -- click-through and
   // always-on-top, with the parent's render showing through it. Reported as
@@ -3893,7 +4492,12 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   // "looks like my display3 is rendering in watermark mode". Its sibling on
   // DISPLAY1 resolved its display and sat at 255.
   //
-  if (g_engine.IsBorderlessFullscreen(hwnd)) {
+  // A child must never enter watermark mode on its own: it has no user to
+  // have left it that way, and the heuristic that infers one cannot tell a
+  // remembered state from the borderless-fullscreen window we just built on
+  // purpose.
+  if (!g_engine.m_bChildMode && !bChildDeferShow &&
+      g_engine.IsBorderlessFullscreen(hwnd)) {
     g_engine.fOpacity = g_engine.m_WindowWatermarkModeOpacity;
     g_engine.SetOpacity(hwnd);
     if (!clickthrough) ToggleClickThrough(hwnd);
@@ -3906,7 +4510,22 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
     }
   }
 
-  if (IsWindow(hwnd)) {
+  if (bChildDeferShow) {
+    // Stays hidden until the render loop has actually drawn something. The
+    // mirror still covers this display, so there is no gap to fill -- showing
+    // an empty window now would only replace a good frame with a grey one.
+    //
+    // Layered up front, at alpha 0. Adding WS_EX_LAYERED later, at the moment
+    // of reveal, costs a style change and a redraw exactly when the window is
+    // first composited; done here it is free and the first thing anyone sees
+    // is the fade starting from nothing.
+    LONG_PTR ex = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+    SetWindowLongPtr(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+    SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);
+    g_engine.m_bChildRevealComplete.store(false);
+    g_bChildRevealPending.store(true);
+  }
+  else if (IsWindow(hwnd)) {
     // Honour what the launcher asked for. SW_SHOW activates;
     // SW_SHOWNOACTIVATE does not, and a harness that starts an instance
     // beside somebody working depends on the difference. See g_iCmdShow.
@@ -3921,13 +4540,45 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
     mdropdx12.LogInfo(L"CreateWindowAndRun: ShowWindow failed, window not created");
   }
 
+  // -test, BEFORE the window state is restored.
+  //
+  // SetTestingMode sets the frame-rate baseline, takes a display snapshot and
+  // raises the settings write shield, and none of those exist when the command
+  // line is read -- so the switch can only set a flag there and the mode has to
+  // be raised once the engine and window are up. This is that point, and it has
+  // to come before the three restores below rather than after them.
+  //
+  // It used to sit ~40 lines further down, after EnsureFullScreen. The switch
+  // therefore arrived too late to stop the one thing it most needed to: with
+  // start_fullscreen=1 in settings.ini -- and a harness shares the file -- every
+  // launch went borderless-fullscreen on a real monitor before testing mode
+  // existed. Reported as "each time you launched lately you have taken over
+  // every display", with the answer given as plainly as it could be: "-test",
+  // "there is a command line switch that should load before anything".
+  //
+  // Still BEFORE RegisterGlobalHotkeys below: that call refuses outright for a
+  // test instance, so the two must not be reordered on the assumption that
+  // they are independent.
+  if (g_engine.m_bTestSwitch) {
+    g_engine.SetTestingMode(true);
+    mdropdx12.LogInfo(L"-test: testing mode on, frame rate set to 60 as a "
+                      L"baseline (changeable over IPC), no TCP remote, no "
+                      L"global hotkeys, no startup fullscreen");
+  }
+
   if (g_engine.m_bAlwaysOnTop) {
     g_engine.ToggleAlwaysOnTop(hwnd);
   }
   if (g_engine.m_WindowBorderless && !borderless) {
     ToggleBorderlessWindow(hwnd);
   }
-  if (g_engine.m_bStartFullscreen)
+  // Restrained, not a hand-written test-instance check: which behaviours differ
+  // under testing mode is data (see kTestingRestraints), and taking a whole
+  // monitor unasked is one of them. The CAPABILITY is untouched --
+  // SET_ALL_FULLSCREEN, the hotkey and ToggleFullscreen all still work -- so a
+  // test that means to exercise fullscreen asks for it.
+  if (g_engine.m_bStartFullscreen &&
+      !g_engine.Restrained(Engine::restraint::kStartupDisplay))
     EnsureFullScreen(hwnd);
 
 
@@ -3957,22 +4608,6 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
 
   // -test asked for testing mode; raise it here rather than at parse time.
   //
-  // SetTestingMode sets the frame-rate baseline, takes a display snapshot and raises the
-  // settings write shield, and none of those exist when the command line is
-  // read. Here the engine is up and the window exists, which is the earliest
-  // point at which all three mean something -- and it is still before the first
-  // preset loads, so nothing has been recorded and no settings written.
-  //
-  // Deliberately AFTER the flag is set but BEFORE RegisterGlobalHotkeys below:
-  // that call refuses outright for a test instance, so the two must not be
-  // reordered on the assumption that they are independent.
-  if (g_engine.m_bTestSwitch) {
-    g_engine.SetTestingMode(true);
-    mdropdx12.LogInfo(L"-test: testing mode on, frame rate set to 60 as a "
-                      L"baseline (changeable over IPC), no TCP remote, no "
-                      L"global hotkeys");
-  }
-
   // Register global hotkeys on the message pump thread's window
   g_engine.RegisterGlobalHotkeys(hwnd);
 
@@ -4407,6 +5042,37 @@ void PrecompilePresetShaders(mdrop::Engine& engine, const std::wstring& baseDir,
   }
 }
 
+// A child outlives nothing. If the parent dies -- crash, kill, or a user closing
+// it -- every child must go with it, or the displays are left holding windows
+// with no way to reach them: child mode ignores the keyboard and opens no tool
+// windows, so there is no way to close one by hand.
+//
+// A wait on the parent's handle rather than a poll: it returns the instant the
+// process object is signalled, costs nothing while waiting, and cannot miss a
+// PID that gets reused.
+static unsigned __stdcall WatchParent(void* arg) {
+  const DWORD parentPid = (DWORD)(uintptr_t)arg;
+  HANDLE hParent = OpenProcess(SYNCHRONIZE, FALSE, parentPid);
+  if (!hParent) {
+    // Already gone, or not permitted to wait on it. Either way this child has
+    // no parent to serve.
+    DLOG_WARN("child mode: parent pid %lu not open-able, exiting", (unsigned long)parentPid);
+    PostMessageW(g_engine.GetPluginWindow(), WM_CLOSE, 0, 0);
+    return 0;
+  }
+  WaitForSingleObject(hParent, INFINITE);
+  CloseHandle(hParent);
+  DLOG_INFO("child mode: parent pid %lu exited, closing", (unsigned long)parentPid);
+  PostMessageW(g_engine.GetPluginWindow(), WM_CLOSE, 0, 0);
+  return 0;
+}
+
+void StartParentWatchdog() {
+  if (!g_engine.m_bChildMode || g_engine.m_nParentPid == 0) return;
+  _beginthreadex(nullptr, 0, &WatchParent,
+                 (void*)(uintptr_t)g_engine.m_nParentPid, 0, nullptr);
+}
+
 void StartSetupThread(HINSTANCE instance) {
   // Snapshot on THIS thread; DoSetup owns and frees the block.
   auto* sp = new SetupParams{ instance, &g_engine,
@@ -4443,6 +5109,9 @@ int StartThreads(HINSTANCE instance) {
 
     mdropdx12.LogInfo(L"Starting setup thread");
     StartSetupThread(instance);
+
+    // After the render thread, so the window exists for the watchdog to close.
+    StartParentWatchdog();
 
     if (g_engine.m_bEnableAudioCapture) {
       mdropdx12.LogInfo(L"Starting audio capture thread");
@@ -4515,14 +5184,42 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv) {
       for (int i = 1; i < argc; i++) {
-        // -child, -childindex=, -display=, -fade=, -rect=, -hidewindow and
-        // -foreground all lived here. They configured a CHILD PROCESS: which
-        // display it covered, which slot it was, how it dissolved in over the
-        // mirror, and where its window went during a test run. #186 phase 6
-        // deleted that mode -- one process renders every display -- so an
-        // instance started with any of them now ignores them and comes up as
-        // an ordinary visualizer, which is the right outcome for a stale
-        // shortcut.
+        // -childindex=<N> : the 1-based slot this child was given, and the N in
+        // its window caption MDXChild_<N>_<parentpid>. Only meaningful with
+        // -child; a child started by hand without one falls back to 1.
+        //
+        // BEFORE -child, and it has to stay there. "-childindex=3" starts with
+        // "-child", so the prefix compare below matches it too -- and that
+        // branch reads everything after the '=' as the PARENT PID, which would
+        // silently give the child a parent of 3 and a watchdog waiting on the
+        // wrong process. The longer option is tested first for the same reason
+        // MSG_IS takes its length from the literal: a prefix compare says
+        // nothing about where the option ends.
+        if (_wcsnicmp(argv[i], L"-childindex=", 12) == 0 ||
+            _wcsnicmp(argv[i], L"--childindex=", 13) == 0) {
+          g_engine.m_nChildIndex = _wtoi(wcschr(argv[i], L'=') + 1);
+          continue;
+        }
+        // -child[=<parentPid>] : render one display under a parent instance's
+        // control, driven entirely over IPC. See Engine::m_bChildMode.
+        //
+        // The tail check is what makes the ordering above a belt rather than
+        // the only thing holding this together: -child takes an '=' or nothing,
+        // so a future -childfoo cannot be swallowed here even if it is added
+        // below this line.
+        if (_wcsnicmp(argv[i], L"-child", 6) == 0 || _wcsnicmp(argv[i], L"--child", 7) == 0) {
+          const wchar_t* tail = argv[i] + (argv[i][1] == L'-' ? 7 : 6);
+          if (*tail == L'\0' || *tail == L'=') {
+            g_engine.m_bChildMode = true;
+            if (*tail == L'=') g_engine.m_nParentPid = (DWORD)_wtoi(tail + 1);
+            // A child shares the parent's directory, so it resolves the same
+            // settings.ini -- and it holds a deliberately reduced state, so every
+            // flush it made overwrote the parent's counts with its own smaller
+            // ones. The parent owns the configuration; a child only reads it.
+            mdrop::PinConfigWriteShield();
+            continue;
+          }
+        }
         // -test : come up as a test instance -- testing mode on, the frame
         // rate SET to 60 as a starting baseline, no TCP remote, and no
         // system-wide hotkeys.
@@ -4540,6 +5237,61 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
         // pins the frame rate, and neither exists yet at parse time.
         if (_wcsicmp(argv[i], L"-test") == 0 || _wcsicmp(argv[i], L"--test") == 0) {
           g_engine.m_bTestSwitch = true;
+          continue;
+        }
+        // -display=<N> : the DISPLAYn this child is to cover. Only meaningful
+        // with -child, and the parent always sends both.
+        if (_wcsnicmp(argv[i], L"-display=", 9) == 0 ||
+            _wcsnicmp(argv[i], L"--display=", 10) == 0) {
+          g_engine.m_nChildDisplay = _wtoi(wcschr(argv[i], L'=') + 1);
+          continue;
+        }
+        // -fade=<ms> : how long to dissolve in over the mirror, 0 for none.
+        if (_wcsnicmp(argv[i], L"-fade=", 6) == 0 ||
+            _wcsnicmp(argv[i], L"--fade=", 7) == 0) {
+          g_engine.m_nChildFadeMs = _wtoi(wcschr(argv[i], L'=') + 1);
+          continue;
+        }
+        // -rect=<x>,<y>,<w>,<h> : build this child's window HERE, small,
+        // instead of covering the display it was given. The harness asks for
+        // it so a test run stops blacking out real monitors, and so that where
+        // a child landed can be checked at all -- a display covered edge to
+        // edge tells you nothing about placement that a corner does not.
+        //
+        // On the command line rather than over the pipe because the child's own
+        // start-up restores settings.ini geometry after the pipe answers; see
+        // the child block in CreateWindowAndRun. The parent re-asserts the same
+        // rect from ChildPlaceNow, which is what stops the poll putting the
+        // window back over the whole monitor a second later.
+        if (_wcsnicmp(argv[i], L"-rect=", 6) == 0 ||
+            _wcsnicmp(argv[i], L"--rect=", 7) == 0) {
+          const wchar_t* v = wcschr(argv[i], L'=') + 1;
+          int x = 0, y = 0, w = 0, h = 0;
+          if (swscanf_s(v, L"%d,%d,%d,%d", &x, &y, &w, &h) == 4 && w > 0 && h > 0) {
+            g_engine.m_rcChildTestWindow.left   = x;
+            g_engine.m_rcChildTestWindow.top    = y;
+            g_engine.m_rcChildTestWindow.right  = x + w;
+            g_engine.m_rcChildTestWindow.bottom = y + h;
+          }
+          continue;
+        }
+        // -hidewindow : build the window and never show it. The quietest a
+        // child can be, for tests about which preset a display holds rather
+        // than about where its window went. The render loop runs as usual, so
+        // presets still cycle and the pipe still answers -- only the reveal is
+        // skipped.
+        if (_wcsnicmp(argv[i], L"-hidewindow", 11) == 0 ||
+            _wcsnicmp(argv[i], L"--hidewindow", 12) == 0) {
+          g_engine.m_bChildHideWindow = true;
+          continue;
+        }
+        // -foreground : this display is configured fullscreen, and the parent
+        // was not in test mode when it decided to spawn -- see ChildSpawnNow
+        // and forgejo#85. Read at the moment of reveal, where it takes the OS
+        // foreground once instead of the ordinary raise-but-do-not-activate.
+        if (_wcsnicmp(argv[i], L"-foreground", 11) == 0 ||
+            _wcsnicmp(argv[i], L"--foreground", 12) == 0) {
+          g_engine.m_bChildForegroundOnReveal = true;
           continue;
         }
         // -pipe=<base> : serve \\.\pipe\<base>_<pid> rather than the default
@@ -4560,13 +5312,45 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
           g_pipeServer.SetNameBase(g_szCmdLinePipeBase);   // refusal reported below
           continue;
         }
-        // -nostartupchildren : accepted and ignored. It suppressed the child
-        // spawns a startup display profile would otherwise make, and the
-        // harness passes it on every launch -- an argument that became an
-        // error would break every one of those runs, so it is swallowed.
-        if (_wcsicmp(argv[i], L"-nostartupchildren") == 0 ||
-            _wcsicmp(argv[i], L"--nostartupchildren") == 0)
+        // -spoutout : Spout OUTPUT on for this run.
+        // -spoutin[=<sender>] : Spout INPUT on for this run, optionally from
+        // a named sender.
+        //
+        // Both are launch OVERRIDES and neither is persisted -- see
+        // Engine::ApplyCommandLineSpout. Testing Spout needs two instances,
+        // one sending and one receiving, and doing that by editing
+        // settings.ini leaves the user's Spout turned on afterwards (#213).
+        //
+        // MDropDX12's own sender name is hardcoded "MDropDX12", so a receiver's
+        // OWN output must stay off, or it publishes a second sender under the
+        // same name and which one is received is anyone's guess.
+        if (_wcsicmp(argv[i], L"-spoutout") == 0 ||
+            _wcsicmp(argv[i], L"--spoutout") == 0) {
+          mdrop::Engine::s_bCmdLineSpoutOut = true;
           continue;
+        }
+        if (_wcsnicmp(argv[i], L"-spoutin", 8) == 0 ||
+            _wcsnicmp(argv[i], L"--spoutin", 9) == 0) {
+          const wchar_t* eq = wcschr(argv[i], L'=');
+          // Bare -spoutin is valid: use whatever sender the settings hold.
+          if (eq && eq[1])
+            wcsncpy_s(mdrop::Engine::s_szCmdLineSpoutInSender, eq + 1, _TRUNCATE);
+          mdrop::Engine::s_bCmdLineSpoutIn = true;
+          continue;
+        }
+        // -nostartupchildren : occupy no display but the render window's.
+        // See Engine::m_bNoStartupChildren.
+        //
+        // Meaningful again (#230). While the child subsystem was deleted this
+        // was accepted and ignored, because the harness passes it on every
+        // launch and an argument that became an error would have broken every
+        // one of those runs. Children are back for flagged presets, so it
+        // suppresses real spawns once more.
+        if (_wcsicmp(argv[i], L"-nostartupchildren") == 0 ||
+            _wcsicmp(argv[i], L"--nostartupchildren") == 0) {
+          g_engine.m_bNoStartupChildren = true;
+          continue;
+        }
         size_t len = wcslen(argv[i]);
         if ((len >= 6 && _wcsicmp(argv[i] + len - 6, L".milk3") == 0) ||
             (len >= 6 && _wcsicmp(argv[i] + len - 6, L".milk2") == 0) ||
@@ -4585,7 +5369,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
   // handing its preset to whichever instance answers first and exiting would
   // defeat the entire point -- the parent would have asked for a display and
   // got nothing.
-  if (g_szCmdLinePreset[0] != L'\0') {
+  if (g_szCmdLinePreset[0] != L'\0' && !g_engine.m_bChildMode) {
     std::wstring msg = L"PRESET=";
     msg += g_szCmdLinePreset;
     if (PipeSendToExistingInstance(msg.c_str())) {
@@ -4792,11 +5576,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 
     // Initialize debug log (creates log/ subdir, rotates debug.log → debug.prev.log)
     //
-    // A child used to get log\child-<pid>\ of its own, because children shared
-    // the parent's folder and all three instances opened the same debug.log
-    // unsynchronised -- records came out spliced through each other mid-word,
-    // exactly when a per-display problem needed reading. One process again.
-    DebugLogInit(g_engine.m_szBaseDir, nullptr);
+    // A child gets log\child-<pid>\ of its own. Children share the parent's
+    // folder, so all three instances used to open the same debug.log and write
+    // to it unsynchronised -- the result was records spliced through each other
+    // mid-word, exactly when a per-display problem needed reading.
+    {
+      wchar_t logSubdir[64] = {};
+      if (g_engine.m_bChildMode)
+        FormatTo(logSubdir, L"child-%lu", (unsigned long)GetCurrentProcessId());
+      DebugLogInit(g_engine.m_szBaseDir, logSubdir[0] ? logSubdir : nullptr);
+    }
     DebugLogSetLevel(g_engine.m_LogLevel); // apply INI log level immediately
 
     if (found) {

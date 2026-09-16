@@ -497,7 +497,7 @@ void ButtonBoardWindow::ShowConfigMenu() {
         ofn.lpstrFile   = szFile;
         ofn.nMaxFile    = MAX_PATH;
         ofn.lpstrDefExt = L"json";
-        ofn.Flags       = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+        ofn.Flags       = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
         // Start in base dir
         std::wstring initDir(m_pEngine->m_szBaseDir);
         ofn.lpstrInitialDir = initDir.c_str();
@@ -516,7 +516,7 @@ void ButtonBoardWindow::ShowConfigMenu() {
         ofn.lpstrFilter = L"JSON Files (*.json)\0*.json\0All Files\0*.*\0";
         ofn.lpstrFile   = szFile;
         ofn.nMaxFile    = MAX_PATH;
-        ofn.Flags       = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+        ofn.Flags       = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
         std::wstring initDir(m_pEngine->m_szBaseDir);
         ofn.lpstrInitialDir = initDir.c_str();
         if (GetOpenFileNameW(&ofn)) {

@@ -3,6 +3,7 @@
 #include "ipc_help.h"
 #include "version.h"
 #include "format_to.h"
+#include "utility.h"   // BuildTimestampW -- the exe's own time, not __DATE__
 
 #include <windows.h>
 #include <string>
@@ -73,6 +74,9 @@ const IpcCommandDoc kCommands[] = {
   { L"GET_CANVAS_MAX",         L"GET_CANVAS_MAX",                  L"Global ceiling, the canvas actually in use, and what this preset asks for", L"canvas" },
   { L"SET_PRESET_CANVAS_MAX=", L"SET_PRESET_CANVAS_MAX=<px>",      L"Per-preset canvas limit for the running preset, capped by the global ceiling", L"canvas" },
   { L"PRESET_CANVAS_MAX_CLEAR", L"PRESET_CANVAS_MAX_CLEAR",        L"Clear the running preset's canvas limit", L"canvas" },
+  { L"SET_PRESET_FPS_MAX=",    L"SET_PRESET_FPS_MAX=<fps>",        L"Per-preset frame cap for the running preset. It only ever LOWERS the active cap, so a value above the user's own cap does nothing; 0 clears it", L"canvas" },
+  { L"PRESET_FPS_MAX_CLEAR",   L"PRESET_FPS_MAX_CLEAR",            L"Clear the running preset's frame cap", L"canvas" },
+  { L"GET_PRESET_FPS_MAX",     L"GET_PRESET_FPS_MAX",              L"The running preset's own cap and the cap actually in force -- PRESET_FPS_MAX=<n>|active=<n>", L"canvas" },
   { L"SET_PRESET_DAMP=",       L"SET_PRESET_DAMP=<0..1>",          L"Feedback damp strength for the running preset; 0 clears it", L"canvas" },
   { L"PRESET_DAMP_CLEAR",      L"PRESET_DAMP_CLEAR",               L"Clear the running preset's feedback damp", L"canvas" },
   { L"SET_DAMP_OVERRIDE=",     L"SET_DAMP_OVERRIDE=<mult|clear>",  L"Raw per-frame feedback multiplier for this session only; nothing is persisted", L"canvas" },
@@ -202,12 +206,22 @@ const IpcCommandDoc kCommands[] = {
 
   // -- window ----------------------------------------------------------------
   { L"SET_WINDOW=",            L"SET_WINDOW=<x>,<y>,<w>,<h>",      L"Set render window position and size; w=0,h=0 moves without resizing", L"window" },
+  // These four are handled by HandleWindowDiagIPC, which runs long before the
+  // strict fallback -- so they WORKED while missing from this table, and were
+  // therefore absent from HELP and undiscoverable. Registration here is what
+  // makes a verb findable, not what makes it dispatch.
+  { L"GET_WINDOW",             L"GET_WINDOW[=<title>]",            L"Where a window is: bare gives the render window, else a title match. Screen x/y/w/h, client size, display device, visible/minimized/maximized/topmost, dpi", L"window" },
+  { L"GET_WINDOWS",            L"GET_WINDOWS",                     L"One WINDOW| line per top-level window this process owns, then WINDOWS_END. Hidden ones listed with visible=0, since a closed tool window still has a position a layout must avoid", L"window" },
+  { L"GET_HUD_STATE",          L"GET_HUD_STATE",                   L"What the HUD is set to show -- HUD_STATE|primaryOnly=..|presetInfo=..|fps=..|debug=..|child=.. -- so a remote can draw the toggles in the right position instead of guessing", L"window" },
+  { L"DIAG_WINDOW=",           L"DIAG_WINDOW=<title>",             L"Every control on one of our tool windows: class, id, rect, visibility, clipping, whether the text fits, and its codepoints", L"window" },
+  { L"CAPTURE_WINDOW=",        L"CAPTURE_WINDOW=<title>",          L"PNG of one tool window under capture\\. Taken in-process with PW_RENDERFULLCONTENT, which is the only way owner-drawn buttons render at all", L"window" },
   { L"OPACITY=",               L"OPACITY=<0.0-1.0>",               L"Set window opacity", L"window" },
   { L"ALWAYS_ON_TOP",          L"ALWAYS_ON_TOP",                   L"Toggle always-on-top", L"window" },
   { L"GET_ALWAYS_ON_TOP",      L"GET_ALWAYS_ON_TOP",               L"Query always-on-top state", L"window" },
   { L"SET_ALWAYS_ON_TOP=",     L"SET_ALWAYS_ON_TOP=<0|1>",         L"Set always-on-top on the primary and every mirror", L"window" },
   { L"MOVE_TO_DISPLAY=",       L"MOVE_TO_DISPLAY=<n>",             L"Centre the render window on \\\\.\\DISPLAYn; replies MOVE_TO_DISPLAY_ERR if no such display is attached", L"window" },
   { L"RAISE_WINDOW",           L"RAISE_WINDOW",                    L"Bring this instance's window to the top of the z-order, without taking focus", L"window" },
+  { L"LOWER_WINDOW",           L"LOWER_WINDOW",                    L"Send this instance's window to the bottom of the z-order, without taking focus. Drops always-on-top first, or the move stays inside the topmost band and does nothing visible. Relayable, so DISPLAY|<N>|LOWER_WINDOW reaches a child", L"window" },
   { L"SET_BORDERLESS_FS=",     L"SET_BORDERLESS_FS=<0|1>",         L"Borderless fullscreen absolutely; SIGNAL|BORDERLESS_FS toggles instead", L"window" },
   // Dispatched since the Mirror/Children toggle landed, but never documented,
   // so HELP claimed the instance could not be cleared off a screen without
@@ -224,13 +238,42 @@ const IpcCommandDoc kCommands[] = {
   { L"SET_MIRROR_ENABLED=",    L"SET_MIRROR_ENABLED=<0|1|N,val>",  L"Enable or disable non-primary outputs, or display N", L"display" },
   { L"SET_MIRROR_OPACITY=",    L"SET_MIRROR_OPACITY=<0-100|N,val>", L"Opacity for every mirror, or display N", L"display" },
   { L"SET_MIRROR_CLICKTHRU=",  L"SET_MIRROR_CLICKTHRU=<0|1|N,val>", L"Click-through for every mirror, or display N", L"display" },
+  { L"SET_MIRROR_WATERMARK=",  L"SET_MIRROR_WATERMARK=<0|1>",       L"Watermark mode for every mirror at once, absolutely; MIRROR_WATERMARK toggles", L"display" },
   { L"SET_MIRROR_WIPE",        L"SET_MIRROR_WIPE[=reinit]",        L"Re-arm the flip-chain wipe; =reinit force-recreates the swapchains", L"display" },
   { L"SET_MIRROR_MAXFPS=",     L"SET_MIRROR_MAXFPS=<0|5-240>",     L"Independent-mirror worker rate cap; 0 means parity with the primary", L"display" },
   { L"GET_MIRROR_MAXFPS",      L"GET_MIRROR_MAXFPS",               L"Query the mirror rate cap", L"display" },
   { L"DIAG_MIRRORS",           L"DIAG_MIRRORS",                    L"Full mirror dump: sizes, ports, sampling, per-display state", L"display" },
+  // Registering it here is not documentation, it is DISPATCH: strict mode --
+  // on by default for -test and -child -- validates against this table, so a
+  // verb missing from it is silently refused. Adding DIAG_GPUTIME to
+  // engine_messages.cpp alone produced a handler that never ran and a reply
+  // that never came, which read as a broken feature rather than an
+  // unregistered one.
+  { L"DIAG_GPUTIME=",          L"DIAG_GPUTIME=<0|1>[,<ms>]",       L"Per-stage GPU timing; logs frames where a stage exceeds <ms> (default 50)", L"display" },
+  { L"DIAG_VRAMMARK=",         L"DIAG_VRAMMARK=<0|1>",             L"Log LOCAL VRAM and the delta since the last mark at each allocating checkpoint, to attribute a jump to the call that caused it", L"display" },
+  { L"SET_TEXCAP=",            L"SET_TEXCAP=<0|64-16384>",         L"Longest edge a texture loaded from disk keeps; 0 removes the cap. Default 1024. Applies to the NEXT load, not to textures already resident", L"system" },
+  { L"GET_TEXCAP",             L"GET_TEXCAP",                      L"Query the texture dimension cap", L"system" },
+  { L"DIAG_BALANCE",           L"DIAG_BALANCE[=<0|1>]",            L"Adaptive frame-rate balancing on/off, and its state: idle/probing/holding/ruledout, the main rate, the slowest display, the ratio between them, the caps in force, and the distress ladder's rung", L"display" },
+  { L"DIAG_LADDER",            L"DIAG_LADDER[=<0|1>]",             L"The distress ladder on/off, and its rung: 1 adaptive frame rate, 2 cheapest copy mirrors. Reports whether the frame is GPU-bound, the achievable rate rung 1 tracks, the trigger in force, and what rung 2 has taken", L"display" },
+  { L"SET_LADDER_TRIGGER=",    L"SET_LADDER_TRIGGER=<-1|fps>",     L"The rate below which the ladder falls back to copy mirrors. -1 derives it from the frame cap (34 when that is high or unset, two thirds of it below 35); a value pins it. Persisted", L"display" },
+  { L"GET_LADDER_TRIGGER",     L"GET_LADDER_TRIGGER",              L"The mirror-fallback trigger in force, the setting behind it, what the derivation would choose, and the frame cap it is relative to", L"display" },
+  { L"DIAG_MIRRORPACE=",       L"DIAG_MIRRORPACE=<0|1>",           L"Closed-loop mirror pacer on/off; off restores the pre-#230 behaviour that removes the device on an expensive preset", L"display" },
+  { L"DIAG_MIRRORCAP=",        L"DIAG_MIRRORCAP=<-1|0|N>",         L"Mirror swap-chain long-edge cap, unpersisted: N forces it, 0 removes it, -1 hands it back to the derivation. Reports the applied value, its source, the setting and what the VRAM budget alone implies", L"display" },
+  { L"SET_MIRRORCAP=",         L"SET_MIRRORCAP=<-1|0|N>",          L"The PERSISTED mirror swap-chain cap: -1 derive it from the VRAM budget (default), 0 no cap, N a fixed long edge for a machine under contention", L"display" },
   { L"DIAG_BATTERY",           L"DIAG_BATTERY",                    L"HUD headset battery: toggle, percent, and which device it came from", L"system" },
-  { L"DIAG_BATTERY_SIM",       L"DIAG_BATTERY_SIM=<0-100|off>",    L"Force the HUD battery figure so its colour bands can be seen; in memory only", L"diag" },
-  { L"SET_DISPLAY_MODE=",      L"SET_DISPLAY_MODE=<N>,<off|mirror|child>", L"How DISPLAY N renders; child gives it its own instance and its own preset", L"display" },
+  // Match field carries the '=', because that is what the dispatcher matches
+  // (engine_mixer.cpp: rfind(L"DIAG_BATTERY_SIM=", 0)). Without it HELP
+  // advertised a bare DIAG_BATTERY_SIM that falls through to the script
+  // engine, and test_ipc_help failed both ways at once -- the '=' form
+  // undocumented and the bare form undispatched.
+  { L"DIAG_BATTERY_SIM=",      L"DIAG_BATTERY_SIM=<0-100|off>",    L"Force the HUD battery figure so its colour bands can be seen; in memory only", L"diag" },
+  { L"DIAG_GPU",               L"DIAG_GPU",                        L"This process's GPU and VRAM cost, keyed by pid. Asking turns the sampler on for about 8s, and because the counter is a rate the first reply after a quiet period carries gpu3d=-1 -- poll twice about a second apart and read the second", L"diag" },
+  // The old text claimed child "gives the display its OWN PRESET in this
+  // process, not its own instance". It never did -- that branch calls
+  // RequestChildSpawn -- and the machinery for the in-process version sat
+  // unreachable behind the same flag. Now there is a word for each tier.
+  { L"SET_DISPLAY_MODE=",      L"SET_DISPLAY_MODE=<N>,<off|mirror|preset|child>", L"How DISPLAY N renders, cheapest first: mirror follows the primary; preset gives it its own preset IN THIS PROCESS; child gives it its own preset in its own instance. 'own' is accepted for preset", L"display" },
+  { L"GET_DISPLAY_MODE",       L"GET_DISPLAY_MODE[=<N>]",          L"Which tier each display is on, plus auto=1 where the cost gate promoted it to a child rather than the user asking", L"display" },
   { L"GET_CHILDREN",           L"GET_CHILDREN",                    L"One CHILD| line per per-display child instance, then CHILDREN_END; state is pending|starting|ready|failed|absent", L"display" },
   { L"DIAG_CHILDREN",          L"DIAG_CHILDREN",                   L"Child worker health: thread, event, job, queue depth, pending and failed spawns", L"display" },
   // Per-display preset control (forgejo#32). The four SET_DISPLAY_* settings
@@ -241,7 +284,9 @@ const IpcCommandDoc kCommands[] = {
   { L"SET_DISPLAY_PRESET_DIR=", L"SET_DISPLAY_PRESET_DIR=<N>,<path>", L"Preset folder display N cycles through; empty inherits the parent's", L"display" },
   { L"SET_DISPLAY_ORDER=",     L"SET_DISPLAY_ORDER=<N>,<0|1>",     L"Random (0) or sequential (1) order on display N", L"display" },
   { L"SET_DISPLAY_LOCK=",      L"SET_DISPLAY_LOCK=<N>,<-1|0|1>",   L"Preset lock for display N: -1 inherits the main window's, 0 unlocked, 1 locked", L"display" },
-  { L"SET_DISPLAY_WATERMARK=", L"SET_DISPLAY_WATERMARK=<N>,<0|1>", L"Watermark mode (click-through, low opacity) for display N's window", L"display" },
+  { L"SET_DISPLAY_MSGMAX=",    L"SET_DISPLAY_MSGMAX=<N>,<-1|0..n>", L"How many messages display N shows at once; -1 inherits the main window's, which cannot itself inherit. The supertext slots are one shared pool, so without this a busy panel takes them all and the others fall silent", L"display" },
+  { L"SET_DISPLAY_WATERMARK=", L"SET_DISPLAY_WATERMARK=<N>,<0|1>", L"Watermark ONE display: the primary, an in-process mirror, or a child. Persisted per display; SET_MIRROR_WATERMARK still does every mirror at once", L"display" },
+  { L"GET_DISPLAY_WATERMARK",  L"GET_DISPLAY_WATERMARK[=<N>]",     L"Watermark state per display; bare lists every monitor with its device and whether a child owns it", L"display" },
   { L"SET_DISPLAY_ENABLED=",   L"SET_DISPLAY_ENABLED=<N>,<0|1>",   L"Enable/disable display N; stops or starts its child if it owns one", L"display" },
   { L"SET_WATERMARK=", L"SET_WATERMARK=<0|1>",     L"Set single-window watermark mode absolutely, on this instance", L"window" },
   { L"GET_WATERMARK",  L"GET_WATERMARK",           L"Query single-window watermark state on this instance", L"window" },
@@ -284,6 +329,7 @@ const IpcCommandDoc kCommands[] = {
   { L"SPOUT_FIXEDSIZE=",       L"SPOUT_FIXEDSIZE=<0|1>",           L"Toggle a fixed Spout output resolution", L"spout" },
   { L"SPOUT_RESOLUTION=",      L"SPOUT_RESOLUTION=<WxH>",          L"Set the Spout output resolution", L"spout" },
   { L"SPOUTINPUT=",            L"SPOUTINPUT=<sender>",             L"Enable Spout input from a named sender", L"spout" },
+  { L"SPOUT_SENDER=",          L"SPOUT_SENDER=<name>",             L"Which Spout sender to take INPUT from. Stores the name only -- SPOUTINPUT= or SIGNAL|ENABLESPOUTMIX is what switches the input on, which is the order Milkwave Remote sends them in. Answered by the pipe server, which posts it to the render window rather than routing it through the dispatcher", L"spout" },
 
   // -- remote and transport --------------------------------------------------
   { L"STATE",                  L"STATE",                           L"Full state batch: opacity, preset, settings, track, volume; ends with END_BATCH", L"remote" },
@@ -292,7 +338,17 @@ const IpcCommandDoc kCommands[] = {
   { L"LIST_DEVICES",           L"LIST_DEVICES",                    L"List devices authorised for the TCP remote", L"remote" },
   { L"DEAUTH_DEVICE|",         L"DEAUTH_DEVICE|<id>",              L"Revoke a TCP remote device's authorisation and disconnect it", L"remote" },
 
+  // -- driving a script file over the pipe (#303) ----------------------------
+  //
+  // Three verbs and not one, deliberately: loading and playing are separate
+  // acts in the UI too, and a caller wanting to see what parsed before
+  // anything executes needs the gap.
+  { L"SCRIPT_LOAD=",           L"SCRIPT_LOAD=<path>",              L"Parse a script file WITHOUT running it. Replies SCRIPT_LOADED=<lines>|<path>, so a caller can check it parsed before anything moves", L"script" },
+  { L"SCRIPT_PLAY",            L"SCRIPT_PLAY",                     L"Start the loaded script. Replies SCRIPT_PLAYING", L"script" },
+  { L"SCRIPT_STOP",            L"SCRIPT_STOP",                     L"Stop the running script. Replies SCRIPT_STOPPED|errors=<n> -- the count STRICT accumulated, which is the script's verdict", L"script" },
+
   // -- system ----------------------------------------------------------------
+  { L"STRICT",                 L"STRICT[=<1|0|on|off|true|false|yes|no>]", L"Per CONNECTION: unknown commands answer ERR|UNKNOWN instead of being drawn on screen as a message. Bare queries. Sticky for the life of the connection; a new one starts at the instance default. Answered by the pipe server, so it never reaches the dispatcher -- an unrecognised value is an error, because _wtoi(\"ON\") is 0 and would silently turn the feature off", L"system" },
   { L"CONFIG",                 L"CONFIG",                          L"Reload configuration and rebuild fonts", L"system" },
   { L"SETTINGS",               L"SETTINGS",                        L"Reload timing settings from the INI", L"system" },
   { L"CONFIG_EXPORT_INI",      L"CONFIG_EXPORT_INI",               L"Copy registry-held settings back into settings.ini and friends", L"system" },
@@ -306,6 +362,11 @@ const IpcCommandDoc kCommands[] = {
   { L"GET_IDLE_TIMER",         L"GET_IDLE_TIMER",                  L"Query idle timer enabled state, timeout and action", L"system" },
   { L"SET_IDLE_ACTIVE=",       L"SET_IDLE_ACTIVE=<0|1>",           L"Trigger the idle action now, as if the timer fired; independent of SET_IDLE_TIMER=", L"system" },
   { L"GET_IDLE_ACTIVE",        L"GET_IDLE_ACTIVE",                 L"Whether the idle action is on screen right now", L"system" },
+  { L"SET_IDLE_TIMEOUT=",      L"SET_IDLE_TIMEOUT=<1-60>",         L"Minutes of no input before the idle action fires. Persisted", L"system" },
+  { L"SET_IDLE_ACTION=",       L"SET_IDLE_ACTION=<0-3>",           L"0 Fullscreen, 1 Stretch/Mirror, 2 Mirror all, 3 Load display profile. Persisted", L"system" },
+  { L"SET_IDLE_PROFILE=",      L"SET_IDLE_PROFILE=<name>",         L"The display profile action 3 loads; empty clears it. An unknown name is refused now rather than silently at idle time", L"system" },
+  { L"SET_IDLE_FULL_OPACITY=", L"SET_IDLE_FULL_OPACITY=<0|1>",     L"Take every display to 100% opacity while idle, whichever action is set. Persisted", L"system" },
+  { L"RESET_IDLE_TIMER",       L"RESET_IDLE_TIMER",                L"Restart the countdown, exactly as a keypress would -- and wake an active idle session when auto-restore is on", L"system" },
   { L"SET_FALLBACK_TEX=",      L"SET_FALLBACK_TEX=<0-5>[|<path>]", L"Missing-texture fallback: 0 hue, 1 white, 2 black, 3 and 4 random, 5 custom file", L"system" },
   { L"GET_FALLBACK_TEX",       L"GET_FALLBACK_TEX",                L"Query the fallback texture style, file and SRV index", L"system" },
 
@@ -339,8 +400,22 @@ const IpcCommandDoc kScriptCommands[] = {
   { L"BEATS=",         L"BEATS=<n>",               L"Set beats per script line", L"script" },
   { L"LINE=",          L"LINE=<n|CURR|NEXT|PREV>", L"Jump to a script line and execute it", L"script" },
   { L"FILE=",          L"FILE=<path>",             L"Load and start a different script file", L"script" },
+
+  // -- driving a TEST from a script file (#303) ------------------------------
+  //
+  // Without STRICT a test script cannot be trusted at all: an unrecognised
+  // token is DRAWN ON SCREEN as a message, so a typo, or a verb a build does
+  // not have, becomes scenery and the script reports success having done
+  // nothing.
+  { L"STRICT",         L"STRICT",                  L"Unknown commands from here on are counted as errors instead of being drawn on screen. Sticky for the rest of the file. Distinct from the pipe's STRICT, which is per connection and never reaches the script engine", L"script" },
+  { L"CHECK",          L"CHECK",                   L"Judge the preset that is up and tally it: shader errors and MISSING TEXTURES counted separately, because a preset with a missing texture compiles, renders, and is still wrong", L"script" },
+  { L"WAITREADY",      L"WAITREADY",               L"Hold the script until the preset has actually finished loading, or 10s. A timeout is logged and counted rather than waited on forever -- a repro that hangs tells its reader nothing", L"script" },
+  { L"REPEAT=",        L"REPEAT=<count>,<line>",   L"Jump back to <line> at most <count> times -- the one BOUNDED backward jump. LINE= is unconditional, so a sweep written with it never ends and so never prints a summary. The budget is keyed on the target line, and re-armed once spent", L"script" },
+  { L"LOG=",           L"LOG=<text>",              L"Write a marker into debug.log, at ERROR level so it survives every LogLevel above Off -- a public repro's only output", L"script" },
+  { L"LOGSTATE",       L"LOGSTATE",                L"Log what the engine is actually doing: preset, fps, mesh, loading, blending, mirrors, display count", L"script" },
+  { L"LOGSUMMARY",     L"LOGSUMMARY",              L"Log the run's verdict: checks, shader failures, texture failures, unknown commands, elapsed, and seconds per preset", L"script" },
   { L"ACTION=",        L"ACTION=<TagName>",        L"Trigger any hotkey action by tag name; the broadest command there is", L"script" },
-  { L"LAUNCH=",        L"LAUNCH=<path>",           L"Launch an external application", L"script" },
+  { L"LAUNCH=",        L"LAUNCH=<path> | LAUNCH=\"<path>\" <args>", L"Launch an external application, focusing it if already running. Quote the path to pass arguments, which also forces a NEW process rather than focusing an old one", L"script" },
   { L"EXEC=",          L"EXEC=<command>",          L"Run a command line", L"script" },
   { L"BTN=",           L"BTN=<n>",                 L"Press a Button Board button", L"script" },
   { L"SEND=",          L"SEND=<0xVK|text>",        L"Post a virtual key code or a string of characters to the render window", L"script" },
@@ -499,6 +574,38 @@ static const wchar_t* const kFeatures[] = {
   // SET_IDLE_ACTIVE=/GET_IDLE_ACTIVE: trigger the idle timer's own action on
   // demand, independent of whether the automatic countdown is enabled.
   L"idleactive",
+  // SET_MIRROR_WATERMARK=<0|1>: the absolute form, alongside the toggles.
+  // Named because a client gates on it directly -- MilkDrop Remote drives its
+  // "Watermark (all mirrors)" switch by reading the state and sending the
+  // toggle only when the two disagree, which is a race it drops the moment it
+  // finds this token (#196).
+  L"mirrorwatermark",
+  // LOWER_WINDOW exists alongside RAISE_WINDOW, so a client can offer "bring
+  // to front" and "send to back" as a pair (#237). Announced because the raise
+  // shipped long before the lower did: a client that finds only the raise must
+  // hide the other button rather than offer one the PC will refuse.
+  L"windowzorder",
+  // Per-display watermark: SET_DISPLAY_WATERMARK addresses ONE display and
+  // GET_DISPLAY_WATERMARK reads it back. Before this the verb refused anything
+  // but the primary and there was no getter at all.
+  L"displaywatermark",
+  // SET_DISPLAY_MODE=<N>,preset -- a display holds its own preset IN THIS
+  // PROCESS, between mirror and child. GET_DISPLAY_MODE reads the tier back
+  // and reports auto=1 when the cost gate promoted a display rather than the
+  // user asking. A client that finds this token can offer three tiers.
+  L"displaytiers",
+  // The idle timer is configurable from a remote rather than only switchable:
+  // SET_IDLE_TIMEOUT=, SET_IDLE_ACTION=, SET_IDLE_PROFILE=,
+  // SET_IDLE_FULL_OPACITY= and RESET_IDLE_TIMER, with the last two IDLE_TIMER=
+  // fields appended for the profile and the opacity option. A client that finds
+  // this token can offer the whole walk-away setup; one that does not still
+  // reads the first three fields, which have not moved (#334).
+  L"idleconfig",
+  // The texture dimension cap is readable and settable: SET_TEXCAP= /
+  // GET_TEXCAP. A client that finds this token can offer the control and show
+  // the current value; one that does not simply never mentions it, and the
+  // engine still applies whatever is in settings.ini (#349).
+  L"texcap",
 };
 
 const wchar_t* const* Features(size_t& count) {
@@ -515,13 +622,19 @@ std::wstring FeatureList() {
   return out;
 }
 
-std::wstring Identity() {
+std::wstring Identity(bool bChildMode) {
   wchar_t buf[512];
+// The feature list is appended as a string, never formatted into the fixed
+// buffer above. kFeatures is APPEND-ONLY by design, so its serialised length
+// only ever grows, and formatting it with %s into wchar_t[N] means some future
+// name silently crosses N and truncates. That is not a cosmetic clipping: it
+// cut "mirrorwatermark" to "m" and took the closing quote with it, so HELP=JSON
+// stopped being parseable JSON at all (#196). Appending cannot truncate.
   FormatTo(buf,
-    L"VERSION=%s|build=%hs %hs|config=%s|arch=%s|protocol=%d|pid=%lu|child=%d"
-    L"|commands=%d|script=%d|signals=%d|features=%s",
+    L"VERSION=%s|build=%s|config=%s|arch=%s|protocol=%d|pid=%lu|child=%d"
+    L"|commands=%d|script=%d|signals=%d",
     MDROP_VERSION_STRW,
-    __DATE__, __TIME__,
+    BuildTimestampW(),
 #ifdef _DEBUG
     L"Debug",
 #else
@@ -534,12 +647,11 @@ std::wstring Identity() {
 #endif
     MDROP_IPC_PROTOCOL,
     (unsigned long)GetCurrentProcessId(),
-    0,   // child=: -child is gone (#186 phase 6); the field is kept
+    bChildMode ? 1 : 0,
     (int)_countof(kCommands),
     (int)_countof(kScriptCommands),
-    (int)_countof(kSignalCommands),
-    FeatureList().c_str());
-  return buf;
+    (int)_countof(kSignalCommands));
+  return std::wstring(buf) + L"|features=" + FeatureList();
 }
 
 namespace {
@@ -561,8 +673,8 @@ void AppendLines(std::wstring& block, const IpcCommandDoc* tbl, size_t n,
 // Group the index into one message per category. A single message holding all
 // ~215 lines would be ~40KB, and the client read buffer is 64KB -- close enough
 // that it is not worth finding out. Every message is one whole category.
-void BuildIndex(std::vector<std::wstring>& out) {
-  out.push_back(Identity());
+void BuildIndex(std::vector<std::wstring>& out, bool bChildMode) {
+  out.push_back(Identity(bChildMode));
   out.push_back(std::wstring(
     L"HELP|MDropDX12 IPC commands. HELP=<command> for one entry, "
     L"HELP=<group> for one group, HELP=JSON for the machine-readable form."));
@@ -665,7 +777,7 @@ void BuildDetail(std::vector<std::wstring>& out, const wchar_t* query) {
   out.push_back(miss);
 }
 
-void BuildJson(std::vector<std::wstring>& out) {
+void BuildJson(std::vector<std::wstring>& out, bool bChildMode) {
   // Chunked: the whole document is ~35KB of wchar_t and one message must stay
   // clear of the 64KB client read buffer.
   //
@@ -680,10 +792,19 @@ void BuildJson(std::vector<std::wstring>& out) {
   doc += L"{\"version\":\"" MDROP_VERSION_STRW L"\"";
 
   wchar_t head[256];
+// The feature list is appended as a string, never formatted into the fixed
+// buffer above. kFeatures is APPEND-ONLY by design, so its serialised length
+// only ever grows, and formatting it with %s into wchar_t[N] means some future
+// name silently crosses N and truncates. That is not a cosmetic clipping: it
+// cut "mirrorwatermark" to "m" and took the closing quote with it, so HELP=JSON
+// stopped being parseable JSON at all (#196). Appending cannot truncate.
   FormatTo(head,
-    L",\"buildDate\":\"%hs %hs\",\"config\":\"%s\",\"arch\":\"%s\""
-    L",\"protocol\":%d,\"pid\":%lu,\"child\":%s,\"features\":\"%s\"",
-    __DATE__, __TIME__,
+    // BuildTimestampW, not __DATE__/__TIME__: those report when THIS file was
+    // compiled, and this one had not been rebuilt for two days while the exe
+    // was minutes old.
+    L",\"buildDate\":\"%s\",\"config\":\"%s\",\"arch\":\"%s\""
+    L",\"protocol\":%d,\"pid\":%lu,\"child\":%s",
+    BuildTimestampW(),
 #ifdef _DEBUG
     L"Debug",
 #else
@@ -696,9 +817,20 @@ void BuildJson(std::vector<std::wstring>& out) {
 #endif
     MDROP_IPC_PROTOCOL,
     (unsigned long)GetCurrentProcessId(),
-    L"false",   // child: see Identity()
-    FeatureList().c_str());
+    // Reports the truth again (#230). While the child subsystem was deleted
+    // this was hardcoded "false"; children are back for flagged presets, and a
+    // client that cannot tell a child from the primary cannot tell which
+    // instance is showing which preset -- which is the whole point of bringing
+    // them back.
+    //
+    // features stays appended below rather than being a format argument: the
+    // pre-deletion version passed it here, and this format string no longer
+    // has a slot for it.
+    bChildMode ? L"true" : L"false");
   doc += head;
+  doc += L",\"features\":\"";
+  doc += FeatureList();
+  doc += L"\"";
 
   struct Src { const IpcCommandDoc* tbl; size_t n; const wchar_t* key; };
   const Src srcs[] = {
@@ -742,7 +874,7 @@ void BuildJson(std::vector<std::wstring>& out) {
 
 }  // namespace
 
-bool Handle(const wchar_t* msg,
+bool Handle(const wchar_t* msg, bool bChildMode,
             std::vector<std::wstring>& reply) {
   if (!msg || !*msg) return false;
 
@@ -750,7 +882,7 @@ bool Handle(const wchar_t* msg,
   // script command that sets vis_version, and a prefix match here would eat
   // it -- claiming a new keyword narrows the script fallback.
   if (_wcsicmp(msg, L"GET_VERSION") == 0 || _wcsicmp(msg, L"VERSION") == 0) {
-    reply.push_back(Identity());
+    reply.push_back(Identity(bChildMode));
     return true;
   }
 
@@ -766,8 +898,8 @@ bool Handle(const wchar_t* msg,
     return false;
   }
 
-  if (!*arg)                             BuildIndex(reply);
-  else if (_wcsicmp(arg, L"JSON") == 0)  BuildJson(reply);
+  if (!*arg)                             BuildIndex(reply, bChildMode);
+  else if (_wcsicmp(arg, L"JSON") == 0)  BuildJson(reply, bChildMode);
   else                                   BuildDetail(reply, arg);
   return true;
 }

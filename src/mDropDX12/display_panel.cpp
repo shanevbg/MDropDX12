@@ -258,39 +258,41 @@ void DisplayPanel::OnPaint(HDC hdc)
 
             const bool isRender = renderDev[0] &&
                                   wcscmp(renderDev, cfg.szDeviceName) == 0;
-            const Engine::DisplayPresetInfo di =
-                p->DisplayPresetStatus(cfg.szDeviceName);
+            ChildInstance ci;
+            const bool haveChild = cfg.bOwnProcess &&
+                                   p->GetChildInfo(cfg.szDeviceName, ci);
 
             // Colour IS the state. Nothing here needs a legend: dim means off,
-            // green means it is showing its own preset, blue means it mirrors,
-            // and the render window's own screen is called out because it is
-            // the one that cannot hold a preset of its own.
-            //
-            // FAILED is gone with the child processes (#186 phase 6): it meant
-            // "the second process for this display would not start", and there
-            // is no second process to fail. STARTING now means the surface
-            // exists and has not produced an image yet, which is a fraction of
-            // a second rather than the several a spawn took.
+            // green means it is running its own preset, blue means it mirrors,
+            // red means a child failed, and the render window's own screen is
+            // called out because it is the one that cannot be a child.
             COLORREF fill, edge, text = RGB(235, 235, 235);
             const wchar_t* state;
             if (isRender)                       { fill = RGB(58, 58, 72); edge = RGB(150, 150, 190); state = L"MAIN WINDOW"; }
             else if (!cfg.bEnabled)             { fill = RGB(38, 38, 38); edge = RGB(80, 80, 80);    state = L"OFF"; text = RGB(140, 140, 140); }
-            else if (cfg.bOwnProcess && di.ready)
+            else if (cfg.bOwnProcess && haveChild && ci.bFailed)
+                                                { fill = RGB(90, 34, 34); edge = RGB(210, 90, 90);   state = L"FAILED"; }
+            else if (cfg.bOwnProcess && haveChild && ci.bReady)
                                                 { fill = RGB(28, 78, 40); edge = RGB(90, 210, 120);  state = L"OWN PRESET"; }
             else if (cfg.bOwnProcess)           { fill = RGB(70, 62, 26); edge = RGB(200, 180, 80);  state = L"STARTING"; }
+            // Its own preset, in this process. Same green as a ready child --
+            // it is showing its own preset, which is what the colour means --
+            // and the label says where it renders. Without this a display set
+            // to the middle tier still read MIRROR on the tile, which is the
+            // first thing Shane checked and the reason it looked like the mode
+            // had not taken.
+            else if (cfg.bOwnPreset)            { fill = RGB(28, 78, 40); edge = RGB(90, 210, 120);  state = L"OWN PRESET"; }
             else                                { fill = RGB(30, 54, 82); edge = RGB(90, 150, 220);  state = L"MIRROR"; }
 
             wchar_t num[8] = L"";
             const int n = Engine::DisplayNumberFromDevice(cfg.szDeviceName);
             if (n > 0) FormatTo(num, L"%d", n);
 
-            std::wstring leaf;
-            if (!di.preset.empty()) {
-                const size_t sep = di.preset.find_last_of(L"\\/");
-                leaf = (sep == std::wstring::npos) ? di.preset
-                                                   : di.preset.substr(sep + 1);
+            const wchar_t* detail = L"";
+            if (haveChild && ci.szCurrentPreset[0]) {
+                const wchar_t* slash = wcsrchr(ci.szCurrentPreset, L'\\');
+                detail = slash ? slash + 1 : ci.szCurrentPreset;
             }
-            const wchar_t* detail = leaf.c_str();
 
             DrawTile(hdc, t, fill, edge, text, (int)i == selected,
                      hBig, hSmall, num, state, detail);

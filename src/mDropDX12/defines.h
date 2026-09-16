@@ -172,7 +172,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // by simply #defining them here, UP TO A MAX OF 5 EXTRA FONTS.
 // access the font by calling GetFont(EXTRA_1) for extra font #1,
 // GetExtraFont(EXTRA_2) for extra font #2, and so on.
-#define NUM_EXTRA_FONTS 3  // <- don't exceed 5 here!
+#define NUM_EXTRA_FONTS 4  // <- don't exceed 5 here!
 #define TOOLTIP_FONT EXTRA_1
 //#define EXTRA_FONT_1_NAME         "Tooltips"
 // defined in the stringtable resources now since 2.0e
@@ -205,6 +205,27 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define EXTRA_FONT_3_DEFAULT_COLOR_R   211
 #define EXTRA_FONT_3_DEFAULT_COLOR_G   0
 #define EXTRA_FONT_3_DEFAULT_COLOR_B   9
+
+// The startup loading counter (#291). LOADING_FONT = EXTRA_4.
+//
+// Its own slot because glyph size in this text path comes from the atlas --
+// there is no per-draw scale -- so "large" has to be a font that is already
+// large. The biggest existing slot is SONGTITLE_FONT at 40pt, which on a
+// 2160x3840 panel is a speck.
+//
+// The message/supertext overlay would have scaled properly, and was the obvious
+// candidate, but it composites INSIDE the warp/comp pass that the loading
+// screen skips -- and it also carries the random font, colour and position
+// overrides, which is not what a progress readout should inherit.
+#define LOADING_FONT EXTRA_4
+#define EXTRA_FONT_4_DEFAULT_FACE L"Bahnschrift"
+#define EXTRA_FONT_4_DEFAULT_SIZE 160
+#define EXTRA_FONT_4_DEFAULT_BOLD 1
+#define EXTRA_FONT_4_DEFAULT_ITAL 0
+#define EXTRA_FONT_4_DEFAULT_AA   1
+#define EXTRA_FONT_4_DEFAULT_COLOR_R   255
+#define EXTRA_FONT_4_DEFAULT_COLOR_G   255
+#define EXTRA_FONT_4_DEFAULT_COLOR_B   255
 
 #define WINDOWCAPTION   SHORTNAME   // the caption that will appear on the plugin window
 #define DLLDESC         LONGNAME    // the desc. of this DLL, as it appears in Winamp's list of viz plugins

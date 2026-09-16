@@ -202,7 +202,8 @@ int mystrcmpiW(const wchar_t* s1, const wchar_t* s2) {
 }
 
 void Engine::ToggleAlwaysOnTop(HWND hwnd) {
-  // Applies m_bAlwaysOnTop to the render window and any live mirror windows.
+  // Applies m_bAlwaysOnTop to the render window, and asks the render thread to
+  // restyle the mirrors (which have their own say in the matter — see below).
   // (Does not flip the flag — callers set m_bAlwaysOnTop first.)
   HWND z = m_bAlwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST;
 
@@ -214,15 +215,27 @@ void Engine::ToggleAlwaysOnTop(HWND hwnd) {
                  SWP_DRAWFRAME | SWP_FRAMECHANGED);
   }
 
-  // Mirror mode used to force TOPMOST on every mirror regardless of this setting,
-  // so "Always On Top off" appeared broken while secondary screens stayed topmost.
-  for (auto& out : m_displayOutputs) {
-    if (out.config.type != DisplayOutputType::Monitor || !out.monitorState)
-      continue;
-    HWND hMirror = out.monitorState->hWnd;
-    if (hMirror && IsWindow(hMirror))
-      SetWindowPos(hMirror, z, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-  }
+  // The mirrors are ASKED to restyle; they are not written here (#338).
+  //
+  // This used to push `z` onto every mirror window directly, and `z` is the
+  // GLOBAL flag alone. Every mirror therefore landed in the global's band
+  // whatever its own settings said, so turning Always On Top off knocked a
+  // watermarked display -- or one with its own Keep on top -- straight down,
+  // with the checkbox still ticked and nothing ever putting it back. Measured
+  // on the live instance: DISPLAY1 with AlwaysOnTop=1 in displays.json and the
+  // box checked, and no WS_EX_TOPMOST on the window.
+  //
+  // m_bAlwaysOnTop is one of three inputs to a mirror's z-order, not the
+  // answer -- ResolveMirrorWindowStyle ORs it with the watermark and the
+  // display's own flag, and it is the only place that knows that. Raising the
+  // dirty flag routes this through it like the five other z-order sites.
+  //
+  // It also fixes a latent hang: mirror HWNDs belong to the RENDER thread and
+  // most callers here are on the UI thread, so this loop was the cross-thread
+  // SetWindowPos that RaiseMirrorSurfaces refuses to make for exactly that
+  // reason. Setting a flag the render thread reads is what that function does
+  // instead, and now so does this one.
+  m_bMirrorStylesDirty.store(true);
 }
 
 void Engine::RaiseMirrorSurfaces(HWND hPrimary)
@@ -233,16 +246,36 @@ void Engine::RaiseMirrorSurfaces(HWND hPrimary)
   // owned by the calling thread; set flags so the other side raises later.
   const DWORD thisTid = GetCurrentThreadId();
 
-  auto raiseIfOwned = [this, thisTid](HWND h, bool activate) {
+  // isMirror, because this lambda serves the PRIMARY as well and the two want
+  // different things under testing mode.
+  //
+  // A mirror goes to the back: it is scenery a test never needs in front.
+  // The primary is left exactly where it is -- neither raised nor buried.
+  // Burying it was measured to matter: HWND_BOTTOM makes the render window
+  // more occluded, Windows throttles an occluded window harder, and the
+  // instance dropped to 22 fps with lock avg 42 ms. Any test that measures a
+  // frame rate would then be measuring this call rather than the engine.
+  //
+  // Not raising it is the other half. Testing mode must not take the screen,
+  // so the TOPMOST hop is wrong here too; doing nothing satisfies both.
+  // stayUp: this window wants to REMAIN on top after the hop, because it is
+  // watermarked or has its own Keep on top (#288). The hop tested the global
+  // m_bAlwaysOnTop, which cannot express "this one", so a raise put such a
+  // display straight back down. The primary passes false -- its z-order is the
+  // global setting's business and App.cpp owns it.
+  auto raiseIfOwned = [this, thisTid](HWND h, bool activate, bool isMirror,
+                                      bool stayUp) {
     if (!h || !IsWindow(h)) return;
     DWORD pid = 0;
     DWORD tid = GetWindowThreadProcessId(h, &pid);
     if (tid != thisTid)
       return; // wrong thread — would deadlock
+    if (m_bTestingMode && !isMirror)
+      return; // leave the primary's z-order alone entirely
     // No SWP_SHOWWINDOW (can re-enter); no activate on foreign focus races
     UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
-    SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, flags);
-    if (!m_bAlwaysOnTop)
+    SetWindowPos(h, MirrorZOrder(true), 0, 0, 0, 0, flags);
+    if (MirrorZOrderHop() && !stayUp)
       SetWindowPos(h, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
     (void)activate;
   };
@@ -254,13 +287,17 @@ void Engine::RaiseMirrorSurfaces(HWND hPrimary)
     HWND hMirror = out.monitorState->hWnd;
     if (!hMirror || !IsWindow(hMirror))
       continue;
-    if (m_bMirrorsActive && out.config.bEnabled && !out.bSkippedSameMonitor)
-      raiseIfOwned(hMirror, false);
+    if (m_bMirrorsActive && out.config.bEnabled && !out.bSkippedSameMonitor) {
+      bool clickThru = false, onTop = false;
+      int opacity = 100;
+      ResolveMirrorWindowStyle(out.config, clickThru, opacity, onTop);
+      raiseIfOwned(hMirror, false, true, onTop);
+    }
   }
 
   // Raise primary only when this is the UI thread
   if (hPrimary && IsWindow(hPrimary)) {
-    raiseIfOwned(hPrimary, true);
+    raiseIfOwned(hPrimary, true, false, m_bAlwaysOnTop);
     DWORD pid = 0;
     if (GetWindowThreadProcessId(hPrimary, &pid) == thisTid) {
       // Async foreground — never block the render thread.
@@ -385,21 +422,69 @@ void ToggleWindowOpacity(HWND hwnd, bool bDown) {
   g_engine.SetOpacity(hwnd);
 }
 
+// The rectangle that counts as "fullscreen" for THIS window (#240).
+//
+// One definition, used by both the test below and by the toggle that acts on
+// it. They had two, and disagreeing was the bug: a correctly placed child
+// covers its monitor ENTIRELY, taskbar included, while the test compared
+// against the work area -- so on the monitor carrying the taskbar a child that
+// was exactly where it belonged reported "not fullscreen", and
+// SET_BORDERLESS_FS=1 then "entered" fullscreen by shrinking it to the work
+// area. That is the 2560x1392 (1440 - 48) seen in #240.
+//
+// A CHILD's target is the display it was told to own, resolved by device name.
+// Not MonitorFromWindow, which answers "whichever monitor this window is
+// nearest": those agree only while the child is already in the right place,
+// and the failure being fixed is precisely that it is not. A child nudged onto
+// another monitor was nailed fullscreen there and then raised there, which is
+// how both children ended up stacked on DISPLAY3 with DISPLAY1 empty.
+//
+// Everything else keeps the work area and MonitorFromWindow. The main window
+// is dragged between monitors by the user and must not hide the taskbar; a
+// child is handed one display and covers it completely, which is the rule
+// ChildPlaceNow and the child's own startup placement already follow.
+RECT Engine::FullscreenTargetRect(HWND hWnd) const {
+  RECT target = {};
+
+  if (m_bChildMode && m_nChildDisplay > 0) {
+    wchar_t want[32];
+    FormatTo(want, L"\\\\.\\DISPLAY%d", m_nChildDisplay);
+    struct Find { const wchar_t* want; RECT rc; bool got; } f = { want, {}, false };
+    EnumDisplayMonitors(NULL, NULL,
+      [](HMONITOR h, HDC, LPRECT, LPARAM lp) -> BOOL {
+        Find* fp = (Find*)lp;
+        MONITORINFOEXW info = { { sizeof(MONITORINFOEXW) } };
+        if (GetMonitorInfoW(h, &info) && wcscmp(info.szDevice, fp->want) == 0) {
+          fp->rc = info.rcMonitor;   // the WHOLE monitor, not rcWork
+          fp->got = true;
+          return FALSE;
+        }
+        return TRUE;
+      }, (LPARAM)&f);
+    // Falls through to the work-area answer when the display is not present --
+    // a child whose monitor has been unplugged still needs a sane target, and
+    // that is the same fallback its startup placement takes.
+    if (f.got) return f.rc;
+  }
+
+  MONITORINFO monitorInfo = { sizeof(MONITORINFO) };
+  HMONITOR hMonitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+  if (GetMonitorInfo(hMonitor, &monitorInfo))
+    target = monitorInfo.rcWork;
+  return target;
+}
+
 bool Engine::IsBorderlessFullscreen(HWND hWnd) {
   // Check if the window is borderless fullscreen:
-  // must fill the work area AND have no standard window chrome (WS_OVERLAPPEDWINDOW).
-  // Without the style check, a normal maximized window also fills the work area
-  // and would incorrectly trigger watermark mode on startup.
+  // must fill its fullscreen target AND have no standard window chrome
+  // (WS_OVERLAPPEDWINDOW). Without the style check, a normal maximized window
+  // also fills the work area and would incorrectly trigger watermark mode on
+  // startup.
   LONG_PTR style = GetWindowLongPtr(hWnd, GWL_STYLE);
   if (style & (WS_CAPTION | WS_THICKFRAME))
     return false;  // has window chrome — it's just maximized, not borderless
 
-  RECT workArea = {};
-  MONITORINFO monitorInfo = { sizeof(MONITORINFO) };
-  HMONITOR hMonitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
-  if (GetMonitorInfo(hMonitor, &monitorInfo)) {
-    workArea = monitorInfo.rcWork;
-  }
+  const RECT workArea = FullscreenTargetRect(hWnd);
   RECT currentRect;
   GetWindowRect(hWnd, &currentRect);
   return (currentRect.left == workArea.left &&
@@ -1165,6 +1250,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
       // bindings can be tested without a window having to take the focus.
       if ((GetKeyState(VK_MENU) & 0x8000) || (lParam & (1 << 29)))
         mods |= MOD_ALT;
+      if (m_bChildMode && ForwardKeyToParent((UINT)wParam, mods)) return 0;
       if (TestingModeHandleKey((UINT)wParam)) return 0;
       if (LookupLocalHotkey((UINT)wParam, mods)) return 0;
     }
@@ -1203,6 +1289,11 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
       if (GetKeyState(VK_CONTROL) & 0x8000) mods |= MOD_CONTROL;
       if (GetKeyState(VK_SHIFT) & 0x8000)   mods |= MOD_SHIFT;
       if (GetKeyState(VK_MENU) & 0x8000)    mods |= MOD_ALT;
+      // A child hands its keys to the parent rather than eating them. Checked
+      // BEFORE the testing-mode gate: a child pins testing mode on for its
+      // whole life, so that gate would swallow every key first and the forward
+      // would never be reached.
+      if (m_bChildMode && ForwardKeyToParent((UINT)wParam, mods)) return 0;
       // Testing mode swallows the keyboard so a stray keystroke cannot alter a
       // measurement. It is gated HERE, at the keyboard entry, and not inside
       // DispatchHotkeyAction -- IPC's ACTION= goes through that same function
@@ -1777,8 +1868,11 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
           // shift/ctrl come from the top of MyWindowProc — same GetKeyState reads,
           // same message, so re-reading them here made no difference
           if (bShiftHeldDown && bCtrlHeldDown) {
+            // KillSprite, not KillTex (#225). This runs from the message pump,
+            // which is between frames on the CPU but says nothing about the
+            // GPU -- submitted frames still name these textures.
             for (int x = 0; x < NUM_TEX; x++)
-              m_texmgr.KillTex(x);
+              KillSprite(x);
           }
           else {
             int newest = -1;
@@ -1795,7 +1889,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
             }
 
             if (newest != -1)
-              m_texmgr.KillTex(newest);
+              KillSprite(newest);   // retire, do not release here (#225)
           }
           return 0; // we processed (or absorbed) the key
         }
@@ -1921,6 +2015,7 @@ LRESULT Engine::MyWindowProc(HWND hWnd, unsigned uMsg, WPARAM wParam, LPARAM lPa
       switch (wParam) {
       case 'N':  // Sound Info toggle
         m_bShowDebugInfo = !m_bShowDebugInfo;
+        RelayHudStateToChildren();   // per-process GPU figures, on every screen
         return 0;
       case 'K':  // Sprite/Message input mode
       {
@@ -2344,6 +2439,30 @@ void Engine::ExecuteRenderCommand(const RenderCommand& cmd) {
     case RenderCmd::ResetBuffers:
       ResetBufferAndFonts();
       break;
+    case RenderCmd::ReleaseShadertoyTargets:
+      // Re-checked on ARRIVAL, not only when the timer fired: a .milk3 can load
+      // in the gap, and rebuilding every device resource to drop buffers that
+      // are in use again would be both a hitch and wrong.
+      if (m_bShadertoyMode || !ShadertoyFeedbackAllocated())
+        break;
+      // ResetBufferAndFonts is the release path because it rewinds the
+      // descriptor bump allocators WHOLESALE. Freeing the textures on their own
+      // would strand their SRV slots with nothing to reclaim them -- which is
+      // exactly what #312 found when an un-ported eviction path released a
+      // resource and left its descriptor live, and it page-faulted the device.
+      //
+      // Under the mirror engine lock for the same reason SetMeshSize above
+      // takes it: this reallocates resources a mirror worker may be mid-record
+      // against, and it bumps the descriptor epoch that session-lived mirrors
+      // re-create their RTVs from.
+      {
+        LockMirrorEngine();
+        ResetBufferAndFonts();
+        UnlockMirrorEngine();
+      }
+      DLOG_INFO("Shadertoy feedback: released after %.0fs with no .milk3",
+                kShadertoyReleaseDelaySec);
+      break;
     case RenderCmd::SetMeshSize: {
       // Clamped here rather than trusted from the sender, because this is the
       // only place the value becomes visible to the code that indexes m_verts.
@@ -2355,11 +2474,37 @@ void Engine::ExecuteRenderCommand(const RenderCommand& cmd) {
       if (gx == m_nGridX && gy == m_nGridY)
         break;
       DLOG_INFO("Mesh resize: %dx%d -> %dx%d", m_nGridX, m_nGridY, gx, gy);
-      m_nGridX = gx;
-      m_nGridY = gy;
-      ResetBufferAndFonts();
+      // Under the mirror engine mutex (#214).
+      //
+      // ProcessPendingCommands runs at the top of RenderFrame, BEFORE
+      // PluginRender takes the MirrorEngineGuard -- so without this the grid
+      // and the vertex buffers are rewritten while a mirror worker may be
+      // mid-record, indexing m_verts as m_nGridX changes under it.
+      //
+      // RenderClassicOrientPipeline does check c.verts.size() against the grid,
+      // but that is a bail-out rather than synchronisation: it catches a record
+      // that started before the change, not one reading the arrays while
+      // ResetBufferAndFonts is reallocating them. A fence cannot help here --
+      // WaitForSurfaceWork waits for SUBMITTED work and relies on this mutex to
+      // mean "no worker is mid-record", which is exactly the guarantee needed.
+      //
+      // Cost is nothing: this fires on a mesh-size change, which is a user
+      // dragging a slider, and the drag's earlier requests are already
+      // coalesced by the equality check above.
+      {
+        LockMirrorEngine();
+        m_nGridX = gx;
+        m_nGridY = gy;
+        ResetBufferAndFonts();
+        UnlockMirrorEngine();
+      }
       break;
     }
+    case RenderCmd::SnapshotResources:
+      // No lock. This thread owns everything BuildResourceSnapshot reads, and
+      // the guard inside it covers only the handoff (#352).
+      BuildResourceSnapshot();
+      break;
     case RenderCmd::ResizeWindow:
       OnUserResizeWindow();
       break;
@@ -2522,6 +2667,60 @@ void Engine::ExecuteRenderCommand(const RenderCommand& cmd) {
                            : L"PROFILE_LOADED=ERROR");
       break;
     }
+    case RenderCmd::IdleEnter:
+    {
+      // Snapshot FIRST: both legs below change the very fields it banks.
+      IdleSnapshotOpacity();
+      // The same profile already being loaded means nothing about the
+      // ARRANGEMENT is changing, so do not pay for a reload. LoadDisplayProfile
+      // disables every output, reapplies the whole state and reconciles
+      // children -- RequestChildKill / RequestChildSpawn -- so walking away
+      // would tear down and respawn a child process purely to brighten screens
+      // that were already arranged the way the profile says. Skipping it also
+      // means no _idle_restore.json is written and nothing has to be undone.
+      //
+      // m_szStartupDisplayProfile is what GET_DISPLAY_PROFILE reports: the
+      // profile last saved or loaded. It records what was last LOADED, not a
+      // live diff of the display state, so a setup changed by hand afterwards
+      // still short-circuits and idle leaves that arrangement alone.
+      if (!cmd.sParam.empty() &&
+          _wcsicmp(cmd.sParam.c_str(), m_szStartupDisplayProfile) != 0) {
+        m_bIdleProfileRestorePending = IdleBankDisplayState();
+        if (!m_bIdleProfileRestorePending) {
+          // Refusing to load when the way back could not be written is the
+          // whole point: an idle profile applied with no restore file is a
+          // permanent change to the user's setup, arrived at by walking away.
+          DLOG_WARN("idle: could not bank the display state; not loading %ls",
+                    cmd.sParam.c_str());
+        } else {
+          // Deliberately NOT written to m_szStartupDisplayProfile. The idle
+          // profile is temporary and must not become the startup default or
+          // the answer to GET_DISPLAY_PROFILE.
+          LoadDisplayProfile(cmd.sParam.c_str());
+          // So a kill while idle is up cannot leave the idle arrangement as
+          // the new normal: LoadDisplayProfile does save displays.json.
+          Config().SetString(L"IdleTimer", L"RestorePending", L"1");
+          ConfigFlushAll();
+        }
+      }
+      if (cmd.iParam1) IdleApplyFullOpacity();
+      IdleRaiseToTop();
+      break;
+    }
+    case RenderCmd::IdleExit:
+    {
+      if (m_bIdleProfileRestorePending) {
+        LoadDisplayProfile(IdleRestoreProfilePath().c_str());
+        m_bIdleProfileRestorePending = false;
+        Config().SetString(L"IdleTimer", L"RestorePending", L"0");
+      }
+      // After the profile, never before: the profile carries nOpacity and
+      // mainWindowOpacity, but NOT nWatermarkOpacity -- SaveDisplayProfile does
+      // not write that field -- so the in-memory snapshot is the authority and
+      // has to have the last word.
+      IdleRestoreOpacity();
+      break;
+    }
     case RenderCmd::AddSpoutOutput:
     {
       DisplayOutput newSpout;
@@ -2597,6 +2796,13 @@ void Engine::ExecuteRenderCommand(const RenderCommand& cmd) {
       ClearErrors(ERR_PRESET);
       m_activeOverride.warpFailed = false;
       m_activeOverride.compFailed = false;
+      // Clearing these drops shader objects and constant tables a mirror's
+      // submitted list still references, and CreateDX12PresetPSOs then
+      // replaces the PSOs under it (#214). Same shape as the preset commit,
+      // which waits for exactly this reason. Applying an override is a
+      // user-triggered, occasional command, so the stall costs nothing.
+      if (m_lpDX)
+        m_lpDX->WaitForGpu();
       m_shaders.warp.Clear();
       m_shaders.comp.Clear();
       LoadShaders(&m_shaders, m_pState, false, false);
@@ -2606,6 +2812,12 @@ void Engine::ExecuteRenderCommand(const RenderCommand& cmd) {
     case RenderCmd::RecompileCompShader:
     {
       ClearErrors(ERR_PRESET);
+      // Same reasoning as ApplyShaderOverride above (#214): every Clear below
+      // drops shader objects and constant tables that a mirror's submitted
+      // list can still name. This is the Preset Editor's Apply -- a keystroke,
+      // not a frame -- so draining once here is the cheap remedy.
+      if (m_lpDX)
+        m_lpDX->WaitForGpu();
       bool allOK = true;
       if (m_nMaxPSVersion > 0) {
         // Recompile Buffer A if present

@@ -1703,7 +1703,7 @@ void Engine::MyReadConfig() {
   // Display outputs live in resources/displays.json now. Pointed at the file
   // and migrated BEFORE the loader reads it -- see MigrateDisplaySettings.
   DisplayCfg().SetPath(profiles::WithSlash(m_szMilkdrop2Path) + L"displays.json");
-  MigrateDisplaySettings();
+  if (!m_bChildMode) MigrateDisplaySettings();
 
   LoadDisplayOutputSettings();
 
@@ -1718,29 +1718,77 @@ void Engine::MyReadConfig() {
   // Move the folder onto the profiles/<type>/ layout before anything reads a
   // profile out of it, and AFTER szStartupDisplayProfile has been read -- the
   // migration re-points that setting when it holds an absolute path into the
-  // old folder, so it has to have a value to re-point.
-  MigrateDisplayProfiles();
+  // old folder, so it has to have a value to re-point. A child skips it: the
+  // parent shares this directory and has already done it.
+  if (!m_bChildMode) MigrateDisplayProfiles();
 
   // Tool window geometry lives in resources/windows.json now. Pointed at the
   // directory and migrated here, before any tool window can read a position.
   ToolWindow::InitWindowStore(m_szMilkdrop2Path);
 
-  if (m_bLoadDisplayProfileOnStart && m_szStartupDisplayProfile[0]) {
-    if (!LoadDisplayProfile(m_szStartupDisplayProfile))
-      DLOG_ERROR("startup display profile '%ls' could not be loaded",
-                 m_szStartupDisplayProfile);
+  // Killed while the idle timer had a profile applied. LoadDisplayProfile saves
+  // displays.json, so without this the idle arrangement silently becomes the
+  // user's normal one -- a permanent change arrived at by walking away from the
+  // machine and it crashing. _idle_restore.json holds the state as it was, and
+  // it WINS over the startup profile because it already accounts for it: it was
+  // banked after the startup profile had been applied.
+  if (!m_bChildMode && Config().GetInt(L"IdleTimer", L"RestorePending", 0) != 0) {
+    const std::wstring path = IdleRestoreProfilePath();
+    if (LoadDisplayProfile(path.c_str())) {
+      DLOG_WARN("idle: restored the pre-idle display state from %ls after an "
+                "unclean exit", path.c_str());
+      m_bLoadDisplayProfileOnStart = false;   // already superseded
+    } else {
+      DLOG_ERROR("idle: RestorePending was set but %ls could not be loaded",
+                 path.c_str());
+    }
+    Config().SetString(L"IdleTimer", L"RestorePending", L"0");
   }
 
-  // A display marked bOwnProcess used to get its own MDropDX12.exe -child,
-  // spawned by a worker thread from here (forgejo#22). #186 moved that in
-  // process and phase 6 deleted the subsystem, so there is nothing to start:
-  // a display holding its own preset is a mirror surface, created by
-  // SendToDisplayOutputs on the render thread when it first runs.
+  if (!m_bChildMode && m_bLoadDisplayProfileOnStart && m_szStartupDisplayProfile[0]) {
+    // RESOLVED, like every other caller (#284). LoadDisplayProfile opens what
+    // it is handed and nothing else, and this was the one entry point passing
+    // the setting through raw -- so a startup profile recorded by its leaf name
+    // silently never loaded, and the only sign was one line in debug.log.
+    //
+    // The UI always writes an absolute path, which is why this went unnoticed;
+    // the harness writes a leaf deliberately, so that an instance started from
+    // a copied settings.ini reads the profile beside IT rather than the
+    // absolute one in the directory the ini came from.
+    const std::wstring path = ResolveDisplayProfilePath(m_szStartupDisplayProfile);
+    if (path.empty() || !LoadDisplayProfile(path.c_str()))
+      DLOG_ERROR("startup display profile '%ls' could not be loaded (resolved to '%ls')",
+                 m_szStartupDisplayProfile, path.c_str());
+  }
+
+  // A display marked bOwnProcess gets its own MDropDX12.exe -child, spawned by
+  // this worker (forgejo#22). Never in a child: a child owns no external
+  // interfaces and spawns nothing of its own.
   //
-  // Nothing replaces this block. It is called out rather than silently removed
-  // because its position mattered -- after the profile load, so a profile that
-  // promoted a display was honoured on the first pass instead of spawning
-  // twice -- and that ordering constraint is gone with the spawn.
+  // After the profile load, so a profile that turns a display into a child is
+  // honoured on the first pass rather than spawning twice.
+  if (!m_bChildMode) {
+    // The worker starts either way. -nostartupchildren suppresses the spawns,
+    // not the ability to spawn: a child asked for later still needs something
+    // to act on the request.
+    StartChildWorker();
+    // Reached only for displays a PROFILE just promoted -- see the downgrade
+    // in LoadDisplayOutputSettings. settings.ini alone never brings a child up.
+    for (auto& out : m_displayOutputs)
+      if (out.config.type == DisplayOutputType::Monitor &&
+          out.config.bEnabled && out.config.bOwnProcess)
+        RequestChildSpawn(out.config.szDeviceName);
+
+    // Startup is over, so the latch comes off: everything that could enqueue a
+    // spawn on its own has now run, and anything further is something a user or
+    // a test explicitly asked for. Dropped here rather than left set for the
+    // process's life, because a run that could never make a child could not
+    // test one either.
+    if (m_bNoStartupChildren) {
+      DLOG_INFO("child: -nostartupchildren is spent; spawns are honoured again");
+      m_bNoStartupChildren = false;
+    }
+  }
 
   // Global hotkeys
   LoadHotkeySettings();
@@ -1810,6 +1858,14 @@ void Engine::MyReadConfig() {
   //   settings shielded    children commonly share the parent's folder
   //   presets.json frozen  the parent owns that database
   //
+  // Set after the config read so it cannot be overwritten by a stored value,
+  // and never cleared: SetTestingMode(false) from ESC or IPC is refused while
+  // m_bChildMode is on (see SetTestingMode).
+  if (m_bChildMode) {
+    SetTestingMode(true);
+    DLOG_INFO("child mode: driven by parent pid %lu, tool windows and "
+              "automatic changes disabled", (unsigned long)m_nParentPid);
+  }
   m_bEnableRating = Config().GetBool(L"Settings", L"bEnableRating", m_bEnableRating);
   m_bEnableMouseInteraction = Config().GetBool(L"Settings", L"bEnableMouseInteraction", m_bEnableMouseInteraction);
 
@@ -1893,6 +1949,10 @@ void Engine::MyReadConfig() {
   m_nMaxPSVersion_ConfigPanel = Config().GetInt(L"Settings", L"MaxPSVersion", m_nMaxPSVersion_ConfigPanel);
   m_nMaxImages = Config().GetInt(L"Settings", L"MaxImages", m_nMaxImages);
   m_nMaxBytes = Config().GetInt(L"Settings", L"MaxBytes", m_nMaxBytes);
+  // Longest edge a disk texture keeps (#349). 0 = no cap. Set through the
+  // free function rather than held on the Engine, so LoadTextureFromFile can
+  // read it with no question about load order relative to the device.
+  SetMaxTextureDim(Config().GetInt(L"Settings", L"MaxTextureDim", GetMaxTextureDim()));
   m_nBassStart = Config().GetInt(L"Settings", L"BassStart", m_nBassStart);
   Config().GetStringTo(L"Settings", L"AudioProfile", L"MDropDX12", m_szDefaultAudioProfile, 128);
   m_nBassEnd = Config().GetInt(L"Settings", L"BassEnd", m_nBassEnd);
@@ -2013,9 +2073,30 @@ void Engine::MyReadConfig() {
   m_ShaderCaching = Config().GetBool(L"Milkwave", L"ShaderCaching", m_ShaderCaching);
   m_ShaderPrecompileOnStartup = Config().GetBool(L"Milkwave", L"ShaderPrecompileOnStartup", m_ShaderPrecompileOnStartup);
   m_CheckDirectXOnStartup = Config().GetBool(L"Milkwave", L"CheckDirectXOnStartup", m_CheckDirectXOnStartup);
-  // Escape hatch for a test that genuinely needs its settings changes to land
-  // on disk. Off by default: testing mode's job is to leave no trace.
-  m_bTestingModeWritesSettings = Config().GetBool(L"Milkwave", L"TestingModeWritesSettings", false);
+  // Whether testing mode's writes reach disk.
+  //
+  // Defaults ON for a harness copy and OFF for the user's own install, which
+  // is the distinction the shield always actually wanted. It was added because
+  // test runs were destroying Shane's settings.ini and presets.json -- "added
+  // gates to testing mode because my installs were getting clobbered" -- and
+  // at the time the harness ran from HIS directory, so shielding every write
+  // was the only way to separate the two. The harness now runs from its own
+  // directory with its own config (IsTestInstance: a copy named *_test, or
+  // -test), so a write from it lands on files that exist to be written.
+  //
+  // Left shielded there it does harm rather than nothing: writes go to an
+  // in-memory overlay that reads can see and disk never does, so any test of
+  // whether a setting PERSISTS silently fails. A per-display watermark was
+  // verified working over IPC and then appeared not to survive a restart -- it
+  // survived fine, the shield had swallowed the write, and the same run proved
+  // it (testing mode on, displays.json stayed 0,0,0; off, the same command
+  // wrote 0,0,1).
+  //
+  // The user's install keeps the shield, because testing mode can be raised
+  // there too and that is precisely the case the gates were earned by.
+  m_bTestingModeWritesSettings =
+      Config().GetBool(L"Milkwave", L"TestingModeWritesSettings",
+                       IsTestInstance());
   m_LogLevel = Config().GetInt(L"Milkwave", L"LogLevel", m_LogLevel);
   if (m_bSelfBootstrapped && m_LogLevel < 4)
     m_LogLevel = 4; // verbose logging for first-run diagnostics
@@ -2121,6 +2202,13 @@ void Engine::MyReadConfig() {
   // any child exists, so there is nothing to relay to.
   m_bPresetLockedByUser = m_bPresetLockOnAtStartup;
   //m_bMilkdropScrollLockState = m_bPresetLockOnAtStartup;
+
+  // Command-line Spout overrides go LAST, so they beat every persisted value
+  // this function just read (#213). At the end rather than beside
+  // LoadSpoutInputSettings deliberately: the log level is still Error partway
+  // through here, which silently swallowed the switch's own announcement and
+  // made a working switch look like a dead one.
+  ApplyCommandLineSpout();
 }
 
 //----------------------------------------------------------------------
@@ -2152,7 +2240,12 @@ void Engine::MyWriteConfig() {
 
   // ================================
   // SPOUT
-  Config().SetInt(L"Settings", L"bSpoutOut", bSpoutOut);
+  // What -spoutout DISPLACED, not what it set (#213). This key is saved here
+  // rather than in SaveSpoutInputSettings with the input keys, which is how it
+  // escaped the first version of the guard and wrote itself into the ini.
+  Config().SetInt(L"Settings", L"bSpoutOut",
+                  s_bCmdLineSpoutOut ? (m_bSpoutOutDisplaced ? 1 : 0)
+                                     : (bSpoutOut ? 1 : 0));
   Config().SetInt(L"Settings", L"bQualityAuto", bQualityAuto);
   Config().SetInt(L"Settings", L"bSpoutFixedSize", bSpoutFixedSize);
   Config().SetInt(L"Settings", L"nSpoutFixedWidth", nSpoutFixedWidth);
@@ -2213,6 +2306,7 @@ void Engine::MyWriteConfig() {
   Config().SetInt(L"Settings", L"MaxPSVersion", m_nMaxPSVersion_ConfigPanel);
   Config().SetInt(L"Settings", L"MaxImages", m_nMaxImages);
   Config().SetInt(L"Settings", L"MaxBytes", m_nMaxBytes);
+  Config().SetInt(L"Settings", L"MaxTextureDim", GetMaxTextureDim());
   Config().SetInt(L"Settings", L"BassStart", m_nBassStart);
   Config().SetString(L"Settings", L"AudioProfile", m_szDefaultAudioProfile);
   Config().SetInt(L"Settings", L"BassEnd", m_nBassEnd);
@@ -2496,6 +2590,13 @@ int Engine::AllocateMyNonDx9Stuff() {
   g_bThreadShouldQuit = false;
   InitializeCriticalSection(&g_cs);
   InitializeCriticalSection(&g_csPresetPending);
+
+  // A running parent always has a child worker. MyReadConfig starts it once at
+  // PluginPreInitialize; this is the same statement made at the OTHER entry
+  // point, so a re-initialisation cannot leave the process without one however
+  // it got torn down. Idempotent — StartChildWorker returns immediately when a
+  // worker already exists — so on the ordinary path this does nothing at all.
+  if (!m_bChildMode) StartChildWorker();
 
   // read in 'm_szShaderIncludeText'
   bool bSuccess = true;
@@ -2820,6 +2921,82 @@ float Engine::EffectiveFeedbackDamp() const
 }
 
 
+
+// The Shadertoy feedback targets, allocated on demand and only as declared (#344).
+//
+// Idempotent: a preset needing the same set as the last one allocates nothing,
+// which is what makes it safe to call from the preset-load path, from
+// AllocateMyDX9Stuff after a resize, and defensively before use.
+//
+// Render thread only. It creates resources and binding blocks, and the flags it
+// reads (m_bHasBufferB/C/D, m_bCompUsesImageFeedback) are written only there.
+//
+// The Buffer A pair is allocated whenever Shadertoy mode is on, even for a
+// preset with no Buffer A shader: RenderFrameShadertoy binds it every frame for
+// the Image pass, in both the has-buffers and no-buffers branches. The other
+// four pairs are bound only when their shader exists, and BuildBindingSlots
+// already falls back to the VS texture for an invalid one -- which is what a
+// shader that never samples it would see anyway.
+void Engine::EnsureShadertoyFeedbackTargets() {
+  if (!m_lpDX || !m_lpDX->m_device)
+    return;
+
+  // Must match m_nTexSizeX/Y: the comp shader's texsize constant IS the VS size,
+  // and Shadertoy shaders compute fragCoord / texelFetch from it.
+  const UINT fbW = (UINT)max(1, m_nTexSizeX);
+  const UINT fbH = (UINT)max(1, m_nTexSizeY);
+  int created = 0;
+
+  auto ensurePair = [&](DX12Texture (&pair)[2], bool wanted, const char* name) {
+    if (!wanted)
+      return;
+    for (int i = 0; i < 2; i++) {
+      // Size is part of the test, not just validity: a resize runs the allocate
+      // cycle again and a stale-sized target would be silently wrong rather
+      // than absent.
+      if (pair[i].IsValid() && pair[i].width == fbW && pair[i].height == fbH)
+        continue;
+      pair[i] = m_lpDX->CreateRenderTargetTexture(fbW, fbH,
+                                                  DXGI_FORMAT_R32G32B32A32_FLOAT, 0.f);
+      if (pair[i].IsValid()) {
+        // Needed for the blit pass (feedback -> backbuffer for display).
+        m_lpDX->CreateBindingBlockForTexture(pair[i]);
+        created++;
+      } else {
+        DLOG_ERROR("Shadertoy feedback: FAILED to create %s[%d] %ux%u",
+                   name, i, fbW, fbH);
+      }
+    }
+  };
+
+  ensurePair(m_dx12Feedback,      true,                     "A");
+  ensurePair(m_dx12ImageFeedback, m_bCompUsesImageFeedback, "image");
+  ensurePair(m_dx12FeedbackB,     m_bHasBufferB,            "B");
+  ensurePair(m_dx12FeedbackC,     m_bHasBufferC,            "C");
+  ensurePair(m_dx12FeedbackD,     m_bHasBufferD,            "D");
+
+  if (created) {
+    // Fresh buffers hold uninitialised FLOAT32 VRAM, and a Shadertoy shader's
+    // "if (iFrame < 2) clear" only runs if the frame counter agrees it is new.
+    m_nFeedbackIdx = 0;
+    m_nShadertoyStartFrame = GetFrame();
+    DLOG_INFO("Shadertoy feedback: created %d target(s) at %ux%u "
+              "(image=%d B=%d C=%d D=%d) = %.1f MB",
+              created, fbW, fbH, m_bCompUsesImageFeedback ? 1 : 0,
+              m_bHasBufferB ? 1 : 0, m_bHasBufferC ? 1 : 0, m_bHasBufferD ? 1 : 0,
+              (double)created * fbW * fbH * 16.0 / (1024.0 * 1024.0));
+  }
+}
+
+// Whether any of them are currently held, so the release clock only runs when
+// there is something to give back.
+bool Engine::ShadertoyFeedbackAllocated() const {
+  return m_dx12Feedback[0].IsValid() || m_dx12Feedback[1].IsValid() ||
+         m_dx12ImageFeedback[0].IsValid() || m_dx12ImageFeedback[1].IsValid() ||
+         m_dx12FeedbackB[0].IsValid() || m_dx12FeedbackB[1].IsValid() ||
+         m_dx12FeedbackC[0].IsValid() || m_dx12FeedbackC[1].IsValid() ||
+         m_dx12FeedbackD[0].IsValid() || m_dx12FeedbackD[1].IsValid();
+}
 
 int Engine::AllocateMyDX9Stuff() {
   // (...aka OnUserResizeWindow)
@@ -3309,36 +3486,22 @@ int Engine::AllocateMyDX9Stuff() {
                 ok ? LOG_INFO : LOG_ERROR);
     }
 
-    // Feedback buffers for Shadertoy temporal reprojection (ping-pong pair, VS-resolution)
-    // Must match m_nTexSizeX/Y because comp shader's texsize constant = VS size,
-    // and Shadertoy shaders compute fragCoord / texelFetch using texsize.
+    // Shadertoy feedback buffers are NOT allocated here (#344).
+    //
+    // Ten R32G32B32A32_FLOAT targets at full render resolution is 160 bytes a
+    // pixel -- about 62% of the primary's whole VRAM footprint, ~1.33 GB at
+    // 2160x3840 -- and this block created all ten unconditionally, with no test
+    // on m_bShadertoyMode and none on whether a .milk3 had ever been loaded.
+    // Most sessions never load one and paid for all ten anyway.
+    //
+    // EnsureShadertoyFeedbackTargets allocates them when a .milk3 loads, and
+    // only the pairs that preset declares. It is called here as well so a
+    // RESIZE, which runs the whole allocate cycle again, puts back whatever the
+    // preset currently on screen needs -- the clear-after-resize below reads
+    // these and would otherwise find them invalid.
     {
-      UINT fbW = (UINT)max(1, m_nTexSizeX);
-      UINT fbH = (UINT)max(1, m_nTexSizeY);
-      m_dx12Feedback[0] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT, 0.f);
-      m_dx12Feedback[1] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT, 0.f);
-      m_dx12ImageFeedback[0] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT, 0.f);
-      m_dx12ImageFeedback[1] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT, 0.f);
-      // Binding blocks needed for the blit pass (feedback → backbuffer for display)
-      if (m_dx12Feedback[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12Feedback[0]);
-      if (m_dx12Feedback[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12Feedback[1]);
-      if (m_dx12ImageFeedback[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12ImageFeedback[0]);
-      if (m_dx12ImageFeedback[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12ImageFeedback[1]);
-      // Buffer B feedback pair (same FLOAT32 format as Buffer A)
-      m_dx12FeedbackB[0] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT, 0.f);
-      m_dx12FeedbackB[1] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT, 0.f);
-      if (m_dx12FeedbackB[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackB[0]);
-      if (m_dx12FeedbackB[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackB[1]);
-      // Buffer C feedback pair
-      m_dx12FeedbackC[0] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT, 0.f);
-      m_dx12FeedbackC[1] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT, 0.f);
-      if (m_dx12FeedbackC[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackC[0]);
-      if (m_dx12FeedbackC[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackC[1]);
-      // Buffer D feedback pair
-      m_dx12FeedbackD[0] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT, 0.f);
-      m_dx12FeedbackD[1] = m_lpDX->CreateRenderTargetTexture(fbW, fbH, DXGI_FORMAT_R32G32B32A32_FLOAT, 0.f);
-      if (m_dx12FeedbackD[0].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackD[0]);
-      if (m_dx12FeedbackD[1].IsValid()) m_lpDX->CreateBindingBlockForTexture(m_dx12FeedbackD[1]);
+      if (m_bShadertoyMode)
+        EnsureShadertoyFeedbackTargets();
       m_nFeedbackIdx = 0;
       { bool ok = m_dx12Feedback[0].IsValid() && m_dx12Feedback[1].IsValid();
         DebugLogA(ok ? "DX12: Feedback buffers: created (ping-pong pair)" : "DX12: Feedback buffers: FAILED", ok ? LOG_INFO : LOG_ERROR); }
@@ -3729,9 +3892,7 @@ int Engine::AllocateMyDX9Stuff() {
   // expanded as a triangle list copied 6x more bytes than the mesh actually contains.
   static_assert((MAX_GRID_X + 1) * (MAX_GRID_Y + 1) <= 65536,
                 "warp mesh vertex count must fit 16-bit indices");
-  m_warpVertsStaged = new MYVERTEX[(m_nGridX + 1) * (m_nGridY + 1)];
-  m_warpIdx16       = new UINT16[m_nGridX * m_nGridY * 6];
-  m_warpIdx16All    = new UINT16[m_nGridX * m_nGridY * 6];
+  m_warpIdx16All = new UINT16[m_nGridX * m_nGridY * 6];
   if (!m_verts || !m_vertinfo) {
     FormatTo(buf, L"couldn't allocate mesh - out of memory");
     dumpmsg(buf);
@@ -3866,8 +4027,26 @@ int Engine::AllocateMyDX9Stuff() {
     }
     if (m_szActivePresetList.empty())
       UpdatePresetList(true); //...just does its initial burst!
-    if (m_bEnablePresetStartup && wcslen(m_szPresetStartup) > 0) {
-      DLOG_INFO("StartupPreset: loading '%ls'", m_szPresetStartup);
+    // A startup PROFILE that carried a primary preset counts as configured
+    // (#284).
+    //
+    // MyReadConfig loads the display profile long before this runs, and that
+    // load writes the profile's primary preset into m_szPresetStartup. But the
+    // test here was m_bEnablePresetStartup alone -- a settings.ini flag the
+    // profile has no say over -- so with it off the branch below fired instead
+    // and loaded a RANDOM preset over the top.
+    //
+    // The symptom is exactly what Shane reported: the non-primary displays
+    // follow the profile, because their presets are applied per display and
+    // nothing here touches them, while the main window ends up on something
+    // else entirely and no profile can pin it.
+    const bool haveStartupPreset =
+        (m_bEnablePresetStartup || m_bProfileSuppliedStartupPreset) &&
+        wcslen(m_szPresetStartup) > 0;
+    if (haveStartupPreset) {
+      DLOG_INFO("StartupPreset: loading '%ls'%ls", m_szPresetStartup,
+                m_bProfileSuppliedStartupPreset ? L" (from the display profile)"
+                                                : L"");
       m_pszNextLoadReason = "startup";
       LoadPreset(m_szPresetStartup, 0.0f);
 
@@ -4089,11 +4268,30 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
         tore = true;
       }
     }
-    if (OnlyMirrorSurface().pipe.ready) {
+    // EVERY surface, not just the first.
+    //
+    // Both of these read OnlyMirrorSurface(), which is m_mirrorSurfaces.front()
+    // and a leftover from before there was a surface per display (#186 phase
+    // 3). With two displays the guard asked whether surface 0 had a pipeline
+    // and, if it did not, skipped the release for surface 1 as well -- leaving
+    // that surface's pipe pointing at resources the descriptor rewind below
+    // was about to invalidate. The clear had the same shape, so surface 1 also
+    // went on claiming imageReady after its pipeline was gone.
+    //
+    // Visible as: mirror watermark works exactly once. Turn it off and on and
+    // the panels freeze on the single frame the first draw managed, because
+    // the surfaces never simulate again (#197). Plain MIRROR off/on is
+    // unaffected -- it does not resize the window, so it never comes through
+    // here at all, which is why this looked watermark-specific.
+    bool anyPipe = false;
+    for (auto& sp : m_mirrorSurfaces)
+      if (sp && sp->pipe.ready) { anyPipe = true; break; }
+    if (anyPipe) {
       ReleaseAllOrientPipelines();
       tore = true;
     }
-    OnlyMirrorSurface().imageReady.store(false);
+    for (auto& sp : m_mirrorSurfaces)
+      if (sp) sp->imageReady.store(false);
     if (tore) {
       m_bRaiseMirrorsNextFrame.store(true);
       DLOG_WARN("CleanUpMyDX9Stuff: mirror stack torn down before descriptor rewind");
@@ -4175,6 +4373,7 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
       SafeRelease(m_textures[i].texptr);
     }
   m_textures.clear();
+  PublishTextureCacheStats();   // #352
 
   // DON'T RELEASE blur textures - they were already released because they're in m_textures[].
 #if (NUM_BLUR_TEX>0)
@@ -4293,16 +4492,6 @@ void Engine::CleanUpMyDX9Stuff(int final_cleanup) {
   if (m_indices_list != NULL) {
     delete m_indices_list;
     m_indices_list = NULL;
-  }
-
-  if (m_warpVertsStaged != NULL) {
-    delete[] m_warpVertsStaged;
-    m_warpVertsStaged = NULL;
-  }
-
-  if (m_warpIdx16 != NULL) {
-    delete[] m_warpIdx16;
-    m_warpIdx16 = NULL;
   }
 
   if (m_warpIdx16All != NULL) {
@@ -4440,6 +4629,7 @@ void Engine::ReleaseGpuResources() {
   for (size_t i = 0; i < m_textures.size(); i++)
     m_textures[i].dx12Tex.Reset();
   m_textures.clear();
+  PublishTextureCacheStats();   // #352
 
   // ── the help overlay (EngineShell) ───────────────────────────────────────
   survivors += ReleaseShellGpuResources();
@@ -4514,6 +4704,11 @@ bool Engine::IsTestInstance() const {
 
 void Engine::SetTestingMode(bool bOn)
 {
+  // A child cannot leave testing mode. ESC does it in two presses and IPC does
+  // it in one, and either would hand a parent-driven display back its keyboard,
+  // its auto-advance and its settings writes without the parent knowing.
+  if (m_bChildMode && !bOn) return;
+
   if (m_bTestingMode == bOn) return;          // idempotent: a set, not a toggle
   m_bTestingMode = bOn;
 
@@ -4600,7 +4795,11 @@ void Engine::SetTestingMode(bool bOn)
   // it found it -- and only if testing mode was the thing that opened it, so a
   // window he opened himself is never shut underneath him. "I can always close
   // it if I don't want or change mind later."
-  if (bOn) {
+  // NEVER in child mode. A child is a headless renderer and owns no external
+  // interfaces -- the parent owns every one of them -- and a child CAN enter
+  // testing mode, so without this gate a multi-display run would sprout a
+  // Remote window per child process.
+  if (bOn && !m_bChildMode) {
     if (!m_remoteWindow || !m_remoteWindow->IsOpen()) {
       OpenRemoteWindow();
       m_bTestingOpenedRemote = true;
@@ -4698,6 +4897,28 @@ void Engine::MyRenderFn(int redraw) {
     m_bPendingPresetSwap.store(false, std::memory_order_release);
     LeaveCriticalSection(&g_csPresetPending);
     ClearErrors(ERR_SCANNING_PRESETS);
+
+    // Honour a random-preset request that arrived before this list existed.
+    //
+    // Startup with no configured startup preset calls LoadRandomPreset while
+    // the scan is still running, and that used to raise "no preset files
+    // found" and put up the built-in fallback -- on an install with 933 files,
+    // 124 ms before one of them loaded fine. LoadRandomPreset now defers
+    // instead, which fixes the false error but leaves nothing on screen unless
+    // the deferred request is picked up HERE, when the list it was waiting for
+    // finally arrives.
+    if (m_bRandomPresetDeferred) {
+      m_bRandomPresetDeferred = false;
+      if (m_nPresets - m_nDirs > 0) {
+        DLOG_INFO("preset list ready (%d files); honouring the random preset "
+                  "request deferred at startup", m_nPresets - m_nDirs);
+        LoadRandomPreset(0.0f);
+      } else {
+        // Genuinely empty, now that the scan has actually finished. Let the
+        // normal path say so and put up the fallback.
+        LoadRandomPreset(0.0f);
+      }
+    }
   }
 
   // Check for pending ratings swap from scan thread
@@ -4736,6 +4957,11 @@ void Engine::MyRenderFn(int redraw) {
   //   used to force the desktop to repaint itself when
   //   running in desktop mode and Winamp is paused or stopped.
 
+  // Release sprites that ended themselves on an earlier frame and whose fence
+  // the GPU has now passed (#225). Before the loads below, so a slot retiring
+  // this frame is free for a sprite being launched this frame.
+  RetireFinishedSprites();
+
   // Flush any queued sprite loads (must happen after BeginFrame opens the command list)
   if (!m_pendingSpriteLoads.empty()) {
     for (auto& ps : m_pendingSpriteLoads)
@@ -4754,7 +4980,10 @@ void Engine::MyRenderFn(int redraw) {
 
     // First run or self-bootstrap: show Welcome window only if no presets were found.
     // Skip it when the user already has presets (e.g., fresh portable copy with presets dir).
-    if (m_bSelfBootstrapped || m_bFirstRun) {
+    // Not in child mode: a spawned child on a fresh folder would otherwise put
+    // a Welcome dialog on the display it was asked to render, and wait for a
+    // click nobody is there to give.
+    if ((m_bSelfBootstrapped || m_bFirstRun) && !m_bChildMode) {
       m_bSelfBootstrapped = false;
       m_bFirstRun = false; // only once per session
       bool bHasPresets = (m_nPresets > m_nDirs); // preset count minus directory entries
@@ -5124,6 +5353,24 @@ void Engine::MyRenderFn(int redraw) {
   // done, and MyRenderFn returns before the shell draws HUD/text over the top,
   // so overlay text cannot bias the luminance. Throttles itself to ~2 Hz.
   m_canvasMetric.RecordFrame(this);
+
+  // Hand the Shadertoy feedback targets back once no .milk3 has been on screen
+  // for a while (#344). Polled here rather than acted on at the moment the mode
+  // drops, so that stepping through a mixed library does not rebuild every
+  // device resource on each .milk3 -> .milk transition; the clock is restarted
+  // by the next .milk3 that loads.
+  //
+  // Enqueued rather than done inline: the release runs ResetBufferAndFonts,
+  // which reallocates everything, and this point is inside the frame.
+  if (m_shadertoyIdleSince > 0.0 && !m_bShadertoyMode &&
+      GetTime() - m_shadertoyIdleSince > kShadertoyReleaseDelaySec) {
+    m_shadertoyIdleSince = 0.0;       // once; the command re-checks on arrival
+    if (ShadertoyFeedbackAllocated()) {
+      RenderCommand rc;
+      rc.cmd = RenderCmd::ReleaseShadertoyTargets;
+      EnqueueRenderCmd(rc);
+    }
+  }
 
   if (!redraw) {
     m_nFramesSinceResize++;

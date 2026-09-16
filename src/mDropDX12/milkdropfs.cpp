@@ -828,6 +828,34 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
   // that used to Clear and Present here is gone (issue 17).
   if (m_blackmode)
     return;
+
+  // Startup loading screen (#291): nothing is drawn until the first preset has
+  // a comp shader to draw with.
+  //
+  // Same mechanism as black mode above -- the early return IS the blank canvas.
+  // Without it the warp pass fell through to PSO_TEXTURED_MYVERTEX and drew the
+  // bare warp mesh, so startup showed a screenful of triangles while the first
+  // preset compiled. Shane, 2026-09-14: "instead of showing a 'broken' render
+  // of triangles while loading can you just have a blank screen with an overlay
+  // of seconds centered in a large font" -- "it was on the primary render", "it
+  // was only for a second", "it will be worse for other people I think".
+  //
+  // The test is the comp BYTECODE, not the PSOs. PSOs are built at the top of
+  // DX12_RenderWarpAndComposite, which this return skips -- so gating on
+  // m_bDX12PSOsDirty would wait for something that can only happen once the
+  // gate opens, and the loading screen would never end.
+  //
+  // MyRenderUI draws the counter over the black; the shell calls it after this
+  // returns, exactly as it does for black mode.
+  if (!m_bFirstPresetEverReady) {
+    if (m_shaders.comp.bytecodeBlob != nullptr) {
+      m_bFirstPresetEverReady = true;
+    } else {
+      if (!m_dwLoadingScreenStart)
+        m_dwLoadingScreenStart = GetTickCount();
+      return;
+    }
+  }
   {
 
     float fDeltaT = 1.0f / GetFps();
@@ -944,33 +972,19 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
       // out than one interval plus its jitter cannot have been scheduled from
       // this clock, so the clock jumped back. Re-arm instead of waiting out the
       // whole gap in silence -- that silence was the reported bug.
-      if (m_bMsgAutoplay && m_fNextAutoMsgTime > 0 &&
-          m_fNextAutoMsgTime - GetTime() >
-            m_fMsgAutoplayInterval + m_fMsgAutoplayJitter + 1.0f)
-        ScheduleNextAutoMessage();
-
-      if (MessagesEnabled() && !Restrained(restraint::kMessages) &&
-        m_bMsgAutoplay && m_nMsgAutoplayCount > 0 &&
-        m_fNextAutoMsgTime > 0 && GetTime() >= m_fNextAutoMsgTime) {
-        int nActiveCustomMsgs = 0;
-        for (int j = 0; j < NUM_SUPERTEXTS; j++) {
-          if (!m_supertexts[j].bIsSongTitle &&
-              m_supertexts[j].fStartTime >= 0 &&
-              GetTime() < m_supertexts[j].fStartTime + m_supertexts[j].fDuration + m_supertexts[j].fFadeOutTime)
-            nActiveCustomMsgs++;
-        }
-        if (nActiveCustomMsgs < m_nMsgMaxOnScreen) {
-          int msgIdx;
-          if (m_bMsgSequential) {
-            if (m_nNextSequentialMsg >= m_nMsgAutoplayCount)
-              m_nNextSequentialMsg = 0;
-            msgIdx = m_nMsgAutoplayOrder[m_nNextSequentialMsg++];
-          } else {
-            msgIdx = m_nMsgAutoplayOrder[rand() % m_nMsgAutoplayCount];
-          }
-          LaunchCustomMessage(msgIdx);
-          ScheduleNextAutoMessage();
-        }
+      // The PRIMARY's turn of the loop. Identical logic to what stood here
+      // inline; it moved into TickMessageAutoplay so a display running its own
+      // preset can take a turn of its own, with its own clock and its own
+      // maxOnScreen, off the same store (#255). The per-display turns are
+      // driven from ComputeMirrorLayout, beside their preset clock.
+      //
+      // The primary keeps its persisted fields as its clock, so nothing about
+      // the Messages tab or settings.ini changes shape.
+      {
+        double nextAt = m_fNextAutoMsgTime;
+        TickMessageAutoplay(-1, nextAt, m_nNextSequentialMsg,
+                            m_nMsgMaxOnScreen);
+        m_fNextAutoMsgTime = (float)nextAt;
       }
 
       // update m_fBlendProgress;
@@ -982,11 +996,30 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
           m_pState->m_fBlendProgress = (GetTime() - m_pState->m_fBlendStartTime) / m_pState->m_fBlendDuration;
           if (m_pState->m_fBlendProgress > 1.0f) {
             m_pState->m_bBlending = false;
-            // Release blend-only PSOs (no longer needed after blend completes)
-            m_dx12OldWarpPSO.Reset();
-            m_dx12WarpBlendPSO.Reset();
-            m_dx12OldCompPSO.Reset();
-            m_dx12CompBlendPSO.Reset();
+            // Release blend-only PSOs (no longer needed after blend completes).
+            //
+            // RETIRE, do not Reset (#214). This runs inside the frame update,
+            // and a mirror worker's submitted command list can still name
+            // these PSOs -- a PSO must outlive every list that references it.
+            // Dropping the last reference here is the same use-after-free
+            // shape as #222 and #225, and it fires on every preset transition
+            // rather than in some corner.
+            //
+            // A WaitForGpu would also be correct and is what the preset commit
+            // does, but this site is far more frequent and a stall per blend
+            // is not worth paying when holding four references for a frame
+            // costs nothing.
+            if (m_lpDX) {
+              m_lpDX->RetireAndReset(m_dx12OldWarpPSO);
+              m_lpDX->RetireAndReset(m_dx12WarpBlendPSO);
+              m_lpDX->RetireAndReset(m_dx12OldCompPSO);
+              m_lpDX->RetireAndReset(m_dx12CompBlendPSO);
+            } else {
+              m_dx12OldWarpPSO.Reset();
+              m_dx12WarpBlendPSO.Reset();
+              m_dx12OldCompPSO.Reset();
+              m_dx12CompBlendPSO.Reset();
+            }
           }
         }
       }
@@ -1509,8 +1542,19 @@ bool mdrop::Engine::OrientPipeReadyForMode(const MirrorSurface& surf) const
   const bool dispOk = surf.pipe.disp[0].IsValid() &&
       surf.pipe.disp[1].IsValid() && surf.pipe.disp[2].IsValid();
   const bool imgOk = surf.pipe.imgFb[0].IsValid() && surf.pipe.imgFb[1].IsValid();
+  // The DECLARED buffers, matching what EnsureOrientPipeline now allocates
+  // (#344). This must agree with it exactly: it is the render thread's "do I
+  // need to rebuild" test, and when only the builder knew about the mode a
+  // classic -> .milk3 switch left this saying "fine" while the worker skipped
+  // every frame and the mirrors froze. The same trap applies per buffer -- a
+  // preset that wants Buffer B on a pipe built without one would bind the VS
+  // fallback and render quietly wrong, forever, because nothing asked for a
+  // rebuild.
   const bool milk3Ok = imgOk &&
-      surf.pipe.fbA[0].IsValid() && surf.pipe.fbA[1].IsValid();
+      surf.pipe.fbA[0].IsValid() && surf.pipe.fbA[1].IsValid() &&
+      (!m_bHasBufferB || surf.pipe.fbB[0].IsValid()) &&
+      (!m_bHasBufferC || surf.pipe.fbC[0].IsValid()) &&
+      (!m_bHasBufferD || surf.pipe.fbD[0].IsValid());
   return dispOk && (m_bShadertoyMode ? milk3Ok : imgOk);
 }
 
@@ -1519,13 +1563,20 @@ bool mdrop::Engine::EnsureOrientPipeline(MirrorSurface& surf, int w, int h)
   if (!m_lpDX || !m_lpDX->m_device || w <= 0 || h <= 0)
     return false;
 
+  // No mark here: this runs every frame and early-outs when the pipe already
+  // matches, so a mark at the top is one QueryVideoMemoryInfo per surface per
+  // frame and buries the run in zero-delta lines. The exit mark below is only
+  // reached when a pipe is actually built, which is the event worth timing.
   ClampOrientCanvas(surf, w, h);
 
   // Descriptor heap rewind can overwrite SRV slots still held by orient textures
   // (landscape strip on portrait when blit samples the wrong resource).
   // NEVER WaitForGpu here — callers may be mid command-list record (hang/SEH).
   // If GPU may still reference old textures, caller must idle before Ensure.
-  const UINT kBindSlots = 6 * DXContext::BINDING_BLOCK_SIZE;
+  // 6 blocks for warp/comp/milk3/blit as before, plus this surface's OWN blur
+  // blocks -- DXC_FRAME_COUNT rotations of MAX_BLUR_PASSES (#209). The blur was
+  // the last binding path still sharing one global block set.
+  const UINT kBindSlots = OrientBindSlots();
   const bool epochMismatch = (surf.pipe.bindEpoch != m_lpDX->m_descriptorEpoch);
 
   // Mode-aware: classic only has imgFb pair + fbA[0]; milk3 has full A–D + imgFb pairs.
@@ -1596,17 +1647,122 @@ bool mdrop::Engine::EnsureOrientPipeline(MirrorSurface& surf, int w, int h)
     surf.pipe.bindBase = savedBase;
     surf.pipe.bindEpoch = m_lpDX->m_descriptorEpoch;
   } else {
-    if (m_lpDX->m_nextFreeSrvSlot + kBindSlots > DXC_MAX_SRV) {
-      DebugLogA("OrientPipe: SRV heap full — cannot reserve bind blocks\n", LOG_ERROR);
-      return false;
+    // A range handed back by a retired surface, before taking a new one.
+    //
+    // Without this the allocator only ever goes up: a surface retired by
+    // RetireMirrorSurfacesExcept abandons its block, so a long session of
+    // display changes climbs even though a surface rebuilding its OWN pipe
+    // reuses its range via stillReserved above.
+    //
+    // This is NOT what exhausted the heap on 2026-09-12. That log has only two
+    // bindBase allocations and no "no longer reserved" warnings, so nothing
+    // had leaked -- 4096 descriptors simply could not hold a third orient
+    // pipe. See DXC_MAX_SRV for that fix and its numbers.
+    //
+    // The epoch is checked because a device re-init rewinds m_nextFreeSrvSlot
+    // to its baseline and hands the same descriptors out again; a range saved
+    // under the old epoch names slots that now belong to somebody else.
+    if (m_freeOrientBindEpoch != m_lpDX->m_descriptorEpoch) {
+      m_freeOrientBindBases.clear();
+      m_freeOrientBindEpoch = m_lpDX->m_descriptorEpoch;
     }
-    surf.pipe.bindBase = m_lpDX->m_nextFreeSrvSlot;
-    m_lpDX->m_nextFreeSrvSlot += kBindSlots;
+    // Does [base, base+kBindSlots) run into a range another LIVE surface is
+    // still using? (#354)
+    //
+    // The free list and m_nextFreeSrvSlot are two allocators over one
+    // descriptor space, and only one of them knows about a reused range. This
+    // is what reconciles them at the point the answer is knowable.
+    auto overlapsLiveSurface = [&](UINT base) -> const MirrorSurface* {
+      for (const auto& sp : SnapshotMirrorSurfaces()) {
+        if (!sp || sp.get() == &surf) continue;
+        if (sp->pipe.bindBase == UINT_MAX) continue;
+        if (sp->pipe.bindEpoch != m_lpDX->m_descriptorEpoch) continue;
+        if (base < sp->pipe.bindBase + kBindSlots &&
+            sp->pipe.bindBase < base + kBindSlots)
+          return sp.get();
+      }
+      return nullptr;
+    };
+
+    // Drop any freed base that a live surface has since taken over. Nothing
+    // else notices: a range goes on the list when its surface retires, and it
+    // can be handed out again from the bump pointer in between.
+    while (!m_freeOrientBindBases.empty()) {
+      const UINT cand = m_freeOrientBindBases.back();
+      const MirrorSurface* clash = overlapsLiveSurface(cand);
+      if (!clash) break;
+      m_freeOrientBindBases.pop_back();
+      char cbuf[224];
+      sprintf(cbuf, "OrientPipe: discarding freed bindBase=%u -- overlaps live "
+                    "surface %ls at %u..%u\n",
+              cand, clash->device.empty() ? L"(none)" : clash->device.c_str(),
+              clash->pipe.bindBase, clash->pipe.bindBase + kBindSlots);
+      DebugLogA(cbuf, LOG_WARN);
+    }
+
+    if (!m_freeOrientBindBases.empty()) {
+      surf.pipe.bindBase = m_freeOrientBindBases.back();
+      m_freeOrientBindBases.pop_back();
+      char rbuf[144];
+      sprintf(rbuf, "OrientPipe: reusing freed SRV bindBase=%u (%u still free)\n",
+              surf.pipe.bindBase, (unsigned)m_freeOrientBindBases.size());
+      DebugLogA(rbuf, LOG_INFO);
+    } else {
+      if (m_lpDX->m_nextFreeSrvSlot + kBindSlots > DXC_MAX_SRV) {
+        DebugLogA("OrientPipe: SRV heap full — cannot reserve bind blocks\n", LOG_ERROR);
+        return false;
+      }
+      surf.pipe.bindBase = m_lpDX->m_nextFreeSrvSlot;
+      m_lpDX->m_nextFreeSrvSlot += kBindSlots;
+      char buf[144];
+      sprintf(buf, "OrientPipe: SRV bindBase=%u (%u slots, free=%u/%u)\n",
+              surf.pipe.bindBase, kBindSlots,
+              m_lpDX->m_nextFreeSrvSlot, (UINT)DXC_MAX_SRV);
+      DebugLogA(buf, LOG_INFO);
+    }
+
+    // THE INVARIANT, and the bug this fixes (#354): the bump pointer must
+    // always sit ABOVE every live reservation.
+    //
+    // Hold that, and every other allocation in the process is safe by
+    // construction -- textures, font atlases and the letterbox SRV all bump
+    // the same counter, and none of them knows an orient pipe exists.
+    //
+    // The fresh branch above keeps it for free. The REUSE branch did not: it
+    // takes a base off the free list without touching the pointer, which is
+    // right in the ordinary case (the range is already accounted for) and
+    // wrong whenever the pointer has been rewound to at or below that base.
+    // Then the next bump -- of anything -- walks straight into a live range.
+    //
+    // Measured on Shane's instance, from its own log:
+    //
+    //   09:26:10  bindBase=2237 (free=2813)   two surfaces, 576 apart, clean
+    //   09:26:10  bindBase=2824 (free=3400)
+    //   14:05:33  Idle timer activated -> DISPLAY3 re-init
+    //   14:05:33  bind range 2824..3400 no longer reserved (free=2237)
+    //   14:05:33  reusing freed SRV bindBase=2237      <- pointer left at 2237
+    //   15:31:45  bindBase=2248 (free=2824)            <- 11 slots later
+    //
+    // 2237..2813 against 2248..2824: 565 of 576 descriptors in common. Both
+    // surfaces then filled their binding blocks into the same slots every
+    // frame, so both displays drew whichever wrote last -- reported as "my
+    // display1 and 3 have gotten linked and are running the same preset",
+    // with the per-display MESSAGES still correctly different, because only
+    // the descriptors were shared and not the surfaces.
+    //
+    // The eleven slots between 2237 and 2248 went to ordinary textures, which
+    // is the same collision with a wider blast radius and needs no second
+    // own-preset display to happen.
+    if (m_lpDX->m_nextFreeSrvSlot < surf.pipe.bindBase + kBindSlots) {
+      char abuf[176];
+      sprintf(abuf, "OrientPipe: bump pointer %u was inside reservation %u..%u "
+                    "-- advancing (#354)\n",
+              m_lpDX->m_nextFreeSrvSlot, surf.pipe.bindBase,
+              surf.pipe.bindBase + kBindSlots);
+      DebugLogA(abuf, LOG_WARN);
+      m_lpDX->m_nextFreeSrvSlot = surf.pipe.bindBase + kBindSlots;
+    }
     surf.pipe.bindEpoch = m_lpDX->m_descriptorEpoch;
-    char buf[128];
-    sprintf(buf, "OrientPipe: SRV bindBase=%u (5x32 slots, free=%u/%u)\n",
-            surf.pipe.bindBase, m_lpDX->m_nextFreeSrvSlot, (UINT)DXC_MAX_SRV);
-    DebugLogA(buf, LOG_INFO);
   }
 
   // Formats must match the PSO each target is drawn with — a render target whose
@@ -1664,10 +1820,32 @@ bool mdrop::Engine::EnsureOrientPipeline(MirrorSurface& surf, int w, int h)
 
   if (forMilk3) {
     const DXGI_FORMAT kFb = DXGI_FORMAT_R32G32B32A32_FLOAT; // Buffer A–D PSO format
+    // Only the buffers the preset DECLARES (#344).
+    //
+    // All four pairs were allocated unconditionally: eight FLOAT32 targets at
+    // 16 bytes a pixel is 128 B/px PER SURFACE, and the overwhelming majority
+    // of .milk3 presets use Buffer A alone -- the GLSL importer cannot even
+    // produce Buffer C or D (docs/GLSL_importing.md), so on an imported preset
+    // those two pairs were pure waste. Measured at +533 MB across two 1920x1088
+    // surfaces for one .milk3 on the primary.
+    //
+    // fbA is unconditional: RenderFrameShadertoy binds it every frame for the
+    // Image pass whether or not a Buffer A shader exists.
+    //
+    // GROW-ONLY, never shrink: `|| already valid` keeps a pair that an earlier
+    // preset needed. Dropping one would make the next preset that wants it a
+    // pipe REBUILD, and rebuilds are the thing to avoid here -- AllocateRtv is
+    // a bump allocator with no free path, so each recreate burns ~10 RTV slots
+    // until the allocator rewinds and the new RTVs alias live ones. That is the
+    // deterministic TDR (0x887A0006) recorded at ClampOrientCanvas. Monotonic
+    // growth bounds it at three extra rebuilds for the whole session.
+    const bool wantB = m_bHasBufferB || surf.pipe.fbB[0].IsValid();
+    const bool wantC = m_bHasBufferC || surf.pipe.fbC[0].IsValid();
+    const bool wantD = m_bHasBufferD || surf.pipe.fbD[0].IsValid();
     if (!makePairFmt(surf.pipe.fbA, "fbA", kFb, 0.f) ||
-        !makePairFmt(surf.pipe.fbB, "fbB", kFb, 0.f) ||
-        !makePairFmt(surf.pipe.fbC, "fbC", kFb, 0.f) ||
-        !makePairFmt(surf.pipe.fbD, "fbD", kFb, 0.f) ||
+        (wantB && !makePairFmt(surf.pipe.fbB, "fbB", kFb, 0.f)) ||
+        (wantC && !makePairFmt(surf.pipe.fbC, "fbC", kFb, 0.f)) ||
+        (wantD && !makePairFmt(surf.pipe.fbD, "fbD", kFb, 0.f)) ||
         !makePair(surf.pipe.imgFb, "imgFb", 0.f)) {
       ReleaseOrientPipeline(surf);
       return false;
@@ -1718,6 +1896,34 @@ bool mdrop::Engine::EnsureOrientPipeline(MirrorSurface& surf, int w, int h)
       }
     }
   }
+
+  // What this pipe actually cost, per surface (#344). Attributing orient-pipe
+  // VRAM by arithmetic from outside got it wrong -- the measured total came to
+  // roughly three times what the declared buffers predicted -- and there was no
+  // way to ask which pairs were built for which surface. With this, the
+  // residual was identified as the mode-change REBUILD rather than the
+  // feedback buffers.
+  if (forMilk3) {
+    const int fbPairs = 1 + (surf.pipe.fbB[0].IsValid() ? 1 : 0)
+                          + (surf.pipe.fbC[0].IsValid() ? 1 : 0)
+                          + (surf.pipe.fbD[0].IsValid() ? 1 : 0);
+    DLOG_INFO("OrientPipe[%ls] milk3 %dx%d: %d FLOAT32 pair(s) "
+              "(B=%d C=%d D=%d declared) = %.1f MB",
+              surf.device.empty() ? L"(none)" : surf.device.c_str(), w, h,
+              fbPairs, m_bHasBufferB ? 1 : 0, m_bHasBufferC ? 1 : 0,
+              m_bHasBufferD ? 1 : 0,
+              (double)fbPairs * 2.0 * w * h * 16.0 / (1024.0 * 1024.0));
+  }
+
+  // The VRAM checkpoint stays alongside it: the log line above says what THIS
+  // pipe asked for, the mark says what the GPU actually charged for it, and the
+  // gap between those two is what made this issue hard to attribute.
+  //
+  // m_bShadertoyMode is still GLOBAL, so the primary loading one .milk3 rebuilds
+  // every surface's pipe -- that is the remaining cost here, not the feedback
+  // buffers, which are now only the pairs the preset declares.
+  VMARK(forMilk3 ? "EnsureOrientPipeline exit (milk3)"
+                 : "EnsureOrientPipeline exit (classic)");
 
   surf.pipe.w = w;
   surf.pipe.h = h;
@@ -1770,6 +1976,21 @@ bool mdrop::Engine::RenderMilk3OrientPipeline(MirrorSurface& surf,
   RenderContext ic;
   FillCanvasInputs(ic, W, H, -1);
   FillMouseInputs(ic, W, H);
+  // This IS a mirror orient record, and the context has to say so (#208).
+  //
+  // It said neither, so ApplyShaderParams' primary-only guard
+  // (`if (!(rc && rc->bOrientRecord))`) let this path through and a MIRROR
+  // WORKER wrote m_nHighestBlurTexUsedThisFrame -- a plain int the render
+  // thread is writing at the same time. The magnitude was harmless, because
+  // this path scans the engine's own shader set and so could only reach a
+  // value the primary would reach anyway; the unsynchronised write was not.
+  //
+  // Safe to set both: this function calls none of the other branches that read
+  // them -- no RenderWarpPass, RenderCompPass, RenderBlurPasses,
+  // DX12_DrawCustomShapes or DrawUserSprites -- so the only behaviour that
+  // changes is the guard that should have been catching it.
+  ic.isMirror      = true;
+  ic.bOrientRecord = true;
 
   ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
   cmdList->SetDescriptorHeaps(1, heaps);
@@ -1941,6 +2162,25 @@ bool mdrop::Engine::RenderClassicOrientPipeline(MirrorSurface& surf,
   if (!m_indices_list || m_nGridX < 1 || m_nGridY < 1)
     return false;
 
+  // Startup loading screen, on an own-preset surface (#291).
+  //
+  // The primary's gate in RenderFrame does not cover these: a surface records
+  // through this path, and FillPresetPipeline(rc, c) BORROWS the engine's
+  // pipeline whenever the context has not adopted its own yet. At startup the
+  // engine's set is empty too, so the borrow yielded a null warp PSO and the
+  // shared warp dispatch fell through to PSO_TEXTURED_MYVERTEX -- the same
+  // screenful of triangles, once per display.
+  //
+  // Which is exactly the arrangement Shane had to describe twice before it
+  // reproduced: "it has to be clouds1b but own preset on each display I think
+  // for you to see the issue". One display compiling one preset is over too
+  // quickly to notice; three surfaces each compiling their own is not.
+  //
+  // Returning false leaves the surface unpainted for this frame, which its
+  // own bNeedsFullChainClear has already made black.
+  if (LoadingScreenActive() && !surf.sim.HasOwnPipeline())
+    return false;
+
   // Independent mirror simulation context: own states (own EEL storage), own
   // warp mesh at this aspect, own blend timeline. Adoption + per-frame step
   // ran on the mirror thread BEFORE the engine lock; here (under the lock)
@@ -1959,7 +2199,7 @@ bool mdrop::Engine::RenderClassicOrientPipeline(MirrorSurface& surf,
   //
   // Reported as 'presets are rendering but they're incorrect', which is
   // exactly what a shader reading another preset's textures looks like.
-  const bool ctxOwnSet = (c.shaders.warp.bytecodeBlob || c.shaders.comp.bytecodeBlob);
+  const bool ctxOwnSet = c.HasOwnPipeline();
   PShaderSet& sh    = ctxOwnSet ? c.shaders    : m_shaders;
   PShaderSet& oldSh = ctxOwnSet ? c.oldShaders : m_OldShaders;
   if (!c.pState || c.verts.size() != (size_t)(m_nGridX + 1) * (m_nGridY + 1))
@@ -2028,6 +2268,19 @@ bool mdrop::Engine::RenderClassicOrientPipeline(MirrorSurface& surf,
   RenderContext ic;
   FillAnimInputs(ic, c);
   FillCanvasInputs(ic, P.w, P.h, c.nFrame);
+  // THIS surface's command list, too. The context described the surface
+  // completely except for where its work goes, so every draw handed `ic` still
+  // fell back to the engine's active list and needed m_cmdListOverride to make
+  // that answer right (#206).
+  ic.cmdList = cmdList;
+  // And that it IS a mirror (#230). This context described the surface in
+  // every other respect and left this flag false, so every `pCtx->isMirror`
+  // test on the injection path -- shapes, waves, sprites -- answered "primary"
+  // for a mirror worker. It read as harmless while the only consumer was a
+  // diagnostic counter; it stops being harmless the moment a per-surface
+  // BUDGET asks the same question, which is how the mirror load shed came to
+  // measure 0 in 3 twice while never once running.
+  ic.isMirror = true;
 
   ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
   cmdList->SetDescriptorHeaps(1, heaps);
@@ -2072,35 +2325,66 @@ bool mdrop::Engine::RenderClassicOrientPipeline(MirrorSurface& surf,
     DX12Texture* pVid = nullptr;
     UINT vidW = 0, vidH = 0;
     if (m_nVideoInputSource == VID_SOURCE_SPOUT) {
-      UpdateSpoutInputTexture();
+      // CONSUME ONLY, same as the webcam/file branch below (#213).
+      //
+      // This used to call UpdateSpoutInputTexture() here, on a MIRROR WORKER.
+      // That function receives a Spout frame, releases and re-adopts
+      // si.pReceivedTexture, rewrites dx12InputTex's resource, width, height
+      // and currentState, and can reallocate its SRV -- all on state the render
+      // thread owns and is using in the same frame. The webcam half of this was
+      // fixed in d490234e and the Spout half was left; it is the same defect.
       if (m_spoutInput && m_spoutInput->bConnected && m_spoutInput->dx12InputTex.IsValid()) {
         pVid = &m_spoutInput->dx12InputTex;
         vidW = m_spoutInput->nSenderWidth;
         vidH = m_spoutInput->nSenderHeight;
       }
     } else if (m_nVideoInputSource == VID_SOURCE_WEBCAM || m_nVideoInputSource == VID_SOURCE_FILE) {
-      if (!m_videoCapture)
-        InitVideoCapture();
-      if (m_videoCapture && m_videoCapture->IsConnected()) {
-        UpdateVideoCaptureTexture();
-        if (m_videoCapture->m_dx12Tex.IsValid()) {
-          pVid = &m_videoCapture->m_dx12Tex;
-          vidW = m_videoCapture->GetWidth();
-          vidH = m_videoCapture->GetHeight();
-        }
+      // CONSUME ONLY on a mirror worker (#206).
+      //
+      // This used to call InitVideoCapture() and UpdateVideoCaptureTexture()
+      // here. Both belong to the render thread, which already does them every
+      // frame on the primary path. UpdateVideoCaptureTexture ends in
+      // VideoCaptureSource::UpdateTexture, which records CopyTextureRegion
+      // into dx->m_commandList -- the RENDER THREAD's open list, named
+      // directly rather than through GetActiveCmdList, so no command-list
+      // override could redirect it. Two threads recording into one
+      // ID3D12GraphicsCommandList is undefined behaviour. InitVideoCapture
+      // additionally constructs the shared m_videoCapture unique_ptr out from
+      // under the render thread.
+      //
+      // The texture is shared, so consuming whatever the render thread last
+      // uploaded is both correct and what the mirror wanted anyway.
+      if (m_videoCapture && m_videoCapture->IsConnected() &&
+          m_videoCapture->m_dx12Tex.IsValid()) {
+        pVid = &m_videoCapture->m_dx12Tex;
+        vidW = m_videoCapture->GetWidth();
+        vidH = m_videoCapture->GetHeight();
       }
     }
     if (pVid && vidW && vidH) {
-      m_lpDX->m_cmdListOverride = cmdList;
+      m_lpDX->SetThreadCmdListOverride(cmdList);
       m_lpDX->TransitionResource(vsRead, D3D12_RESOURCE_STATE_RENDER_TARGET, cmdList);
       D3D12_CPU_DESCRIPTOR_HANDLE vrtv = m_lpDX->GetRtvCpuHandle(vsRead);
       cmdList->OMSetRenderTargets(1, &vrtv, FALSE, nullptr);
       SetViewportAndScissor(cmdList, (UINT)P.w, (UINT)P.h);
       CompositeVideoInputFX(true, *pVid, vidW, vidH, &ic);
-      if (m_nVideoInputSource == VID_SOURCE_SPOUT)
-        m_lpDX->TransitionResource(*pVid, D3D12_RESOURCE_STATE_COPY_DEST, cmdList);
+      // The shared input texture is NOT transitioned back here (#213).
+      //
+      // It used to go to COPY_DEST after every composite, from every recorder.
+      // TransitionResource read-modify-writes DX12Texture::currentState, so N
+      // mirror surfaces plus the primary all wrote one shadow variable for one
+      // resource, and a barrier built from a stale read disagrees with what the
+      // GPU thinks the resource is. In Release that is silent: a correct frame
+      // by luck, a corrupted one, or a device removal minutes later with
+      // nothing pointing back here.
+      //
+      // The render thread now parks it in PIXEL_SHADER_RESOURCE for the whole
+      // window in which mirrors run and only moves it to COPY_DEST around its
+      // own upload. Every transition a recorder still asks for is therefore a
+      // no-op -- TransitionResource returns early when currentState already
+      // equals the target -- so what was a write from many threads is a read.
       m_lpDX->TransitionResource(vsRead, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, cmdList);
-      m_lpDX->m_cmdListOverride = nullptr;
+      m_lpDX->SetThreadCmdListOverride(nullptr);
       cmdList->SetDescriptorHeaps(1, heaps);
       cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
     }
@@ -2157,8 +2441,8 @@ bool mdrop::Engine::RenderClassicOrientPipeline(MirrorSurface& surf,
     patchOrientBlurSlots(&oldSh.warp.params, oldWarpSlots);
   }
   // DIAG_BINDINGS: what the MIRROR resolved from the same params.
-  CaptureBindSnapshot(m_bindSnapMirror[BINDSNAP_WARP], &sh.warp.params, warpSlots);
-  CaptureBindSnapshot(m_bindSnapMirror[BINDSNAP_OLDWARP], &oldSh.warp.params, oldWarpSlots);
+  CaptureBindSnapshot(surf.bindSnap[BINDSNAP_WARP], &sh.warp.params, warpSlots);
+  CaptureBindSnapshot(surf.bindSnap[BINDSNAP_OLDWARP], &oldSh.warp.params, oldWarpSlots);
 
   m_lpDX->FillSrvBindingBlock(b0 + 0 * bs, warpSlots);
   m_lpDX->FillSrvBindingBlock(b0 + 2 * bs, oldWarpSlots);
@@ -2256,8 +2540,18 @@ bool mdrop::Engine::RenderClassicOrientPipeline(MirrorSurface& surf,
     bc.blurTex         = P.blur;
     bc.blurW           = P.blurW;
     bc.blurH           = P.blurH;
-    bc.highestBlurUsed = ScanHighestBlurUsed(bBlending);
+    bc.highestBlurUsed = ScanHighestBlurUsed(bBlending, &bc);
     bc.isMirror        = true;
+    // THIS surface's blur blocks, not the engine-wide set (#209). They sit
+    // directly after the 6 blocks EnsureOrientPipeline already reserves, and
+    // the rotation term is the SURFACE's own frame count -- never
+    // DXContext::m_frameIndex, which belongs to the render thread.
+    if (P.bindBase != UINT_MAX) {
+      const UINT kBlock = DXContext::BINDING_BLOCK_SIZE;
+      const UINT rot = (UINT)(P.frames % DXC_FRAME_COUNT);
+      bc.blurBindBase = P.bindBase + 6 * kBlock +
+                        rot * DXContext::MAX_BLUR_PASSES * kBlock;
+    }
     RenderBlurPasses(bc);
   }
 
@@ -2266,8 +2560,8 @@ bool mdrop::Engine::RenderClassicOrientPipeline(MirrorSurface& surf,
   // in the context's own VMs with per-context reg/gmegabuf storage, so the
   // old save/restore hack around the process-global regs is gone.
   {
-    m_lpDX->m_cmdListOverride = cmdList;
-    m_pShapeVsOverride = &vsRead;
+    m_lpDX->SetThreadCmdListOverride(cmdList);
+    ic.shapeVs = &vsRead;
 
     SetViewportAndScissor(cmdList, (UINT)P.w, (UINT)P.h);
     {
@@ -2300,8 +2594,8 @@ bool mdrop::Engine::RenderClassicOrientPipeline(MirrorSurface& surf,
     if (SpritesEnabled())
       DrawUserSprites(12, cmdList, &ic);
 
-    m_pShapeVsOverride = nullptr;
-    m_lpDX->m_cmdListOverride = nullptr;
+    ic.shapeVs = nullptr;
+    m_lpDX->SetThreadCmdListOverride(nullptr);
 
     cmdList->SetDescriptorHeaps(1, heaps);
     cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
@@ -2330,8 +2624,8 @@ bool mdrop::Engine::RenderClassicOrientPipeline(MirrorSurface& surf,
 
   // DIAG_BINDINGS: mirror comp pair, captured after the blur patch so the
   // snapshot is what actually reaches the descriptor block.
-  CaptureBindSnapshot(m_bindSnapMirror[BINDSNAP_COMP], &sh.comp.params, compSlots);
-  CaptureBindSnapshot(m_bindSnapMirror[BINDSNAP_OLDCOMP], &oldSh.comp.params, oldCompSlots);
+  CaptureBindSnapshot(surf.bindSnap[BINDSNAP_COMP], &sh.comp.params, compSlots);
+  CaptureBindSnapshot(surf.bindSnap[BINDSNAP_OLDCOMP], &oldSh.comp.params, oldCompSlots);
 
   // ── Comp → display (fbA[0]); two-pass crossfade when blending / .milk2 ──
   m_lpDX->TransitionResource(display, D3D12_RESOURCE_STATE_RENDER_TARGET, cmdList);
@@ -2377,11 +2671,11 @@ bool mdrop::Engine::RenderClassicOrientPipeline(MirrorSurface& surf,
       vidH = m_videoCapture->GetHeight();
     }
     if (pVid && vidW && vidH) {
-      m_lpDX->m_cmdListOverride = cmdList;
+      m_lpDX->SetThreadCmdListOverride(cmdList);
       CompositeVideoInputFX(false, *pVid, vidW, vidH, &ic);
       if (m_nVideoInputSource == VID_SOURCE_SPOUT)
         m_lpDX->TransitionResource(*pVid, D3D12_RESOURCE_STATE_COPY_DEST, cmdList);
-      m_lpDX->m_cmdListOverride = nullptr;
+      m_lpDX->SetThreadCmdListOverride(nullptr);
       cmdList->SetDescriptorHeaps(1, heaps);
       cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
     }
@@ -2393,14 +2687,14 @@ bool mdrop::Engine::RenderClassicOrientPipeline(MirrorSurface& surf,
   // primary's post-comp stamp (milkdropfs.cpp:4323-4328). vsWrite is next
   // frame's warp source; without this the sprite never enters the loop.
   if (SpritesEnabled()) {
-    m_lpDX->m_cmdListOverride = cmdList;
+    m_lpDX->SetThreadCmdListOverride(cmdList);
     m_lpDX->TransitionResource(vsWrite, D3D12_RESOURCE_STATE_RENDER_TARGET, cmdList);
     D3D12_CPU_DESCRIPTOR_HANDLE wRtv = m_lpDX->GetRtvCpuHandle(vsWrite);
     cmdList->OMSetRenderTargets(1, &wRtv, FALSE, nullptr);
     SetViewportAndScissor(cmdList, (UINT)P.w, (UINT)P.h);
     DrawUserSprites(10, cmdList, &ic);
     m_lpDX->TransitionResource(vsWrite, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, cmdList);
-    m_lpDX->m_cmdListOverride = nullptr;
+    m_lpDX->SetThreadCmdListOverride(nullptr);
   }
 
   P.fbIdx = 1 - P.fbIdx;
@@ -2887,6 +3181,11 @@ void mdrop::Engine::RenderFrameShadertoy(ID3D12GraphicsCommandList* cmdList)
   // Independent mirrors snapshot this BB and re-draw messages at panel size.
   if (MessagesEnabled() && !AnyIndependentMirrorEnabled()) {
     for (int i = 0; i < NUM_SUPERTEXTS; i++) {
+      // The primary draws only its OWN (#255). The slots are one pool shared
+      // with every display running its own message loop, so without this the
+      // main window would show theirs as well as its own.
+      if (m_supertexts[i].nOwnerDisplay != -1)
+        continue;
       if (m_supertexts[i].fStartTime >= 0 && !m_supertexts[i].bRedrawSuperText) {
         float fProgress = (GetTime() - m_supertexts[i].fStartTime) / m_supertexts[i].fDuration;
         if (fProgress <= 1.0f) {
@@ -2935,6 +3234,17 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       m_supertexts[i].bRedrawSuperText = false;
     }
   }
+
+  // Per-frame, in EVERY mode (#208).
+  //
+  // The classic path re-assigns the real depth from ScanHighestBlurUsed below,
+  // so for it this is redundant. It is not redundant for the shadertoy branch
+  // immediately after, which RETURNS before that scan while
+  // RenderFrameShadertoy's ApplyShaderParams calls carry no RenderContext --
+  // so they clear the primary-only guard and accumulate through max() with
+  // nothing ever putting the value back. That left the member session-scoped
+  // on a .milk3 preset, which is the exact shape #208 was filed about.
+  m_nHighestBlurTexUsedThisFrame = 0;
 
   // ── Shadertoy pipeline: skip warp/blur/shapes entirely ──
   if (m_bShadertoyMode) {
@@ -3209,8 +3519,10 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
   //
   // Shared with the mirror worker (#15). The scan has to include the OLD
   // shaders during a blend, or levels they sample are never generated.
-  m_nHighestBlurTexUsedThisFrame =
-      max(m_nHighestBlurTexUsedThisFrame, ScanHighestBlurUsed(m_pState->m_bBlending));
+  // ASSIGN, not max. This is the primary's once-a-frame scan and it is what
+  // makes the member per-frame again (#208); the binds below may still raise it
+  // within the frame.
+  m_nHighestBlurTexUsedThisFrame = ScanHighestBlurUsed(m_pState->m_bBlending);
   {
     RenderContext bc;
     FillAnimInputs(bc);
@@ -3256,7 +3568,15 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
         if (m_supertexts[i].fStartTime >= 0 && !m_supertexts[i].bRedrawSuperText) {
           float fProgress = (GetTime() - m_supertexts[i].fStartTime) / m_supertexts[i].fDuration;
           if (fProgress >= 1.0f) {
-            ShowSongTitleAnim(m_nTexSizeX, m_nTexSizeY, fProgress, i);
+            // Burn only the PRIMARY's own into the primary's feedback (#255).
+            //
+            // Deliberately NOT a `continue` over the whole block: this loop is
+            // also where a finished supertext is RETIRED, so skipping it
+            // entirely for a display-owned message would hold its slot for
+            // ever and starve the shared pool. Skip the draw, keep the
+            // retirement.
+            if (m_supertexts[i].nOwnerDisplay == -1)
+              ShowSongTitleAnim(m_nTexSizeX, m_nTexSizeY, fProgress, i);
             float fTimeAfterFullDuration = GetTime() - m_supertexts[i].fStartTime - m_supertexts[i].fDuration;
             if (fTimeAfterFullDuration >= m_supertexts[i].fBurnTime) {
               m_supertexts[i].fStartTime = -1.0f;  // 'off' state
@@ -3396,7 +3716,8 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
       UpdateSpoutInputTexture();
       if (m_spoutInput && m_spoutInput->bConnected && m_spoutInput->dx12InputTex.IsValid()) {
         CompositeVideoInputFX(false, m_spoutInput->dx12InputTex, m_spoutInput->nSenderWidth, m_spoutInput->nSenderHeight);
-        m_lpDX->TransitionResource(m_spoutInput->dx12InputTex, D3D12_RESOURCE_STATE_COPY_DEST);
+        // No transition back -- UpdateSpoutInputTexture owns the COPY_DEST
+        // window now, immediately around the Receive() that needs it (#213).
       }
     } else if (m_nVideoInputSource == VID_SOURCE_WEBCAM || m_nVideoInputSource == VID_SOURCE_FILE) {
       if (!m_videoCapture)
@@ -3430,6 +3751,11 @@ void mdrop::Engine::DX12_RenderWarpAndComposite()
   // ── Display active supertexts on the backbuffer ──
   if (MessagesEnabled() && !AnyIndependentMirrorEnabled()) {
     for (int i = 0; i < NUM_SUPERTEXTS; i++) {
+      // The primary draws only its OWN (#255). The slots are one pool shared
+      // with every display running its own message loop, so without this the
+      // main window would show theirs as well as its own.
+      if (m_supertexts[i].nOwnerDisplay != -1)
+        continue;
       if (m_supertexts[i].fStartTime >= 0 && !m_supertexts[i].bRedrawSuperText) {
         float fProgress = (GetTime() - m_supertexts[i].fStartTime) / m_supertexts[i].fDuration;
         if (fProgress <= 1.0f) {
@@ -3479,8 +3805,9 @@ static float WaveAlphaAfterVolumeMod(float alpha, bool enable, float vol, float 
 void mdrop::Engine::DX12_DrawWave(float* fL, float* fR, CState* pStateOverride,
                                   const td_mysounddata* pSndOverride,
                                   const RenderContext* pCtx) {
-  if (!m_lpDX || !m_lpDX->GetActiveCmdList())
+  if (!m_lpDX || !CmdListFor(pCtx))
     return;
+  m_lpDX->BeginStage("wave");   // #222 stage map
 
   // Whose wave is this? Every parameter below -- colour, position, mode, alpha,
   // mystery, brighten, and the old-wave blend -- used to come from m_pState
@@ -4267,7 +4594,7 @@ void mdrop::Engine::DX12_DrawWave(float* fL, float* fR, CState* pStateOverride,
     topology = D3D_PRIMITIVE_TOPOLOGY_LINESTRIP;
   }
 
-  auto* cmdList = m_lpDX->GetActiveCmdList();
+  auto* cmdList = CmdListFor(pCtx);
   if (!cmdList) return;
   cmdList->SetPipelineState(m_lpDX->m_PSOs[psoId].Get());
 
@@ -4389,11 +4716,15 @@ void mdrop::Engine::RenderWarpPass(const RenderContext& ctx) {
   auto bindShader = [&](PShaderInfo* si, CState* st,
                         D3D12_GPU_DESCRIPTOR_HANDLE table) {
     if (si && si->CT && st) {
-      ApplyShaderParams(&si->params, si->CT, st, &ctx);
+      // Stage into a buffer THIS record owns, not into the shader's shadow
+      // (#206) -- see the note on ApplyShaderParams.
       DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(si->CT);
-      if (ct->GetShadowSize() > 0) {
+      std::vector<BYTE> cb12;
+      ct->CopyShadowInto(cb12);
+      ApplyShaderParams(&si->params, si->CT, st, &ctx, &cb12);
+      if (!cb12.empty()) {
         D3D12_GPU_VIRTUAL_ADDRESS cb =
-            m_lpDX->UploadConstantBuffer(ct->GetShadowData(), ct->GetShadowSize());
+            m_lpDX->UploadConstantBuffer(cb12.data(), (UINT)cb12.size());
         if (cb) cmdList->SetGraphicsRootConstantBufferView(0, cb);
       }
     } else {
@@ -4428,35 +4759,66 @@ void mdrop::Engine::RenderWarpPass(const RenderContext& ctx) {
   const bool bNewUsesWarp = (ctx.pState->m_nWarpPSVersion > 0);
 
   if (bBlending && (bOldUsesWarp || bNewUsesWarp)) {
+    // EVERY TILE MUST BE DRAWN BY EXACTLY ONE OF THESE TWO PASSES (#188).
+    //
+    // The two culls are complementary by construction -- pass 0 drops a tile
+    // only when every vertex alpha is 255, pass 1 only when every one is 0 --
+    // so between them they cover the mesh. That guarantee is worth nothing if
+    // a pass declines to run at all, and both used to:
+    //
+    //     if (bOldUsesWarp && (psos.oldWarp || psos.warp))  { draw }
+    //     else if (!bOldUsesWarp && pOldState)              { draw fallback }
+    //
+    // A side that WANTS a warp shader but has neither PSO matched neither
+    // branch, so its tiles were never written and the feedback buffer kept
+    // whatever was there -- black. Visible as hard-edged black regions along
+    // the .milk2 cutout, which is what #188 was reported as, and confirmed by
+    // capturing VS[1] directly: the black is already in the warp destination,
+    // before any comp shader runs.
+    //
+    // The no-blend branch below always had this right -- `psos.warp ?
+    // psos.warp : PSO_TEXTURED_MYVERTEX` -- so this is the same rule applied
+    // to the two passes that did not have it. An earlier fix narrowed the hole
+    // by adding `|| psos.warp` to the conditions; it did not close it, because
+    // both PSOs can be null together.
+    //
     // Pass 0: old preset, opaque, culling tiles fully blended to the new one.
-    if (bOldUsesWarp && (ctx.psos.oldWarp || ctx.psos.warp)) {
-      cmdList->SetPipelineState(ctx.psos.oldWarp ? ctx.psos.oldWarp
-                                                 : ctx.psos.warp);
-      bindShader(&ctx.oldShaders->warp, ctx.pOldState, ctx.oldWarpTable);
-      drawWarpMesh(ctx.pOldState->m_bAutoGenWarpShader ? decayColor(ctx.pOldState)
-                                                       : 0xFFFFFFFFu,
-                   true, true);
-    } else if (!bOldUsesWarp && ctx.pOldState) {
-      cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
-      bindShader(nullptr, nullptr, ctx.oldWarpTable);
-      drawWarpMesh(decayColor(ctx.pOldState), true, true);
+    if (ctx.pOldState) {
+      ID3D12PipelineState* oldPso =
+          bOldUsesWarp ? (ctx.psos.oldWarp ? ctx.psos.oldWarp : ctx.psos.warp)
+                       : nullptr;
+      if (oldPso) {
+        cmdList->SetPipelineState(oldPso);
+        bindShader(&ctx.oldShaders->warp, ctx.pOldState, ctx.oldWarpTable);
+        drawWarpMesh(ctx.pOldState->m_bAutoGenWarpShader ? decayColor(ctx.pOldState)
+                                                         : 0xFFFFFFFFu,
+                     true, true);
+      } else {
+        cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+        bindShader(nullptr, nullptr, ctx.oldWarpTable);
+        drawWarpMesh(decayColor(ctx.pOldState), true, true);
+      }
     }
 
     // Pass 1: new preset, alpha blended, culling tiles that are fully old.
-    // `|| m_dx12WarpPSO` is the guard the primary was missing -- see above.
-    if (bNewUsesWarp && (ctx.psos.warpBlend || ctx.psos.warp)) {
-      cmdList->SetPipelineState(ctx.psos.warpBlend ? ctx.psos.warpBlend
-                                                   : ctx.psos.warp);
-      bindShader(&ctx.shaders->warp, ctx.pState, ctx.warpTable);
-      drawWarpMesh(ctx.pState->m_bAutoGenWarpShader ? decayColor(ctx.pState)
-                                                    : 0xFFFFFFFFu,
-                   true, false);
-    } else if (!bNewUsesWarp) {
-      // No warp shader: the fallback PSO has no alpha blend, but for this case
-      // the UV blending is sufficient -- DX9 uses a single pass here too.
-      cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
-      bindShader(nullptr, nullptr, ctx.warpTable);
-      drawWarpMesh(decayColor(ctx.pState), true, false);
+    {
+      ID3D12PipelineState* newPso =
+          bNewUsesWarp ? (ctx.psos.warpBlend ? ctx.psos.warpBlend : ctx.psos.warp)
+                       : nullptr;
+      if (newPso) {
+        cmdList->SetPipelineState(newPso);
+        bindShader(&ctx.shaders->warp, ctx.pState, ctx.warpTable);
+        drawWarpMesh(ctx.pState->m_bAutoGenWarpShader ? decayColor(ctx.pState)
+                                                      : 0xFFFFFFFFu,
+                     true, false);
+      } else {
+        // No warp shader, or one whose PSO is missing: the fallback PSO has no
+        // alpha blend, but for this case the UV blending is sufficient -- DX9
+        // uses a single pass here too.
+        cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+        bindShader(nullptr, nullptr, ctx.warpTable);
+        drawWarpMesh(decayColor(ctx.pState), true, false);
+      }
     }
   } else if (bBlending && !bOldUsesWarp && !bNewUsesWarp) {
     // Neither preset uses a warp shader: UV blending alone is enough.
@@ -4481,7 +4843,8 @@ void mdrop::Engine::RenderWarpPass(const RenderContext& ctx) {
 // Both render bodies scanned the same four CShaderParams for TEX_BLUR* codes;
 // the primary accumulated into the member m_nHighestBlurTexUsedThisFrame and
 // the mirror into a local. Same loop, written twice.
-int mdrop::Engine::ScanHighestBlurUsed(bool bBlending) const {
+int mdrop::Engine::ScanHighestBlurUsed(bool bBlending,
+                                       const RenderContext* rc) const {
   int highest = 0;
   auto scan = [&](const CShaderParams* sp) {
     if (!sp) return;
@@ -4490,13 +4853,17 @@ int mdrop::Engine::ScanHighestBlurUsed(bool bBlending) const {
         highest = max(highest, ((int)sp->m_texcode[i] - (int)TEX_BLUR1) + 1);
     }
   };
-  scan(&m_shaders.warp.params);
-  scan(&m_shaders.comp.params);
+  // THIS surface's set when it has one. Reading m_shaders here meant an
+  // own-preset mirror sized its pyramid from the primary's preset (#208).
+  const PShaderSet* cur = (rc && rc->shaders) ? rc->shaders : &m_shaders;
+  scan(&cur->warp.params);
+  scan(&cur->comp.params);
   // A blend samples the outgoing preset's shaders too, so their blur levels
   // have to be generated as well or they read whatever was last left there.
   if (bBlending) {
-    scan(&m_OldShaders.warp.params);
-    scan(&m_OldShaders.comp.params);
+    const PShaderSet* old = (rc && rc->oldShaders) ? rc->oldShaders : &m_OldShaders;
+    scan(&old->warp.params);
+    scan(&old->comp.params);
   }
   return highest;
 }
@@ -4520,6 +4887,7 @@ void mdrop::Engine::RenderBlurPasses(const RenderContext& ctx) {
 #if (NUM_BLUR_TEX > 0)
   if (!m_lpDX || !m_lpDX->m_device || !ctx.cmdList) return;
   if (!ctx.blurSrc || !ctx.blurTex || !ctx.pState) return;
+  m_lpDX->BeginStage("blur");   // #222 stage map
 
   const int passes = min(NUM_BLUR_TEX, ctx.highestBlurUsed * 2);
   if (passes <= 0) return;
@@ -4560,6 +4928,13 @@ void mdrop::Engine::RenderBlurPasses(const RenderContext& ctx) {
   cmdList->SetDescriptorHeaps(1, heaps);
   cmdList->SetGraphicsRootSignature(m_lpDX->m_blurRootSignature.Get());
 
+  // One staging buffer per blur direction, owned by THIS record rather than by
+  // the shader (#206). m_BlurShaders[0..1] are engine-wide, so writing the
+  // constants into their own shadow buffers meant two surfaces blurring at the
+  // same time each uploaded a blend of both surfaces' values.
+  std::vector<BYTE> cbLocal[2];
+  bool cbLocalReady[2] = { false, false };
+
   for (int i = 0; i < passes; i++) {
     DX12Texture& srcTex = (i == 0) ? *ctx.blurSrc : ctx.blurTex[i - 1];
     DX12Texture& dstTex = ctx.blurTex[i];
@@ -4573,11 +4948,19 @@ void mdrop::Engine::RenderBlurPasses(const RenderContext& ctx) {
 
     // Even passes blur horizontally, odd passes vertically.
     cmdList->SetPipelineState(m_dx12BlurPSO[i % 2].Get());
-    m_lpDX->UpdateBlurPassBinding(i, srcTex.srvIndex);
-    cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetBlurPassBindingGpuHandle(i));
+    m_lpDX->UpdateBlurPassBinding(i, srcTex.srvIndex, ctx.blurBindBase);
+    cmdList->SetGraphicsRootDescriptorTable(
+        1, m_lpDX->GetBlurPassBindingGpuHandle(i, ctx.blurBindBase));
 
-    LPD3DXCONSTANTTABLE pCT = m_BlurShaders[i % 2].ps.CT;
+    DX12ConstantTable* ct =
+        static_cast<DX12ConstantTable*>(m_BlurShaders[i % 2].ps.CT);
     D3DXHANDLE* h = m_BlurShaders[i % 2].ps.params.const_handles;
+    if (!ct) continue;
+    std::vector<BYTE>& cb = cbLocal[i % 2];
+    if (!cbLocalReady[i % 2]) {
+      ct->CopyShadowInto(cb);
+      cbLocalReady[i % 2] = true;
+    }
 
     int srcw = (i == 0) ? ctx.blurSrcW : (ctx.blurW ? ctx.blurW[i - 1] : (int)srcTex.width);
     int srch = (i == 0) ? ctx.blurSrcH : (ctx.blurH ? ctx.blurH[i - 1] : (int)srcTex.height);
@@ -4598,32 +4981,31 @@ void mdrop::Engine::RenderBlurPasses(const RenderContext& ctx) {
       const float d3 = 4 + 2 * w[5] / w3;
       const float d4 = 6 + 2 * w[7] / w4;
       const float w_div = 0.5f / (w1 + w2 + w3 + w4);
-      if (h[0]) pCT->SetVector(nullptr, h[0], &srctexsize);
-      if (h[1]) pCT->SetVector(nullptr, h[1], &D3DXVECTOR4(w1, w2, w3, w4));
-      if (h[2]) pCT->SetVector(nullptr, h[2], &D3DXVECTOR4(d1, d2, d3, d4));
-      if (h[3]) pCT->SetVector(nullptr, h[3], &D3DXVECTOR4(fscale_now, fbias_now, w_div, 0));
+      if (h[0]) ct->WriteVectorInto(cb, h[0], srctexsize);
+      if (h[1]) ct->WriteVectorInto(cb, h[1], D3DXVECTOR4(w1, w2, w3, w4));
+      if (h[2]) ct->WriteVectorInto(cb, h[2], D3DXVECTOR4(d1, d2, d3, d4));
+      if (h[3]) ct->WriteVectorInto(cb, h[3], D3DXVECTOR4(fscale_now, fbias_now, w_div, 0));
     } else {
       const float w1 = w[0] + w[1] + w[2] + w[3];
       const float w2 = w[4] + w[5] + w[6] + w[7];
       const float d1 = 0 + 2 * ((w[2] + w[3]) / w1);
       const float d2 = 2 + 2 * ((w[6] + w[7]) / w2);
       const float w_div = 1.0f / ((w1 + w2) * 2);
-      if (h[0]) pCT->SetVector(nullptr, h[0], &srctexsize);
-      if (h[5]) pCT->SetVector(nullptr, h[5], &D3DXVECTOR4(w1, w2, d1, d2));
+      if (h[0]) ct->WriteVectorInto(cb, h[0], srctexsize);
+      if (h[5]) ct->WriteVectorInto(cb, h[5], D3DXVECTOR4(w1, w2, d1, d2));
       if (h[6]) {
         // Only the first vertical pass carries the edge darkening.
         if (i == 1)
-          pCT->SetVector(nullptr, h[6], &D3DXVECTOR4(w_div, (1 - edge_darken), edge_darken, 5.0f));
+          ct->WriteVectorInto(cb, h[6], D3DXVECTOR4(w_div, (1 - edge_darken), edge_darken, 5.0f));
         else
-          pCT->SetVector(nullptr, h[6], &D3DXVECTOR4(w_div, 1.0f, 0.0f, 5.0f));
+          ct->WriteVectorInto(cb, h[6], D3DXVECTOR4(w_div, 1.0f, 0.0f, 5.0f));
       }
     }
 
-    DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(pCT);
-    if (ct && ct->GetShadowSize() > 0) {
-      D3D12_GPU_VIRTUAL_ADDRESS cb =
-          m_lpDX->UploadConstantBuffer(ct->GetShadowData(), ct->GetShadowSize());
-      if (cb) cmdList->SetGraphicsRootConstantBufferView(0, cb);
+    if (!cb.empty()) {
+      D3D12_GPU_VIRTUAL_ADDRESS cbAddr =
+          m_lpDX->UploadConstantBuffer(cb.data(), (UINT)cb.size());
+      if (cbAddr) cmdList->SetGraphicsRootConstantBufferView(0, cbAddr);
     }
     m_lpDX->DrawVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, v, 4, sizeof(MYVERTEX), cmdList);
   }
@@ -4701,11 +5083,15 @@ void mdrop::Engine::RenderCompPass(const RenderContext& ctx) {
   auto bindShader = [&](PShaderInfo* si, CState* st,
                         D3D12_GPU_DESCRIPTOR_HANDLE table) {
     if (si && si->CT && st) {
-      ApplyShaderParams(&si->params, si->CT, st, &ctx);
+      // Stage into a buffer THIS record owns, not into the shader's shadow
+      // (#206) -- see the note on ApplyShaderParams.
       DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(si->CT);
-      if (ct->GetShadowSize() > 0) {
+      std::vector<BYTE> cb12;
+      ct->CopyShadowInto(cb12);
+      ApplyShaderParams(&si->params, si->CT, st, &ctx, &cb12);
+      if (!cb12.empty()) {
         D3D12_GPU_VIRTUAL_ADDRESS cb =
-            m_lpDX->UploadConstantBuffer(ct->GetShadowData(), ct->GetShadowSize());
+            m_lpDX->UploadConstantBuffer(cb12.data(), (UINT)cb12.size());
         if (cb) cmdList->SetGraphicsRootConstantBufferView(0, cb);
       }
     } else {
@@ -4745,20 +5131,38 @@ void mdrop::Engine::RenderCompPass(const RenderContext& ctx) {
                             (ctx.pOldState->m_nCompPSVersion > 0);
   const bool bNewUsesComp = (ctx.pState->m_nCompPSVersion > 0);
 
-  if (bBlending && (bOldUsesComp || bNewUsesComp)) {
+  // FIRST in the chain, not third (#188). This used to sit after the blending
+  // branch, so on any preset that was blending it never ran -- and a frozen
+  // .milk2 blends for as long as it is loaded, which makes "show me the raw
+  // feedback buffer" silently do nothing on precisely the presets whose
+  // feedback is in question. A diagnostic override that quietly declines to
+  // override is worse than not having one.
+  if (!ctx.isMirror && m_nDiagDisplayMode > 0) {
+    // Raw VS[0] or VS[1] with no comp shader.
+    DX12Texture& diagTex = (m_nDiagDisplayMode == 1) ? m_dx12VS[0] : m_dx12VS[1];
+    m_lpDX->TransitionResource(diagTex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
+    bindShader(nullptr, nullptr, m_lpDX->GetBindingBlockGpuHandle(diagTex));
+    drawCompQuad(0xFF);
+  } else if (bBlending && (bOldUsesComp || bNewUsesComp)) {
     // Per-vertex alpha from the warp wipe mesh, at THIS surface's aspect --
     // a uniform quad alpha ignores the .milk2 blending pattern.
-    UpdateCompMeshBlendColors(cShade, ctx.pState, ctx.verts);
+    // Both passes draw the SAME staged mesh, which is why the buffer is
+    // taken once here rather than reached for inside each draw: the two blend
+    // passes cull against each other's alphas, so they must see identical
+    // vertices (#206).
+    const MYVERTEX* compVerts =
+        UpdateCompMeshBlendColors(cShade, ctx.pState, ctx.verts);
 
     if (bOldUsesComp && (ctx.psos.oldComp || ctx.psos.comp)) {
       cmdList->SetPipelineState(ctx.psos.oldComp ? ctx.psos.oldComp
                                                  : ctx.psos.comp);
       bindShader(&ctx.oldShaders->comp, ctx.pOldState, ctx.oldCompTable);
-      DrawCompMesh(true, true, cmdList);
+      DrawCompMesh(compVerts, true, true, cmdList);
     } else if (!bOldUsesComp) {
       cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
       bindShader(nullptr, nullptr, ctx.oldCompTable);
-      DrawCompMesh(true, true, cmdList);
+      DrawCompMesh(compVerts, true, true, cmdList);
     }
 
     // `|| m_dx12CompPSO` is the guard the primary was missing -- see above.
@@ -4766,21 +5170,12 @@ void mdrop::Engine::RenderCompPass(const RenderContext& ctx) {
       cmdList->SetPipelineState(ctx.psos.compBlend ? ctx.psos.compBlend
                                                    : ctx.psos.comp);
       bindShader(&ctx.shaders->comp, ctx.pState, ctx.compTable);
-      DrawCompMesh(true, false, cmdList);
+      DrawCompMesh(compVerts, true, false, cmdList);
     } else if (!bNewUsesComp) {
       cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
       bindShader(nullptr, nullptr, ctx.compTable);
-      DrawCompMesh(true, false, cmdList);
+      DrawCompMesh(compVerts, true, false, cmdList);
     }
-  } else if (!ctx.isMirror && m_nDiagDisplayMode > 0) {
-    // Diagnostic passthrough: show raw VS[0] or VS[1] with no comp shader.
-    // Primary only -- it is driven by a debug toggle on the main window and a
-    // mirror has no diag mode of its own.
-    DX12Texture& diagTex = (m_nDiagDisplayMode == 1) ? m_dx12VS[0] : m_dx12VS[1];
-    m_lpDX->TransitionResource(diagTex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    cmdList->SetPipelineState(m_lpDX->m_PSOs[PSO_TEXTURED_MYVERTEX].Get());
-    bindShader(nullptr, nullptr, m_lpDX->GetBindingBlockGpuHandle(diagTex));
-    drawCompQuad(0xFF);
   } else {
     // No blend: one pass. The m_nCompPSVersion check is the mirror's, and is
     // the more careful form -- m_dx12CompPSO can outlive the preset that built
@@ -4826,8 +5221,9 @@ void mdrop::Engine::ApplyRenderMitigations(const RenderContext& ctx) {
 
 void mdrop::Engine::DX12_DrawSprites(CState* pStateOverride,
                                      const RenderContext* pCtx) {
-  if (!m_lpDX || !m_lpDX->GetActiveCmdList())
+  if (!m_lpDX || !CmdListFor(pCtx))
     return;
+  m_lpDX->BeginStage("darkencenter+borders");   // #222 stage map
 
   // darken_center and the inner/outer borders are PRESET settings, so they
   // follow the surface's own preset rather than the engine's (#186).
@@ -4852,7 +5248,7 @@ void mdrop::Engine::DX12_DrawSprites(CState* pStateOverride,
   const int   texSizeX   = haveCanvas ? pCtx->canvasW : m_nTexSizeX;
   const int   texSizeY   = haveCanvas ? pCtx->canvasH : m_nTexSizeY;
 
-  auto* cmdList = m_lpDX->GetActiveCmdList();
+  auto* cmdList = CmdListFor(pCtx);
 
   // Darken center
   if (*pState->var_pf_darken_center) {
@@ -4948,8 +5344,9 @@ void mdrop::Engine::DX12_DrawSprites(CState* pStateOverride,
 
 void mdrop::Engine::DX12_DrawCustomShapes(CState* pNewOverride, CState* pOldOverride,
                                           const RenderContext* pCtx) {
-  if (!m_lpDX || !m_lpDX->GetActiveCmdList())
+  if (!m_lpDX || !CmdListFor(pCtx))
     return;
+  m_lpDX->BeginStage("shapes");   // #222 stage map
 
   // Mirror sim contexts pass their own states; null = primary (unchanged).
   CState* pNewState = pNewOverride ? pNewOverride : m_pState;
@@ -4973,35 +5370,43 @@ void mdrop::Engine::DX12_DrawCustomShapes(CState* pNewOverride, CState* pOldOver
   const int   texSizeY   = haveCanvas ? pCtx->canvasH : m_nTexSizeY;
   const bool bStateBlending = pNewState->m_bBlending && pOldStateL;
 
-  auto* cmdList = m_lpDX->GetActiveCmdList();
+  auto* cmdList = CmdListFor(pCtx);
 
   // DIAG (flicker hunt 2026-08-21): shapes flatten to ellipses on mirrors when
   // aspectY deviates from the orient value during a ctx record. Count it.
   // THIS surface's expected aspect. It compared against the FIRST surface's
   // pipe, so with several displays aspBad/aspGood were scored against the wrong
   // one -- which also means earlier aspBad=0 runs proved less than they looked.
-  if (m_bOrientOppositeAspect && haveCanvas && texSizeX > 0 && texSizeY > 0) {
+  // Test the VALUE, not merely that a context exists -- the rule RenderContext
+  // documents, and the one 43e807c7 had to fix for the canvas.
+  const bool orientRecord = (pCtx && pCtx->bOrientRecord);
+  if (orientRecord && haveCanvas && texSizeX > 0 && texSizeY > 0) {
     const float expect = (texSizeX > texSizeY)
         ? texSizeY / (float)texSizeX
         : 1.0f;
     if (fabsf(aspectY - expect) > 0.01f) {
-      m_diagOrientAspectBad++;
+      m_diagOrientAspectBad.fetch_add(1, std::memory_order_relaxed);
       DLOG_WARN("OrientAspect BAD during ctx shape draw: aspY=%.4f expect=%.4f (count=%u)",
-                aspectY, expect, m_diagOrientAspectBad);
+                aspectY, expect, m_diagOrientAspectBad.load(std::memory_order_relaxed));
     } else {
-      m_diagOrientAspectGood++;
+      m_diagOrientAspectGood.fetch_add(1, std::memory_order_relaxed);
     }
   }
 
   // --- Heavy preset detection: compute total instances across all shapes ---
+  //
+  // Hoisted out of the m_bSkipHeavyPresets branch (#230): the mirror GPU-cost
+  // cap below needs this count whether or not that opt-in setting is on, and
+  // it is sixteen adds.
+  int totalInstances = 0;
+  for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
+    if (pNewState->m_shape[i].enabled)
+      totalInstances += pNewState->m_shape[i].instances;
+    if (bStateBlending && pOldStateL->m_shape[i].enabled)
+      totalInstances += pOldStateL->m_shape[i].instances;
+  }
+
   if (m_bSkipHeavyPresets) {
-    int totalInstances = 0;
-    for (int i = 0; i < MAX_CUSTOM_SHAPES; i++) {
-      if (pNewState->m_shape[i].enabled)
-        totalInstances += pNewState->m_shape[i].instances;
-      if (bStateBlending && pOldStateL->m_shape[i].enabled)
-        totalInstances += pOldStateL->m_shape[i].instances;
-    }
     if (totalInstances > m_nHeavyPresetMaxInstances) {
       DLOG_INFO("GPU Protection: Skipping shapes — total instances %d exceeds threshold %d (preset: %ls)",
               totalInstances, m_nHeavyPresetMaxInstances,
@@ -5029,7 +5434,20 @@ void mdrop::Engine::DX12_DrawCustomShapes(CState* pNewOverride, CState* pOldOver
   // Independent mirror re-render (cmdListOverride): cap from remaining aux upload so
   // milk2 dual-pass never silent-drops draws (black mirrors). Same-orient re-render
   // gets a higher soft ceiling; opposite-aspect already spent more of the buffer on warp.
-  if (m_lpDX->m_cmdListOverride) {
+  // pCtx->isMirror, NOT m_lpDX->m_cmdListOverride (#230).
+  //
+  // That member has ZERO assignments anywhere in the tree -- it is always
+  // nullptr -- so everything in this block has been dead code: the aux-upload
+  // budget, kSoftMaxOpposite, kSoftMaxSameOrient, the whole per-mirror
+  // instance ceiling. Mirror workers set the THREAD-LOCAL override instead
+  // (SetThreadCmdListOverride), and the header says plainly that the member
+  // "exists to paper over exactly these sites and is being removed one at a
+  // time". This site was left behind when it went.
+  //
+  // So a mirror safety budget that reads as carefully tuned has never once
+  // run. The RenderContext knows the answer and is the thing every other
+  // per-surface decision in this function already asks.
+  if (pCtx && pCtx->isMirror) {
     const UINT kReserveBytes = 2u * 1024u * 1024u;   // waves + HUD + comp CBs
     const UINT kBytesPerInst = 12u * 1024u;          // ~100-gon fill + border (conservative)
     const int kSoftMaxSameOrient = 1536;             // letterbox path rarely hits this
@@ -5044,18 +5462,109 @@ void mdrop::Engine::DX12_DrawCustomShapes(CState* pNewOverride, CState* pOldOver
     if (bStateBlending)
       budget = max(kSoftMin, budget / 2);
 
-    int softMax = m_bOrientOppositeAspect ? kSoftMaxOpposite : kSoftMaxSameOrient;
+    int softMax = orientRecord ? kSoftMaxOpposite : kSoftMaxSameOrient;
     int orientCap = budget;
     if (orientCap < kSoftMin) orientCap = kSoftMin;
     if (orientCap > softMax) orientCap = softMax;
 
     if (effectiveMaxInstances == 0 || orientCap < effectiveMaxInstances)
       effectiveMaxInstances = orientCap;
+
+    // GPU-COST CAP, mirrors only (#230).
+    //
+    // The caps above bound the UPLOAD RING. They say nothing about how long
+    // the GPU takes, and that is what actually kills the device: every mirror
+    // does a full classic re-render, so its command list carries about as many
+    // draws as the primary's. Three surfaces is therefore roughly three times
+    // the geometry work of one, and a preset with 1300+ shape instances turns
+    // its first frame into a watchdog kill.
+    //
+    // Measured, uncapped, on one fixed preset sequence:
+    //
+    //     primary alone, 2160x3840      0 device removals in 3 runs
+    //     primary + two mirrors         3 in 3, every one of them on
+    //                                   'martin - crystal palace 2077.3c.milk'
+    //                                   at 1312 instances, ~110 ms after it
+    //                                   was applied
+    //
+    // So the primary's own cost is survivable and the mirrors are the
+    // difference. They are the ones capped, and the primary is deliberately
+    // left alone: it is what the user is looking at, and degrading that to
+    // protect a secondary panel is the wrong trade.
+    //
+    // Engages only above the instance count the engine already calls heavy,
+    // so an ordinary preset's mirrors are untouched and identical to the
+    // primary. This is the "protect automatically" half of the rule that says
+    // a user must never have to annotate a preset to stop the app dying -- and
+    // it replaces a GPU Warning that has been printing this exact number for
+    // ages while doing nothing about it.
+    const int kMirrorCapAbove = 512;   // == the existing GPU Warning threshold
+    if (totalInstances > kMirrorCapAbove) {
+      // The budget comes from a measurement rather than a taste: the primary
+      // ALONE renders this preset without killing the device, so its own cost
+      // is the known-survivable unit. The mirrors together are allowed to add
+      // at most HALF of that again, split between them.
+      //
+      // Scaling by the mirror COUNT is what makes this hold for one panel and
+      // for four; a fixed fraction would be too tight for one and too loose
+      // for four. Not scaled by mirror CANVAS on purpose -- a mirror renders
+      // at a quarter of the primary's pixels and still issues the same number
+      // of draws, and it is the draw and vertex work that dominates here, not
+      // fill. Dividing by pixels would let the cap go slack exactly where it
+      // must not.
+      //
+      // Dividing by three (one share each) was tried first and measured: it
+      // fixed the 1312-instance preset but still died once in six runs on the
+      // 1625-instance one, so the budget was too generous at the top end.
+      const int nMirrors = (int)MirrorSurfaceCount();
+      int gpuCap = totalInstances / (2 * (nMirrors > 0 ? nMirrors : 1));
+      if (gpuCap < 64) gpuCap = 64;   // a mirror that draws nothing is worse
+      // Report engagement, rate-limited to once per preset. Without this the
+      // only evidence a cap is working is the absence of a crash, and a cap
+      // that silently never runs looks exactly the same -- which is precisely
+      // how the dead m_cmdListOverride branch above survived for so long.
+      {
+        // Once per distinct instance count, i.e. once per preset that trips
+        // it -- NOT once per frame. Keyed on the frame counter it fired three
+        // times in six milliseconds, because each surface reaches here inside
+        // the same engine frame.
+        static int s_lastLoggedTotal = -1;
+        if (s_lastLoggedTotal != totalInstances) {
+          s_lastLoggedTotal = totalInstances;
+          DLOG_WARN("Mirror load shed (#230): total=%d mirrors=%d cap=%d/mirror "
+                    "res=%dx%d preset=%ls",
+                    totalInstances, nMirrors, gpuCap, texSizeX, texSizeY,
+                    CurrentPresetLeaf());
+        }
+      }
+      if (effectiveMaxInstances == 0 || gpuCap < effectiveMaxInstances)
+        effectiveMaxInstances = gpuCap;
+    }
   }
 
   int diag_shapesDrawn = 0, diag_shapesVisible = 0;
   float diag_firstVisibleAlpha = 0;
   DWORD diag_firstVisibleColor = 0;
+
+  // SHAPE GEOMETRY EXTREMES (#222).
+  //
+  // The startup TDR is a genuine timeout on a DrawInstanced, and its shape is
+  // the tell: frames cost 0.5 ms, then ONE frame costs 2525 ms. A factor of
+  // 5000 is not a preset that is gradually too heavy for the canvas -- that
+  // would creep through 50 ms and 200 ms first. It is one frame whose geometry
+  // is degenerate.
+  //
+  // A shape is a fan of `sides` triangles around (x,y) with radius `rad` in
+  // clip space, where the whole screen is 2 units across. So rad = 1000 is a
+  // polygon covering the screen five hundred times over, and a preset with 850
+  // instances of it at 2160x3840 asks the rasteriser for something on the
+  // order of 10^13 pixels. That is a watchdog kill, from arithmetic alone.
+  // Non-finite values are worse and are never intentional.
+  //
+  // These counters cost a compare per instance and are logged only when they
+  // are actually extreme, so this stays in for the next person who sees a hang.
+  double diag_maxRad = 0.0;
+  int diag_nonFinite = 0;
 
   int num_reps = bStateBlending ? 2 : 1;
   for (int rep = 0; rep < num_reps; rep++) {
@@ -5085,8 +5594,12 @@ void mdrop::Engine::DX12_DrawCustomShapes(CState* pNewOverride, CState* pOldOver
         // the backbuffer. Mirror aux keeps its tuned 48 KB; the main ring reserves the
         // dual-preset comp mesh (2 * (FCGSX-2)*(FCGSY-2)*2 tris * 3 * 40 B = 310 KB)
         // plus custom waves, sprites and HUD text.
+        // isMirror for the same reason as the block above (#230): the member
+        // is never assigned, so this has always taken the primary's 768 KB
+        // branch -- including on mirror surfaces, whose aux ring is far
+        // smaller and for whom the 48 KB figure was chosen.
         const UINT kShapeUploadReserve =
-            m_lpDX->m_cmdListOverride ? 48u * 1024u : 768u * 1024u;
+            (pCtx && pCtx->isMirror) ? 48u * 1024u : 768u * 1024u;
 
         for (int instance = 0; instance < instances; instance++) {
           if (m_lpDX->GetUploadBytesRemaining() < kShapeUploadReserve) {
@@ -5125,6 +5638,20 @@ void mdrop::Engine::DX12_DrawCustomShapes(CState* pNewOverride, CState* pOldOver
           float borderA = (float)*pState->m_shape[i].var_pf_border_a;
           if (shapeA <= 0.0f && shapeA2 <= 0.0f && borderA <= 0.0f)
             continue;
+
+          // Measured AFTER the alpha early-exit, so it describes geometry that
+          // is actually submitted -- an invisible shape costs the GPU nothing
+          // however absurd its radius.
+          {
+            const double gx   = *pState->m_shape[i].var_pf_x;
+            const double gy   = *pState->m_shape[i].var_pf_y;
+            const double grad = *pState->m_shape[i].var_pf_rad;
+            const double gang = *pState->m_shape[i].var_pf_ang;
+            if (!isfinite(gx) || !isfinite(gy) || !isfinite(grad) || !isfinite(gang))
+              diag_nonFinite++;
+            else if (fabs(grad) > diag_maxRad)
+              diag_maxRad = fabs(grad);
+          }
 
           v[0].Diffuse =
             ((((int)(*pState->m_shape[i].var_pf_a * 255 * alpha_mult)) & 0xFF) << 24) |
@@ -5170,7 +5697,7 @@ void mdrop::Engine::DX12_DrawCustomShapes(CState* pNewOverride, CState* pOldOver
           if (textured) {
             // Bind VS0 (or orient override) at t0 for textured shapes
             const DX12Texture& shapeVs =
-                m_pShapeVsOverride ? *m_pShapeVsOverride : m_dx12VS[0];
+                (pCtx && pCtx->shapeVs) ? *pCtx->shapeVs : m_dx12VS[0];
             cmdList->SetGraphicsRootDescriptorTable(1, m_lpDX->GetSrvGpuHandle(shapeVs));
             bool bClamp = (*pState->var_pf_wrap <= m_fSnapPoint);
             DX12PsoId fillPso = additive
@@ -5241,12 +5768,25 @@ void mdrop::Engine::DX12_DrawCustomShapes(CState* pNewOverride, CState* pOldOver
     DLOG_VERBOSE("DX12 Shapes: drawn=%d visible=%d firstAlpha=%.3f firstColor=0x%08X",
             diag_shapesDrawn, diag_shapesVisible, diag_firstVisibleAlpha, diag_firstVisibleColor);
   }
+
+  // Report only genuinely extreme geometry (#222). rad > 8 already covers the
+  // screen sixteen times over, so nothing that renders sensibly trips this;
+  // it fires on the frame that is about to hang the GPU, and because it is
+  // written while the CPU builds the vertices it reaches the log BEFORE the
+  // watchdog kills the device. That ordering is the whole point -- a stat
+  // gathered after the frame would never be written at all.
+  if (diag_nonFinite > 0 || diag_maxRad > 8.0) {
+    DLOG_ERROR("SHAPE EXTREME (#222): drawn=%d maxRad=%.1f nonFinite=%d res=%dx%d preset=%ls",
+               diag_shapesDrawn, diag_maxRad, diag_nonFinite, texSizeX, texSizeY,
+               CurrentPresetLeaf());
+  }
 }
 
 void mdrop::Engine::DX12_DrawCustomWaves(CState* pNewOverride, CState* pOldOverride,
                                          const RenderContext* pCtx) {
-  if (!m_lpDX || !m_lpDX->GetActiveCmdList())
+  if (!m_lpDX || !CmdListFor(pCtx))
     return;
+  m_lpDX->BeginStage("customwaves");   // #222 stage map
 
   // Mirror sim contexts pass their own states; null = primary (unchanged).
   CState* pNewState = pNewOverride ? pNewOverride : m_pState;
@@ -5270,7 +5810,7 @@ void mdrop::Engine::DX12_DrawCustomWaves(CState* pNewOverride, CState* pOldOverr
   const int   texSizeY   = haveCanvas ? pCtx->canvasH : m_nTexSizeY;
   const bool bStateBlending = pNewState->m_bBlending && pOldStateL;
 
-  auto* cmdList = m_lpDX->GetActiveCmdList();
+  auto* cmdList = CmdListFor(pCtx);
 
   int num_reps = bStateBlending ? 2 : 1;
   for (int rep = 0; rep < num_reps; rep++) {
@@ -5890,20 +6430,43 @@ bool mdrop::Engine::SetMilkdropRenderTarget(LPDIRECTDRAWSURFACE7 lpSurf, int w, 
 }
 */
 
-void mdrop::Engine::UpdateCompMeshBlendColors(const DWORD cShade[4],
+// The comp mesh THIS thread stages into (#206).
+//
+// m_comp_verts was one engine-wide array that the blend path rewrote in full
+// immediately before DrawCompMesh read it back, so two mirror workers -- or a
+// worker and the render thread's own comp pass, which reaches the identical
+// code -- interleaved their writes and each drew a mesh whose per-vertex alpha
+// was a mix of two surfaces' wipe patterns at two different aspects. That is a
+// torn .milk2 blending_pattern, not a subtle colour shift, and for a .milk2
+// library it is every mirror frame forever: bMilk2FrozenBlend stays true.
+//
+// Same shape as DrawWarpMeshIndexed's tlVerts/tlIdx. m_comp_indices stays
+// shared -- built once in AllocateMyDX9Stuff, only read afterwards.
+static MYVERTEX* CompStageForThisThread()
+{
+  thread_local std::vector<MYVERTEX> tl;
+  if (tl.size() != (size_t)(FCGSX * FCGSY))
+    tl.assign((size_t)FCGSX * FCGSY, MYVERTEX{});
+  return tl.data();
+}
+
+const MYVERTEX* mdrop::Engine::UpdateCompMeshBlendColors(const DWORD cShade[4],
                                               CState* pStateOverride,
                                               const MYVERTEX* warpVertsOverride)
 {
   // Match DX9 ShowToUser_Shaders: interpolate corner hue-shader colors onto
-  // m_comp_verts and, while blending, pull per-vertex alpha from the warp mesh
+  // the comp mesh and, while blending, pull per-vertex alpha from the warp mesh
   // (the snail / plasma / wipe pattern). That is what makes .milk2 photos
   // follow the saved blending_pattern instead of a uniform 50% mix.
   CState* pState = pStateOverride ? pStateOverride : m_pState;
   const MYVERTEX* warpVerts = warpVertsOverride ? warpVertsOverride : m_verts;
   const bool bBlending = pState && pState->m_bBlending && warpVerts;
+  MYVERTEX* stage = CompStageForThisThread();
   for (int j = 0; j < FCGSY; j++) {
     for (int i = 0; i < FCGSX; i++) {
-      MYVERTEX* p = &m_comp_verts[i + j * FCGSX];
+      // Geometry from the shared template, colour into this thread's copy.
+      MYVERTEX* p = &stage[i + j * FCGSX];
+      *p = m_comp_verts[i + j * FCGSX];
       float x = p->x * 0.5f + 0.5f;
       float y = p->y * 0.5f + 0.5f;
       auto unpack = [](DWORD c, int shift) -> float {
@@ -5943,6 +6506,7 @@ void mdrop::Engine::UpdateCompMeshBlendColors(const DWORD cShade[4],
       p->Diffuse = D3DCOLOR_RGBA_01(cr, cg, cb, (float)alpha);
     }
   }
+  return stage;
 }
 
 // Submits the warp mesh as an indexed draw. The mesh reuses each vertex ~6x, so the old
@@ -5958,16 +6522,27 @@ void mdrop::Engine::DrawWarpMeshIndexed(const MYVERTEX* srcVerts, DWORD cDecay,
                                         ID3D12GraphicsCommandList* cmdList)
 {
   if (!m_lpDX || !srcVerts || !m_indices_list) return;
-  if (!m_warpVertsStaged || !m_warpIdx16 || !m_warpIdx16All) return;
+  if (!m_warpIdx16All) return;
+  m_lpDX->BeginStage("warp");   // #222 stage map
 
   const int vertCount = (m_nGridX + 1) * (m_nGridY + 1);
   const int totalIdx  = m_warpIdx16AllCount;
   if (vertCount <= 0 || totalIdx <= 0) return;
 
+  // Staging is PER THREAD (#206). The tinted vertex copy and the culled index
+  // list used to be two engine-wide arrays, so the primary and a mirror worker
+  // staging at the same time interleaved their vertices into one buffer and
+  // both drew the result -- corrupt geometry, not a torn scalar. m_warpIdx16All
+  // stays shared because it is built once and thereafter only read.
+  thread_local std::vector<MYVERTEX> tlVerts;
+  thread_local std::vector<UINT16>   tlIdx;
+  if ((int)tlVerts.size() < vertCount) tlVerts.resize(vertCount);
+  if ((int)tlIdx.size() < totalIdx)    tlIdx.resize(totalIdx);
+
   const DWORD rgb = cDecay & 0x00FFFFFF;
   for (int i = 0; i < vertCount; i++) {
-    m_warpVertsStaged[i] = srcVerts[i];
-    m_warpVertsStaged[i].Diffuse = rgb | (srcVerts[i].Diffuse & 0xFF000000);
+    tlVerts[i] = srcVerts[i];
+    tlVerts[i].Diffuse = rgb | (srcVerts[i].Diffuse & 0xFF000000);
   }
 
   const UINT16* indices = m_warpIdx16All;
@@ -5989,24 +6564,27 @@ void mdrop::Engine::DrawWarpMeshIndexed(const MYVERTEX* srcVerts, DWORD cDecay,
         // Pass 1 (new preset): skip if all verts fully old (alpha==0x00)
         if (a0 == 0x00 && a1 == 0x00 && a2 == 0x00) continue;
       }
-      m_warpIdx16[out++] = (UINT16)i0;
-      m_warpIdx16[out++] = (UINT16)i1;
-      m_warpIdx16[out++] = (UINT16)i2;
+      tlIdx[out++] = (UINT16)i0;
+      tlIdx[out++] = (UINT16)i1;
+      tlIdx[out++] = (UINT16)i2;
     }
     if (out == 0) return; // every tile culled — nothing to submit
-    indices = m_warpIdx16;
+    indices = tlIdx.data();
     indexCount = out;
   }
 
   m_lpDX->DrawIndexedVertices(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
-                              m_warpVertsStaged, (UINT)vertCount, sizeof(MYVERTEX),
+                              tlVerts.data(), (UINT)vertCount, sizeof(MYVERTEX),
                               indices, indexCount, cmdList);
 }
 
-void mdrop::Engine::DrawCompMesh(bool bCullTiles, bool bFlipCulling, ID3D12GraphicsCommandList* cmdList)
+void mdrop::Engine::DrawCompMesh(const MYVERTEX* compVerts, bool bCullTiles,
+                                 bool bFlipCulling,
+                                 ID3D12GraphicsCommandList* cmdList)
 {
-  if (!m_lpDX)
+  if (!m_lpDX || !compVerts)
     return;
+  m_lpDX->BeginStage("comp");   // #222 stage map
   if (!cmdList)
     cmdList = m_lpDX->m_commandList.Get();
   if (!cmdList)
@@ -6021,7 +6599,7 @@ void mdrop::Engine::DrawCompMesh(bool bCullTiles, bool bFlipCulling, ID3D12Graph
     int i = 0;
     while (prims_queued < max_prims_per_batch && src_idx < primCount * 3) {
       for (int j = 0; j < 3; j++)
-        tempv[i++] = m_comp_verts[m_comp_indices[src_idx++]];
+        tempv[i++] = compVerts[m_comp_indices[src_idx++]];
       if (bCullTiles) {
         DWORD d1 = (tempv[i - 3].Diffuse >> 24);
         DWORD d2 = (tempv[i - 2].Diffuse >> 24);
@@ -6047,6 +6625,7 @@ void mdrop::Engine::DrawUserSprites(int targetLayer, ID3D12GraphicsCommandList* 
 {
   if (!m_lpDX)
     return;
+  m_lpDX->BeginStage("usersprites");   // #222 stage map
   if (!cmdList)
     cmdList = m_lpDX->m_commandList.Get();
   if (!cmdList)
@@ -6076,7 +6655,12 @@ void mdrop::Engine::DrawUserSprites(int targetLayer, ID3D12GraphicsCommandList* 
   cmdList->SetGraphicsRootSignature(m_lpDX->m_rootSignature.Get());
 
   for (int iSlot = 0; iSlot < NUM_TEX; iSlot++) {
-    if (m_texmgr.m_tex[iSlot].dx12Surface.IsValid()) {
+    // A retiring sprite keeps its slot until its fence clears (#225), so the
+    // pending flag -- not the surface -- is what says whether to draw it.
+    // Without this it would go on drawing, and go on being killed, for the
+    // frame or two between the two.
+    if (m_texmgr.m_tex[iSlot].dx12Surface.IsValid() &&
+        !m_texmgr.m_tex[iSlot].bPendingKill) {
       if (evalThisPass) {
         // set values of input variables:
         *(m_texmgr.m_tex[iSlot].var_time) = (double)(GetTime() - m_texmgr.m_tex[iSlot].fStartTime);
@@ -6442,7 +7026,18 @@ void mdrop::Engine::DrawUserSprites(int targetLayer, ID3D12GraphicsCommandList* 
         SetViewportAndScissor(cmdList, m_lpDX->m_client_width, m_lpDX->m_client_height);
       }
 
-      if (bKillSprite) {
+      // PRIMARY ONLY, like the burn-in branch just above it (#206).
+      //
+      // bKillSprite reads var_done, which the sprite EEL sets -- and that EEL
+      // runs only on the primary, by the evalThisPass latch at the top of this
+      // function. So every surface drawing this sprite sees the same "done"
+      // and each one used to call KillSprite. texmgr::KillTex releases a
+      // shared texture, writes a null descriptor into the live shader-visible
+      // heap and frees an NSEEL handle the primary is still executing; doing
+      // that from a mirror worker is a use-after-free waiting for the timing
+      // to line up. The engine lock has been making it nearly unreachable
+      // rather than the gate doing it.
+      if (bKillSprite && bPrimaryList) {
         KillSprite(iSlot);
       }
     }
@@ -6628,7 +7223,7 @@ void mdrop::Engine::FillPresetPipeline(RenderContext& rc) {
 // compiled, this is what makes the mirror stop drawing with the primary's
 // pipeline, which is the whole point of the issue.
 void mdrop::Engine::FillPresetPipeline(RenderContext& rc, const MirrorSimContext& c) {
-  if (!c.shaders.warp.bytecodeBlob && !c.shaders.comp.bytecodeBlob) {
+  if (!c.HasOwnPipeline()) {
     FillPresetPipeline(rc);
     return;
   }
@@ -6664,6 +7259,15 @@ void mdrop::Engine::FillAnimInputs(RenderContext& rc) {
 // the rest of its list. The fps floor and the 30-second duration fallback are
 // copied from there deliberately, not approximated.
 void mdrop::Engine::FillAnimInputs(RenderContext& rc, const MirrorSimContext& c) {
+  // Every mirror context is built through this overload, so naming the surface
+  // here covers all of them at once and cannot be forgotten at a new call site
+  // -- which is exactly how the canvas mitigations were missed twice.
+  rc.sim = &c;
+  // Every mirror context is built through this overload and only mirror
+  // contexts are, so this is exactly the old engine flag's lifetime: true for
+  // the duration of a worker record, false on the primary, which uses the
+  // other overload (#206).
+  rc.bOrientRecord = true;
   rc.fTime = c.fTime;
   rc.fFps  = (c.fFps > 1.f ? c.fFps : 60.f);
   float dur = m_fNextPresetTime - m_fPresetStartTime;
@@ -6709,7 +7313,23 @@ void mdrop::Engine::FillMouseInputs(RenderContext& rc, int w, int h) {
 }
 
 void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT, CState* pState,
-                                      const RenderContext* rc) {
+                                      const RenderContext* rc,
+                                      std::vector<BYTE>* stage) {
+  // Every constant below goes through one of these, so there is a single place
+  // that decides where the bytes land (#206). With a stage the caller owns the
+  // buffer and nothing is shared; without one this is exactly the call that
+  // was here before, including its null-handle guard.
+  DX12ConstantTable* ct12 = static_cast<DX12ConstantTable*>(pCT);
+  auto put = [&](D3DXHANDLE h, const D3DXVECTOR4& v) {
+    if (!h) return;
+    if (stage && ct12) ct12->WriteVectorInto(*stage, h, v);
+    else if (pCT)      pCT->SetVector(nullptr, h, &v);
+  };
+  auto putMat = [&](D3DXHANDLE h, const D3DXMATRIX& m) {
+    if (!h) return;
+    if (stage && ct12) ct12->WriteMatrixInto(*stage, h, m);
+    else if (pCT)      pCT->SetMatrix(nullptr, h, &m);
+  };
 
   // Note which blur levels this preset samples, so the blur passes know how
   // many to actually run -- see the note at DX12_RenderWarpAndComposite, which
@@ -6719,16 +7339,22 @@ void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT,
   // DX12 replacements are elsewhere and predate this removal: BuildBindingSlots
   // resolves the same m_texcode switch into SRV descriptor indices, and the
   // sampler half is four static samplers declared in the root signature.
-  for (int i = 0; i < sizeof(p->m_texture_bindings) / sizeof(p->m_texture_bindings[0]); i++) {
-    if (p->m_texcode[i] >= TEX_BLUR1 && p->m_texcode[i] <= TEX_BLUR_LAST)
-      m_nHighestBlurTexUsedThisFrame = max(m_nHighestBlurTexUsedThisFrame, ((int)p->m_texcode[i] - (int)TEX_BLUR1) + 1);
+  // Only the PRIMARY accumulates into the engine member. A mirror runs this
+  // same function, and with no guard its preset's blur3 permanently inflated
+  // the primary's pyramid depth (#208). A mirror's own depth comes from the
+  // context-aware scan above, into bc.highestBlurUsed.
+  if (!(rc && rc->bOrientRecord)) {
+    for (int i = 0; i < sizeof(p->m_texture_bindings) / sizeof(p->m_texture_bindings[0]); i++) {
+      if (p->m_texcode[i] >= TEX_BLUR1 && p->m_texcode[i] <= TEX_BLUR_LAST)
+        m_nHighestBlurTexUsedThisFrame = max(m_nHighestBlurTexUsedThisFrame, ((int)p->m_texcode[i] - (int)TEX_BLUR1) + 1);
+    }
   }
 
   // bind "texsize_XYZ" params
   int N = (int)p->texsize_params.size();
   for (int i = 0; i < N; i++) {
     TexSizeParamInfo* q = &(p->texsize_params[i]);
-    pCT->SetVector(nullptr, q->texsize_param, &D3DXVECTOR4((float)q->w, (float)q->h, 1.0f / q->w, 1.0f / q->h));
+    put(q->texsize_param, D3DXVECTOR4((float)q->w, (float)q->h, 1.0f / q->w, 1.0f / q->h));
   }
 
   // Both offsets come off the SAME clock as the state whose start time is
@@ -6779,7 +7405,13 @@ void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT,
   // silently fell back to the PRIMARY's size and aspect -- which is what
   // SizeGuard used to paper over before #186 phase 2 removed it.
   if (rc && rc->isMirror) {
-    static std::set<std::string> s_seen;
+    // thread_local, not static (#206). Only mirror workers reach this, and
+    // with more than one surface an unsynchronised std::set::insert from N
+    // threads is not merely a lost log line -- it is concurrent mutation of a
+    // red-black tree. Per-thread is also the more useful diagnostic: one line
+    // per SURFACE per distinct shape, rather than whichever surface happened
+    // to get there first speaking for all of them.
+    thread_local std::set<std::string> s_seen;
     char key[192];
     sprintf(key, "have=%d ctx=%dx%d out=%dx%d tex=%dx%d asp=%.4f/%.4f eng=%dx%d/%.4f/%.4f",
             haveCanvas ? 1 : 0, rc->canvasW, rc->canvasH, outW, outH,
@@ -6804,15 +7436,15 @@ void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT,
   if (p->rand_frame) {
     if (rc && rc->randFrame) {
       D3DXVECTOR4 rf(rc->randFrame[0], rc->randFrame[1], rc->randFrame[2], rc->randFrame[3]);
-      pCT->SetVector(nullptr, p->rand_frame, &rf);
+      put(p->rand_frame, rf);
     } else {
-      pCT->SetVector(nullptr, p->rand_frame, &m_rand_frame);
+      put(p->rand_frame, m_rand_frame);
     }
   }
-  if (p->rand_preset) pCT->SetVector(nullptr, p->rand_preset, &pState->m_rand_preset);
+  put(p->rand_preset, pState->m_rand_preset);
   D3DXHANDLE* h = p->const_handles;
-  if (h[0]) pCT->SetVector(nullptr, h[0], &D3DXVECTOR4(aspect_x, aspect_y, 1.0f / aspect_x, 1.0f / aspect_y));
-  if (h[1]) pCT->SetVector(nullptr, h[1], &D3DXVECTOR4(0, 0, 0, 0));
+  put(h[0], D3DXVECTOR4(aspect_x, aspect_y, 1.0f / aspect_x, 1.0f / aspect_y));
+  put(h[1], D3DXVECTOR4(0, 0, 0, 0));
   {
     // In Shadertoy mode, iFrame must start at 0 when the preset loads (not global frame count).
     // Many Shadertoy shaders use "if (iFrame < 2) { reset; }" to initialize the feedback buffer.
@@ -6833,36 +7465,42 @@ void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT,
     // One NAMED consumer, too. A latch shared by every consumer reports
     // whichever ran last, so three sites still doing the right thing hide a
     // fourth doing the wrong one -- also measured.
-    m_nDiagShaderFrame = (int)frameVal;
-    if (h[2]) pCT->SetVector(nullptr, h[2], &D3DXVECTOR4(time_since_preset_start_wrapped, fpsVal, frameVal, progress));
+    // Onto the SURFACE when the context names one, so the value belongs to
+    // whoever recorded it. m_nDiagShaderFrame stays for the primary, which has
+    // no surface context (#198).
+    if (rc && rc->sim)
+      rc->sim->diagShaderFrame = (int)frameVal;
+    else
+      m_nDiagShaderFrame = (int)frameVal;
+    put(h[2], D3DXVECTOR4(time_since_preset_start_wrapped, fpsVal, frameVal, progress));
   }
-  if (h[3]) pCT->SetVector(nullptr, h[3], &D3DXVECTOR4(snd.imm_rel[0], snd.imm_rel[1], snd.imm_rel[2], 0.3333f * (snd.imm_rel[0], snd.imm_rel[1], snd.imm_rel[2])));
-  if (h[4]) pCT->SetVector(nullptr, h[4], &D3DXVECTOR4(snd.avg_rel[0], snd.avg_rel[1], snd.avg_rel[2], 0.3333f * (snd.avg_rel[0], snd.avg_rel[1], snd.avg_rel[2])));
-  if (h[5]) pCT->SetVector(nullptr, h[5], &D3DXVECTOR4(blur_max[0] - blur_min[0], blur_min[0], blur_max[1] - blur_min[1], blur_min[1]));
-  if (h[6]) pCT->SetVector(nullptr, h[6], &D3DXVECTOR4(blur_max[2] - blur_min[2], blur_min[2], blur_min[0], blur_max[0]));
-  if (h[7]) pCT->SetVector(nullptr, h[7], &D3DXVECTOR4((float)texSizeX, (float)texSizeY, 1.0f / (float)texSizeX, 1.0f / (float)texSizeY));
-  if (h[8]) pCT->SetVector(nullptr, h[8], &D3DXVECTOR4(0.5f + 0.5f * cosf((float)time * 0.329f + 1.2f),
+  put(h[3], D3DXVECTOR4(snd.imm_rel[0], snd.imm_rel[1], snd.imm_rel[2], 0.3333f * (snd.imm_rel[0], snd.imm_rel[1], snd.imm_rel[2])));
+  put(h[4], D3DXVECTOR4(snd.avg_rel[0], snd.avg_rel[1], snd.avg_rel[2], 0.3333f * (snd.avg_rel[0], snd.avg_rel[1], snd.avg_rel[2])));
+  put(h[5], D3DXVECTOR4(blur_max[0] - blur_min[0], blur_min[0], blur_max[1] - blur_min[1], blur_min[1]));
+  put(h[6], D3DXVECTOR4(blur_max[2] - blur_min[2], blur_min[2], blur_min[0], blur_max[0]));
+  put(h[7], D3DXVECTOR4((float)texSizeX, (float)texSizeY, 1.0f / (float)texSizeX, 1.0f / (float)texSizeY));
+  put(h[8], D3DXVECTOR4(0.5f + 0.5f * cosf((float)time * 0.329f + 1.2f),
     0.5f + 0.5f * cosf((float)time * 1.293f + 3.9f),
     0.5f + 0.5f * cosf((float)time * 5.070f + 2.5f),
     0.5f + 0.5f * cosf((float)time * 20.051f + 5.4f)
   ));
-  if (h[9]) pCT->SetVector(nullptr, h[9], &D3DXVECTOR4(0.5f + 0.5f * sinf((float)time * 0.329f + 1.2f),
+  put(h[9], D3DXVECTOR4(0.5f + 0.5f * sinf((float)time * 0.329f + 1.2f),
     0.5f + 0.5f * sinf((float)time * 1.293f + 3.9f),
     0.5f + 0.5f * sinf((float)time * 5.070f + 2.5f),
     0.5f + 0.5f * sinf((float)time * 20.051f + 5.4f)
   ));
-  if (h[10]) pCT->SetVector(nullptr, h[10], &D3DXVECTOR4(0.5f + 0.5f * cosf((float)time * 0.0050f + 2.7f),
+  put(h[10], D3DXVECTOR4(0.5f + 0.5f * cosf((float)time * 0.0050f + 2.7f),
     0.5f + 0.5f * cosf((float)time * 0.0085f + 5.3f),
     0.5f + 0.5f * cosf((float)time * 0.0133f + 4.5f),
     0.5f + 0.5f * cosf((float)time * 0.0217f + 3.8f)
   ));
-  if (h[11]) pCT->SetVector(nullptr, h[11], &D3DXVECTOR4(0.5f + 0.5f * sinf((float)time * 0.0050f + 2.7f),
+  put(h[11], D3DXVECTOR4(0.5f + 0.5f * sinf((float)time * 0.0050f + 2.7f),
     0.5f + 0.5f * sinf((float)time * 0.0085f + 5.3f),
     0.5f + 0.5f * sinf((float)time * 0.0133f + 4.5f),
     0.5f + 0.5f * sinf((float)time * 0.0217f + 3.8f)
   ));
-  if (h[12]) pCT->SetVector(nullptr, h[12], &D3DXVECTOR4(mip_x, mip_y, mip_avg, 0));
-  if (h[13]) pCT->SetVector(nullptr, h[13], &D3DXVECTOR4(blur_min[1], blur_max[1], blur_min[2], blur_max[2]));
+  put(h[12], D3DXVECTOR4(mip_x, mip_y, mip_avg, 0));
+  put(h[13], D3DXVECTOR4(blur_min[1], blur_max[1], blur_min[2], blur_max[2]));
   
   // BMV/MDropDX12
   if (h[14]) {
@@ -6881,23 +7519,23 @@ void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT,
       bool neverClicked = (cx == 0.f && cy == 0.f);
       float z = neverClicked ? 0.f : (m_stMouseDown ?  cx : -cx);
       float w = neverClicked ? 0.f : (m_stMouseJustClicked ? cy : -cy);
-      pCT->SetVector(nullptr, h[14], &D3DXVECTOR4(mx, my, z, w));
+      put(h[14], D3DXVECTOR4(mx, my, z, w));
     } else {
-      pCT->SetVector(nullptr, h[14], &D3DXVECTOR4(m_mouseX,
+      put(h[14], D3DXVECTOR4(m_mouseX,
         m_mouseY != -1 ? -m_mouseY + 1 : -1,
         m_mouseDown ? 1.0f : 0.0f,
         m_mouseClicked > 0 ? m_lastMouseY : -m_lastMouseY));
     }
   }
-  if (h[15]) pCT->SetVector(nullptr, h[15], &D3DXVECTOR4(snd.smooth[0], snd.smooth[1], snd.smooth[2], 0.3333f * (snd.smooth[0], snd.smooth[1], snd.smooth[2])));
-  if (h[16]) pCT->SetVector(nullptr, h[16], &D3DXVECTOR4(m_VisIntensity, m_VisShift, m_VisVersion, 0));
-  if (h[17]) pCT->SetVector(nullptr, h[17], &D3DXVECTOR4(m_ColShiftHue, m_ColShiftSaturation, m_ColShiftBrightness, 0));
+  put(h[15], D3DXVECTOR4(snd.smooth[0], snd.smooth[1], snd.smooth[2], 0.3333f * (snd.smooth[0], snd.smooth[1], snd.smooth[2])));
+  put(h[16], D3DXVECTOR4(m_VisIntensity, m_VisShift, m_VisVersion, 0));
+  put(h[17], D3DXVECTOR4(m_ColShiftHue, m_ColShiftSaturation, m_ColShiftBrightness, 0));
   if (h[18]) {
     float ve_alpha = (float)(*pState->var_pf_echo_alpha);
     float ve_zoom  = (float)(*pState->var_pf_echo_zoom);
     int   ve_orient = (int)(*pState->var_pf_echo_orient) % 4;
     float inv_zoom = (ve_zoom > 0.001f) ? (1.0f / ve_zoom) : 1.0f;
-    pCT->SetVector(nullptr, h[18], &D3DXVECTOR4(
+    put(h[18], D3DXVECTOR4(
         (float)(*pState->var_pf_gamma),
         ve_alpha,
         inv_zoom,
@@ -6908,12 +7546,12 @@ void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT,
     SYSTEMTIME st;
     GetLocalTime(&st);
     float secsSinceMidnight = (float)st.wHour * 3600.0f + (float)st.wMinute * 60.0f + (float)st.wSecond + (float)st.wMilliseconds * 0.001f;
-    pCT->SetVector(nullptr, h[19], &D3DXVECTOR4((float)st.wYear, (float)(st.wMonth - 1), (float)st.wDay, secsSinceMidnight));
+    put(h[19], D3DXVECTOR4((float)st.wYear, (float)(st.wMonth - 1), (float)st.wDay, secsSinceMidnight));
   }
 
   // get_fft's shape, from the active audio profile
   if (p->fft_params)
-    pCT->SetVector(nullptr, p->fft_params, &D3DXVECTOR4(
+    put(p->fft_params, D3DXVECTOR4(
       m_audioProfile.fftSqrt ? 0.5f : 1.0f, m_audioProfile.fftHzRef,
       // .z = this frame's largest FFT bin, for md3_fft(). .w still free.
       m_fFFTFramePeak, 0.0f));
@@ -6922,7 +7560,7 @@ void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT,
   int num_q_float4s = sizeof(p->q_const_handles) / sizeof(p->q_const_handles[0]);
   for (int i = 0; i < num_q_float4s; i++) {
     if (p->q_const_handles[i])
-      pCT->SetVector(nullptr, p->q_const_handles[i], &D3DXVECTOR4(
+      put(p->q_const_handles[i], D3DXVECTOR4(
         (float)*pState->var_pf_q[i * 4 + 0],
         (float)*pState->var_pf_q[i * 4 + 1],
         (float)*pState->var_pf_q[i * 4 + 2],
@@ -6943,7 +7581,7 @@ void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT,
       D3DXMatrixMultiply(&temp, &temp, &mz);
       D3DXMatrixMultiply(&temp, &temp, &my);
 
-      pCT->SetMatrix(nullptr, p->rot_mat[i], &temp);
+      putMat(p->rot_mat[i], temp);
     }
   }
   // the last 4 are totally random, each frame
@@ -6960,7 +7598,7 @@ void mdrop::Engine::ApplyShaderParams(CShaderParams* p, LPD3DXCONSTANTTABLE pCT,
       D3DXMatrixMultiply(&temp, &temp, &mz);
       D3DXMatrixMultiply(&temp, &temp, &my);
 
-      pCT->SetMatrix(nullptr, p->rot_mat[i], &temp);
+      putMat(p->rot_mat[i], temp);
     }
   }
 }

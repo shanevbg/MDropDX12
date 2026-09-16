@@ -21,6 +21,17 @@ void Engine::LoadScript(const wchar_t* path) {
   StopScript();
   m_script.lines.clear();
   m_script.filePath = path;
+  // Per FILE, not per session (#303): strict is declared by the script that
+  // wants it, so a chained FILE= must not inherit it silently -- and the error
+  // count belongs to the run being reported, not to everything since launch.
+  m_script.strict = false;
+  m_script.errors = 0;
+  m_script.waitingReady = false;
+  m_script.repeatLine = -1;
+  m_script.repeatsLeft = 0;
+  m_script.checks = 0;
+  m_script.checkShaderFails = 0;
+  m_script.checkTextureFails = 0;
 
   std::wifstream file(path);
   if (!file.is_open()) {
@@ -65,6 +76,7 @@ void Engine::StartScript() {
   m_script.playing = true;
   m_script.currentLine = 0;
   m_script.lastLineTime = GetTime();
+  m_script.startedAt = GetTime();
 
   // Execute the first line immediately
   ExecuteScriptLine(0);
@@ -73,14 +85,56 @@ void Engine::StartScript() {
 }
 
 void Engine::StopScript() {
+  // The verdict goes HERE, not where the line list runs out (#303).
+  //
+  // A script ends three ways -- off the end, on a STOP line, or because someone
+  // pressed Stop -- and a test script written to be handed to a user ends with
+  // STOP, which is the one path an end-of-lines summary never reaches. That is
+  // exactly how the self-test came to pass five of its six checks: every marker
+  // was in the log and the verdict was not.
+  //
+  // Guarded on `playing` so the StopScript that LoadScript calls first cannot
+  // print a verdict for a run that never happened.
+  if (m_script.playing && m_script.strict) {
+    DLOG_ERROR("SCRIPT: finished -- %d error%ls", m_script.errors,
+               m_script.errors == 1 ? L"" : L"s");
+  }
   m_script.playing = false;
   m_script.currentLine = -1;
+  m_script.waitingReady = false;
   SyncScriptUI();
 }
 
 void Engine::UpdateScript() {
   if (!m_script.playing || m_script.lines.empty())
     return;
+
+  // WAITREADY holds the line until the preset has actually loaded (#303).
+  //
+  // Timed out rather than trusted: a preset whose shaders never compile would
+  // otherwise stop the script for good, and a repro that hangs tells its reader
+  // nothing. Ten seconds is longer than the slowest compile measured here by an
+  // order of magnitude, and the timeout is LOGGED -- a script that had to wait
+  // that long has found something worth knowing about.
+  if (m_script.waitingReady) {
+    const double waited = GetTime() - m_script.waitStarted;
+    if (m_nLoadingPreset == 0) {
+      m_script.waitingReady = false;
+      m_script.lastLineTime = GetTime();
+      DLOG_ERROR("SCRIPT: ready after %.2fs", waited);
+    } else if (waited > 10.0) {
+      m_script.waitingReady = false;
+      m_script.lastLineTime = GetTime();
+      m_script.errors++;
+      DLOG_ERROR("SCRIPT: WAITREADY TIMED OUT after %.1fs -- preset still loading",
+                 waited);
+    } else {
+      // Held: do not let the beat interval accumulate while waiting, or the
+      // script would sprint through the next several lines to catch up.
+      m_script.lastLineTime = GetTime();
+      return;
+    }
+  }
 
   double elapsed = GetTime() - m_script.lastLineTime;
   double interval = (60.0 / m_script.bpm) * m_script.beats;
@@ -93,8 +147,17 @@ void Engine::UpdateScript() {
       if (m_script.loop) {
         m_script.currentLine = 0;
       } else {
+        // StopScript logs the verdict -- every exit route goes through it.
+        const int nErr = m_script.errors;
         StopScript();
-        AddNotification((wchar_t*)L"Script finished");
+        if (nErr > 0) {
+          wchar_t note[96];
+          FormatTo(note, L"Script finished with %d error%ls", nErr,
+                   nErr == 1 ? L"" : L"s");
+          AddNotification(note);
+        } else {
+          AddNotification((wchar_t*)L"Script finished");
+        }
         return;
       }
     }
@@ -127,7 +190,7 @@ void Engine::ExecuteScriptLine(int lineIndex) {
     token = token.substr(start, end - start + 1);
 
     if (!token.empty())
-      ExecuteScriptCommand(token);
+      ExecuteScriptCommand(token, m_script.strict);
   }
 }
 
@@ -146,8 +209,132 @@ void Engine::ExecuteScriptLine(const wchar_t* text, bool bStrict) {
 }
 
 void Engine::ExecuteScriptCommand(const std::wstring& cmd, bool bStrict) {
+  // A script that has declared STRICT stays strict for every token after it,
+  // however the token arrived (#303).
+  bStrict = bStrict || m_script.strict;
+
+  // --- Driving a test from a script file (#303) ---
+  if (cmd == L"STRICT") {
+    // Everything after this is checked rather than painted on screen.
+    //
+    // Without it a test script cannot be trusted: an unrecognised token is
+    // DRAWN AS A MESSAGE, so a typo or a verb this build does not have becomes
+    // scenery and the script reports success having done nothing. Shane:
+    // "Can require use of STRICT flag".
+    m_script.strict = true;
+    m_script.errors = 0;
+    DLOG_ERROR("SCRIPT: strict mode on -- unknown commands are errors from here");
+  }
+  else if (_wcsnicmp(cmd.c_str(), L"LOG=", 4) == 0) {
+    // A marker in debug.log, which is the only output a public repro has.
+    //
+    // Logged at ERROR deliberately, and it is not an error: it is the one level
+    // that survives every LogLevel above Off, so a script handed to someone
+    // whose logging is at the default still produces a readable trace. Asking
+    // them to change a setting first is a step that gets skipped.
+    DLOG_ERROR("SCRIPT: %ls", cmd.c_str() + 4);
+  }
+  else if (cmd == L"LOGSTATE") {
+    // What the engine is actually doing, into the log, so a report says more
+    // than "it looked wrong".
+    wchar_t cur[MAX_PATH] = {};
+    CurrentPresetPath(cur, MAX_PATH);
+    DLOG_ERROR("SCRIPT STATE: preset='%ls' fps=%.1f mesh=%dx%d loading=%d "
+               "blend=%d mirrors=%d displays=%d",
+               cur, GetFps(), m_nGridX, m_nGridY, m_nLoadingPreset,
+               (m_pState && m_pState->m_bBlending) ? 1 : 0,
+               m_bMirrorsActive ? 1 : 0,
+               (int)m_displayOutputs.size());
+  }
+  else if (cmd == L"CHECK") {
+    // Judge the preset that is up, and tally it.
+    //
+    // Both counters are per-load and were reset when this preset began, so
+    // they describe THIS preset and not the run so far -- which is what lets a
+    // sweep name the preset that is at fault instead of reporting a total.
+    //
+    // Texture misses are counted separately from shader errors because they
+    // fail differently: a preset with a missing texture compiles, renders, and
+    // is wrong. Anything that only asks "did the shaders build" scores it a
+    // pass.
+    const int shaderErrs = m_nShaderErrorsThisLoad.load();
+    const int texMiss    = m_nTextureMissesThisLoad.load();
+    wchar_t cur[MAX_PATH] = {};
+    CurrentPresetPath(cur, MAX_PATH);
+    m_script.checks++;
+    if (shaderErrs) m_script.checkShaderFails++;
+    if (texMiss)    m_script.checkTextureFails++;
+    DLOG_ERROR("SCRIPT CHECK: %ls shader_errors=%d textures_missing=%d  %ls",
+               (shaderErrs || texMiss) ? L"FAIL" : L"ok",
+               shaderErrs, texMiss, cur);
+  }
+  else if (cmd == L"LOGSUMMARY") {
+    // Elapsed is COMPUTED here even though every log line is timestamped
+    // already. Shane: "it's in the logs" -- it is, and a reader of a 200-preset
+    // report should not have to find the first and last entry and subtract
+    // them to learn how long it took, nor divide to get the per-preset rate.
+    // That rate is the number that says whether a library is slow.
+    const double elapsed = GetTime() - m_script.startedAt;
+    DLOG_ERROR("SCRIPT SUMMARY: checked=%d  shader_failures=%d  "
+               "texture_failures=%d  unknown_commands=%d  "
+               "elapsed=%.1fs  per_preset=%.2fs",
+               m_script.checks, m_script.checkShaderFails,
+               m_script.checkTextureFails, m_script.errors,
+               elapsed, elapsed / (m_script.checks > 0 ? m_script.checks : 1));
+  }
+  else if (_wcsnicmp(cmd.c_str(), L"REPEAT=", 7) == 0) {
+    // REPEAT=<count>,<line> -- jump back to <line>, at most <count> times.
+    //
+    // The one bounded backward jump this language has. LINE= is unconditional,
+    // so a sweep written with it runs forever and has to be stopped by hand --
+    // which means it can never print a summary, and a report that never
+    // arrives is not a report.
+    //
+    // The budget is keyed on the TARGET LINE so two loops in one script do not
+    // share a counter, and it is re-armed once exhausted so a script that is
+    // played twice behaves the same way the second time.
+    int count = 0, line = -1;
+    if (swscanf(cmd.c_str() + 7, L"%d,%d", &count, &line) == 2 &&
+        count > 0 && line >= 0 && line < (int)m_script.lines.size()) {
+      if (m_script.repeatLine != line) {
+        m_script.repeatLine = line;
+        m_script.repeatsLeft = count;
+      }
+      if (m_script.repeatsLeft > 0) {
+        m_script.repeatsLeft--;
+        // line - 1, because UpdateScript INCREMENTS currentLine and then
+        // executes it. Setting it to `line` runs line+1 next, which for a
+        // two-line loop is the REPEAT line itself: it then span on that one
+        // line forever, re-CHECKing the same preset because the NEXT above it
+        // was never reached again.
+        //
+        // That is not a theory. A 4,771-preset sweep reported 4,777 checks,
+        // zero failures and 0.02 s/preset -- and the log held ONE distinct
+        // preset name, one "ready after" line, and the cache had gained 11
+        // files instead of thousands. A clean result produced by not running.
+        m_script.currentLine = line - 1;
+        m_script.lastLineTime = GetTime();
+      } else {
+        m_script.repeatLine = -1;      // re-armed for a second play
+      }
+    } else if (bStrict) {
+      m_script.errors++;
+      DLOG_ERROR("SCRIPT: REPEAT needs <count>,<line> -- got '%ls'", cmd.c_str());
+    }
+  }
+  else if (cmd == L"WAITREADY") {
+    // Hold the script here until the preset has finished loading.
+    //
+    // Every other form of waiting in this language is a number of BEATS, which
+    // is a guess about how long a machine takes to compile a shader -- and the
+    // machine a repro matters on is the slow one, where the guess is wrong. The
+    // hold times out (see UpdateScript) so a preset that never loads stalls the
+    // script for a few seconds rather than forever.
+    m_script.waitingReady = true;
+    m_script.waitStarted = GetTime();
+  }
   // --- Sequencing ---
-  if (cmd == L"NEXT") {
+  else if (cmd == L"NEXT") {
     NextPreset(0);
   }
   else if (cmd == L"PREV") {
@@ -381,9 +568,41 @@ void Engine::ExecuteScriptCommand(const std::wstring& cmd, bool bStrict) {
   else if (_wcsnicmp(cmd.c_str(), L"ACTION=", 7) == 0) {
     DispatchHotkeyByTag(cmd.substr(7));
   }
-  // --- Launch application ---
+  // --- Launch application, optionally with arguments ---
+  //
+  //   LAUNCH=C:\Program Files\Foo\foo.exe              the original form
+  //   LAUNCH="C:\Python\python.exe" "script.py" --n 20 path quoted, then args
+  //
+  // A QUOTED path is what turns arguments on, and the unquoted form is left
+  // exactly as it was. Splitting on the first space instead would have broken
+  // every existing binding: `C:\Program Files\...` is the normal shape of a
+  // Windows path and has spaces in it, so the old form has to stay
+  // "everything is the path".
+  //
+  // '|' is not available as a separator here, however natural it looks beside
+  // the rest of the vocabulary -- the script tokenizer splits on it before a
+  // command is ever dispatched, so `LAUNCH=x|y` arrives as two commands.
   else if (_wcsnicmp(cmd.c_str(), L"LAUNCH=", 7) == 0) {
-    LaunchOrFocusApp(cmd.substr(7));
+    std::wstring rest = cmd.substr(7);
+    size_t a = rest.find_first_not_of(L" \t");
+    if (a == std::wstring::npos) a = rest.size();
+    if (a < rest.size() && rest[a] == L'"') {
+      const size_t close = rest.find(L'"', a + 1);
+      if (close != std::wstring::npos) {
+        std::wstring path = rest.substr(a + 1, close - a - 1);
+        std::wstring args = rest.substr(close + 1);
+        const size_t b = args.find_first_not_of(L" \t");
+        args = (b == std::wstring::npos) ? std::wstring() : args.substr(b);
+        LaunchOrFocusApp(path, args);
+        return;
+      }
+      // An unclosed quote is a typo, not a path: say so rather than trying to
+      // open a file whose name begins with a quotation mark.
+      DLOG_ERROR("SCRIPT: LAUNCH= has an unclosed quote: %ls", rest.c_str());
+      if (bStrict) m_script.errors++;
+      return;
+    }
+    LaunchOrFocusApp(rest);
   }
   // --- Milkwave-specific (ignore gracefully) ---
   else if (_wcsnicmp(cmd.c_str(), L"STYLE=", 6) == 0 ||
@@ -414,7 +633,15 @@ void Engine::ExecuteScriptCommand(const std::wstring& cmd, bool bStrict) {
       wchar_t reply[320];
       FormatTo(reply, L"ERR|UNKNOWN|%s", cmd.c_str());
       g_pipeServer.Send(reply);
-      DLOG_WARN("IPC strict: nothing recognises '%ls'", cmd.c_str());
+      // COUNTED and logged at ERROR, not just answered down the pipe (#303).
+      //
+      // The reply is for a harness that is listening. A script run by a user
+      // has nobody on the other end, so the failure went nowhere: it was
+      // suppressed from the screen, which is the point of strict, and then
+      // silently discarded. The count is what lets the run report a verdict
+      // when the script ends.
+      m_script.errors++;
+      DLOG_ERROR("SCRIPT: unknown command '%ls' (strict)", cmd.c_str());
       return;
     }
     // Build a message using current default style

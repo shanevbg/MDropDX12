@@ -164,6 +164,42 @@ Options:
 
 To test a release build manually, run `Release/MDropDX12.exe` after the release script updates it.
 
+### Command-line switches
+
+| switch | effect |
+|---|---|
+| `<path>.milk` / `.milk2` / `.milk3` | load that preset; forwarded to a running instance over the pipe |
+| `-test` | come up as a test instance — testing mode on, frame rate set to 60 as a starting baseline, no TCP remote, no system-wide hotkeys |
+| `-pipe=<base>` | serve `\\.\pipe\<base>_<pid>` instead of the default name |
+| `-spoutout` | Spout **output** on for this run |
+| `-spoutin[=<sender>]` | Spout **input** on for this run, from `<sender>`; bare, it uses whatever the settings already hold |
+| `-nostartupchildren` | accepted and ignored (the child-process mode is gone; the harness still passes it) |
+
+`--` forms work equally (`--test`, `--spoutin=…`).
+
+**The Spout switches are overrides, not configuration.** They apply after the
+settings are read, so they win — and whatever they displaced is what gets
+written back on exit, so a test launch cannot leave Spout enabled in your
+`settings.ini`. That matters because testing Spout needs two instances, one
+sending and one receiving:
+
+```powershell
+# sender
+MDropDX12.exe -spoutout
+# receiver, in its own directory
+MDropDX12_test.exe -pipe=mdx12test -spoutin=MDropDX12
+```
+
+MDropDX12's own Spout sender name is hardcoded `MDropDX12`, so only one
+instance may send at a time — give the receiver `-spoutout` as well and it
+publishes a second sender under the same name, at which point which one gets
+received is anyone's guess.
+
+`-child`, `-childindex=`, `-display=`, `-fade=`, `-rect=`, `-hidewindow` and
+`-foreground` configured the child-process mode. That mode was deleted in v3.0
+— one process renders every display — and an instance started with any of them
+now ignores them and comes up as an ordinary visualizer.
+
 ## Project Structure
 
 ```
@@ -461,7 +497,12 @@ MDropDX12 uses Named Pipe IPC (`\\.\pipe\Milkwave_<PID>`) for communication with
    | `GET_LOGLEVEL` | Query log level |
    | `CLEAR_LOGS` | Delete all log files |
    | `SET_IDLE_TIMER=0\|1` | Enable/disable the idle timer (persists; restores first if idle is active) |
-   | `GET_IDLE_TIMER` | Query idle timer — replies `IDLE_TIMER=<enabled>\|<timeoutMin>\|<action>` |
+   | `GET_IDLE_TIMER` | Query idle timer — replies `IDLE_TIMER=<enabled>\|<timeoutMin>\|<action>\|<profile>\|<fullOpacity>` |
+   | `SET_IDLE_TIMEOUT=1-60` | Minutes of no input before the idle action fires |
+   | `SET_IDLE_ACTION=0-3` | 0 Fullscreen, 1 Stretch/Mirror, 2 Mirror all, 3 Load display profile |
+   | `SET_IDLE_PROFILE=name` | The display profile action 3 loads; empty clears it, an unknown name is refused |
+   | `SET_IDLE_FULL_OPACITY=0\|1` | Take every display to 100% opacity while idle |
+   | `RESET_IDLE_TIMER` | Restart the countdown, as a keypress would |
    | `TESTING_MODE=0\|1` | Freeze automatic preset changes and ignore the keyboard, so a measurement cannot be altered mid-run. Query with no value. Never persisted; ESC twice leaves it |
    | `PRESET_OVERRIDE_STATUS` | Per-slot resolution for the running preset — replies `PRESET_OVERRIDE\|shader=..\|shaderSrc=none\|rule\|preset\|vfx=..\|vfxSrc=..\|tag=..` |
    | `SET_PRESET_SHADER_OVERRIDE=<name>` | The running preset's own shader override; an empty value means "explicitly none" |

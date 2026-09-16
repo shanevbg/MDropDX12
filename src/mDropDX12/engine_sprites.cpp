@@ -789,7 +789,25 @@ bool Engine::LaunchSprite(int nSpriteNum, int nSlot) {
 }
 
 void Engine::KillSprite(int iSlot) {
-  m_texmgr.KillTex(iSlot);
+  // Retire rather than release (#225).
+  //
+  // Both callers reach this from inside a frame: DrawUserSprites when the
+  // sprite's own EEL sets `done`, and RenderCmd::KillSprite from the pending
+  // command drain. KillTex there would release a texture and rewrite its
+  // descriptor in the live SRV heap while the command list naming them is
+  // still being recorded -- #222's fault exactly, and from a worse place.
+  //
+  // The cover-art sprite takes this path on every song: it is launched as
+  // sprite 0 and ends itself when its built-in fade finishes.
+  if (m_lpDX)
+    m_texmgr.RetireTex(iSlot, m_lpDX->CurrentFrameFenceValue());
+  else
+    m_texmgr.KillTex(iSlot);   // no device, nothing can be in flight
+}
+
+void Engine::RetireFinishedSprites() {
+  if (m_lpDX)
+    m_texmgr.CollectRetired(m_lpDX->CompletedFenceValue());
 }
 
 void Engine::KillMilk2Sprites() {
@@ -802,6 +820,35 @@ void Engine::KillMilk2Sprites() {
 
 void Engine::ApplyMilk2Sprites() {
   m_bMilk2SpritesNeedApply = false;
+
+  // Nothing below may release a sprite texture while the GPU might still be
+  // reading it (#222 — the startup TDR).
+  //
+  // KillMilk2Sprites calls texmgr::KillTex, which the preset-commit path
+  // already describes as "the sharpest edge": it calls ResetResource() on the
+  // texture, drops the upload buffer, AND overwrites that slot's descriptor in
+  // the LIVE shader-visible heap. The last of those is why the failure arrives
+  // as a page fault at VA 0 rather than at a freed address — which is exactly
+  // what #222's DRED dump shows.
+  //
+  // This runs twice on a normal startup: once when the preset is applied, and
+  // again from the resize path a moment later ("Resize/fullscreen destroys
+  // sprite textures"). The second call is the dangerous one — it frees the
+  // texture the FIRST call uploaded, while frames that sample it are still in
+  // flight on the GPU. Measured on MilkDrop2077 - TimeSpace3b, whose embedded
+  // sprite is lazer1.jpg: 4 hangs in 10 uncapped launches with the sprite
+  // enabled, 0 in 12 with it disabled, and DRED named the faulting op as that
+  // sprite's own draw every time.
+  //
+  // Both queues, because either can be holding the reference: the mirror
+  // surfaces via WaitForSurfaceWork, and the main queue via WaitForGpu (which
+  // drains the aux queues first). Sprites are re-applied on preset load and on
+  // resize only, so this costs nothing per frame — the same reasoning the
+  // preset-commit wait is built on.
+  WaitForSurfaceWork();
+  if (m_lpDX)
+    m_lpDX->WaitForGpu();
+
   KillMilk2Sprites();
   if (!SpritesEnabled() || m_milk2Sprites.empty())
     return;

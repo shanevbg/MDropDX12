@@ -86,7 +86,17 @@ void Engine::ToggleSetting(int id) {
   switch (id) {
   case SET_HARD_CUTS:        pBool = &m_bHardCutsDisabled; break;
   case SET_PRESET_LOCK:      pBool = &m_bPresetLockOnAtStartup; break;
-  case SET_SEQ_ORDER:        pBool = &m_bSequentialPresetOrder; break;
+  case SET_SEQ_ORDER:
+    // Not a plain flip, for the same reason SET_SHOW_BATTERY below is not: a
+    // display profile can LEND this value to the session, and a deliberate
+    // change has to take it back (#356). SetMainRenderOrder sets it, clears
+    // the loan and persists it -- one writer, every surface.
+    //
+    // Flipping the bool here left the loan in place, so the Displays window's
+    // profile save and the shutdown save both went on writing the profile's
+    // value instead of the one just chosen.
+    SetMainRenderOrder(!m_bSequentialPresetOrder);
+    return;
   case SET_SONG_TITLE_ANIMS: pBool = &m_bSongTitleAnims; break;
   case SET_CHANGE_WITH_SONG: pBool = &m_ChangePresetWithSong; break;
   case SET_SHOW_FPS:         pBool = &m_bShowFPS; break;
@@ -126,6 +136,14 @@ void Engine::AdjustSetting(int id, int direction) {
   if (id == SET_AUDIO_SENSITIVITY) {
     if (m_fAudioSensitivity <= 0.0f) m_fAudioSensitivity = 1.0f;
     mdropdx12_audio_sensitivity = m_fAudioSensitivity;
+  }
+  if (id == SET_TIME_BETWEEN) {
+    // Recompute the next change now rather than waiting out the deadline the
+    // old value set, and drop any pin the Displays window had put on this so
+    // the next saved profile records what was just typed (#356). There is no
+    // profile "loan" to strip any more (#358).
+    m_fNextPresetTime = -1.0f;
+    m_primaryProfile.fTimeBetweenPresets = -1.0f;
   }
   SaveSettingToINI(id);
 }
@@ -358,6 +376,60 @@ void Engine::LoadUserDefaults() {
 std::vector<std::wstring> Engine::FallbackPathsCopy() const {
   return m_fallbackPaths.with(
       [](const std::vector<std::wstring>& v) { return v; });
+}
+
+//---------------------------------------------------------------------------
+// Sibling resource directories: "../<whatever>" for pre-MDropDX12 presets (#299)
+//---------------------------------------------------------------------------
+//
+// A preset from MilkDrop 2 or the Milkwave builds names a texture and expects
+// it to be found in a folder BESIDE the preset folder. This engine tried
+// exactly one such folder and only if it was named "textures", so any library
+// organised differently simply lost its textures -- MilkDrop 3 PRO keeps them
+// in "sprites", and a preset in Milkdrop3\presets1\ asking for 'spirale3' could
+// not see Milkdrop3\sprites\Spirale3.jpg one folder over.
+//
+// So: every immediate subdirectory of the preset directory's parent, plus the
+// parent itself. ONE level, deliberately -- a recursive walk of a preset
+// library is unbounded, and "../<subdir>" is the convention being restored, not
+// "somewhere under the library".
+//
+// Rebuilt only when the preset directory changes. The caller is the texture
+// MISS path, which runs per texture per extension, and a directory listing
+// there would be paid over and over for the presets that are already broken.
+const std::vector<std::wstring>& Engine::SiblingResourceDirs() {
+  if (_wcsicmp(m_szSiblingDirsFor, m_szPresetDir) == 0)
+    return m_siblingResourceDirs;
+
+  wcsncpy_s(m_szSiblingDirsFor, m_szPresetDir, _TRUNCATE);
+  m_siblingResourceDirs.clear();
+
+  std::wstring parent = m_szPresetDir;
+  while (!parent.empty() &&
+         (parent.back() == L'\\' || parent.back() == L'/'))
+    parent.pop_back();
+  const size_t cut = parent.find_last_of(L"\\/");
+  if (cut == std::wstring::npos) return m_siblingResourceDirs;
+  parent.erase(cut + 1);                       // keep the trailing separator
+
+  // The parent itself first: a library that keeps its images loose beside the
+  // preset folders rather than in a subfolder.
+  m_siblingResourceDirs.push_back(parent);
+
+  WIN32_FIND_DATAW fd;
+  HANDLE h = FindFirstFileW((parent + L"*").c_str(), &fd);
+  if (h == INVALID_HANDLE_VALUE) return m_siblingResourceDirs;
+  do {
+    if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+    if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0)
+      continue;
+    m_siblingResourceDirs.push_back(parent + fd.cFileName + L"\\");
+  } while (FindNextFileW(h, &fd));
+  FindClose(h);
+
+  DLOG_INFO("sibling resource dirs: %d under '%ls'",
+            (int)m_siblingResourceDirs.size(), parent.c_str());
+  return m_siblingResourceDirs;
 }
 
 void Engine::AddFallbackPath(const std::wstring& path) {

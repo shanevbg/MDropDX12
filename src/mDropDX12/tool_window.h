@@ -813,6 +813,11 @@ private:
   HWND m_hLblBlend = NULL, m_hEditBlend = NULL;
   HWND m_hLblTime = NULL, m_hEditTime = NULL;
   HWND m_hChkHardCuts = NULL, m_hChkLock = NULL, m_hChkSeq = NULL;
+  // The LIVE lock, distinct from m_hChkLock's startup preference. Kept in
+  // step with the engine by the 500 ms WM_TIMER, because a hotkey, the game
+  // controller, IPC and the silence auto-lock can all change it while this
+  // window is open.
+  HWND m_hChkLockNow = NULL;
   HWND m_hStartupCombo = NULL, m_hLblStartup = NULL;
   HWND m_hStartupPath = NULL, m_hStartupBrowse = NULL;
   // Shows which preset szPresetStartup actually names, or (random).
@@ -1313,7 +1318,16 @@ private:
   // The subscription follows ACTIVATION, not merely being open. Shane asked for
   // levels to be read "only if asked or mixer tool window open and active", so
   // a window sitting behind the visualiser must cost nothing.
+  //
+  // It is deliberately NOT keyed on visibility, though the refresh below is.
+  // Subscribing polls every provider, Sonar over HTTP included; tying that to
+  // a window merely being on screen made switching headsets crawl (#328).
   bool m_subscribed = false;
+
+  // Ticks since the last refresh while visible but not in front. The window
+  // ticks once a second; unfocused it refreshes on every fifth, which is what
+  // keeps the battery and the failover list current without subscribing.
+  int m_idleTicks = 0;
 
   // Slider id minus IDC_MW_MIXER_FADER_BASE indexes these, which is how a
   // WM_HSCROLL finds the channel and fader it belongs to. Rebuilt with the

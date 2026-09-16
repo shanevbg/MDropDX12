@@ -41,6 +41,21 @@ enum class RenderCmd : uint8_t {
                          // about 24,800 MYVERTEX past the end, across up to nine
                          // threads. See forgejo#8.
     ResetBuffers,        // ResetBufferAndFonts()
+    // Give the Shadertoy feedback targets back after a spell with no .milk3
+    // (#344). Its own command rather than ResetBuffers so it can re-check the
+    // mode on arrival and do nothing if a .milk3 loaded in the meantime.
+    ReleaseShadertoyTargets,
+    // Rebuild the Resource Viewer's snapshot (#352). The viewer runs on the
+    // Settings ToolWindow thread and used to read m_textures, m_shaders and
+    // m_pState directly -- a vector the render thread erases from, and COM
+    // constant tables it releases on every preset load. The render thread
+    // copies what the viewer needs into m_resourceSnapshot and posts
+    // WM_MW_RESOURCES_READY; the UI thread then probes the disk and fills the
+    // list touching no engine state at all.
+    //
+    // Carries no payload, so the repeats a held-down Refresh queues collapse
+    // into one rebuild -- the same reason SetMeshSize carries none.
+    SnapshotResources,
     ResizeWindow,        // OnUserResizeWindow()
     DeviceRecovery,      // PerformDeviceRecovery()
     ToggleSpout,         // ToggleSpout()
@@ -97,6 +112,17 @@ enum class RenderCmd : uint8_t {
     ResetDisplayOutputs, // ResetDisplayOutputsToDefaults(). Rewrites
                          // m_displayOutputs and destroys every monitor
                          // mirror -- render-thread only, #27.
+    // The idle timer entering and leaving its walk-away state. Render-thread
+    // only for the same reason LoadDisplayProfile is: they rewrite
+    // m_displayOutputs (#27).
+    //
+    // iParam1 != 0 takes every screen to 100% opacity; sParam, when it names a
+    // profile that is not already the loaded one, banks the current display
+    // state and loads it. Both legs are optional and independent, which is why
+    // this is one command rather than several: the snapshot has to be taken
+    // before EITHER of them runs.
+    IdleEnter,
+    IdleExit,            // Put back whatever IdleEnter changed.
     Quit,                // Clean shutdown
 };
 

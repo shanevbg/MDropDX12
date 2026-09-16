@@ -1000,7 +1000,7 @@ void AnnotationsWindow::ShowImportDialog() {
     ofn.lpstrFile = szFile;
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrTitle = L"Import Annotations";
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
 
     if (!GetOpenFileNameW(&ofn)) return;
 
@@ -2597,7 +2597,7 @@ LRESULT AnnotationsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
             ofn.nMaxFile = MAX_PATH;
             ofn.lpstrTitle = L"Preset to run in place of this one";
             ofn.lpstrInitialDir = initial.empty() ? NULL : initial.c_str();
-            ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+            ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
             if (!GetOpenFileNameW(&ofn)) return 0;
             if (!src.empty() && _wcsicmp(szFile, src.c_str()) == 0) {
                 MessageBoxW(m_hWnd,
@@ -2634,7 +2634,7 @@ LRESULT AnnotationsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam)
         ofn.nMaxFile = MAX_PATH;
         ofn.lpstrTitle = L"Save the replacement copy as";
         ofn.lpstrInitialDir = initial.empty() ? NULL : initial.c_str();
-        ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+        ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
         if (!GetSaveFileNameW(&ofn)) return 0;
         if (_wcsicmp(szFile, src.c_str()) == 0) {
             MessageBoxW(m_hWnd,

@@ -1,15 +1,19 @@
 #pragma once
 // pipe_server.h — Named Pipe IPC server for Milkwave visualizers
 // Replaces the hidden WM_COPYDATA IPC window with a named pipe.
-// Pipe name: \\.\pipe\Milkwave_<PID>
+// Pipe name: \\.\pipe\Milkwave_<PID>   -- a normal instance
+//            \\.\pipe\mDxChild_<PID>   -- a -child instance
 //
-// Milkwave_ is SHARED: Milkwave Visualizer publishes it too, and every
-// discovery tool -- Milkwave Remote, the MCP server, vis.py, the probe
-// harness -- enumerates it to find something to drive.
+// The two are deliberately in different namespaces. Milkwave_ is SHARED:
+// Milkwave Visualizer publishes it too, and every discovery tool -- Milkwave
+// Remote, the MCP server, vis.py, the probe harness -- enumerates it to find
+// something to drive. A child must not be in that set. The parent owns every
+// external interface, which is already why a child serves no TCP port and no
+// mDNS advert (App.cpp); its pipe is an external interface too, and naming it
+// like a parent's contradicted that within three lines of the code saying so.
 //
-// A second namespace, mDxChild_<PID>, existed for -child instances so they
-// stayed out of that set: a child owned no external interface, and its pipe
-// was one. #186 phase 6 deleted -child, and the namespace with it.
+// The parent still reaches its children: it gets the pid straight back from
+// CreateProcess and builds the same name (child_instances.cpp).
 // Supports multiple concurrent clients (e.g., MilkwaveRemote + MCP).
 
 #ifndef PIPE_SERVER_H
@@ -39,6 +43,9 @@ class PipeServer;
 
 // ─── Pipe name bases ───────────────────────────────────────────────────────────
 
+// The base a -child instance serves when nobody has said otherwise.
+#define PIPE_CHILD_BASE_DEFAULT L"mDxChild"
+
 // A base is [A-Za-z0-9_], 1 to 39 characters.
 //
 // It arrives over IPC from anyone who can reach the pipe, and it becomes a path
@@ -54,6 +61,18 @@ bool PipeNameBaseIsValid(const wchar_t* base);
 // the parent's word with "Child" on the end, so an instance and its children
 // sit in one namespace: rename a parent and its whole tree moves with it, and
 // the user's children keep mDxChild_ to themselves.
+//
+// Exists so the name is derived ONCE. ChildSpawnNow builds the name it will
+// wait on and the child's own Start builds the name it will serve, and those
+// two never speak; while both were hardcoded that was duplication, but a base
+// that varies makes them two things that can disagree -- and the parent then
+// waits out its timeout on a name nobody serves and terminates a healthy
+// child. The parent derives it here and hands it over on the command line.
+//
+// Falls back to PIPE_CHILD_BASE_DEFAULT when the result would be a name
+// PipeNameBaseIsValid rejects, so the child is never told something it will
+// refuse and silently serve the default of instead.
+void PipeChildNameBase(const wchar_t* parentBase, wchar_t* out, size_t outCount);
 
 // Per-client connection context — one per connected client, owned by PipeServer.
 struct PipeClientContext {
@@ -93,11 +112,12 @@ public:
     // wmIPCMessage: the custom IPC message constant (WM_APP+9 in MDropDX12, WM_USER+200 in Milkwave).
     // wmSignalBase: base for SIGNAL| dispatch (WM_APP in MDropDX12, WM_USER in Milkwave).
     //   SIGNAL|NEXT_PRESET → PostMessage(wmSignalBase + 100), etc.
-    // dwOnlyFromPid, when non-zero, refuses every client that is not that
-    // process. Passed in rather than read from engine state, so the pipe
-    // server keeps depending on nothing.
+    // bChildMode picks the mDxChild_ namespace. dwOnlyFromPid, when non-zero,
+    // refuses every client that is not that process -- a child accepts its
+    // parent and nobody else. Both are passed in rather than read from engine
+    // state, so the pipe server keeps depending on nothing.
     void Start(HWND hTargetWindow, UINT wmIPCMessage,
-               UINT wmSignalBase = 0x8000 /*WM_APP*/,
+               UINT wmSignalBase = 0x8000 /*WM_APP*/, bool bChildMode = false,
                DWORD dwOnlyFromPid = 0);
     void Stop();
 
@@ -136,7 +156,7 @@ public:
     bool SetNameBase(const wchar_t* base);
 
     // The base in force, WITH its trailing separator ("mdx12test_"), or "" for
-    // the default.
+    // the default. What PipeChildNameBase takes.
     const wchar_t* GetNameBase() const { return m_szNameBase; }
 
     // Enqueue an outgoing message to all connected clients (fire-and-forget).
@@ -221,6 +241,7 @@ private:
     // Empty means "the default for this mode". Remembered so Rename can put
     // the server back up exactly as Start had it.
     wchar_t m_szNameBase[48] = {};
+    bool    m_bChildMode = false;
     // 0 = accept anyone. Non-zero = the only client pid allowed to connect.
     DWORD m_dwOnlyFromPid = 0;
     wchar_t m_szLastClientExePath[MAX_PATH] = {};

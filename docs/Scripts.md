@@ -61,6 +61,81 @@ With the defaults (`BPM=120`, `BEATS=8`), each line lasts 4 seconds. Change thes
 | `LINE=PREV` | Jump to previous line and execute it |
 | `FILE=another.txt` | Load and start a different script file (relative paths are relative to the current script's directory) |
 
+### Driving a test, or a bug report
+
+These five make a script file something you can hand to someone else: "load
+this, press Play, send me `log/debug.log`". No Python, no named pipe, no
+harness — the log is the result.
+
+| Command | Description |
+|---------|-------------|
+| `STRICT` | From here on, a command this build does not recognise is an **error** — logged and counted — instead of being drawn on screen as a message. Also resets the error count. |
+| `LOG=text` | Write `text` into `debug.log`, so a fault can be pinned to the step that caused it |
+| `LOGSTATE` | Write the engine's current state (preset, fps, mesh size, loading, blending, mirrors, display count) into `debug.log` |
+| `WAITREADY` | Hold here until the current preset has finished loading, instead of guessing at a number of beats. Times out after 10 seconds, and says so |
+
+`STRICT` is the one that matters. By default **any unrecognised text is
+displayed as a message** (see Syntax Rules), which is right for a VJ script and
+wrong for a test: a mistyped command, or one that only exists in a newer build,
+becomes scenery and the script reports success having done nothing. Under
+`STRICT` it is reported instead, and the run ends with a line saying how many
+errors there were.
+
+`LOG=` writes at the Error level deliberately — not because it is an error, but
+because that level survives every `LogLevel` above Off, so a script sent to
+someone whose logging is at the default still produces a readable trace without
+asking them to change a setting first.
+
+### Sweeping a library and reporting on it
+
+| Command | Description |
+|---------|-------------|
+| `CHECK` | Judge the preset currently up and tally it: shader compile errors, and textures it asked for and did not get |
+| `REPEAT=count,line` | Jump back to `line`, at most `count` times, then fall through |
+| `LOGSUMMARY` | Write the tally so far into `debug.log` |
+
+`REPEAT` is the only bounded backward jump in the language, and it is what makes
+a report possible at all: `LINE=` is unconditional, so a sweep written with it
+runs until someone presses Stop — and a run that never ends never prints a
+summary. `line` is counted from 0, ignoring comments and counting blank lines.
+
+`CHECK` counts missing textures separately from shader errors because they fail
+differently. A preset with a missing texture **compiles, renders, and is wrong**
+— anything that only asks "did the shaders build" scores it a pass.
+
+Both counters are per preset, reset when each one loads, so a sweep names the
+preset at fault rather than reporting a running total.
+
+`resources\scripts\sweep-report.txt` ships as a working sweep. It walks whatever
+preset directory the app is currently using; turn Random off first if you want
+it walked in order. The run ends with:
+
+```
+SCRIPT CHECK: FAIL shader_errors=1 textures_missing=0  C:\...\some preset.milk
+SCRIPT SUMMARY: checked=200  shader_failures=1  texture_failures=0  unknown_commands=0
+SCRIPT: finished -- 0 errors
+```
+
+Ready-made examples ship as `resources\scripts\selftest.txt` and
+`resources\scripts\sweep-report.txt`.
+
+```
+STRICT
+LOG=--- self-test begins ---
+LOGSTATE
+
+NEXT
+WAITREADY
+LOGSTATE
+
+LOG=--- self-test ends ---
+STOP
+```
+
+These are also reachable over the named pipe, so a harness can run a script
+file: `SCRIPT_LOAD=<path>` (replies `SCRIPT_LOADED=<lines>|<path>`),
+`SCRIPT_PLAY`, and `SCRIPT_STOP` (replies `SCRIPT_STOPPED|errors=<n>`).
+
 ### Preset Control
 
 | Command | Description |
@@ -112,23 +187,70 @@ The same values also appear in the `SETTINGS\|` batch as `ORDER=`, `INTERVAL=` a
 
 #### Per-display instances and profiles
 
-A display set to `child` holds its own preset -- its own preset directory, startup preset and cycle -- and advances on its own timer, independently of the main window and of the other displays. `SIGNAL\|NEXT_PRESET` nudges every such display to pick its *own* next preset.
+A display renders in one of **three** tiers, cheapest first:
 
-> The keyword is `child` for compatibility only. It once meant a second `MDropDX12.exe -child` process; since v3.0 one process renders every display, and the mode means "this display holds a preset of its own". Old spellings stay accepted -- an unrecognised keyword falls through to the script engine, so a renamed command fails *silently*.
+| Tier | Preset | Where it renders |
+|---|---|---|
+| `mirror` | follows the primary | in this process |
+| `preset` | its own | in this process |
+| `child` | its own | its own `MDropDX12.exe -child` process |
 
-`child` is mutually exclusive with the independent-mirror render, which re-draws the *primary's* preset at another orientation and cannot hold a preset of its own.
+`preset` is the middle tier and usually the one wanted: a display holding its own preset does **not** need a process of its own. `own` is accepted as a synonym for `preset`, because it is the obvious guess.
+
+**`child` has no measured performance benefit, and is kept as a choice rather than a recommendation.** It used to be described as buying safety for "a preset heavy enough to endanger the device", and the app used to promote displays to it automatically on that basis. Both are gone (#261), because the measurements did not support either:
+
+- **Memory is not the reason.** Toggling a display's own preset in-process moves VRAM by about 60 MB; three independent presets in one process cost +100 MB over the same setup as mirrors, which is 0.66% of a 15 GB budget.
+- **Nor is speed.** Three independent renders of the heaviest preset here sustain 23/25/31 fps at 82% GPU *in one process*. And a child is worse for exactly the case it was supposed to help: Windows classifies QoS from the **focused** window and only one process can own it, so a child is throttled to about 66 fps precisely when it is asked to carry a heavy preset (#121).
+
+What a child still genuinely buys is **fault isolation** — its device loss is its own, so a display that dies does not take the session with it — at the cost of a whole second instance. Choose it for that, not for frame rate.
+
+Full measurements, the governors that replaced automatic isolation, and the measurement traps involved are in [`multidisplay_cost.md`](multidisplay_cost.md).
+
+A display holding its own preset advances on its own timer, independently of the primary and of the other displays, and `SIGNAL\|NEXT_PRESET` on the parent nudges each of them to pick its *own* next preset. Both own-preset tiers are mutually exclusive with `mirror`, which re-draws the *primary's* preset at another orientation and cannot hold a preset of its own.
 
 | Command | Description |
 |---------|-------------|
-| `SET_DISPLAY_MODE=<N>,<off\|mirror\|child>` | How DISPLAY N renders. `N` is the device-name index, so `\\.\DISPLAY3` is `3` |
-| `GET_CHILDREN` | One `CHILD\|display=…\|pid=…\|preset=…\|interval=…\|order=…\|state=…\|reason=…` line per own-preset display, then `CHILDREN_END`. `pid=` is this process; `state=` is `ready`, `starting` or `absent` |
-| `DIAG_CHILDREN` | Kept, and always healthy: `worker=1`, `queued=0`, `inprocess=1`, plus `children=` (the count of own-preset displays). There is no worker thread or spawn queue to be unwell |
+| `SET_DISPLAY_MODE=<N>,<off\|mirror\|preset\|child>` | How DISPLAY N renders. `N` is the device-name index, so `\\.\DISPLAY3` is `3` |
+| `GET_DISPLAY_MODE[=<N>]` | `DISPLAY_MODE\|<N>=<off\|mirror\|preset\|child>,device=…,auto=…,independent=…` per monitor, then `\|END`. `auto=1` means the tier was raised to `child` automatically because the preset tripped the GPU-cost gate. Omit `=<N>` for every monitor |
+| `GET_CHILDREN` | One `CHILD\|display=…\|pid=…\|preset=…\|fps=…\|interval=…\|interval_raw=…\|order=…\|lock=…\|lock_raw=…\|dir=…\|startup=…\|state=…\|reason=…\|rect=…\|visible=…\|minimized=…\|fs=…` line per child, then `CHILDREN_END`. `fps=` is the rate that child is **actually rendering at**, collected from the poll that already fetches its preset — empty until it has answered once, so "not known yet" stays distinct from a real 0. It is the only way to see it: `DIAG_MIRRORS` reports per-surface figures for **in-process** surfaces only, so a display moved to its own process is invisible to every other frame-rate measurement. **One message per child**, so a client must read until the terminator rather than matching the first reply — a matcher that the terminator also satisfies returns `CHILDREN_END` and silently drops every row. `preset=` is what the child last reported it has loaded and `startup=` what it was configured with, so the two disagreeing is the signal that a child drifted off its preset. `interval_raw`/`lock_raw` keep the `-1` "inherit" sentinel visible where `interval`/`lock` show the resolved value |
+| `DIAG_CHILDREN` | Child-worker health: `worker=`, `event=`, `job=`, `queued=`, `children=`, `pending=`, `failed=` |
+| `SET_DISPLAY_WATERMARK=<N>,<0\|1>` | Watermark mode for **one** display. `N` is the device-name index throughout, and naming the display the render window is on addresses *this* instance — the primary is an ordinary row, not a special index. A child is relayed `SET_WATERMARK=`, since it owns its window outright and the style pass cannot reach it; an in-process display records the intent and the style pass applies it |
+| `GET_DISPLAY_WATERMARK[=<N>]` | `DISPLAY_WATERMARK\|<N>=<0\|1>,device=…,ownProcess=…` per monitor, then `\|END` |
+| `SET_DISPLAY_ENABLED=<N>,<0\|1>` | Turn display N on or off. Starts or stops its child if it owns one |
+| `SET_DISPLAY_PRESET=<N>,<path>` | Show a preset on display N **now**. Transient — it does not become that display's startup preset |
+| `SET_DISPLAY_STARTUP_PRESET=<N>,<path>` | The preset display N returns to when its instance restarts |
+| `SET_DISPLAY_PRESET_DIR=<N>,<path>` | The folder display N cycles through; empty inherits the parent's |
+| `SET_DISPLAY_ORDER=<N>,<0\|1>` | Random (0) or sequential (1) order on display N |
+| `SET_DISPLAY_TIME_BETWEEN=<N>,<sec>` | Cycle interval for display N. `0` never cycles, `-1` inherits the parent's |
+| `SET_DISPLAY_MSGMAX=<N>,<-1\|0..n>` | How many messages display N shows at once; `-1` inherits the main window's, which cannot itself inherit. The supertext slots are **one shared pool**, so without this a busy panel takes them all and the other screens fall silent |
+| `DISPLAY_NEXT=<N>` / `DISPLAY_PREV=<N>` | Advance or step back **display N only**, leaving every other display where it is |
+| `CHILD_TEST_WINDOWS=<auto\|off\|tiny\|hidden>` | **Testing.** How a child's window comes up; `auto` follows testing mode. Applies to the next spawn |
+| `SET_DISPLAY_CHILD_RECT=<N>,<x>,<y>,<w>,<h>` | **Testing.** Where display N's child window goes in `tiny` mode; `w=0` restores the corner default |
 | `SAVE_DISPLAY_SNAPSHOT` | Bank every screen's **current** preset as a timestamped profile |
 | `LIST_DISPLAY_PROFILES` | One `DISPLAY_PROFILE\|<name>` line per saved profile, then `DISPLAY_PROFILES_END` |
 | `NEXT_DISPLAY_PROFILE` / `PREV_DISPLAY_PROFILE` | Load the next/previous saved profile, wrapping |
 | `SAVE_DISPLAY_PROFILE=<path>[\|primary=1][\|messaging=1]` | Write the whole display state to a JSON profile |
 | `LOAD_DISPLAY_PROFILE=<path>` | **Replace** the display state with a profile — anything it does not name is turned off |
 | `GET_DISPLAY_PROFILE` | Path of the profile last saved or loaded |
+
+#### Profiles by name
+
+The verbs above take a **path**. There is a name-addressed set as well, and it is
+the one to prefer: a client should not have to know where the folder is, and a
+profile saved by name lands in the right place automatically. Gate on the
+`displayprofiles` feature token.
+
+| Command | Reply | Description |
+|---------|-------|-------------|
+| `DISPLAY_PROFILE_LIST` | `DISPLAY_PROFILE\|file=…\|name=…` per profile, or `DISPLAY_PROFILE_NONE` | Saved profiles, as leaf and display name. **One message** with the rows newline-joined, not a stream with a terminator |
+| `DISPLAY_PROFILE_SAVE=<name>[\|primary=1][\|messaging=1]` | `DISPLAY_PROFILE_SAVED\|file=…` | Save by name. An empty name banks a timestamp. **Does not** change the startup default — a save should not silently decide what loads at boot |
+| `DISPLAY_PROFILE_LOAD=<name>` | async `PROFILE_LOADED=<path>` | Load by name. Errors come back as `DISPLAY_PROFILE_ERR\|reason=unknown_profile` or `…\|reason=malformed` |
+| `DISPLAY_PROFILE_DELETE=<name>` | `DISPLAY_PROFILE_DELETED\|file=…` | Delete a saved profile (to the Recycle Bin) |
+| `DISPLAY_PROFILE_STARTUP[=<name>]` | `DISPLAY_PROFILE_STARTUP\|file=…\|enabled=<0\|1>` | Query, or set which profile loads at startup. An empty name disables it |
+
+Files whose name begins with `_` never appear in these listings — they are
+bookkeeping, not profiles anybody chose. `_idle_restore.json` is the one in use
+today (see [Idle Timer](#idle-timer-ipc)).
 
 `state` answers "why is there no child on this display", which used to be
 unanswerable — `absent` meant three different things and a remote could only
@@ -218,6 +340,7 @@ These commands set defaults for subsequent bare-text messages:
 | `FONT=Arial` | Set default font face |
 | `SIZE=20` | Set default font size |
 | `COLOR=255,0,0` | Set default color (R,G,B) |
+| `STYLE=<name>` | Select a message **animation profile** by name — the entrance, movement and fade set up in the Text Animations window. Applies to messages that follow, like the other defaults here |
 | `CLEARPARAMS` | Reset font, size, and color to defaults (Arial, 20, white) |
 
 ### Sprites and Messages
@@ -228,6 +351,9 @@ These commands set defaults for subsequent bare-text messages:
 | `CLEARTEXTS` | Remove all active text messages |
 | `SEND=00` | Send a string to the visualizer window (e.g., trigger sprite 00) |
 | `SEND=0x73` | Send a virtual key code (hex) to the visualizer (e.g., 0x73 = F4) |
+| `BTN=<n>` | Press Button Board button `n` — whatever that button is bound to, without needing to know what it is |
+| `SONGINFO` | Open the Song Info window |
+| `SOUNDINFO` | Toggle the sound debug display |
 
 ### Visual Parameters
 
@@ -254,8 +380,23 @@ These adjust real-time rendering parameters:
 | `GET_FPS` | Read the primary cap. Reply `FPSCAP=<fps>` | — |
 | `SET_MIRROR_MAXFPS=N` | Independent-mirror worker cap. Reply `MIRROR_MAXFPS=<fps>` | 0 = parity with primary, else 5-240 |
 | `GET_MIRROR_MAXFPS` | Read the mirror cap. Reply `MIRROR_MAXFPS=<fps>` | — |
+| `SET_MIRRORCAP=N` | Persisted mirror swap-chain long-edge cap. Reply `MIRRORCAP=<applied>\|setting=<N>` | -1 derive from the VRAM budget (default), 0 no cap, else a fixed long edge |
+| `DIAG_MIRRORCAP=N` | The same cap, **unpersisted** — an experiment, not a decision. Reply `MIRRORCAP=<applied>\|source=<derived\|setting\|diag>\|setting=<n>\|derived=<n>\|budgetMB=<n>\|share=<pct>` | -1 hands control back to the derivation |
+| `SET_LADDER_TRIGGER=<-1\|fps>` | `LADDER_TRIGGER=<applied>\|setting=\|derived=\|target=` | The rate below which the distress ladder falls back to copy mirrors. `-1` derives it from the frame cap — 34 when that is high or unset, two thirds of it at or below 35 — and a value pins it. **Persisted.** It is a setting rather than a diagnostic because whether a given multi-display rate is acceptable is a judgement about the person watching: measured on a 3-display rig, three independent renders of the heaviest preset here reach ~35 fps achievable, one frame the right side of the derived 34, so someone who wants that case to fall back has to say so |
+| `GET_LADDER_TRIGGER` | as above | Read it back, including what the derivation *would* choose, so an override can be compared against the rule it replaced |
 | `SET_VSYNC=N` | Wait for vblank when presenting. Reply `VSYNC=<0\|1>` | 0 = off, 1 = on |
 | `GET_VSYNC` | Read VSync for every display output (batch, see below) | — |
+
+`MIRRORCAP` is a **size** cap, not a rate cap: it limits the long edge of each
+mirror swap chain. It defaults to a value derived from the reported VRAM budget
+— a tenth of the budget, split between the enabled monitor outputs, converted to
+a 16:9 long edge and rounded down to a multiple of 256 so ordinary drift in the
+budget does not resize anything. On any ordinary GPU that lands at the 8192
+ceiling, which is past every panel it will meet, so the derived cap is
+effectively "no cap"; a small card gets a real one. `derived=` in the
+`DIAG_MIRRORCAP` reply always reports that computation even when a setting or a
+diagnostic override is what is actually applied, so the two can be compared
+without clearing either (#254).
 
 The cap is any integer in range, not a menu choice — a deliberately unusual
 value such as `SET_FPS=137` is the cleanest way to tell "this surface is
@@ -278,10 +419,10 @@ only wants "is VSync on" parses what it always did.
 they differ. The primary is forced to vsync whenever mirrors are active, so it
 can report `vsync=0|effective=1`. Mirror panels present unsynced by
 construction and are always `0`, whatever the setting says — `source=fixed`
-marks a value no setting reaches. `source=shared` marks an own-preset display:
-it presents under the one process's flag, so `SET_VSYNC` reaches it with
-nothing to broadcast. (It read `source=broadcast|type=child` while each such
-display was a separate process with its own copy of the flag.)
+marks a value no setting reaches. `source=broadcast` marks a child, which is a
+separate process with its own copy of the flag that `SET_VSYNC` pushes to it;
+a bare `-child` with no owner receives no broadcast and must be asked on its own
+pipe.
 
 **`SET_VSYNC=0` is a prerequisite for any frame-rate measurement.** VSync
 defaults **on**, and with it on every surface presents at the panel's refresh
@@ -425,6 +566,69 @@ LAUNCH=notepad.exe
 
 Opens (or focuses) an external application. If the application is already running, it brings it to the foreground.
 
+#### With arguments
+
+Quote the path, and everything after it is passed as arguments:
+
+```
+LAUNCH="C:\Python313\python.exe" "resources\scripts\compare_milkwave.py" --presets 20
+LAUNCH="C:\Windows\System32\cmd.exe" /c echo hello
+```
+
+Two things change when a path is quoted:
+
+- Everything after the closing quote becomes the command line arguments.
+- It always starts a **new** process instead of focusing one that is already
+  running. Arguments are a request to *do something*, and handing focus to a
+  copy started earlier with different arguments would silently do nothing.
+
+The unquoted form is unchanged, including for paths with spaces in them —
+`LAUNCH=C:\Program Files\App\app.exe` still treats the whole value as the path.
+Only a leading quote turns arguments on.
+
+> `|` cannot be used as a separator here. The script tokenizer splits lines on
+> `|` before a command is dispatched, so `LAUNCH=app.exe|--flag` arrives as two
+> separate commands.
+
+`EXEC=<command>` runs a command line instead of opening an application. Use
+`LAUNCH=` when you want the window — it focuses an instance that is already
+running rather than starting a second one — and `EXEC=` when you only want the
+command to happen. The same `|` restriction applies.
+
+### Comparing against Milkwave
+
+Milkwave 4 ships MDropDX12 v3, so both are installed together and can be
+compared side by side. Two files ship for this:
+
+| File | What it is |
+|---|---|
+| `resources/scripts/compare-milkwave.txt` | the script you run |
+| `resources/scripts/compare_milkwave.py` | the helper it launches |
+
+Edit the two paths at the top of the `.txt` — your Python, and your Milkwave —
+then run it from the Script window or over IPC with `SCRIPT=compare-milkwave`.
+
+The helper plays the same preset in both engines, photographs each window,
+scores how far apart they look and writes `comparison/report.txt` ranked worst
+first, with a side-by-side PNG per preset.
+
+It makes the two comparable before measuring anything:
+
+- **Same window size.** Both engines render to the shape they are given, so
+  comparing a tall window against a wide one measures the window rather than the
+  engine. Both are set to the smaller of the two client sizes and put back
+  afterwards.
+- **Same audio device.** `DEVICE=` is sent to both, so they are not visualising
+  different sounds. Without this, one engine listening to a silent endpoint
+  looks exactly like a rendering difference.
+
+It never moves, raises or focuses either window — `PrintWindow` photographs a
+window that is completely covered — and it refuses to run if more than one copy
+of either program is up, rather than guessing which to reconfigure.
+
+Needs Pillow, and offers to install it if it is missing. Milkwave must not be
+minimised: a minimised window has nothing to photograph.
+
 ## Examples
 
 ### Basic Preset Sequence
@@ -554,16 +758,51 @@ STOP
 
 MDropDX12 listens for commands on a Named Pipe at `\\.\pipe\Milkwave_<PID>` where `<PID>` is the visualizer's process ID. All script commands listed above also work over IPC. The commands below are additional IPC-only commands not available in script files.
 
+### Where to start
+
+The surface is large — around 290 commands — and most of it is one of a dozen
+subsystems. If you know what you are trying to do, start here rather than
+reading down:
+
+| I want to… | Go to |
+|---|---|
+| know what *this* build accepts | [`HELP`](#ask-the-running-build-help) — authoritative, unlike this file |
+| gate a client on a capability | [Knowing what a build supports](#knowing-what-a-build-supports) |
+| give each screen its own preset | [Per-display instances and profiles](#per-display-instances-and-profiles) |
+| save and restore a whole screen arrangement | [Profiles by name](#profiles-by-name) |
+| set up a walk-away screensaver | [Idle Timer](#idle-timer-ipc) |
+| put every screen up, then put them back | [Walk-away control](#walk-away-control) |
+| fix a preset that washes out to white | [Runaway feedback](#runaway-feedback-canvas-damp-and-frame-caps) |
+| rate, tag or annotate presets | [Preset annotations](#preset-annotations-ratings-flags-tags-and-notes) |
+| pin a shader or VFX profile to one preset | [Per-preset overrides](#per-preset-overrides) |
+| drive or photograph a tool window | [Driving the tool windows](#driving-the-tool-windows) |
+| work out why something looks wrong | [Diagnostics](#diagnostics) |
+| script a repeatable test | [Driving a test, or a bug report](#driving-a-test-or-a-bug-report) |
+| control volume and audio devices | [Audio](#audio), then [`mixer.md`](mixer.md) |
+
+**Two conventions worth knowing before you write a client.**
+
+*Prefer the absolute form to the toggle.* Where both exist —
+`SET_MIRROR_WATERMARK=<0|1>` beside `SIGNAL|MIRROR_WM`, `SET_BORDERLESS_FS=`
+beside `SIGNAL|BORDERLESS_FS` — the absolute one is there because driving a
+switch from a toggle means read, compare, and send only if they differ, and that
+is a race against anything else changing it.
+
+*Read until the terminator.* A command that answers with a list sends **one
+message per row** and then a terminator — `CHILDREN_END`, `WINDOWS_END`,
+`PRESET_ROWS_END`, `MIXER_END`, `END_BATCH`. A client that returns the first
+reply it sees will sometimes get the terminator and silently report nothing.
+
 ### Protocol
 
 - **Pipe name**: `\\.\pipe\Milkwave_<PID>` (discover via `CreateToolhelp32Snapshot` or the MCP server)
-- **One pipe per process, and one process.** A display that holds its own
-  preset used to be a second `-child` process serving
-  `\\.\pipe\mDxChild_<PID>`, kept out of the shared `Milkwave_` namespace so
-  discovery tools could not find it. Since v3.0 every display renders in the
-  one process and that namespace is gone. Address a display with a
-  `SET_DISPLAY_*` verb; `DISPLAY|<N>|<command>` no longer relays anywhere and
-  replies `err=no_relay` naming the verbs that replaced it.
+- **Child instances use a different namespace**: a display running as its own
+  process serves `\\.\pipe\mDxChild_<PID>` and **accepts connections only from
+  its parent**. `Milkwave_` is shared -- Milkwave Visualizer publishes it too,
+  and every discovery tool enumerates it looking for something to drive -- so a
+  child must not appear in it. The parent owns every external interface, which
+  is already why a child serves no TCP port and no mDNS advert. Drive a child
+  through the parent: `DISPLAY|<N>|<command>`, or a `SET_DISPLAY_*` verb.
 - **Message encoding**: UTF-16LE null-terminated wide strings
 - **Field delimiter**: `|` separates fields within a command
 - **Duplex**: The pipe supports bidirectional communication (e.g., `STATE` returns data)
@@ -572,6 +811,14 @@ MDropDX12 listens for commands on a Named Pipe at `\\.\pipe\Milkwave_<PID>` wher
   reconnects faster than the server can re-arm will still see `ERROR_PIPE_BUSY`
   (measured: none below ~1,800 connects/second, saturation at ~270,000).
   Clients should retry, as `WaitNamedPipe` does.
+
+**Over the network.** The same command vocabulary is served on TCP for LAN
+clients, which authenticate once per connection and are then remembered:
+
+| Command | Description |
+|---------|-------------|
+| `LIST_DEVICES` | Devices currently authorised for the TCP remote |
+| `DEAUTH_DEVICE\|<id>` | Revoke one device's authorisation and disconnect it |
 
 ### Ask the running build: `HELP`
 
@@ -592,8 +839,11 @@ Reassemble `HELP=JSON` by filtering messages that start with `HELP_JSON|`,
 sorting by the index, and concatenating the payloads - the chunks are numbered
 because a client's queue can also hold messages from an earlier batch.
 
-`protocol` increments when an existing command's contract changes, so a client
-can feature-detect without comparing version strings.
+`protocol` increments on **any** change a client can depend on — a new command
+or an added reply field counts, not only a breaking one — so a client can
+feature-detect without comparing version strings. See
+[Knowing what a build supports](#knowing-what-a-build-supports) for the numbered
+history and the `features` list that goes with it.
 
 Note that `VERSION` is matched **exactly**: `VERSION=<n>` remains the script
 command that sets `vis_version`.
@@ -636,9 +886,12 @@ Signal commands use the `SIGNAL|` prefix and are processed directly by the pipe 
 | Command | Response | Description |
 |---------|----------|-------------|
 | `DIAG_MIRRORS` | `MIRRORS\|…` | Rich mirror dump. Global: `main=WxH,mainPort,needSrv,canSample,anyOpp,anyIndepMilk3,shadertoy,compPso,slots,frame,skipFrames,allocHr,listHr,auxUsed,orient=WxH,orientReady,orientFrames,orientFb`. Per `monN`: enabled/opacity/clickthru/independent/skipped/portrait, swapsize/bufs, layered/visible, **path** (`orient`/`stretchMain`/`letterbox`/`copy`/`black`/`orientFail`), drawFI/presFI/presHr, ok/fail/skip/draws, mustBlock/oppIndep/wipe/paintMask, bb0/bb1/bb2 states. Use when debugging portrait landscape ghost / every-other-frame. |
-| `DIAG_WINDOW=<title>` | `WINDOW_CTRLS\|…`, one `WINDOW_CTRL\|…` per control, `WINDOW_CTRLS_END` | Every control on one of our own tool windows: `class`, `id`, `x`/`y`/`w`/`h` (client coords), `vis`, `enab`, `clip` (1 when the client edge cuts the control's RECTANGLE off), `tw` (the width the CONTROL would need to hold its text on one line, its own chrome included, so `textfits` is 0 exactly when `tw` > `w`), `textfits` (0 when the text does not fit the control it is in, 1 when it does, -1 where the question is not asked — an edit or a combo holds the user's data and scrolls it), `u=` the text's CODEPOINTS, and `text=` the text itself (`\|` escaped as `\|`, backslash as `\\`, CR/LF as `\r`/`\n`; decode left to right in ONE pass — the pipe is deliberately **not** `\p`, because almost every string here is a Windows path and a two-pass decoder turns `C:\resources\presets\` into `C:\resources|resets\`, which looks exactly like a truncated buffer). Title matched case-insensitively, whole title before prefix. `WINDOW_CTRLS=NOTFOUND` if no visible window matches. **The codepoints are the point:** a glyph button whose escape was mangled into the system codepage still prints as something, and only `u=` shows `U+E8E5` arriving as `00C3 00A8 0045 0035`. `clip` and `textfits` are different failures and neither implies the other: a button in the right place can still be drawn as `Ou` instead of `Out`. `textfits` is measured against this app's OWN drawing code — every button, check box and radio here is `BS_OWNERDRAW`, so the check-glyph reserve comes from `DrawOwnerCheckbox`, not from a system metric — which is one more reason it can only be answered in-process. |
+| `DIAG_WINDOW=<title>` | `WINDOW_CTRLS\|…`, one `WINDOW_CTRL\|…` per control, `WINDOW_CTRLS_END` | Every control on one of our own tool windows: `class`, `id`, `x`/`y`/`w`/`h` (client coords), `vis`, `enab`, `clip` (1 when the client edge cuts the control's RECTANGLE off), `tw` (the width the CONTROL would need to hold its text on one line, its own chrome included, so `textfits` is 0 exactly when `tw` > `w`), `textfits` (0 when the text does not fit the control it is in, 1 when it does, -1 where the question is not asked — an edit or a combo holds the user's data and scrolls it), `u=` the text's CODEPOINTS, and `text=` the text itself (`\|` escaped as `\|`, backslash as `\\`, CR/LF as `\r`/`\n`; decode left to right in ONE pass — the pipe is deliberately **not** `\p`, because almost every string here is a Windows path and a two-pass decoder turns `C:\resources\presets\` into `C:\resources\|resets\`, which looks exactly like a truncated buffer). Title matched case-insensitively, whole title before prefix. `WINDOW_CTRLS=NOTFOUND` if no visible window matches. **The codepoints are the point:** a glyph button whose escape was mangled into the system codepage still prints as something, and only `u=` shows `U+E8E5` arriving as `00C3 00A8 0045 0035`. `clip` and `textfits` are different failures and neither implies the other: a button in the right place can still be drawn as `Ou` instead of `Out`. `textfits` is measured against this app's OWN drawing code — every button, check box and radio here is `BS_OWNERDRAW`, so the check-glyph reserve comes from `DrawOwnerCheckbox`, not from a system metric — which is one more reason it can only be answered in-process. |
 | `CAPTURE_WINDOW=<title>` | `WINDOW_CAPTURE_PATH=<png>` | A PNG of one tool window, written under `capture\`. Taken INSIDE the process with `PW_RENDERFULLCONTENT` — from another process `PrintWindow` does not render owner-drawn buttons at all, so the pin, the refresh and every glyph button come back as flat background and a broken one looks exactly like a working one. Use `CAPTURE` for the render output; this is for the windows. |
 | `DIAG_MESSAGES` | `DIAG_MESSAGES\|…` | Every term of the autoplay guard — `enabled`, `testing`, `autoplay`, `count`, `nextAt`, `now`, `interval`, `jitter`, `maxOnScreen`, `sequential`, `nextSeq`, `animProfiles` — then one `stN=` block per live supertext (`start`, `dur`, `fadeOut`, `burn`, `redraw`, `song`, `text`); free slots are omitted. Use when messages do not appear: `nextAt` far ahead of `now` means the clock moved backwards, and a `stN` with `start` in the future is a leaked slot. |
+| `DIAG_MIRRORPACE=<0\|1>` | `MIRRORPACE=<0\|1>,skipped=<n>` | The closed-loop mirror pacer (#230), which holds mirror GPU work below the TDR watchdog by dropping frames when the measured cost climbs. **Off exists only to demonstrate the device removal it prevents** — turn it off to show the failure is still reachable, then back on. `skipped=` is the running count of frames it dropped. |
+| `DIAG_BALANCE[=<0\|1>]` | `BALANCE=<0\|1>\|state=\|main=\|slowest=\|displays=\|ratio=\|cap=\|userCap=\|baseline=` | Adaptive frame-rate balancing (#261), which replaced the automatic isolation gate `DIAG_GPURISK` switched. When the main render exceeds **1.25×** the slowest independent display, the main is capped to that ratio and the displays re-measured. If they improved the cap is kept and tracks the current slowest, so the main rises again as they do; if they did **not** improve, the cap is released and the preset is `ruledout`, because some presets are simply slow and capping the main buys nothing. `state=` is `idle`/`probing`/`holding`/`ruledout`; `userCap=` is the frame cap being held on the user's behalf (`-1` when none). The verdict resets on a preset change. The cap is never written to `settings.ini`. Children are excluded from `slowest=`: they render in another process, so capping this one frees them nothing. |
+| `SET_MIRROR_WATERMARK=<0\|1>` | `MIRROR_WATERMARK=<0\|1>` | Watermark mode for **every** mirror at once — absolute, not a toggle. Per-display is `SET_DISPLAY_WATERMARK=<N>,<0\|1>`; the primary's own is `SET_WATERMARK=<0\|1>` / `GET_WATERMARK`. |
 | `SET_MIRROR_WIPE` | `MIRROR_WIPE=1` | Re-arm full flip-chain wipe (clears paint masks). `SET_MIRROR_WIPE=reinit` also force-recreates mirror swap chains. |
 | `SET_MIRROR_OPACITY=<1-100>` | `MIRROR_OPACITY=<N>` | Set opacity for all monitor mirrors (or `N,val` for DISPLAY N) |
 | `SET_MIRROR_CLICKTHRU=<0\|1>` | `MIRROR_CLICKTHRU=<N>` | Set click-through for all monitor mirrors |
@@ -651,6 +904,8 @@ Signal commands use the `SIGNAL|` prefix and are processed directly by the pipe 
 | `ALWAYS_ON_TOP` | `ALWAYS_ON_TOP=<N>` | Toggle always-on-top |
 | `MOVE_TO_DISPLAY=<N>` | `MOVED_TO=<device>` | Move render window to center of display N (1-based index into monitor list) |
 | `SET_WINDOW=<x>,<y>,<w>,<h>` | `WINDOW=(<x>,<y>)-(<x2>,<y2>) <w>x<h>` | Set render window position and size. Use w=0,h=0 to move without resizing |
+| `GET_WINDOW[=<title>]` | `WINDOW\|role=\|display=<N>\|device=\|pid=\|title=\|x=\|y=\|w=\|h=\|client=WxH\|monitor=\|visible=\|minimized=\|maximized=\|topmost=\|dpi=` | Where a window IS. Bare gives the render window; a title matches one window (whole title before prefix, case-insensitive), `WINDOW=NOTFOUND` if none. Screen coordinates, because that is the frame a client arranging itself around us has to reason in. `client=` is **not** redundant with `w`/`h`: the render cost, the swap-chain size and every capture are client-sized, while a layout must reserve the FRAME — on a borderless window the two are equal, on a tool window they differ by caption and border, and that difference is exactly the margin a layout gets wrong when it only has one of them. `role=` is `render`, `mirror`, `child` or `tool` — with several displays these look identical from outside, and only the app can tell them apart. `display=` is the 1-based index `GET_DISPLAY_MODE` uses and `device=` its device name, so the two verbs join without inferring a monitor from coordinates; `pid=` appears only for a child, which runs in its own process. `monitor=` is where Windows says the window actually is, as against `device=` which is where the engine assigned it — normally identical, and worth being able to see when they are not. Device names are emitted raw, unescaped, matching `GET_DISPLAY_MODE` |
+| `GET_WINDOWS` | `WINDOWS\|count=<n>`, one `WINDOW\|…` per window, then `WINDOWS_END` | Every window this app owns — render window, in-process mirrors, tool windows, **and children**, each with the fields above plus `class=`. A child renders in its **own process**, so it cannot be found by an enumeration filtered to our pid and is contributed from the child registry instead; without that a three-display setup with two children reports one window and looks perfectly correct. A child spawned whose window has not appeared yet is reported as `state=nowindow` rather than omitted, since "waiting for it" and "not a child" are different answers. Hidden ones are listed with `visible=0`, since a child in hidden mode is a real window with a real rect; zero-area windows are dropped, because the IME plumbing Windows attaches to every process carries a title and would otherwise be three rows of noise. A **closed** tool window does not appear at all: `ToolWindow::Close` destroys it, so its remembered position lives in the ini rather than in an HWND. Terminated, unlike `UI_LIST` |
 
 ### Audio
 
@@ -666,17 +921,37 @@ Signal commands use the `SIGNAL|` prefix and are processed directly by the pipe 
 | `GET_DEVICE_VOLUME` | Query current device volume and mute state. Responds with `DEVICE_VOLUME=N\|muted=0\|1` |
 | `SET_DEVICE_MUTE=0\|1` | Mute (1) or unmute (0) the audio device. Responds with `DEVICE_MUTE=0\|1` |
 | `TOGGLE_DEVICE_MUTE` | Toggle device mute state. Responds with `DEVICE_MUTE=0\|1` |
-| `MIXER_STATE` | Every mixer channel, fader, route and device. Answers in chunks bracketed by `MIXER_BEGIN` / `MIXER_END` — read until `MIXER_END` |
-| `MIXER_VIEW` | The fader list as DRAWN — see `docs/mixer.md` |
-| `MIXER_ORDER_REV` | The arrangement token alone |
-| `MIXER_ORDER_SET=<rev>\|<key>,<key>,…` | Push a whole fader arrangement |
-| `MIXER_PROFILE_LIST` / `_SAVE=` / `_LOAD=` / `_DELETE=` | The saved mixer profiles: levels and layout together |
-| `MIXER_ENABLE=0\|1` | Turn the audio mixer subsystem on or off. Off by default. Responds `MIXER_ENABLED=0\|1` |
-| `MIXER_SUBSCRIBE=0\|1` | Ask for live updates. Gates all provider polling. Responds `MIXER_SUBSCRIBED=0\|1` |
+| `GET_AUDIO_DEVICES` | Every capture and render device this build can see |
+| `SET_AUDIO_GAIN=<n>` / `GET_AUDIO_GAIN` | Input gain applied before the FFT, independent of the Windows device volume |
+| `GET_AUDIO_DIAG` / `DIAG_AUDIO` | What the capture is actually receiving — the first thing to read when a preset looks deaf |
+| `AUDIO_PROFILE=<name>` | Apply a saved audio profile (the response curves that make this engine sound like another) |
+| `AUDIO_PROFILE_LIST` / `AUDIO_PROFILE_CLEAR` | List them; drop back to the built-in response |
+
+#### Mixer
+
+The mixer is a subsystem of its own and **off by default**. The verbs below are
+the ones worth knowing from a script; the whole surface — routes, failover,
+groups, profiles and the view model — is in [`mixer.md`](mixer.md).
+
+| Command | Description |
+|---------|-------------|
+| `MIXER_ENABLE=0\|1` | Turn the subsystem on or off. Responds `MIXER_ENABLED=0\|1` |
+| `MIXER_SUBSCRIBE=0\|1` | Ask for live updates. Gates **all** provider polling, so leaving it off costs nothing |
+| `MIXER_STATE` | Every channel, fader, route and device. Answers in chunks bracketed by `MIXER_BEGIN` / `MIXER_END` — read until `MIXER_END` |
 | `MIXER_SET=<ch>\|<fader>\|<0.0-1.0>` | Set one fader's volume. Responds with that `MIXER_FADER` record, or `MIXER_ERR\|reason=…` |
-| `MIXER_MUTE=<ch>\|<fader>\|<0\|1\|toggle>` | Mute, unmute or toggle one fader. Responds `MIXER_MUTED\|…` |
+| `MIXER_MUTE=<ch>\|<fader>\|<0\|1\|toggle>` | Mute, unmute or toggle one fader |
+| `MIXER_REFRESH` | Re-enumerate devices now |
+| `MIXER_BATTERY` | Headset battery, where the device reports one |
+| `MIXER_PROFILE_LIST`, `MIXER_PROFILE_SAVE=<name>`, `MIXER_PROFILE_LOAD=<name>`, `MIXER_PROFILE_DELETE=<name>` | Saved mixer profiles — levels and layout together |
+| `MIXER_FADER_NAME=<ch>\|<fader>\|<name>` | Rename one fader |
+| `MIXER_RENAME_DEVICE=<id>\|<name>` | Rename a device everywhere it appears |
+| `MIXER_HIDE=<ch>\|<fader>\|<0\|1>` / `MIXER_HIDDEN` | Hide a fader from the drawn list; query what is hidden |
+| `MIXER_WINDOW=<0\|1>` | Show or hide the Mixer window |
+| `MIXER_CFG_FILE=<path>` / `MIXER_CFG_PATH` | Point the mixer at another config file, and read back which one is in use. **A test must set this** rather than write the real one |
+| `MIXER_ALLOW_MOVE=<route>\|<deviceId>\|<delta>` | Reorder a route's allowlist — the order failover tries devices in |
+| `MIXER_CONFIRM_STATUS`, `MIXER_CONFIRM_BEGIN=`, `MIXER_CONFIRM_SET=`, `MIXER_CONFIRM_ANSWER=` | The "did that work?" prompt after a failover switch, driven without clicking it |
+| `MIXER_SONAR_RESTART` | Restart SteelSeries Sonar, which hangs often enough to need it |
 | `DIAG_MIXER` | Mixer subsystem state, for the probe harness |
-| `GET_VERSION` | This build's identity, including `protocol=` and `features=`. **Gate on those, not on the version string** — see below |
 | `MIXER_ORDER` | The STORED fader order, one `MIXER_ORDER` record per key, then `MIXER_ORDER_END\|count=…\|rev=…`. Not what the window draws — see `MIXER_VIEW` |
 | `MIXER_VIEW` | The fader list as DRAWN, with the view rules applied. One record per fader carrying `pos` (drawn row, `-1` if hidden), `order` (its index in `MIXER_ORDER` space), `hidden`, `pinned`, then `MIXER_VIEW_END` with the counts, the `rev` and the three view flags |
 | `MIXER_ORDER_REV` | Just the arrangement token, for a client checking whether the list it holds is still current |
@@ -692,14 +967,13 @@ Signal commands use the `SIGNAL|` prefix and are processed directly by the pipe 
 | `MIXER_ALLOW_REMOVE=<route>\|<deviceId>` | Remove a device from the allowlist |
 | `DIAG_FAILOVER` | Failover state for the default-render route |
 | `MIXER_SIM_DEVICE=<id>\|<present\|gone\|current\|forget>` | Testing mode only: drive the watcher without hardware |
-| `MIXER_PROFILE_LIST` / `_SAVE=` / `_LOAD=` / `_DELETE=` | The saved mixer profiles — levels and layout together |
 
 ### Knowing what a build supports
 
 `GET_VERSION` answers with the build's identity:
 
-    VERSION=3.0.0|build=…|config=Release|arch=x64|protocol=2|pid=…|child=0
-    |commands=224|script=49|signals=21|features=mixerview,mixerrev,mixerpush,mixerbattery,mixernames
+    VERSION=3.1.0|build=…|config=Release|arch=x64|protocol=10|pid=…|child=0
+    |commands=292|script=56|signals=21|features=mixerview,mixerrev,mixerpush,…,idleconfig
 
 **Gate on `protocol` and `features`, never on the version string.** A version is
 what a release is called; these two describe the shape of the wire, which is
@@ -710,8 +984,16 @@ depend on — a new command or an added field counts, not only a breaking one. I
 stood at 1 through the whole of the v3 work under the old "only when an existing
 command's contract changes" rule, which is why the rule changed (forgejo#74).
 
-    1  the original surface, through the v2.11.0 release
-    2  the mixer view, the arrangement token, and both fader fields
+    1   the original surface, through the v2.11.0 release
+    2   the mixer view, the arrangement token, and both fader fields
+    3   the hotkey diagnostics: what is bound globally, and what is HELD
+    4   groups= on MIXER_FADER
+    5   named display-profile IPC, and DISPLAY_PROFILE_STARTUP
+    6   SET_ALL_FULLSCREEN=/GET_ALL_FULLSCREEN, fs= on GET_CHILDREN
+    7   SET_IDLE_ACTIVE=/GET_IDLE_ACTIVE — trigger the idle action on demand
+    8   SET_VSYNC=/GET_VSYNC
+    9   SET_MIRROR_WATERMARK= — the absolute form, alongside the toggles
+    10  the idle timer is configurable and resettable from a remote
 
 `features` names capabilities individually, because a client usually degrades
 per feature rather than per build — MilkDrop Remote has a separate fallback for
@@ -726,6 +1008,16 @@ three of the four.
 | `mixerbattery` | `battery=` on `MIXER_FADER` |
 | `mixernames` | `chwindowsName=` on `MIXER_FADER` |
 | `mixergroups` | `MIXER_GROUPS`, `MIXER_GROUP_SET`, `MIXER_GROUP_NUDGE`, `MIXER_GROUP_MUTE`. **Replaces the `MIXER_SLOT*` verbs**, which are gone — a client seeing this token must stop sending them |
+| `hotkeydiag` | `DIAG_HOTKEYS` and friends: what is bound globally, and whether this process actually **holds** the combination or another application owns it |
+| `mixerfadergroups` | `groups=` on `MIXER_FADER` — which volume-hotkey groups a fader belongs to |
+| `displayprofiles` | The name-addressed display profiles: `DISPLAY_PROFILE_LIST` / `_SAVE=` / `_LOAD=` / `_DELETE=` / `_STARTUP[=]` |
+| `allfullscreen` | `SET_ALL_FULLSCREEN=` / `GET_ALL_FULLSCREEN`, and `fs=` on `GET_CHILDREN` — the walk-away control and its restore point |
+| `idleactive` | `SET_IDLE_ACTIVE=` / `GET_IDLE_ACTIVE` — fire the idle action on demand, independent of the countdown |
+| `mirrorwatermark` | `SET_MIRROR_WATERMARK=<0\|1>`, the absolute form. A client gating on this can drive a switch instead of reading, comparing and toggling — which is a race |
+| `windowzorder` | `LOWER_WINDOW` exists alongside `RAISE_WINDOW`, so "bring to front" and "send to back" can be offered as a pair |
+| `displaywatermark` | `SET_DISPLAY_WATERMARK=` addresses **one** display, and `GET_DISPLAY_WATERMARK` reads it back |
+| `displaytiers` | `SET_DISPLAY_MODE=<N>,preset` — a display holds its own preset **in this process**, the middle tier between mirror and child |
+| `idleconfig` | The idle timer is configurable from a remote, not just switchable: `SET_IDLE_TIMEOUT=`, `SET_IDLE_ACTION=`, `SET_IDLE_PROFILE=`, `SET_IDLE_FULL_OPACITY=`, `RESET_IDLE_TIMER`, and two more fields on `IDLE_TIMER=` |
 
 Three rules the list follows, so that it can be trusted:
 
@@ -759,6 +1051,52 @@ should move with it.
 | `VAR_VERSION=N` | Vis version override | integer |
 | `VAR_QUALITY=N` | Render quality scale | 0.01-1.0 |
 | `VAR_AUTO=0\|1` | Auto quality adjustment | 0 or 1 |
+| `SET_MESH_SIZE=<gridX>` | Warp mesh width; the height follows at 3/4. Applied on the render thread | 8-192 |
+| `SET_INJECT_EFFECT=<0-4>` | Post-process effect: 0 off, 1 brighten, 2 darken, 3 solarize, 4 invert. `F11` cycles the same thing | 0-4 |
+
+### Runaway feedback: canvas, damp and frame caps
+
+A small number of presets look right in a window and wash out to a flat glare on
+a big screen. The cause is a feedback loop whose brake is spatial transport
+measured in **texels** while its gain is not, so a larger canvas weakens the
+brake and the loop diverges. A sweep of 1266 presets found 24 of them.
+
+Two independent settings address it — use either, both or neither — and a third
+caps the frame rate for presets that are simply expensive. The full explanation,
+including why damp can make a preset *worse* and when to prefer the canvas
+limit, is in [`annotations.md`](annotations.md#canvas-and-damp-two-fixes-for-a-runaway-feedback-loop).
+These are the verbs that drive it.
+
+**Global ceiling**
+
+| Command | Description |
+|---------|-------------|
+| `SET_CANVAS_MAX=<px>` | Global feedback-canvas ceiling, long edge in pixels. `0` means no limit |
+| `GET_CANVAS_MAX` | The global ceiling, the canvas actually in use, and what this preset asks for |
+
+**Per preset**, keyed by content hash, so the setting follows a preset that is
+renamed or moved. Each applies to the preset that is **running now**:
+
+| Command | Description |
+|---------|-------------|
+| `SET_PRESET_CANVAS_MAX=<px>` | Canvas limit for this preset. Capped by the global ceiling, so a value above it has no effect |
+| `PRESET_CANVAS_MAX_CLEAR` | Clear it |
+| `SET_PRESET_DAMP=<0..1>` | Feedback damp strength. `0` clears it. At or below a 1024 px long edge the multiplier is exactly 1.0 and this does nothing at all |
+| `PRESET_DAMP_CLEAR` | Clear it |
+| `SET_PRESET_FPS_MAX=<fps>` | Frame cap for this preset. It only ever **lowers** the active cap, so a value above the user's own cap does nothing; `0` clears it |
+| `PRESET_FPS_MAX_CLEAR` | Clear it |
+| `GET_PRESET_FPS_MAX` | `PRESET_FPS_MAX=<n>\|active=<n>` — this preset's own cap, and the cap actually in force |
+
+**Measuring and tuning**
+
+| Command | Description |
+|---------|-------------|
+| `DIAG_CANVAS_METRIC` | Mean luminance of an 8×8 reduction of the presented frame. This is how a runaway is *detected*: a preset heading for a flat glare climbs towards 1.0 |
+| `SET_CANVAS_TRACE=<0\|1>` | Write per-frame canvas metrics to `log/diag_canvas_trace.csv` |
+| `SET_DAMP_OVERRIDE=<mult\|clear>` | Raw per-frame feedback multiplier, **this session only** — nothing is persisted. For finding a value before committing it with `SET_PRESET_DAMP=` |
+
+A sweep that looks for runaways therefore reads: load the preset, let it settle,
+poll `DIAG_CANVAS_METRIC`, and record the ones that climb.
 
 ### Color
 
@@ -786,6 +1124,13 @@ range and the response reports what was stored.
 | `VFX_PROFILE_SAVE=<name>` | `VFX_PROFILE_SAVED=<name>` | Save current parameters under that name, replacing it if it exists |
 | `VFX_PROFILE_LOAD=<name>` | `VFX_PROFILE_LOADED=<name>` | Load a profile. Unknown name returns `VFX_PROFILE_LOADED=ERROR\|<name>` |
 | `VFX_PROFILE_IMPORT=<path>[\|<name>]` | `VFX_PROFILE_IMPORTED=<count>` | Import from a file this build did not write (see below). `<name>` names a single unnamed set |
+| `VFX_SCOPED_STATUS` | `VFX_SCOPED\|active=…\|profile=…\|dirty=…` | Whether a **scoped** edit is in progress, which profile it belongs to, and whether it has unsaved changes |
+| `VFX_SCOPED_KEEP=<0\|1>` | — | Answer the Keep/Discard prompt without clicking it. `1` writes the edit into the scoped profile |
+
+A *scoped* edit is one made while a profile is attached to the running preset:
+changing a parameter then asks whether to keep it in that profile or throw it
+away. `VFX_SCOPED_STATUS` and `VFX_SCOPED_KEEP=` answer that prompt from a
+script, which a test needs because the prompt otherwise blocks on a click.
 
 The three reset groups are exactly the window's three Reset buttons, which means
 `blendMode` counts as **transform** — its combo box sits on the Transform tab.
@@ -900,7 +1245,21 @@ chose, which replaces that name after asking.
 | Command | Description |
 |---------|-------------|
 | `SPOUTINPUT=0\|1\|senderName` | Enable/disable Spout input from a specific sender |
-| `SPOUT_SENDER=name` | Set Spout input sender name |
+| `SPOUT_SENDER=<name>` | Which sender to take input **from**. Stores the name only — `SPOUTINPUT=` or `SIGNAL\|ENABLESPOUTMIX` is what switches the input on, which is the order Milkwave Remote sends them in |
+
+### Video input mixing (IPC)
+
+A webcam, a video file or a Spout sender can be composited under or over the
+visualisation. The `SIGNAL|` verbs above switch it on and set it up; this reads
+it back:
+
+| Command | Description |
+|---------|-------------|
+| `GET_INPUT_MIX` | Source (0 none, 1 Spout, 2 webcam, 3 file), webcam device, opacity, whether it is on top, and the luma key |
+
+`source` is the single authoritative flag — a client should read that rather
+than inferring from whether a Spout sender name happens to be set. The full
+feature is in [`VideoInput.md`](VideoInput.md).
 
 ### Wave Parameters
 
@@ -947,9 +1306,111 @@ This allows external tools to receive track info updates in real time.
 
 ### Window (IPC)
 
+This instance's own window. For a *display's* window use the `SET_DISPLAY_*`
+verbs, and for a child use the relay — `DISPLAY|<N>|<command>`.
+
 | Command | Description |
 |---------|-------------|
-| `OPACITY=N` | Set window opacity (0.0-1.0) |
+| `OPACITY=<0.0-1.0>` | Window opacity |
+| `SET_WINDOW=<x>,<y>,<w>,<h>` | Position and size. `w=0,h=0` moves without resizing |
+| `SET_BORDERLESS_FS=<0\|1>` | Borderless fullscreen, **absolutely**. `SIGNAL\|BORDERLESS_FS` toggles instead |
+| `SET_MINIMIZED=<0\|1>` | Minimise or restore. Clears a screen **without retiring the child that owns it**, so coming back is instant |
+| `RAISE_WINDOW` | Bring to the top of the z-order, without taking focus |
+| `LOWER_WINDOW` | Send to the bottom, without taking focus. Drops always-on-top first — otherwise the move stays inside the topmost band and nothing visibly happens. Relayable, so `DISPLAY\|<N>\|LOWER_WINDOW` reaches a child |
+| `GET_HUD_STATE` | `HUD_STATE\|primaryOnly=…\|presetInfo=…\|fps=…\|debug=…\|child=…` — what the HUD is set to show, so a remote can draw its toggles in the right position instead of guessing |
+
+Prefer the absolute forms (`SET_…=<0|1>`) over the toggles for anything
+automated. A toggle forces a client to read the state, compare, and send only if
+they differ — which is a race, and the reason the absolute forms exist.
+
+#### Walk-away control
+
+| Command | Description |
+|---------|-------------|
+| `SET_ALL_FULLSCREEN=<0\|1\|2>` | `1` foregrounds and fullscreens the primary **and every ready child**; `0` puts each back exactly as it was found; `2` leaves them fullscreen regardless of what `0` would have restored |
+| `GET_ALL_FULLSCREEN` | Whether the primary, the mirrors and every enabled child are up — read from the **actual windows**, not from what was last requested |
+
+`0` restoring "exactly as found" is the point: it is a restore, not a toggle, so
+a screen that was already fullscreen before the call stays that way afterwards.
+`2` is the escape hatch for when that memory is wrong or unwanted.
+
+#### Driving the tool windows
+
+The Settings, Displays, Mixer and other tool windows can be opened and operated
+over the pipe. This exists so a test can exercise the UI without a human, and so
+a remote can put a window where the user is looking.
+
+| Command | Description |
+|---------|-------------|
+| `UI_SHOW=<window>[\|tab=N][\|ctrl=ID]` | Open a tool window by its **hotkey action name**, optionally at a page and on a control |
+| `UI_CLICK=<window>\|ctrl=ID` | Press a control in a tool window |
+| `UI_MOVE=<window>\|render` | Move a tool window; `render` centres it on the visualiser's display |
+| `UI_CLOSE=<window>` | Close a tool window |
+| `UI_LIST` | The tool windows this build has, and which are open |
+| `DIAG_WINDOW=<title>` | Every control on one of our tool windows: class, id, rect, visibility, **clipping**, whether the text fits, and its codepoints |
+| `CAPTURE_WINDOW=<title>` | A PNG of one tool window, under `capture\` |
+
+**The `UI_*` verbs and the `*_WINDOW` verbs name windows differently**, which is
+the thing that trips people up. `UI_*` takes the **hotkey action name** —
+`OpenSettings`, `OpenDisplays`, `OpenAnnotations`, `OpenAudioMixer`,
+`OpenPresetEditor` and so on; `UI_LIST` prints the full set. `DIAG_WINDOW=` and
+`CAPTURE_WINDOW=` take the window **title**, matched case-insensitively on the
+whole title before any prefix — `MDropDX12 Settings`. An unknown name comes back
+as `UI_ERR|reason=unknown_window`, and an unmatched title as
+`WINDOW_CTRLS=NOTFOUND`.
+
+`DIAG_WINDOW` and `CAPTURE_WINDOW` are how a layout is checked without eyes on
+the screen. Two failures they separate that look identical in a screenshot: a
+control can be in the right place and still have its text cut off (`textfits=0`
+with `clip=0`), and the codepoints show a glyph button whose escape was mangled
+into the system codepage — `U+E8E5` arriving as four characters — which
+otherwise just renders as *something*.
+
+`CAPTURE_WINDOW` is taken **inside** the process with `PW_RENDERFULLCONTENT`.
+From another process `PrintWindow` does not render owner-drawn buttons at all,
+so every glyph button comes back as flat background and a broken one looks
+exactly like a working one. Use `CAPTURE` for the render output and this for the
+windows.
+
+### Idle Timer (IPC)
+
+The walk-away screensaver: after a few minutes with no input the visualizer puts
+itself up, and on input it puts everything back.
+
+| Command | Response | Description |
+|---------|----------|-------------|
+| `GET_IDLE_TIMER` | `IDLE_TIMER=<enabled>\|<timeoutMin>\|<action>\|<profile>\|<fullOpacity>` | The whole configuration in one call |
+| `SET_IDLE_TIMER=<0\|1>` | `IDLE_TIMER=…` | Enable or disable the automatic countdown. Disabling while idle is on screen restores first, so nothing is stranded |
+| `SET_IDLE_TIMEOUT=<1-60>` | `IDLE_TIMER=…` | Minutes of no input before the action fires |
+| `SET_IDLE_ACTION=<0-3>` | `IDLE_TIMER=…` | `0` Fullscreen, `1` Stretch/Mirror, `2` Mirror all, `3` Load display profile |
+| `SET_IDLE_PROFILE=<name>` | `IDLE_TIMER=…`, or `IDLE_PROFILE=ERROR\|<name>` | The display profile action 3 loads. An empty value clears it. A name that does not exist is **refused now** rather than failing silently hours later with nobody watching |
+| `SET_IDLE_FULL_OPACITY=<0\|1>` | `IDLE_TIMER=…` | Take **every** display to 100% opacity while idle, whichever action is set |
+| `RESET_IDLE_TIMER` | `IDLE_TIMER_RESET=1` | Restart the countdown |
+| `SET_IDLE_ACTIVE=<0\|1>` | `IDLE_ACTIVE=<0\|1>` | Fire the idle action **now**, or restore. Independent of `SET_IDLE_TIMER=` — whether the countdown runs on its own says nothing about whether idle can be asked for |
+| `GET_IDLE_ACTIVE` | `IDLE_ACTIVE=<0\|1>` | Whether the idle action is on screen right now |
+
+The last two fields of `IDLE_TIMER=` were **appended**, so a client that reads
+only the first three keeps working unchanged.
+
+`RESET_IDLE_TIMER` is "pretend the user just did something", not a separate
+concept. The countdown is normally the system-wide last-input age, which no
+application can move, so this supplies a second baseline and the shorter of the
+two wins. Because real input would also *wake* an active idle session, so does
+this — when `AutoRestore` is on.
+
+**Action 3 does not reload a profile that is already loaded.** If the configured
+profile is the one `GET_DISPLAY_PROFILE` reports, idle changes only the opacity
+and the z-order. That matters: loading a profile disables every output,
+reapplies the whole state and reconciles children, so a needless reload would
+tear down and respawn a child process purely to brighten screens that were
+already arranged correctly.
+
+Opacity and z-order are transient and never reach `displays.json`. The display
+arrangement is not transient, so before loading a profile idle banks the current
+state to `_idle_restore.json` in the profile folder and reloads it on wake — and
+if the app is killed while idle is up, that file is loaded at the next start, in
+preference to the startup profile. Files whose name begins with `_` never appear
+in the profile lists; they are bookkeeping, not profiles anybody chose.
 
 ### Messages (IPC)
 
@@ -960,6 +1421,20 @@ MSG|text=Hello World|font=Segoe UI|size=30|r=255|g=255|b=255|time=5|x=0.5|y=0.5
 ```
 
 See the [Messages](#messages) section above for the full list of MSG parameters (text, font, size, r, g, b, time, growth, x, y, startx, starty, movetime, easemode, easefactor, shadowoffset, burntime, fade, fadeout, bold, ital, randx, randy, randr, randg, randb, box_alpha, box_col, box_left, box_right, box_top, box_bottom, profile).
+
+`MSG|` shows one message. These control the **autoplay** set — the messages the
+app shows on its own from `messages.ini`:
+
+| Command | Description |
+|---------|-------------|
+| `SET_MESSAGES=<0\|1>` | Enable or disable automatic message playback |
+| `GET_MESSAGES` | Whether it is enabled |
+| `TOGGLE_MESSAGES` | Toggle it |
+| `DIAG_MESSAGES` | Every term of the autoplay guard — `enabled`, `testing`, `autoplay`, `count`, `nextAt`, `now`, `interval`, `jitter`, `maxOnScreen`, `sequential` — then one `stN=` block per live message |
+
+Use `DIAG_MESSAGES` when messages stop appearing: `nextAt` far ahead of `now`
+means the clock moved backwards, and an `stN` with a `start` in the future is a
+leaked slot.
 
 ### State and Configuration
 
@@ -975,6 +1450,39 @@ See the [Messages](#messages) section above for the full list of MSG parameters 
 | `CLEARSPRITES` | Remove all active sprites |
 | `CLEARTEXTS` | Remove all active text overlays |
 | `LINK=N` | Link Remote to preset index N |
+| `GET_PRESET_STATUS` | One message with the preset and load status: file, description, loading, ready, Shadertoy buffers |
+| `GET_COVER_STATUS` | Whether the track-artwork sprite is on screen, and which image file it is |
+| `GET_NUMERIC_MODE` | Whether typing a digit selects a **sprite** or a **custom message** — the same digits mean different things in the two modes, so a remote drawing a keypad has to know which |
+
+#### Process and session control
+
+| Command | Description |
+|---------|-------------|
+| `SHUTDOWN` | Clean shutdown: saves settings, stops the render thread, exits |
+| `RESTART_DEVICE` | Recreate the D3D12 device — the same path a TDR recovery takes |
+| `TESTING_MODE[=<0\|1>]` | Freeze automatic preset changes and the idle timer, and ignore the keyboard. Bare form queries. **Never persisted** |
+| `SET_LOGLEVEL=<0-4>` / `GET_LOGLEVEL` | 0 Off, 1 Error, 2 Warn, 3 Info, 4 Verbose. The getter also reports the log directory |
+| `CLEAR_LOGS` | Delete everything under `log/` and reopen `debug.log` |
+| `CONFIG_EXPORT_INI` | Copy registry-held settings back into `settings.ini` and friends |
+| `SET_PIPE_NAME=<base>` | **Testing only.** Serve the pipe under another namespace so a harness instance is distinguishable from the real one |
+
+**`TESTING_MODE=1` is the switch to raise before driving this app in anger.** It
+stops the frame changing underneath a measurement, keeps a run out of
+`presets.json`, and stops tool windows saving the positions a test left them in.
+Raise it once at the start of a session and lower it at the end — cycling it
+around each individual step leaves the app in the normal state in between, which
+is exactly where a stray write gets in.
+
+#### Missing textures
+
+| Command | Description |
+|---------|-------------|
+| `SET_FALLBACK_TEX=<0-5>[\|<path>]` | What a preset gets when a texture it names is not found: `0` hue, `1` white, `2` black, `3` and `4` random, `5` a custom file |
+| `GET_FALLBACK_TEX` | The current style, file and SRV index |
+
+White is the multiplicative identity, which is why it is the safe default: a
+missing texture that falls back to black turns whatever it multiplies into a
+black screen, and that reads as a broken preset rather than a missing file.
 
 ### Preset Lists and Directory (IPC)
 
@@ -996,6 +1504,71 @@ LOAD_LIST=favorites
 SET_DIR=C:\MyPresets\collection1|recursive
 CLEAR_LIST
 ```
+
+### Preset annotations: ratings, flags, tags and notes
+
+`presets.json` records what you have learned about a preset — a rating, flags,
+tags, a note, how often it has played and for how long, plus any shader errors
+captured automatically. It is keyed by a **hash of the preset's normalised
+body**, not by filename, so everything here follows a preset that is renamed or
+moved. The database, the flags and the duplicate handling are described in
+[`annotations.md`](annotations.md).
+
+Two addressing forms. The plain verbs act on the preset that is **running now**;
+the `_FOR=` verbs take a content hash and act on any preset in the database,
+running or not.
+
+| Command | Description |
+|---------|-------------|
+| `SET_PRESET_RATING=<0-5>` / `SET_PRESET_RATING_FOR=<hash>,<0-5>` | Rate a preset. `0` clears the rating |
+| `SET_PRESET_FLAG=<name>,<0\|1>` / `SET_PRESET_FLAG_FOR=<hash>,…` | Set or clear one flag: `favorite`, `error`, `skip`, `broken`, `canvas` |
+| `SET_PRESET_TAG=<name>,<0\|1>` / `SET_PRESET_TAG_FOR=<hash>,…` | Add or remove a tag |
+| `SET_PRESET_NOTE=<text>` / `SET_PRESET_NOTE_FOR=<hash>,<text>` | Set the note |
+| `GET_PRESET_NOTE` / `GET_PRESET_NOTE_FOR=<hash>` | Read the note; empty if it has none |
+| `GET_PRESET_TAGS` | Every tag in use, with counts |
+| `GET_PRESET_FOLDERS` | Folders presets live in, with counts. A preset in two places counts in both |
+
+Nothing is recorded while **testing mode** is on, and presets under a folder
+named `TEST` never get an entry at all. Both gates block *writes* only — reads
+always work — so a measurement run cannot make itself the "most played".
+
+#### Browsing the database
+
+| Command | Description |
+|---------|-------------|
+| `BROWSE_PRESETS=<offset>,<count>[,q=][,folder=][,tag=][,flag=][,minrating=][,sort=name\|rating\|used\|time\|lastused]` | Page the database. One `PRESET_ROW\|` per entry, then `PRESET_ROWS_END` carrying the **filtered** total |
+
+`BROWSE_PRESETS` is what a remote's preset browser is built on: it filters and
+sorts server-side, so a client never holds the whole library. The terminator
+carries the filtered total rather than the database size, which is what a pager
+needs to draw its scrollbar.
+
+#### Per-preset overrides
+
+A preset can pin a shader override or a VFX profile to itself, overriding
+whatever its tags would otherwise select. See
+[`custom_shaders.md`](custom_shaders.md) for the override system itself.
+
+| Command | Description |
+|---------|-------------|
+| `PRESET_OVERRIDE_STATUS` | What each slot resolved to, and **whether a rule or the preset won** |
+| `SET_PRESET_SHADER_OVERRIDE=<name>` | Pin a shader override to this preset. An empty value means *explicitly none* |
+| `SET_PRESET_VFX_PROFILE=<name>` | Pin a VFX profile to this preset. An empty value means *explicitly none* |
+| `CLEAR_PRESET_OVERRIDE=<shader\|vfx>` | Remove the slot **entirely**, so tag rules apply again |
+
+Note the three-state distinction, which is the thing that catches people out:
+setting a slot **empty** means "this preset uses none", while `CLEAR_` removes
+the slot so the tag rules decide. They are not the same.
+
+#### Keeping the database honest
+
+| Command | Description |
+|---------|-------------|
+| `DIAG_ANNOT_MISSING` | Count entries whose preset file cannot be found |
+| `ANNOT_REMOVE_MISSING` | Purge those entries |
+| `DIAG_ANNOT_RESOLVE=<file>` | Where an entry's preset actually lives; an empty path means gone |
+| `DIAG_ANNOT_QUERY=<pattern>` | Count entries matching the Annotations window's own search predicate — so a test can check the search without driving the UI |
+| `DIAG_ANNOT_REPAIR` | Drop alias paths that hash to a **different** preset than the entry holding them |
 
 ### Shader Import (IPC)
 
@@ -1029,6 +1602,140 @@ These commands provide headless GLSL->HLSL shader import and conversion via the 
 **SHADER_CONVERT** is the same as `SHADER_GLSL` but does not apply the shader — it only converts and returns the HLSL. Useful for inspecting the GLSL->HLSL conversion output.
 
 **SHADER_SAVE** saves whatever was last imported/converted. Use `.milk3` extension for the JSON Shadertoy format or `.milk` for legacy MilkDrop format. Requires a prior `SHADER_IMPORT`, `SHADER_GLSL`, or `SHADER_CONVERT` call to populate the shader passes.
+
+### Diagnostics
+
+The `DIAG_*` family reports what the engine is **actually** doing, as against
+what it was asked to do. They are the difference between a bug report that says
+"it looked wrong" and one somebody can act on, and most of them exist because a
+specific wrong belief cost a debugging session.
+
+| Command | What it answers |
+|---------|-----------------|
+| `DIAG_MIRRORS` | The rich per-display dump: size, opacity, click-through, watermark, always-on-top, which **render path** each display took (`orient` / `stretchMain` / `letterbox` / `copy` / `black`), draw and present counts, and back-buffer states. Start here for anything about displays |
+| `DIAG_CHILDREN` | Child-worker health: `worker=`, `event=`, `job=`, `queued=`, `children=`, `pending=`, `failed=` |
+| `DIAG_LADDER[=<0\|1>]` | The distress ladder and its rung: 1 adaptive frame rate, 2 cheapest copy mirrors. Reports whether the frame is GPU-bound and the rate rung 1 is tracking |
+| `DIAG_GPU` | This process's GPU and VRAM cost, keyed by pid. Asking turns the sampler on for about 8s, and because the counter is a rate the **first** reply after a quiet period carries `gpu3d=-1` — poll twice about a second apart and read the second |
+| `DIAG_GPUTIME=<0\|1>[,<ms>]` | Per-stage GPU timing; logs frames where a stage exceeds `<ms>` (default 50). Averages over a frame hide the single draw that kills a device |
+| `DIAG_CONFIG[=flush]` | Settings-layer counters; `=flush` writes the cache out first |
+| `DIAG_UI_MODE` | Which full-frame overlay is up (regular / menu / load / settings …) and the settings cursor |
+| `DIAG_MESSAGES` | Every term of the autoplay message guard — see [Messages](#messages-ipc) |
+| `GET_RENDER_DIAG` | Rendering values (blur scales and biases), for cross-engine comparison |
+| `DIAG_BINDINGS` | Side-by-side SRV binding slots for the primary and the mirror |
+| `DIAG_DISPLAY_MODE=<0\|1\|2>` | Show the raw `VS[0]` or `VS[1]` render target instead of the composed frame |
+| `DIAG_CANVAS_METRIC` | Mean luminance of the presented frame — see [Runaway feedback](#runaway-feedback-canvas-damp-and-frame-caps) |
+| `GET_EEL_STATE [megabuf=S,C] [gmegabuf=S,C] [reg=S,C]` | Dump EEL `megabuf`, `gmegabuf` and `reg` values |
+| `TEST_EEL_ISOLATION` | Self-test that per-context EEL storage really is isolated |
+| `DUMP_SHADER` | Write the running shader sources to files under `log/` |
+
+**Hotkeys.** A binding can be configured and still not work, because another
+application owns the combination system-wide. These tell the two apart:
+
+| Command | What it answers |
+|---------|-----------------|
+| `DIAG_HOTKEYS` | One `HOTKEY\|` line per **global** binding, then `HOTKEYS_END`. `held=0` means another application owns that combination — the binding is correct and inert |
+| `DIAG_HOTKEY_SCAN` | One line per candidate combination, then `HOTKEY_SCAN_END`; status is `free` / `taken` / `ours`. For finding somewhere to put a new binding |
+| `DIAG_HOTKEY_BIND=<action>,<mod>,<vk>[,<scope>]` | Set a binding — scope `1` (default) global and re-registered, `0` local. **In memory only**, never written to `hotkeys.json`. `vk=0` unbinds. This is how a test drives a new action without pressing a key |
+| `DIAG_HOTKEY_CONFLICTS=<action>,<mod>,<vk>,<scope>` | What assigning that combination *would* unbind, before doing it |
+
+**Settings that two paths can disagree about.** Each of these exists because a
+preference and a live value were once the same variable, and changing one
+silently changed the other:
+
+| Command | What it answers |
+|---------|-----------------|
+| `DIAG_GLOBAL_PRESET_CYCLE` | The cycle interval the shutdown save *would* write — which loading a display profile must not change |
+| `DIAG_STARTUP_PRESET_LOCK` | The "Preset Lock on Startup" preference — which toggling the live lock must not change |
+| `DIAG_BATTERY` | HUD headset battery: toggle, percent, and which device it came from |
+| `DIAG_BATTERY_SIM=<0-100\|off>` | Force the HUD battery figure so its colour bands can be seen. In memory only |
+
+> `DIAG_SIMULATE_DEVICE_REMOVED` forces `DXGI_ERROR_DEVICE_REMOVED` to exercise
+> TDR handling. It **destroys the device** — the recovery path is what is under
+> test. A TDR is machine-wide, so it also takes down any other visualizer
+> running at the time.
+
+### Recipes
+
+Short end-to-end sequences for the things the newer commands were built for.
+Each line is one pipe message.
+
+**Set up a walk-away screensaver.** After ten idle minutes, load a saved screen
+arrangement and take every display to full brightness:
+
+```text
+SET_IDLE_ACTION=3
+SET_IDLE_PROFILE=evening
+SET_IDLE_FULL_OPACITY=1
+SET_IDLE_TIMEOUT=10
+SET_IDLE_TIMER=1
+GET_IDLE_TIMER
+```
+
+Try it without waiting ten minutes — `SET_IDLE_ACTIVE=1` fires the action now
+and `SET_IDLE_ACTIVE=0` puts everything back. `RESET_IDLE_TIMER` restarts the
+countdown, and wakes an active session exactly as a keypress would.
+
+If the profile you name is the one already loaded, idle skips the load and only
+changes opacity and z-order — a reload would tear down and respawn any display
+running in its own process, for screens that were already arranged correctly.
+
+**Give one screen its own preset, then bank the arrangement.** The middle tier
+(`preset`) holds its own preset without a second process — prefer it to `child`:
+
+```text
+SET_DISPLAY_MODE=2,preset
+SET_DISPLAY_PRESET_DIR=2,C:\Presets\ambient
+SET_DISPLAY_TIME_BETWEEN=2,45
+SET_DISPLAY_ORDER=2,1
+GET_DISPLAY_MODE
+DISPLAY_PROFILE_SAVE=three-screens
+```
+
+`DISPLAY_PROFILE_LOAD=three-screens` puts it back later. A profile is a
+**complete** state, so loading one turns off any display it does not mention.
+
+**Find presets that wash out to white.** A runaway climbs towards a flat glare,
+which `DIAG_CANVAS_METRIC` measures directly:
+
+```text
+TESTING_MODE=1
+PRESET=C:\Presets\suspect.milk
+GET_PRESET_STATUS           … poll until ready=1
+DIAG_CANVAS_METRIC          … wait a few seconds, then again
+DIAG_CANVAS_METRIC
+SET_PRESET_CANVAS_MAX=1024  … if it climbed
+TESTING_MODE=0
+```
+
+Poll `GET_PRESET_STATUS` rather than sleeping a fixed time: the machine a
+runaway matters on is the slow one, where a guessed delay is wrong. (Inside a
+**script file** the same wait is one word, `WAITREADY` — but that only holds a
+*playing* script, so over the pipe it does nothing and the poll is the way.)
+
+`TESTING_MODE=1` matters here: without it the preset advances underneath the
+measurement, and the run writes itself into `presets.json` as the most-played
+preset in the library.
+
+**Check a window's layout without looking at it.** The reply says which controls
+are clipped, and which have text that does not fit — two different faults that a
+screenshot cannot tell apart:
+
+```text
+UI_SHOW=OpenDisplays
+DIAG_WINDOW=MDropDX12 Displays
+CAPTURE_WINDOW=MDropDX12 Displays
+UI_CLOSE=OpenDisplays
+```
+
+**Put every screen up for a performance, then restore.** `0` restores each
+window exactly as it was found, so a screen that was already fullscreen stays
+that way:
+
+```text
+SET_ALL_FULLSCREEN=1
+… later …
+SET_ALL_FULLSCREEN=0
+```
 
 ### Fallback
 
@@ -1072,9 +1779,9 @@ Three properties, and they are what make this safe to have at all:
 - **Sticky while the connection lives.** `STRICT=OFF` stays off until that same
   client turns it back on.
 
-**`-test` instances start strict.** Their only caller is a test harness, which
-is not served by having its mistake rendered across a frame it is about to
-capture. Everything else starts lenient. (`-child` was the other, and is gone.) The exe-name convention counts: a copy
+**`-child` and `-test` instances start strict.** Their only callers are a parent
+process and a test harness, neither of which is served by having its mistake
+rendered. Everything else starts lenient. The exe-name convention counts: a copy
 called `MDropDX12_test.exe` is a test instance whether or not `-test` was given.
 
 Strictness applies only to the *final* fallback. Every script command - `SEND=`,

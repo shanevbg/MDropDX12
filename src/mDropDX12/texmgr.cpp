@@ -77,6 +77,8 @@ void texmgr::Init() {
     m_tex[i].base_y = 0.0f;
     m_tex[i].base_sx = 1.0f;
     m_tex[i].base_sy = 1.0f;
+    m_tex[i].bPendingKill = false;
+    m_tex[i].killFence = 0;
     m_tex[i].tex_eel_ctx = NSEEL_VM_alloc();
   }
 }
@@ -451,9 +453,41 @@ int texmgr::LoadTexFromPixels(const void* pixels, UINT imgW, UINT imgH, int iSlo
   return ret;
 }
 
+void texmgr::RetireTex(int iSlot, UINT64 fence) {
+  if (iSlot < 0 || iSlot >= NUM_TEX) return;
+  if (!m_tex[iSlot].pSurface) return;          // already gone
+  if (m_tex[iSlot].bPendingKill) {
+    // Earliest fence wins. A slot marked again on a later frame must not have
+    // its release pushed further out by the newer, higher value.
+    if (fence < m_tex[iSlot].killFence)
+      m_tex[iSlot].killFence = fence;
+    return;
+  }
+  m_tex[iSlot].bPendingKill = true;
+  m_tex[iSlot].killFence    = fence;
+  DebugLogAFmt(LOG_VERBOSE, "Sprite slot %d retiring at fence %llu (#225)",
+               iSlot, (unsigned long long)fence);
+}
+
+void texmgr::CollectRetired(UINT64 completedFence) {
+  for (int i = 0; i < NUM_TEX; i++) {
+    if (m_tex[i].bPendingKill && completedFence >= m_tex[i].killFence) {
+      DebugLogAFmt(LOG_VERBOSE,
+                   "Sprite slot %d released, GPU reached %llu (#225)",
+                   i, (unsigned long long)completedFence);
+      KillTex(i);                              // clears the flag, below
+    }
+  }
+}
+
 void texmgr::KillTex(int iSlot) {
   if (iSlot < 0) return;
   if (iSlot >= NUM_TEX) return;
+  // Always cleared here, so a slot can never be left marked for a retirement
+  // that has already happened -- including on the Finish() and eviction paths,
+  // which call KillTex directly and must not leave a stale fence behind.
+  m_tex[iSlot].bPendingKill = false;
+  m_tex[iSlot].killFence    = 0;
 
   // Release GPU resource but preserve pre-allocated SRV indices
   m_tex[iSlot].dx12Surface.ResetResource();

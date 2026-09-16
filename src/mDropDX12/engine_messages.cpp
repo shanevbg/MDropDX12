@@ -986,15 +986,81 @@ void Engine::OnAnimationTimeRebased(float delta) {
   if (m_pOldState) m_pOldState->m_fBlendStartTime += delta;
 }
 
+// The interval by itself, so every clock arms the same way (#255).
+//
+// There is more than one clock now: the primary's m_fNextAutoMsgTime, and one
+// per display running its own preset. They share the store, the order and the
+// jitter settings -- only WHEN each fires differs -- so the arithmetic lives
+// here once rather than being copied per clock and drifting.
+float Engine::NextAutoMessageInterval() {
+  float jitter = m_fMsgAutoplayJitter * ((rand() % 2001 - 1000) / 1000.0f);
+  float interval = m_fMsgAutoplayInterval + jitter;
+  return interval < 1.0f ? 1.0f : interval;
+}
+
 void Engine::ScheduleNextAutoMessage() {
   if (!m_bMsgAutoplay || m_nMsgAutoplayCount == 0) {
     m_fNextAutoMsgTime = -1.0f;
     return;
   }
-  float jitter = m_fMsgAutoplayJitter * ((rand() % 2001 - 1000) / 1000.0f);
-  float interval = m_fMsgAutoplayInterval + jitter;
-  if (interval < 1.0f) interval = 1.0f;
-  m_fNextAutoMsgTime = GetTime() + interval;
+  m_fNextAutoMsgTime = GetTime() + NextAutoMessageInterval();
+}
+
+// One display's turn of the message autoplay loop (#255).
+//
+// Lifted verbatim from the block that used to sit inline in RenderFrame, and
+// then given its state as parameters instead of reading the globals -- so the
+// primary passes its own fields and each own-preset display passes its own.
+// Same store, same order, same overrides; different clock.
+//
+// `ownerDisplay` is -1 for the primary or a 1-based DISPLAYn, and is stamped on
+// whatever it spawns so the draw side knows whose it is.
+void Engine::TickMessageAutoplay(int ownerDisplay, double& nextAt,
+                                 int& nextSeq, int maxOnScreen) {
+  if (!m_bMsgAutoplay || m_nMsgAutoplayCount <= 0)
+    return;
+
+  // Same backstop as the primary's: a next-message time further out than one
+  // interval plus its jitter cannot have been scheduled from this clock, so
+  // the clock jumped back. Re-arm rather than wait out the gap in silence.
+  // Also arms a clock that has never been set (-1), which is how a display
+  // joins in the first time it renders.
+  if (nextAt <= 0.0 ||
+      nextAt - GetTime() > m_fMsgAutoplayInterval + m_fMsgAutoplayJitter + 1.0f) {
+    nextAt = GetTime() + NextAutoMessageInterval();
+    return;
+  }
+
+  if (!MessagesEnabled() || Restrained(restraint::kMessages))
+    return;
+  if (GetTime() < nextAt)
+    return;
+
+  // Only THIS display's messages count against its limit. The slots are one
+  // shared pool, so without the owner test a busy panel would hold every other
+  // panel below its own limit.
+  int nActive = 0;
+  for (int j = 0; j < NUM_SUPERTEXTS; j++) {
+    if (!m_supertexts[j].bIsSongTitle &&
+        m_supertexts[j].nOwnerDisplay == ownerDisplay &&
+        m_supertexts[j].fStartTime >= 0 &&
+        GetTime() < m_supertexts[j].fStartTime + m_supertexts[j].fDuration +
+                    m_supertexts[j].fFadeOutTime)
+      nActive++;
+  }
+  if (nActive >= maxOnScreen)
+    return;
+
+  int msgIdx;
+  if (m_bMsgSequential) {
+    if (nextSeq >= m_nMsgAutoplayCount)
+      nextSeq = 0;
+    msgIdx = m_nMsgAutoplayOrder[nextSeq++];
+  } else {
+    msgIdx = m_nMsgAutoplayOrder[rand() % m_nMsgAutoplayCount];
+  }
+  LaunchCustomMessage(msgIdx, ownerDisplay);
+  nextAt = GetTime() + NextAutoMessageInterval();
 }
 
 // ======== Message Edit Dialog (ModalDialog subclass) ========
@@ -2050,7 +2116,7 @@ void Engine::ReadCustomMessages() {
   ReadAnimProfiles();
 }
 
-void Engine::LaunchCustomMessage(int nMsgNum) {
+void Engine::LaunchCustomMessage(int nMsgNum, int ownerDisplay) {
   if (nMsgNum > 99)
     nMsgNum = 99;
 
@@ -2079,7 +2145,7 @@ void Engine::LaunchCustomMessage(int nMsgNum) {
 
   int fontID = m_CustomMessage[nMsgNum].nFont;
 
-  int nextFreeSupertextIndex = GetNextFreeSupertextIndex();
+  int nextFreeSupertextIndex = GetNextFreeSupertextIndex(ownerDisplay);
   if (nextFreeSupertextIndex > -1) {
     m_supertexts[nextFreeSupertextIndex].bRedrawSuperText = true;
     m_supertexts[nextFreeSupertextIndex].bIsSongTitle = false;
@@ -2324,16 +2390,21 @@ bool Engine::HandleVSyncIPC(const wchar_t* sMessage) {
       if (hCheck)
         SendMessage(hCheck, BM_SETCHECK, m_bEnableVSync ? BST_CHECKED : BST_UNCHECKED, 0);
     }
-    // Broadcasting this to the child processes stood here: each had its own
-    // Engine and its own m_bEnableVSync read from settings.ini at launch, so
-    // without it a user turning VSync off saw it take effect on some monitors
-    // and not others. One process owns every display now, so there is one flag
-    // and it has already been set.
+    // Reach the children too. A -child is a separate process with its own
+    // Engine and its own m_bEnableVSync, read from settings.ini at launch, so
+    // without this the parent's displays and the children's would present under
+    // different rules -- and a user who turns VSync off would see it take effect
+    // on some of their monitors and not others.
+    //
+    // Safe against recursion by construction: BroadcastToChildren returns
+    // immediately when m_bChildMode is set (child_instances.cpp:1461), and a
+    // child has no children of its own.
+    BroadcastToChildren(sMessage);
     extern PipeServer g_pipeServer;
     wchar_t buf[48];
     FormatTo(buf, L"VSYNC=%d", v);
     g_pipeServer.Send(buf);
-    DLOG_INFO("VSync %s via IPC", v ? "enabled" : "disabled");
+    DLOG_INFO("VSync %s via IPC (broadcast to children)", v ? "enabled" : "disabled");
     return true;
   }
   if (MSG_IS(sMessage, L"GET_VSYNC")) {
@@ -2382,15 +2453,13 @@ bool Engine::HandleVSyncIPC(const wchar_t* sMessage) {
       std::wstring line = L"VSYNC_OUT|display=";
       line += out.config.szDeviceName;
       if (out.config.bOwnProcess) {
-        // type=own, not type=child: an own-preset display is a surface in this
-        // process, so it presents under the same flag as everything else
-        // rather than a broadcast copy of it (#186 phase 6). The name is the
-        // honest one; the field itself stays so a client keeps parsing.
-        const DisplayPresetInfo di = DisplayPresetStatus(out.config.szDeviceName);
-        line += L"|type=own|vsync=" + std::to_wstring(m_bEnableVSync ? 1 : 0);
+        ChildInstance ci;
+        const bool have = GetChildInfo(out.config.szDeviceName, ci);
+        line += L"|type=child|vsync=" + std::to_wstring(m_bEnableVSync ? 1 : 0);
         line += L"|effective=" + std::to_wstring(m_bEnableVSync ? 1 : 0);
-        line += L"|source=shared|state=";
-        line += !di.haveSurface ? L"absent" : di.ready ? L"ready" : L"starting";
+        line += L"|source=broadcast|state=";
+        line += have ? (ci.bFailed ? L"failed" : ci.bReady ? L"ready" : L"starting")
+                     : L"absent";
       } else {
         line += L"|type=mirror|vsync=0|effective=0|source=fixed|state=";
         line += m_bMirrorsActive ? L"ready" : L"inactive";
@@ -2425,15 +2494,12 @@ bool Engine::HandlePresetCycleIPC(const wchar_t* sMessage) {
   if (MSG_IS(sMessage, L"SET_PRESET_ORDER=")) {
     // Format: SET_PRESET_ORDER=<0|1>   0 = random, 1 = sequential
     m_bSequentialPresetOrder = (_wtoi(sMessage + 17) != 0);
-    // Deliberate: this is now the global, not a profile's loan of it.
-    ClearPrimaryOverride(kPrimaryOverrideOrder);
     Config().SetInt(L"Settings", L"bSequentialPresetOrder", m_bSequentialPresetOrder);
     SendPresetCycleInfo();
     return true;
   }
   if (MSG_IS(sMessage, L"SET_PRESET_LOCK=")) {
     SetUserPresetLock(_wtoi(sMessage + 16) != 0);
-    ClearPrimaryOverride(kPrimaryOverrideLock);
     SendPresetCycleInfo();
     return true;
   }
@@ -2447,7 +2513,6 @@ bool Engine::HandlePresetCycleIPC(const wchar_t* sMessage) {
     // previous value set. Writing an absolute time here would fight UpdateTime
     // for ownership of the same field.
     m_fNextPresetTime = -1.0f;
-    ClearPrimaryOverride(kPrimaryOverrideTime);
     Config().SetFloat(L"Settings", L"fTimeBetweenPresets", m_fTimeBetweenPresets);
     SendPresetCycleInfo();
     return true;
@@ -2463,12 +2528,15 @@ bool Engine::HandlePresetCycleIPC(const wchar_t* sMessage) {
 //
 // ALWAYS_ON_TOP and MIRROR_INDEPENDENT both already had SET_/GET_ pairs
 // alongside their toggle -- WATERMARK did not, and neither did
-// MIRROR_WATERMARK. Only WATERMARK is added here. MIRROR_WATERMARK's toggle
-// is a multi-phase sequence -- move the render window to the largest
-// display, go fullscreen, THEN activate mirrors a frame later -- that saves
-// and restores several pieces of window state as it goes; making it
-// absolute needs its own careful pass against that sequence rather than a
-// blind "post the same message if the flag differs" copy of this one.
+// MIRROR_WATERMARK. Both have one now.
+//
+// MIRROR_WATERMARK took longer because its toggle is a multi-phase sequence
+// -- move the render window to the largest display, go fullscreen, THEN
+// activate mirrors a frame later -- that saves and restores several pieces
+// of window state as it goes. The careful pass that warning asked for is
+// done (#196): the comparison happens inside the window procedure, where
+// the transition state lives, instead of in a caller that can only see a
+// flag which stays false until the sequence finishes.
 //
 // Reported live: a running child's window ended up in watermark mode by
 // accident (via WM_MW_MIRROR_WM's interaction with an own-process display),
@@ -2480,6 +2548,17 @@ void Engine::SetWatermark(bool want) {
   if (m_bWatermarkActive == want) return;
   HWND hw = GetPluginWindow();
   if (hw) PostMessage(hw, WM_MW_WATERMARK, 0, 0);
+}
+
+// Deliberately does NOT compare against m_bMirrorWatermarkActive here.
+//
+// Entering is two phases and that flag is not set until the second, so a
+// comparison made on this side would see "off" mid-transition and ask for a
+// second enter. WM_MW_MIRROR_WM resolves wParam 2/3 against the transition
+// state it owns; this only forwards the request.
+void Engine::SetMirrorWatermark(bool want) {
+  HWND hw = GetPluginWindow();
+  if (hw) PostMessage(hw, WM_MW_MIRROR_WM, want ? 2 : 3, 0);
 }
 
 bool Engine::HandleWindowModeIPC(const wchar_t* sMessage) {
@@ -2498,10 +2577,90 @@ bool Engine::HandleWindowModeIPC(const wchar_t* sMessage) {
     g_pipeServer.Send(buf);
     return true;
   }
+  if (MSG_IS(sMessage, L"SET_MIRROR_WATERMARK=")) {
+    // Format: SET_MIRROR_WATERMARK=<0|1>
+    //
+    // A switch sends "make it so", not "change it". With only a toggle a
+    // client had to read, compare and then send -- and anything that moved
+    // the state in between left the switch having done the opposite of what
+    // was asked. A phone is the client most likely to be a second behind.
+    const bool want = (_wtoi(sMessage + 21) != 0);
+    SetMirrorWatermark(want);
+    // The state ASKED FOR, like SET_WATERMARK= above: the message runs
+    // asynchronously on the window's own thread, so the member has not moved
+    // yet if this is not that thread. DIAG_MIRRORS' watermark= is the read
+    // back, on both the header and every per-monitor record.
+    extern PipeServer g_pipeServer;
+    wchar_t buf[40];
+    FormatTo(buf, L"MIRROR_WATERMARK=%d", want ? 1 : 0);
+    g_pipeServer.Send(buf);
+    return true;
+  }
   if (MSG_IS(sMessage, L"GET_WATERMARK")) {
     extern PipeServer g_pipeServer;
     wchar_t buf[32];
     FormatTo(buf, L"WATERMARK=%d", m_bWatermarkActive ? 1 : 0);
+    g_pipeServer.Send(buf);
+    return true;
+  }
+
+  // ── HUD state, absolute, and the form the parent relays to its children ──
+  //
+  // ABSOLUTE, never a toggle. The parent sends its own resolved state, so a
+  // child that missed an earlier message still converges instead of ending up
+  // inverted -- the same reason SET_MIRROR_WATERMARK= exists beside the
+  // WATERMARK toggle. `ACTION=ShowFPS` and `ACTION=DebugInfo` remain the
+  // toggles a human binds to a key.
+  //
+  // These exist because a child could not be told any of this. Every one of
+  // these four flags was set directly by a UI handler or a hotkey and read
+  // from settings.ini only at process start, so a child kept whatever was on
+  // disk when it spawned, for its whole life. Unticking "show HUD only on the
+  // primary display" therefore did nothing to a running child: the parent's
+  // flag went false and the child's stayed true, so it went on drawing no HUD
+  // with no way to ask it to stop.
+  struct HudFlag { const wchar_t* msg; size_t len; bool Engine::* field; };
+  static const HudFlag kHudFlags[] = {
+    { L"SET_HUD_PRIMARY_ONLY=", 21, &Engine::m_bDisableMirrorHud },
+    { L"SET_SHOW_PRESET_INFO=", 21, &Engine::m_bShowPresetInfo   },
+    { L"SET_SHOW_DEBUG=",       15, &Engine::m_bShowDebugInfo    },
+    { L"SET_SHOW_FPS=",         13, &Engine::m_bShowFPS          },
+  };
+  for (const HudFlag& f : kHudFlags) {
+    // len COUNTS the '=', so the compare includes it and the value starts one
+    // past it. Comparing len-1 would match the verb without its '=' and then
+    // read the value FROM the '=', and _wtoi("=1") is 0 -- every one of these
+    // would have resolved to false while looking entirely reasonable.
+    if (wcsncmp(sMessage, f.msg, f.len) != 0) continue;
+    const bool want = (_wtoi(sMessage + f.len) != 0);
+    this->*(f.field) = want;
+    // Logged because "did the parent's change actually reach this child" is
+    // the exact question this whole path exists to answer, and a child cannot
+    // be asked from outside: its pipe accepts a connection from anyone but
+    // replies only to the parent, so GET_HUD_STATE on a child's pipe times out
+    // even though the child is healthy. Its own log/child-<pid>/debug.log is
+    // where the answer has to be readable.
+    DLOG_INFO("hud: %ls -> %d (child=%d)", f.msg, want ? 1 : 0,
+              m_bChildMode ? 1 : 0);
+    // A child is a leaf: it has no children of its own to tell, and relaying
+    // from here would bounce the message back at the parent.
+    if (!m_bChildMode) RelayHudStateToChildren();
+    extern PipeServer g_pipeServer;
+    std::wstring resp(f.msg, f.len - 1);   // the verb without its '='
+    resp += L"=";
+    resp += want ? L"1" : L"0";
+    g_pipeServer.Send(resp.c_str());
+    return true;
+  }
+
+  if (MSG_EQ(sMessage, L"GET_HUD_STATE")) {
+    extern PipeServer g_pipeServer;
+    wchar_t buf[128];
+    FormatTo(buf, L"HUD_STATE|primaryOnly=%d|presetInfo=%d|fps=%d|debug=%d"
+                  L"|child=%d",
+             m_bDisableMirrorHud ? 1 : 0, m_bShowPresetInfo ? 1 : 0,
+             m_bShowFPS ? 1 : 0, m_bShowDebugInfo ? 1 : 0,
+             m_bChildMode ? 1 : 0);
     g_pipeServer.Send(buf);
     return true;
   }
@@ -2562,7 +2721,11 @@ bool Engine::HandleCoverStatusIPC(const wchar_t* sMessage) {
     // var goes nonzero), so this call needs no polling logic of its own.
     bool bShown = false;
     for (int i = 0; i < NUM_TEX; i++) {
-      if (m_texmgr.m_tex[i].pSurface && m_texmgr.m_tex[i].nUserData == 0) {
+      // IsLive, not pSurface: a cover whose fade has finished is already off
+      // the screen but keeps its slot until its fence clears (#225), and
+      // reporting it as shown for those frames would make this answer lag the
+      // render state it exists to describe.
+      if (m_texmgr.IsLive(i) && m_texmgr.m_tex[i].nUserData == 0) {
         bShown = true;
         break;
       }
@@ -2608,6 +2771,109 @@ HWND FindTopWindowForPid(DWORD pid) {
 }
 
 }  // namespace
+
+// What only this class knows about its own windows, for GET_WINDOW(S) (#259).
+//
+// Three roles that look identical from outside -- the primary render window,
+// an in-process mirror, and a child's render window -- plus the display each
+// one belongs to. A child is in ANOTHER PROCESS, so it cannot be found by an
+// enumeration filtered to our pid and has to be contributed here or it is
+// simply absent: a three-display setup with two children would otherwise
+// report one window and look perfectly correct.
+std::vector<mdrop::KnownWindow> Engine::BuildKnownWindows() {
+  std::vector<mdrop::KnownWindow> out;
+
+  mdrop::KnownWindow render;
+  render.hWnd = GetPluginWindow();
+  render.role = L"render";
+  {
+    wchar_t dev[32] = {};
+    if (GetRenderMonitorDevice(dev)) render.device = dev;
+  }
+  out.push_back(render);
+
+  // The display INDEX is the 1-based position among Monitor outputs, which is
+  // what every other display verb means by "display N". Counted the same way
+  // GET_DISPLAY_MODE counts it, so the two join.
+  {
+    std::lock_guard<std::recursive_mutex> lk(m_displayOutputsMutex);
+    int idx = 0;
+    for (auto& o : m_displayOutputs) {
+      if (o.config.type != DisplayOutputType::Monitor) continue;
+      ++idx;
+      if (o.config.bOwnProcess) continue;   // a child; added below, with its pid
+      if (!o.monitorState || !o.monitorState->hWnd) continue;
+      mdrop::KnownWindow k;
+      k.hWnd = o.monitorState->hWnd;
+      k.role = L"mirror";
+      k.display = idx;
+      k.device = o.config.szDeviceName;
+      out.push_back(k);
+    }
+  }
+
+  {
+    std::lock_guard<std::mutex> lk(m_childrenMutex);
+    for (const ChildInstance& ci : m_children) {
+      if (!ci.pid) continue;
+      mdrop::KnownWindow k;
+      // May be null: a child's pipe answers well before its window exists, and
+      // that state is reported rather than hidden -- "spawned, no window yet"
+      // and "not a child at all" are different answers to a caller waiting.
+      k.hWnd = FindTopWindowForPid(ci.pid);
+      k.role = L"child";
+      k.device = ci.szDeviceName;
+      k.pid = ci.pid;
+      // Resolve the index from the device name rather than storing a second
+      // copy of it on ChildInstance, so the two cannot drift apart.
+      {
+        std::lock_guard<std::recursive_mutex> lkd(m_displayOutputsMutex);
+        int idx = 0;
+        for (auto& o : m_displayOutputs) {
+          if (o.config.type != DisplayOutputType::Monitor) continue;
+          ++idx;
+          if (_wcsicmp(o.config.szDeviceName, ci.szDeviceName) == 0) {
+            k.display = idx;
+            break;
+          }
+        }
+      }
+      out.push_back(k);
+    }
+  }
+  return out;
+}
+
+// Step ONE display's own preset, in this process (#274).
+//
+// Sequential order steps one either way; random order ignores the direction,
+// which is what "previous" means when there is no order to step back through.
+//
+// Shared, because the two callers had drifted. The IPC verbs were widened to
+// the in-process `preset` tier and the Displays window's Prev/Next buttons were
+// not, so a display set to "Own preset" was told it mirrored the main window
+// and the button did nothing -- reported by Shane against his display 3.
+bool Engine::StepDisplayOwnPreset(const DisplayOutputConfig& cfg, bool next,
+                                  const wchar_t** reason)
+{
+  MirrorSurface* ps = MirrorSurfaceFor(cfg.szDeviceName);
+  if (!ps) {
+    if (reason) *reason = L"no_surface";
+    return false;
+  }
+  const std::wstring dir = ResolveDisplayPresetDir(cfg);
+  int idx = ps->seqIndex.load();
+  if (cfg.bSequentialOrder && !next)
+    idx -= 2;                   // PickDisplayPreset advances by one
+  const std::wstring pick = PickDisplayPreset(dir, cfg.bSequentialOrder, idx);
+  ps->seqIndex.store(idx);
+  if (pick.empty()) {
+    if (reason) *reason = L"no_presets";
+    return false;
+  }
+  PostSurfacePreset(*ps, pick);
+  return true;
+}
 
 // Per-display render mode and the child registry (forgejo#22).
 //
@@ -2712,10 +2978,27 @@ bool Engine::HandleDisplayModeIPC(const wchar_t* sMessage) {
           m_allFullscreenSnapshot.primaryWasMinimized = IsIconic(hRender) != FALSE;
           m_allFullscreenSnapshot.primaryWasFullscreen = IsBorderlessFullscreen(hRender);
         }
-        // Per-CHILD window state was recorded here, found from each child's
-        // pid. An own-preset display is a mirror swap chain in this process
-        // now (#186 phase 6) -- it has no separate top-level window to
-        // minimise, and it goes up and down with the mirrors below.
+        for (auto& out : m_displayOutputs) {
+          if (out.config.type != DisplayOutputType::Monitor) continue;
+          if (!out.config.bEnabled || !out.config.bOwnProcess) continue;
+          ChildInstance ci;
+          if (!GetChildInfo(out.config.szDeviceName, ci) || !ci.bReady) continue;
+          AllFullscreenSnapshot::ChildState cs;
+          cs.device = out.config.szDeviceName;
+          if (HWND hChild = FindTopWindowForPid(ci.pid)) {
+            // STOWED, not merely iconic. A child is hidden rather than
+            // minimised now (see WM_MW_SET_MINIMIZED), because minimising a
+            // WS_EX_TOOLWINDOW leaves a caption stub on the desktop. Testing
+            // only IsIconic would record a hidden child as "was on screen",
+            // and the restore below would then send SET_BORDERLESS_FS to a
+            // window that is not shown -- putting it back fullscreen but
+            // invisible, with nothing to say why.
+            cs.wasMinimized = (IsIconic(hChild) != FALSE) ||
+                              (IsWindowVisible(hChild) == FALSE);
+            cs.wasFullscreen = IsBorderlessFullscreen(hChild);
+          }
+          m_allFullscreenSnapshot.children.push_back(cs);
+        }
       }
 
       if (hRender) {
@@ -2726,14 +3009,18 @@ bool Engine::HandleDisplayModeIPC(const wchar_t* sMessage) {
         changedPrimary = 1;
       }
 
-      // Three messages down each child's pipe stood here. Every own-preset
-      // display is raised by m_bRaiseMirrorsNextFrame below, with the rest --
-      // so this counts what that covers rather than doing it a second way.
       for (auto& out : m_displayOutputs) {
         if (out.config.type != DisplayOutputType::Monitor) continue;
         if (!out.config.bEnabled || !out.config.bOwnProcess) continue;
-        if (DisplayPresetStatus(out.config.szDeviceName).ready) changedChildren++;
-        else                                                    skippedChildren++;
+        ChildInstance ci;
+        if (!GetChildInfo(out.config.szDeviceName, ci) || !ci.bReady) {
+          skippedChildren++;
+          continue;
+        }
+        RequestChildSend(out.config.szDeviceName, L"SET_MINIMIZED=0");
+        RequestChildSend(out.config.szDeviceName, L"SET_BORDERLESS_FS=1");
+        RequestChildSend(out.config.szDeviceName, L"RAISE_WINDOW");
+        changedChildren++;
       }
 
       if (m_bMirrorsActive) {
@@ -2747,19 +3034,26 @@ bool Engine::HandleDisplayModeIPC(const wchar_t* sMessage) {
       }
     } else if (mode == 2) {
       // Force exit regardless of any snapshot (forgejo#98) -- unconditional,
-      // not "restore to not-fullscreen": WM_MW_BORDERLESS_FS/MW_FS_EXIT is a
-      // no-op when already not fullscreen (App.cpp's WM_MW_BORDERLESS_FS
-      // handler compares current state before toggling), so there is nothing
-      // to check here first.
+      // not "restore to not-fullscreen": WM_MW_BORDERLESS_FS/MW_FS_EXIT and
+      // child SET_BORDERLESS_FS=0 are both no-ops when already not
+      // fullscreen (App.cpp's WM_MW_BORDERLESS_FS handler compares current
+      // state before toggling), so there is nothing to check here first.
       forced = true;
       if (hRender) {
         PostMessage(hRender, WM_MW_BORDERLESS_FS, MW_FS_EXIT, 0);
         changedPrimary = 1;
       }
-      // A mirror swap chain is borderless by construction and has no framed
-      // state to return to, so an own-preset display has nothing to exit --
-      // where a child process did. Deactivating the mirrors is what frees
-      // these screens now.
+      for (auto& out : m_displayOutputs) {
+        if (out.config.type != DisplayOutputType::Monitor) continue;
+        if (!out.config.bEnabled || !out.config.bOwnProcess) continue;
+        ChildInstance ci;
+        if (!GetChildInfo(out.config.szDeviceName, ci) || !ci.bReady) {
+          skippedChildren++;
+          continue;
+        }
+        RequestChildSend(out.config.szDeviceName, L"SET_BORDERLESS_FS=0");
+        changedChildren++;
+      }
       // A forced exit invalidates whatever "before" a pending snapshot
       // remembered -- leaving it would let a later =0 restore back INTO
       // fullscreen, undoing the exit this branch exists to do.
@@ -2784,9 +3078,16 @@ bool Engine::HandleDisplayModeIPC(const wchar_t* sMessage) {
         }
         changedPrimary = 1;
       }
-      // Restoring each child's remembered window state stood here. Nothing is
-      // remembered for an own-preset display any more, because there is no
-      // separate window whose state could differ from the mirrors'.
+      for (const auto& cs : m_allFullscreenSnapshot.children) {
+        if (cs.wasMinimized) {
+          RequestChildSend(cs.device.c_str(), L"SET_MINIMIZED=1");
+        } else {
+          wchar_t cmd[64];
+          FormatTo(cmd, L"SET_BORDERLESS_FS=%d", cs.wasFullscreen ? 1 : 0);
+          RequestChildSend(cs.device.c_str(), cmd);
+        }
+        changedChildren++;
+      }
       m_allFullscreenSnapshot = AllFullscreenSnapshot{};
     }
     // mode==0 with no active snapshot: nothing to restore, everything below
@@ -2813,10 +3114,6 @@ bool Engine::HandleDisplayModeIPC(const wchar_t* sMessage) {
     HWND hRender = m_lpDX ? m_lpDX->GetHwnd() : nullptr;
     const bool primaryUp = hRender && !IsIconic(hRender) && IsBorderlessFullscreen(hRender);
 
-    // children_up / children_total used to be found from each child process's
-    // top-level window. An own-preset display is a mirror swap chain in this
-    // process now, so "is its window up" is "is its surface rendering" -- and
-    // the mirrors have to be active for any of them to be on screen at all.
     int childrenTotal = 0, childrenUp = 0;
     bool anyMirrorEnabled = false;
     for (auto& out : m_displayOutputs) {
@@ -2824,7 +3121,10 @@ bool Engine::HandleDisplayModeIPC(const wchar_t* sMessage) {
       if (!out.config.bEnabled) continue;
       if (!out.config.bOwnProcess) { anyMirrorEnabled = true; continue; }
       childrenTotal++;
-      if (m_bMirrorsActive && DisplayPresetStatus(out.config.szDeviceName).ready)
+      ChildInstance ci;
+      if (!GetChildInfo(out.config.szDeviceName, ci) || !ci.bReady) continue;
+      HWND hChild = FindTopWindowForPid(ci.pid);
+      if (hChild && !IsIconic(hChild) && IsBorderlessFullscreen(hChild))
         childrenUp++;
     }
     const bool mirrorsUp = !anyMirrorEnabled || m_bMirrorsActive;
@@ -2877,13 +3177,14 @@ bool Engine::HandleDisplayModeIPC(const wchar_t* sMessage) {
   }
 
   if (MSG_IS(sMessage, L"SET_DISPLAY_MODE=")) {
-    // SET_DISPLAY_MODE=<N>,<off|mirror|child>
+    // SET_DISPLAY_MODE=<N>,<off|mirror|preset|child>
     // N names the monitor the way the SET_MIRROR_* family already does:
     // \\.\DISPLAY3 is 3.
     const wchar_t* args = sMessage + 17;
     const wchar_t* comma = wcschr(args, L',');
     if (!comma) {
-      g_pipeServer.Send(L"DISPLAY_MODE=ERROR|expected <N>,<off|mirror|child>");
+      g_pipeServer.Send(
+          L"DISPLAY_MODE=ERROR|expected <N>,<off|mirror|preset|child>");
       return true;
     }
     wchar_t target[32];
@@ -2907,9 +3208,16 @@ bool Engine::HandleDisplayModeIPC(const wchar_t* sMessage) {
     const bool wantChild  = (_wcsicmp(mode.c_str(), L"child")  == 0);
     const bool wantMirror = (_wcsicmp(mode.c_str(), L"mirror") == 0);
     const bool wantOff    = (_wcsicmp(mode.c_str(), L"off")    == 0);
-    if (!wantChild && !wantMirror && !wantOff) {
+    // The middle tier: this display's own preset, rendered IN PROCESS. It is
+    // what "child" always implied and had to pay a whole instance for.
+    // "preset" is the word; "own" is accepted because it is the obvious guess.
+    const bool wantPreset = (_wcsicmp(mode.c_str(), L"preset") == 0) ||
+                            (_wcsicmp(mode.c_str(), L"own")    == 0);
+    if (!wantChild && !wantMirror && !wantOff && !wantPreset) {
       wchar_t err[192];
-      FormatTo(err, L"DISPLAY_MODE=ERROR|%d|expected off|mirror|child, got '%.40ls'",
+      FormatTo(err,
+                 L"DISPLAY_MODE=ERROR|%d|expected off|mirror|preset|child, "
+                 L"got '%.40ls'",
                  _wtoi(args), mode.c_str());
       g_pipeServer.Send(err);
       return true;
@@ -2936,22 +3244,33 @@ bool Engine::HandleDisplayModeIPC(const wchar_t* sMessage) {
       if (wcscmp(out.config.szDeviceName, target) != 0) continue;
       found = true;
 
-      // Spawning and killing a child process accompanied each of these. The
-      // surface that renders this display is created, re-pointed and retired
-      // from the config by SendToDisplayOutputs, which reads what is written
-      // here on its next pass (#186 phase 6).
       if (wantChild) {
         out.config.bEnabled = true;
+        out.config.bOwnPreset = true;
         out.config.bOwnProcess = true;
         // Mutually exclusive: bIndependentRender is the in-process mirror sim,
         // which renders the PRIMARY's preset. A display cannot be both.
         out.config.bIndependentRender = false;
+        RequestChildSpawn(target);
+      } else if (wantPreset) {
+        // Its own preset, in process. No child: the surface worker holds the
+        // preset itself, which is what #186 phase 4 built and what only a
+        // child was previously allowed to do.
+        out.config.bEnabled = true;
+        out.config.bOwnPreset = true;
+        out.config.bOwnProcess = false;
+        out.config.bIndependentRender = false;
+        RequestChildKill(target);
       } else if (wantMirror) {
         out.config.bEnabled = true;
+        out.config.bOwnPreset = false;
         out.config.bOwnProcess = false;
+        RequestChildKill(target);
       } else {   // wantOff -- now reached only by the word "off"
         out.config.bEnabled = false;
+        out.config.bOwnPreset = false;
         out.config.bOwnProcess = false;
+        RequestChildKill(target);
       }
       break;
     }
@@ -2971,7 +3290,9 @@ bool Engine::HandleDisplayModeIPC(const wchar_t* sMessage) {
     // what it says and " Child " comes back as "child".
     wchar_t ok[96];
     FormatTo(ok, L"DISPLAY_MODE=%d,%ls", _wtoi(args),
-               wantChild ? L"child" : (wantMirror ? L"mirror" : L"off"));
+               wantChild  ? L"child"
+             : wantPreset ? L"preset"
+             : wantMirror ? L"mirror" : L"off");
     g_pipeServer.Send(ok);
     return true;
   }
@@ -3063,6 +3384,73 @@ bool Engine::HandleDisplayModeIPC(const wchar_t* sMessage) {
     return true;
   }
 
+  // GET_DISPLAY_MODE[=<N>] -- which tier each display is on.
+  //
+  // Reports the same words SET_DISPLAY_MODE accepts, plus auto=1 when the
+  // display is a child because the cost gate promoted it rather than because
+  // the user asked. Without that the two are indistinguishable from outside,
+  // which is exactly the confusion that had processes appearing unexplained.
+  //
+  // Before GET_DISPLAY_MODE, and before GET_DISPLAY_PROFILE: MSG_IS is a
+  // prefix compare and all three begin "GET_DISPLAY_", so the longer verbs
+  // have to be tested first.
+  if (MSG_IS(sMessage, L"GET_DISPLAY_MODE")) {
+    const wchar_t* eq = wcschr(sMessage, L'=');
+    const int want = eq ? _wtoi(eq + 1) : -1;
+    std::wstring resp = L"DISPLAY_MODE";
+    std::lock_guard<std::recursive_mutex> lkDisp(m_displayOutputsMutex);
+    int idx = 0;
+    for (auto& out : m_displayOutputs) {
+      if (out.config.type != DisplayOutputType::Monitor) continue;
+      ++idx;
+      if (want >= 0 && idx != want) continue;
+      const wchar_t* mode =
+          !out.config.bEnabled                          ? L"off"
+        : out.config.bOwnProcess                        ? L"child"
+        : out.config.bOwnPreset                         ? L"preset"
+                                                        : L"mirror";
+      resp += L"|" + std::to_wstring(idx) + L"=" + mode +
+              L",device=" + out.config.szDeviceName +
+              // Always 0 since #261 removed the cost gate -- nothing promotes a
+              // display any more, so every child is the user's. The field stays
+              // rather than vanishing, because a client parsing it into a dict
+              // and reading auto= would fault on its absence; it is scheduled
+              // to go when the Remote no longer looks for it.
+              L",auto=0" +
+              L",independent=" + (out.config.bIndependentRender ? L"1" : L"0");
+    }
+    resp += L"|END";
+    g_pipeServer.Send(resp.c_str());
+    return true;
+  }
+
+  // GET_DISPLAY_WATERMARK[=<N>] -- one display's watermark state, or all of
+  // them. The setter has existed for a while with nothing to read it back
+  // with, so the only way to confirm a display's state was DIAG_MIRRORS, whose
+  // watermark= echoed a global and said the same thing for every monitor.
+  //
+  // Checked before GET_DISPLAY_PROFILE because MSG_IS is a PREFIX compare and
+  // both begin "GET_DISPLAY_"; the longer, more specific verb has to win.
+  if (MSG_IS(sMessage, L"GET_DISPLAY_WATERMARK")) {
+    const wchar_t* eq = wcschr(sMessage, L'=');
+    const int want = eq ? _wtoi(eq + 1) : -1;
+    std::wstring resp = L"DISPLAY_WATERMARK";
+    std::lock_guard<std::recursive_mutex> lkDisp(m_displayOutputsMutex);
+    int idx = 0;
+    for (auto& out : m_displayOutputs) {
+      if (out.config.type != DisplayOutputType::Monitor) continue;
+      ++idx;
+      if (want >= 0 && idx != want) continue;
+      resp += L"|" + std::to_wstring(idx) + L"=" +
+              (out.config.bWatermark ? L"1" : L"0") +
+              L",device=" + out.config.szDeviceName +
+              L",ownProcess=" + (out.config.bOwnProcess ? L"1" : L"0");
+    }
+    resp += L"|END";
+    g_pipeServer.Send(resp.c_str());
+    return true;
+  }
+
   if (MSG_IS(sMessage, L"GET_DISPLAY_PROFILE")) {
     g_pipeServer.Send((std::wstring(L"DISPLAY_PROFILE=") +
                        m_szStartupDisplayProfile).c_str());
@@ -3070,33 +3458,11 @@ bool Engine::HandleDisplayModeIPC(const wchar_t* sMessage) {
   }
 
   if (MSG_IS(sMessage, L"GET_CHILDREN")) {
-    // Reports the DISPLAYS and what each is showing (#186 phase 6).
-    //
-    // The verb keeps its name and its wire shape on purpose. Milkwave Remote
-    // and the Android client send this today, and an unrecognised keyword falls
-    // through to the script engine rather than being rejected -- so a renamed
-    // command fails SILENTLY, which is the worst outcome available. Old names
-    // stay accepted; what changed is that the reply describes a display rather
-    // than a process.
-    //
-    // Fields that named the mechanism are kept and given honest values rather
-    // than dropped, for the same reason:
-    //
-    //   pid=      always this process's own pid. There is no second process,
-    //             and 0 would read as "not running" to a client that tests it.
-    //   state=    ready | starting | absent. `failed` is gone with the spawn
-    //             that could fail, and `pending` with the queue it waited in.
-    //   reason=   still present on every line, still empty unless state says
-    //             otherwise, so a client parses one shape.
-    //   visible=/minimized=/fs=
-    //             the display's mirror window, which is this process's now.
-    //             minimized= is always 0: a mirror swap-chain window has no
-    //             minimised state to be in.
-    const unsigned long ownPid = (unsigned long)GetCurrentProcessId();
     for (auto& out : m_displayOutputs) {
       if (out.config.type != DisplayOutputType::Monitor) continue;
       if (!out.config.bOwnProcess) continue;
-      const DisplayPresetInfo di = DisplayPresetStatus(out.config.szDeviceName);
+      ChildInstance ci;
+      const bool have = GetChildInfo(out.config.szDeviceName, ci);
 
       // std::wstring, not a fixed buffer. This carried three MAX_PATH-capable
       // fields in wchar_t[MAX_PATH + 256]; dir= and startup= are two more, and
@@ -3105,14 +3471,32 @@ bool Engine::HandleDisplayModeIPC(const wchar_t* sMessage) {
       // process. A read-only query must not be able to do that.
       std::wstring line = L"CHILD|display=";
       line += out.config.szDeviceName;
-      line += L"|pid=" + std::to_wstring(ownPid);
+      line += L"|pid=" + std::to_wstring(have ? (unsigned long)ci.pid : 0UL);
       line += L"|preset=";
-      line += di.preset;
+      line += (have ? ci.szCurrentPreset : L"");
 
-      // The EFFECTIVE interval, so a display cycling happily at the main
-      // window's rate no longer reports interval=-1.000 -- the sentinel meaning
-      // "inherit" was being printed raw. interval_raw keeps "inherited"
-      // distinguishable from "explicitly set to the same number".
+      // The rate this display is ACTUALLY rendering at (#246). Empty until the
+      // child has answered once, so "not known yet" stays distinct from a
+      // genuine 0 -- a child that has stopped rendering and one that has not
+      // been asked yet are different answers.
+      //
+      // This is the only way to see it. DIAG_MIRRORS reports per-surface
+      // frame times for IN-PROCESS surfaces only, so a display moved to its
+      // own process vanished from every frame-rate figure the app could
+      // produce -- which is precisely the arrangement a mirrors-vs-children
+      // comparison exists to judge, leaving it able to report the primary and
+      // nothing else.
+      line += L"|fps=";
+      if (have && ci.fFps >= 0.0f) {
+        wchar_t f[24];
+        FormatTo(f, L"%.1f", ci.fFps);
+        line += f;
+      }
+
+      // The EFFECTIVE interval, so a child cycling happily at the parent's rate
+      // no longer reports interval=-1.000 -- the sentinel meaning "inherit" was
+      // being printed raw. interval_raw keeps "inherited" distinguishable from
+      // "explicitly set to the same number".
       wchar_t num[64];
       FormatTo(num, L"%.3f", EffectiveChildInterval(out.config));
       line += L"|interval="; line += num;
@@ -3126,49 +3510,78 @@ bool Engine::HandleDisplayModeIPC(const wchar_t* sMessage) {
       line += L"|lock_raw=" + std::to_wstring(out.config.nPresetLock);
       line += L"|dir=";     line += out.config.szPresetDir;
       line += L"|startup="; line += out.config.szStartupPreset;
-
       // state=absent used to mean three different things -- "a child is
       // coming", "the flag is set and nothing will act on it" and "we tried and
       // could not" -- so no client could choose between a spinner, a Start
       // button and an error. MDR_Android showed "Starting its own instance..."
-      // forever (forgejo#57).
+      // forever (forgejo#57). The three are separate now:
       //
-      // Two of those three cannot happen any more, which is most of what
-      // deleting the child subsystem bought a remote: there is no spawn to be
-      // pending and none to fail. What is left is whether the surface exists
-      // and whether it has drawn.
+      //   pending   a spawn is queued, or the worker is acting on one
+      //   starting  the process exists, its pipe has not answered yet
+      //   ready     it is up and has answered
+      //   failed    the last attempt failed; reason= says how
+      //   absent    requested, nothing in flight, nothing tried -- ask again
+      //
+      // reason= is present on every line and empty unless state=failed, so a
+      // client parses one shape.
+      std::wstring reason;
+      const bool failedSpawn = ChildSpawnFailure(out.config.szDeviceName, reason);
       line += L"|state=";
-      if (!di.haveSurface)   line += L"absent";
-      else if (di.ready)     line += L"ready";
-      else                   line += L"starting";
+      if (have)
+        line += (ci.bFailed ? L"failed" : ci.bReady ? L"ready" : L"starting");
+      else if (ChildSpawnPending(out.config.szDeviceName))
+        line += L"pending";
+      else if (failedSpawn)
+        line += L"failed";
+      else
+        line += L"absent";
       line += L"|reason=";
-      if (!di.haveSurface && !m_bMirrorsActive) line += L"displays_inactive";
+      if (failedSpawn && (!have || ci.bFailed)) line += reason;
+      else if (have && ci.bFailed)             line += L"exited";
 
-      // The window this display is shown in. It used to be found from the
-      // child's pid, because the parent never tracked a child's HWND -- it
-      // drove them entirely over the pipe -- so "did the child assigned to
-      // display N end up on display N" could only be answered by covering that
-      // display and looking at it. That is the whole reason the display suites
-      // were intrusive, and it is answerable directly now.
-      HWND hDisp = out.monitorState ? out.monitorState->hWnd : nullptr;
-      if (hDisp && IsWindow(hDisp)) {
-        RECT wr{};
-        GetWindowRect(hDisp, &wr);
-        line += L"|rect=" + std::to_wstring(wr.left) + L"," +
-                std::to_wstring(wr.top) + L"," +
-                std::to_wstring(wr.right - wr.left) + L"," +
-                std::to_wstring(wr.bottom - wr.top);
-        line += L"|visible=";
-        line += IsWindowVisible(hDisp) ? L"1" : L"0";
-        // Always 0. A child process's window could be minimised -- that is
-        // what the Mirror toggle's stand-down did to clear a screen while
-        // keeping the preset and cycle timer alive -- and a client had to read
-        // IsIconic rather than visible= to tell that from "shown". A mirror
-        // swap-chain window is shown or hidden, with nothing in between.
-        line += L"|minimized=0";
-        // fs=: the same test SET_ALL_FULLSCREEN's snapshot uses (forgejo#96).
-        line += L"|fs=";
-        line += IsBorderlessFullscreen(hDisp) ? L"1" : L"0";
+      // Where the child's window ACTUALLY is, found from its pid.
+      //
+      // The parent has never tracked a child's HWND -- it drives them entirely
+      // over the pipe -- so before this there was no way to ask where one
+      // landed, and "did the child assigned to display N end up on display N"
+      // could only be answered by covering that display and looking at it. That
+      // is the whole reason the display suites were intrusive.
+      //
+      // Empty for a child with no window yet, and for one built -hidewindow
+      // that has none to find. visible= separates "no window" from "a window
+      // deliberately not shown", which are different answers to different
+      // questions.
+      line += L"|rect=";
+      if (have && ci.pid) {
+        HWND hChild = FindTopWindowForPid(ci.pid);
+        if (hChild) {
+          RECT wr{};
+          GetWindowRect(hChild, &wr);
+          line += std::to_wstring(wr.left) + L"," + std::to_wstring(wr.top) + L"," +
+                  std::to_wstring(wr.right - wr.left) + L"," +
+                  std::to_wstring(wr.bottom - wr.top);
+          line += L"|visible=";
+          line += IsWindowVisible(hChild) ? L"1" : L"0";
+          // IsWindowVisible checks only WS_VISIBLE, which a MINIMIZED window
+          // still has -- so it cannot tell "shown" from "minimized" on its
+          // own, and both fields are reported for that reason.
+          //
+          // The Mirror toggle no longer stands children down this way: it
+          // RETIRES them, so a display it cleared has no child row at all
+          // rather than a minimized one. SET_MINIMIZED= is still reachable
+          // directly, and for a child it now HIDES rather than minimises --
+          // so a stowed child reads visible=0, minimized=0, which is the
+          // honest pair.
+          line += L"|minimized=";
+          line += IsIconic(hChild) ? L"1" : L"0";
+          // fs=: the same test SET_ALL_FULLSCREEN's snapshot uses (forgejo#96),
+          // so a client can already tell "fullscreen" from "windowed" per
+          // child without waiting for that verb to exist.
+          line += L"|fs=";
+          line += IsBorderlessFullscreen(hChild) ? L"1" : L"0";
+        } else {
+          line += L"|visible=|minimized=|fs=";
+        }
       } else {
         line += L"|visible=|minimized=|fs=";
       }
@@ -3269,37 +3682,72 @@ bool Engine::HandleDisplayModeIPC(const wchar_t* sMessage) {
     return true;
   }
 
-  if (MSG_IS(sMessage, L"CHILD_TEST_WINDOWS=") ||
-      MSG_IS(sMessage, L"SET_DISPLAY_CHILD_RECT=")) {
-    // Both of these placed a CHILD PROCESS's window during a test run.
+  if (MSG_IS(sMessage, L"CHILD_TEST_WINDOWS=")) {
+    // How a child's window comes up: auto | off | tiny | hidden.
     //
-    // CHILD_TEST_WINDOWS chose how one came up -- auto | off | tiny | hidden --
-    // because a display in own-process mode spawned a child that went
-    // borderless FULLSCREEN on a real monitor, and the display suites spawned
-    // and retired those repeatedly, blacking out real screens over and over.
-    // SET_DISPLAY_CHILD_RECT said WHERE the tiny one went, which is what made
-    // per-display placement testable at all.
-    //
-    // #186 removed the child processes. A display holding its own preset
-    // renders into the same mirror swap chain every other display uses, so
-    // there is no separate window to size, place or hide -- and the intrusion
-    // these existed to control cannot happen: turning the mirrors off frees
-    // every screen at once.
-    //
-    // Kept, rather than deleted, and answering ok=1. An unrecognised keyword
-    // falls through to the script engine instead of being refused, so a
-    // removed verb fails SILENTLY -- the worst outcome available for a
-    // harness that has been sending this for months. applies=nothing is the
-    // honest form of "accepted, and it changes nothing".
-    const bool rect = MSG_IS(sMessage, L"SET_DISPLAY_CHILD_RECT=");
-    g_pipeServer.Send(rect
-        ? L"DISPLAY_CHILD_RECT|ok=1|applies=nothing"
-          L"|detail=displays render in process; there is no child window to place"
-        : L"CHILD_TEST_WINDOWS|ok=1|applies=nothing"
-          L"|detail=displays render in process; there is no child window to style");
+    // "auto" follows testing mode, which is the default and the reason this
+    // needs no setting up in the common case -- a suite that turns testing mode
+    // on stops blacking out monitors without having to ask for anything.
+    const wchar_t* v = sMessage + 19;
+    int mode;
+    if      (_wcsicmp(v, L"auto")   == 0) mode = kChildWindowAuto;
+    else if (_wcsicmp(v, L"off")    == 0) mode = kChildWindowNormal;
+    else if (_wcsicmp(v, L"normal") == 0) mode = kChildWindowNormal;
+    else if (_wcsicmp(v, L"tiny")   == 0) mode = kChildWindowTiny;
+    else if (_wcsicmp(v, L"hidden") == 0) mode = kChildWindowHidden;
+    else {
+      g_pipeServer.Send(L"CHILD_TEST_WINDOWS_ERR=expected auto, off, tiny or hidden");
+      return true;
+    }
+    m_nChildTestWindows = mode;
+    // Existing children are NOT restyled. The window is built from the command
+    // line and cannot be rebuilt in place, so a mode set now applies to the
+    // next spawn -- said in the reply rather than left to be discovered by a
+    // test that changed the mode and saw nothing move.
+    wchar_t buf[96];
+    FormatTo(buf, L"CHILD_TEST_WINDOWS=%ls|effective=%d|applies=next_spawn",
+               v, EffectiveChildWindowMode());
+    g_pipeServer.Send(buf);
     return true;
   }
 
+  if (MSG_IS(sMessage, L"SET_DISPLAY_CHILD_RECT=")) {
+    // SET_DISPLAY_CHILD_RECT=<N>,<x>,<y>,<w>,<h> -- where display N's child
+    // window goes in tiny mode. w or h of 0 clears it, so the corner default
+    // comes back.
+    //
+    // This is what makes placement testable at all: put a child at a chosen
+    // spot, read GET_CHILDREN's rect= back, and check it landed there and
+    // inside display N. Never persisted; see DisplayOutputConfig::rcTestWindow.
+    int n = 0, x = 0, y = 0, w = 0, h = 0;
+    if (swscanf_s(sMessage + 23, L"%d,%d,%d,%d,%d", &n, &x, &y, &w, &h) < 1 || n <= 0) {
+      g_pipeServer.Send(L"DISPLAY_CHILD_RECT_ERR=expected <N>,<x>,<y>,<w>,<h>");
+      return true;
+    }
+    wchar_t want[32];
+    FormatTo(want, L"\\\\.\\DISPLAY%d", n);
+    for (auto& o : m_displayOutputs) {
+      if (o.config.type != DisplayOutputType::Monitor) continue;
+      if (wcscmp(o.config.szDeviceName, want) != 0) continue;
+      if (w > 0 && h > 0) {
+        o.config.rcTestWindow.left   = x;
+        o.config.rcTestWindow.top    = y;
+        o.config.rcTestWindow.right  = x + w;
+        o.config.rcTestWindow.bottom = y + h;
+      } else {
+        o.config.rcTestWindow = RECT{};
+      }
+      RECT eff{};
+      TestChildRect(want, eff);
+      wchar_t buf[160];
+      FormatTo(buf, L"DISPLAY_CHILD_RECT=%d|rect=%d,%d,%d,%d|applies=next_spawn",
+                 n, eff.left, eff.top, eff.right - eff.left, eff.bottom - eff.top);
+      g_pipeServer.Send(buf);
+      return true;
+    }
+    g_pipeServer.Send(L"DISPLAY_CHILD_RECT_ERR=no such display");
+    return true;
+  }
 
   if (MSG_IS(sMessage, L"SET_DISPLAY_ENABLED=")) {
     // SET_DISPLAY_ENABLED=<N>,<0|1> -- the IPC form of the Displays window's
@@ -3340,26 +3788,38 @@ bool Engine::HandleDisplayModeIPC(const wchar_t* sMessage) {
   }
 
   if (MSG_IS(sMessage, L"DIAG_CHILDREN")) {
-    // This reported the HEALTH of the child worker thread, because forgejo#57
-    // was a worker stopped by a device recovery that could not be seen from
-    // outside: every command was accepted, queued and silently never acted on.
+    // Worker health, not child state -- GET_CHILDREN already answers the
+    // latter. This exists because forgejo#57 was a child worker that had been
+    // stopped by a device recovery and could not be seen from outside: every
+    // command was accepted, queued and silently never acted on, and the app
+    // reported no children because there genuinely were none.
     //
-    // There is no worker, no queue and no job object to report on since #186
-    // phase 6 -- a display holds its preset in this process. The verb is kept,
-    // answering with the fields pinned to the values that mean "healthy",
-    // because an unrecognised keyword falls through to the script engine and
-    // would fail silently rather than loudly.
-    //
-    // children= still counts the displays holding their own preset, which is
-    // the one number here that still describes something real.
-    int own = 0;
-    for (auto& out : m_displayOutputs)
-      if (out.config.type == DisplayOutputType::Monitor &&
-          out.config.bEnabled && out.config.bOwnProcess)
-        own++;
-    std::wstring line = L"CHILDREN_DIAG|worker=1|event=1|job=0|queued=0";
-    line += L"|children=" + std::to_wstring((long long)own);
-    line += L"|pending=|failed=|inprocess=1";
+    // worker=0, or a queued= that never falls, is that failure in one line.
+    std::wstring line = L"CHILDREN_DIAG|worker=";
+    line += ChildWorkerAlive() ? L"1" : L"0";
+    line += L"|event=";
+    line += m_hChildCmdEvent ? L"1" : L"0";
+    line += L"|job=";
+    line += m_hChildJob ? L"1" : L"0";
+    line += L"|queued=" + std::to_wstring((unsigned long long)ChildQueueDepth());
+    line += L"|children=" + std::to_wstring((long long)GetChildCount());
+    line += L"|pending=";
+    {
+      std::lock_guard<std::mutex> lock(m_childCmdMutex);
+      bool first = true;
+      for (auto& d : m_childSpawnPending) {
+        if (!first) line += L",";
+        line += d;
+        first = false;
+      }
+      line += L"|failed=";
+      first = true;
+      for (auto& f : m_childSpawnFailed) {
+        if (!first) line += L",";
+        line += f.first + L"=" + f.second;
+        first = false;
+      }
+    }
     g_pipeServer.Send(line.c_str());
     return true;
   }
@@ -3441,6 +3901,20 @@ std::wstring TrimWs(const wchar_t* p) {
 
 }  // namespace
 
+// IDLE_TIMER=<enabled>|<timeoutMinutes>|<action>|<profile>|<fullOpacity>
+//
+// The last two fields were APPENDED rather than inserted, so every existing
+// reader keeps working: they split on '|' and take the first three, and a
+// client that has never heard of an idle profile simply ignores what follows.
+void Engine::SendIdleTimerReply() {
+  extern PipeServer g_pipeServer;
+  wchar_t buf[MAX_PATH + 96];
+  FormatTo(buf, L"IDLE_TIMER=%d|%d|%d|%s|%d",
+           m_bIdleTimerEnabled ? 1 : 0, m_nIdleTimeoutMinutes, m_nIdleAction,
+           m_szIdleProfile, m_bIdleFullOpacity ? 1 : 0);
+  g_pipeServer.Send(buf);
+}
+
 bool Engine::HandleDisplayPresetIPC(const wchar_t* sMessage) {
   extern PipeServer g_pipeServer;
   #define DisplayReplyErr(...) g_pipeServer.Send(ReplyErr(__VA_ARGS__).c_str())
@@ -3496,19 +3970,15 @@ bool Engine::HandleDisplayPresetIPC(const wchar_t* sMessage) {
 
     wchar_t target[32];
     FormatTo(target, L"\\\\.\\DISPLAY%d", n);
-    // Nothing to relay TO. This forwarded an arbitrary message into that
-    // display's own process, which is how a client reached settings that only
-    // existed inside a child. #186 gave every display to this one process, so
-    // there is no second Engine holding a different value of anything.
-    //
-    // err=no_relay, not the old err=not_a_child: the caller is not being told
-    // it named the wrong kind of display, it is being told the mechanism is
-    // gone and which verbs replaced it.
-    (void)inner;
-    DisplayReplyErr(L"DISPLAY_RELAY", n, L"no_relay",
-                    L"displays render in this process; use the addressed verbs "
-                    L"(SET_DISPLAY_PRESET, DISPLAY_NEXT, SET_DISPLAY_PRESET_DIR, "
-                    L"SET_DISPLAY_LOCK, SET_DISPLAY_ORDER, SET_DISPLAY_INTERVAL)");
+    ChildInstance ci;
+    if (!GetChildInfo(target, ci) || !ci.bReady) {
+      DisplayReplyErr(L"DISPLAY_RELAY", n, L"not_a_child",
+                      L"no ready child on this display; "
+                      L"SET_DISPLAY_MODE=<N>,child gives it one");
+      return true;
+    }
+    RequestChildSend(target, inner.c_str());
+    DisplayReplyOk(L"DISPLAY_RELAY", n, L"relayed", inner.c_str());
     return true;
   }
 
@@ -3521,6 +3991,10 @@ bool Engine::HandleDisplayPresetIPC(const wchar_t* sMessage) {
     { L"SET_DISPLAY_ORDER=",           L"DISPLAY_ORDER",           18 },
     { L"SET_DISPLAY_LOCK=",            L"DISPLAY_LOCK",            17 },
     { L"SET_DISPLAY_WATERMARK=",       L"DISPLAY_WATERMARK",       22 },
+    // Longest-first, as the comment on this table requires: this must precede
+    // SET_DISPLAY_MSG= were one ever added, and it is longer than the entries
+    // it sits among, so it is safe here (#255).
+    { L"SET_DISPLAY_MSGMAX=",          L"DISPLAY_MSGMAX",          19 },
     { L"SET_DISPLAY_PRESET=",          L"DISPLAY_PRESET",          19 },
     { L"DISPLAY_NEXT=",                L"DISPLAY_NEXT",            13 },
     { L"DISPLAY_PREV=",                L"DISPLAY_PREV",            13 },
@@ -3577,10 +4051,16 @@ bool Engine::HandleDisplayPresetIPC(const wchar_t* sMessage) {
   // Per-screen presets belong to the own-preset path, and phase 4 puts them
   // there. At that point this guard widens again -- to displays that hold their
   // own preset, which is a different test from bIndependentRender.
-  if (!isPrimary && !out->config.bOwnProcess) {
-    DisplayReplyErr(v->reply, n, L"not_a_child",
-                    L"display is a mirror; SET_DISPLAY_MODE=<N>,child gives "
-                    L"it its own preset");
+  // Widened, as that paragraph said it would be: the test is whether the
+  // display HOLDS ITS OWN PRESET, not whether it runs in its own process. With
+  // the middle tier those are different questions, and asking the old one told
+  // a display in `preset` mode -- which has a preset of its own and a surface
+  // to step it on -- that it was a mirror.
+  if (!isPrimary && !DisplayHoldsOwnPreset(out->config)) {
+    DisplayReplyErr(v->reply, n, L"not_own_preset",
+                    L"display follows the primary; SET_DISPLAY_MODE=<N>,preset "
+                    L"gives it its own preset in this process, or ,child in its "
+                    L"own");
     return true;
   }
 
@@ -3599,6 +4079,13 @@ bool Engine::HandleDisplayPresetIPC(const wchar_t* sMessage) {
       rc.fParam = m_fBlendTimeUser;
       rc.sParam = value;
       EnqueueRenderCmd(rc);
+    } else if (ChildOwnsDisplayForIpc(target)) {
+      // A child holds this display's preset in ANOTHER PROCESS, so there is no
+      // surface here to post to and reaching for one answered no_surface --
+      // refusing exactly the displays that have a preset of their own (#236).
+      RequestChildSend(target, (L"PRESET=" + value).c_str());
+      DisplayReplyOk(v->reply, n, L"child", value.c_str());
+      return true;
     } else {
       // #186 phase 4: the display holds its own preset IN PROCESS, so this
       // goes to its surface instead of down a pipe to a child. Posted rather
@@ -3627,13 +4114,29 @@ bool Engine::HandleDisplayPresetIPC(const wchar_t* sMessage) {
       rc.cmd = next ? RenderCmd::NextPresetLocal : RenderCmd::PrevPresetLocal;
       rc.fParam = m_fBlendTimeUser;
       EnqueueRenderCmd(rc);
+    } else if (ChildOwnsDisplayForIpc(target)) {
+      // The child owns this display's preset and steps it itself. Same hole as
+      // SET_DISPLAY_PRESET above: the guard that lets a child reach this arm
+      // sent it to a branch that could only serve an in-process surface, so
+      // MDR_Android's Previous/Next were dead on precisely the displays
+      // running their own instance (#236).
+      //
+      // SIGNAL|NEXT_PRESET rather than a resolved path: the child owns its own
+      // directory, order and sequence position, and picking a file here would
+      // step a sequence the child is not keeping.
+      RequestChildSend(target, next ? L"SIGNAL|NEXT_PRESET"
+                                    : L"SIGNAL|PREV_PRESET");
+      DisplayReplyOk(v->reply, n, L"child", L"");
+      return true;
     } else {
-      // Advance THIS display's own preset, in process -- the same call the
-      // Displays window's Next/Prev buttons make.
-      const wchar_t* err = nullptr;
-      std::wstring detail;
-      if (!AdvanceDisplayPreset(*out, next, err, detail)) {
-        DisplayReplyErr(v->reply, n, err, detail.c_str());
+      const wchar_t* why = nullptr;
+      if (!StepDisplayOwnPreset(out->config, next, &why)) {
+        if (wcscmp(why, L"no_surface") == 0)
+          DisplayReplyErr(v->reply, n, why,
+                          L"display has no render surface yet; enable it first");
+        else
+          DisplayReplyErr(v->reply, n, why,
+                          ResolveDisplayPresetDir(out->config).c_str());
         return true;
       }
     }
@@ -3648,18 +4151,31 @@ bool Engine::HandleDisplayPresetIPC(const wchar_t* sMessage) {
                       L"use SET_DIR= for the main instance");
       return true;
     }
-    // Pushing SET_DIR down the child's pipe stood here. The surface resolves
-    // this display's directory from the config every time it picks a preset.
     wcsncpy_s(out->config.szPresetDir, value.c_str(), _TRUNCATE);
     SaveDisplayOutputSettings();
-    DisplayReplyOk(v->reply, n, L"display", out->config.szPresetDir);
+    RequestChildSend(target, (std::wstring(L"SET_DIR=") + value).c_str());
+    DisplayReplyOk(v->reply, n, L"child", out->config.szPresetDir);
     return true;
   }
 
   if (_wcsicmp(v->reply, L"DISPLAY_STARTUP_PRESET") == 0) {
     if (isPrimary) {
-      DisplayReplyErr(v->reply, n, L"primary_uses_global",
-                      L"the main instance has its own startup preset setting");
+      // The main render's PROFILE pin, which is a different thing from the
+      // global startup preset and used to be refused here as though it were
+      // the same one (#284).
+      //
+      // m_primaryProfile is what the Displays window's "Main render" group
+      // writes and what the next saved profile carries for the main window.
+      // It was reachable from that window and from nowhere else -- so a remote
+      // could pin a startup preset for every display except the biggest one,
+      // and no test could reach the field at all.
+      //
+      // Deliberately NOT SaveDisplayOutputSettings: this is staging for the
+      // next profile save, held in memory exactly as the window holds it, and
+      // writing it to settings.ini would make it a second global competing
+      // with szPresetStartup.
+      wcsncpy_s(m_primaryProfile.szStartupPreset, value.c_str(), _TRUNCATE);
+      DisplayReplyOk(v->reply, n, L"primary", m_primaryProfile.szStartupPreset);
       return true;
     }
     // Pin, as opposed to browse. SET_DISPLAY_PRESET shows a preset now and is
@@ -3670,6 +4186,41 @@ bool Engine::HandleDisplayPresetIPC(const wchar_t* sMessage) {
     wcsncpy_s(out->config.szStartupPreset, value.c_str(), _TRUNCATE);
     SaveDisplayOutputSettings();
     DisplayReplyOk(v->reply, n, L"child", out->config.szStartupPreset);
+    return true;
+  }
+
+  if (_wcsicmp(v->reply, L"DISPLAY_MSGMAX") == 0) {
+    // SET_DISPLAY_MSGMAX=<N>,<n> -- how many messages this display shows at
+    // once; -1 inherits the global Messages setting (#255).
+    //
+    // Per display because a display running its own preset runs its own
+    // message loop, and the supertext slots are ONE shared pool: without a
+    // per-display limit a busy panel takes every slot and the others fall
+    // silent. Aimed at the primary it is the global setting, so a remote
+    // drawing one row per monitor gets a working control on every row -- the
+    // same shape DISPLAY_LOCK follows below.
+    const int want = _wtoi(value.c_str());
+    if (want < -1 || want > NUM_SUPERTEXTS) {
+      DisplayReplyErr(v->reply, n, L"out_of_range",
+                      L"expected -1 to inherit, or 0..NUM_SUPERTEXTS");
+      return true;
+    }
+    if (isPrimary) {
+      if (want < 0) {
+        DisplayReplyErr(v->reply, n, L"primary_cannot_inherit",
+                        L"the main window is what the others inherit from");
+        return true;
+      }
+      m_nMsgMaxOnScreen = want;
+      SaveSettingToINI(SET_SPRITES_MESSAGES);
+    } else {
+      out->config.nMsgMaxOnScreen = want;
+      SaveDisplayOutputSettings();
+      RefreshDisplaysTab();
+    }
+    wchar_t val[16];
+    FormatTo(val, L"%d", want);
+    DisplayReplyOk(v->reply, n, isPrimary ? L"primary" : L"display", val);
     return true;
   }
 
@@ -3707,12 +4258,12 @@ bool Engine::HandleDisplayPresetIPC(const wchar_t* sMessage) {
       SetMainRenderLock(want != 0);
       SendPresetCycleInfo();
     } else {
-      // The resolved value used to be pushed to the child here, so that going
-      // back to inherit moved it to whatever the main window currently is.
-      // SendToDisplayOutputs reads EffectiveChildPresetLock on every pass, so
-      // the inherit case follows the main window with nothing to push.
       out->config.nPresetLock = want;
       SaveDisplayOutputSettings();
+      // Push the RESOLVED value: going back to inherit must move the child to
+      // whatever the main window currently is, not leave it on its last pin.
+      RequestChildSend(target, EffectiveChildPresetLock(out->config)
+                                   ? L"SET_PRESET_LOCK=1" : L"SET_PRESET_LOCK=0");
     }
     wchar_t num[16];
     FormatTo(num, L"%d", want);
@@ -3732,19 +4283,25 @@ bool Engine::HandleDisplayPresetIPC(const wchar_t* sMessage) {
     // thread: reported live as a display that could only be put into
     // watermark mode by accident, with no reliable way to ask for it.
     const bool want = (_wtoi(value.c_str()) != 0);
-    if (!isPrimary) {
-      // Watermark is a property of a WINDOW -- transparency, click-through and
-      // always-on-top -- and this used to reach the child process that owned
-      // the display's window. A display is a mirror swap chain in this process
-      // now; the mirror watermark covers all of them together
-      // (m_bMirrorWatermarkActive), and there is no per-display form.
-      DisplayReplyErr(v->reply, n, L"no_per_display_watermark",
-                      L"watermark applies to the main window or to every "
-                      L"mirror at once; use SET_WATERMARK");
-      return true;
+    if (isPrimary) {
+      SetWatermark(want);
+    } else {
+      // Per display now, for an in-process mirror as well as a child. The
+      // comment above used to say a mirror "has no window of its own to
+      // watermark" and refuse; it does have one -- ApplyMirrorWindowStyles
+      // styles it every time m_bMirrorStylesDirty is raised -- what was
+      // missing was somewhere to record the intent, which is
+      // DisplayOutputConfig::bWatermark.
+      out->config.bWatermark = want;
+      m_bMirrorStylesDirty.store(true);
+      SaveDisplayOutputSettings();
+      // A child owns its window outright, so the style pass cannot reach it.
+      if (out->config.bOwnProcess)
+        RequestChildSend(target, want ? L"SET_WATERMARK=1" : L"SET_WATERMARK=0");
+      RefreshDisplaysTab();
     }
-    SetWatermark(want);
-    DisplayReplyOk(v->reply, n, L"primary", want ? L"1" : L"0");
+    DisplayReplyOk(v->reply, n, isPrimary ? L"primary" : L"display",
+                   want ? L"1" : L"0");
     return true;
   }
 
@@ -3753,9 +4310,10 @@ bool Engine::HandleDisplayPresetIPC(const wchar_t* sMessage) {
     if (isPrimary) {
       SetMainRenderOrder(seq);
     } else {
-      // Read live by PickDisplayPreset; nothing to push.
       out->config.bSequentialOrder = seq;
       SaveDisplayOutputSettings();
+      RequestChildSend(target, seq ? L"SET_PRESET_ORDER=1"
+                                   : L"SET_PRESET_ORDER=0");
     }
     DisplayReplyOk(v->reply, n, isPrimary ? L"primary" : L"display",
                    seq ? L"1" : L"0");
@@ -3776,8 +4334,11 @@ bool Engine::HandleDisplayPresetIPC(const wchar_t* sMessage) {
       SetMainRenderInterval(max(0.0f, secs));
     } else {
       out->config.fTimeBetweenPresets = secs;
-      // Read live by the cycle logic in SendToDisplayOutputs; nothing to push.
       SaveDisplayOutputSettings();
+      wchar_t msg[64];
+      FormatTo(msg, L"SET_TIME_BETWEEN_PRESETS=%.3f",
+                 EffectiveChildInterval(out->config));
+      RequestChildSend(target, msg);
     }
     wchar_t shown[32];
     FormatTo(shown, L"%.3f", isPrimary ? m_fTimeBetweenPresets : secs);
@@ -3815,6 +4376,28 @@ bool Engine::HandleCanvasIPC(const wchar_t* sMessage) {
       SetPresetCanvasMaxByFile(fn, px);
       wchar_t out[64];
       FormatTo(out, L"PRESET_CANVAS_MAX=%d", px);
+      g_pipeServer.Send(out);
+    }
+    else if (MSG_IS(sMessage, L"SET_PRESET_FPS_MAX=")) {
+      // Per-preset frame-rate ceiling for the CURRENT preset (#222). It only
+      // ever LOWERS the active cap -- EnforceMaxFPS takes the min -- so a value
+      // above the user's own cap has no effect, and 0 clears it.
+      extern PipeServer g_pipeServer;
+      const int fps = max(0, _wtoi(sMessage + 19));
+      SetPresetFpsMaxByFile(CurrentPresetLeaf(), fps);
+      wchar_t out[64];
+      FormatTo(out, L"PRESET_FPS_MAX=%d", fps);
+      g_pipeServer.Send(out);
+    }
+    else if (MSG_IS(sMessage, L"PRESET_FPS_MAX_CLEAR")) {
+      extern PipeServer g_pipeServer;
+      SetPresetFpsMaxByFile(CurrentPresetLeaf(), 0);
+      g_pipeServer.Send(L"PRESET_FPS_MAX=cleared");
+    }
+    else if (MSG_IS(sMessage, L"GET_PRESET_FPS_MAX")) {
+      extern PipeServer g_pipeServer;
+      wchar_t out[64];
+      FormatTo(out, L"PRESET_FPS_MAX=%d|active=%d", m_nPresetFpsCap, m_max_fps_w);
       g_pipeServer.Send(out);
     }
     else if (MSG_IS(sMessage, L"PRESET_CANVAS_MAX_CLEAR")) {
@@ -4091,7 +4674,7 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
   // engine for Milkwave Remote -- is untouched.
   {
     std::vector<std::wstring> help;
-    if (ipc_help::Handle(sMessage, help)) {
+    if (ipc_help::Handle(sMessage, m_bChildMode, help)) {
       extern PipeServer g_pipeServer;
       for (const std::wstring& line : help) g_pipeServer.Send(line);
       g_pipeServer.Send(L"END_BATCH");
@@ -4115,7 +4698,7 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
   if (HandleDisplayPresetIPC(sMessage)) return;
   if (HandlePresetBrowseIPC(sMessage)) return;
   if (HandleHotkeyDiagIPC(sMessage)) return;
-  if (HandleWindowDiagIPC(sMessage, m_szBaseDir)) return;
+  if (HandleWindowDiagIPC(sMessage, m_szBaseDir, BuildKnownWindows())) return;
 
   // Warp mesh dimensions. An early return rather than another link in the
   // else-if chain below, which is already at MSVC's block-nesting limit -- one
@@ -4138,9 +4721,21 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
   }
 
   if (MSG_IS(sMessage, L"SET_MESH_SIZE=")) {
+    // SET_MESH_SIZE=<x>        -> x by x*3/4, the historical 4:3 derivation
+    // SET_MESH_SIZE=<x>,<y>    -> exactly x by y
+    //
+    // The optional Y exists because the 4:3 derivation is itself under
+    // question (#188): MilkDrop 3 uses a SQUARE 64x64 mesh (plugin.cpp
+    // 1256-1257, its only assignment), so every preset here samples its warp
+    // on a differently-shaped grid than the engine it is written for, and
+    // .milk2 blend cutouts inherit that distortion. Measuring the difference
+    // needs a square mesh at runtime; forcing one by changing the derivation
+    // would change how every preset renders in order to run the experiment.
     const int gridX = _wtoi(sMessage + 14);
+    const wchar_t* comma = wcschr(sMessage + 14, L',');
+    const int gridY = comma ? _wtoi(comma + 1) : (gridX * 3 / 4);
     m_reqGridX.store(gridX);
-    m_reqGridY.store(gridX * 3 / 4);
+    m_reqGridY.store(gridY);
     EnqueueRenderCmd(RenderCmd::SetMeshSize);
     return;
   }
@@ -4547,7 +5142,12 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
       FormatTo(status,
         L"PRESET_STATUS|file=%s|desc=%s|loading=%s|loadingFlag=%d|ready=%d"
         L"|shadertoy=%d|hasA=%d|hasB=%d|hasC=%d|hasD=%d"
-        L"|compPS=%d|bufferAPS=%d|logLevel=%d",
+        // fps= is the ACHIEVED rate, not the cap -- GET_FPS answers FPSCAP and
+        // there was nothing that answered this. It rides here because the
+        // parent already fetches this reply from every child once per poll, so
+        // a display's real rate costs no extra round trip; a child cannot be
+        // asked directly, since its pipe replies only to its parent (#246).
+        L"|compPS=%d|bufferAPS=%d|logLevel=%d|fps=%.1f",
         m_szCurrentPresetFile, desc, loading,
         m_nLoadingPreset,
         m_bPresetLoadReady.load() ? 1 : 0,
@@ -4556,7 +5156,8 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
         m_bHasBufferC ? 1 : 0, m_bHasBufferD ? 1 : 0,
         m_pState ? m_pState->m_nCompPSVersion : 0,
         m_pState ? m_pState->m_nBufferAPSVersion : 0,
-        g_debugLogLevel);
+        g_debugLogLevel,
+        GetFps());
       g_pipeServer.Send(status);
     }
     if (m_nNumericInputMode == NUMERIC_INPUT_MODE_CUST_MSG) {
@@ -4877,7 +5478,9 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
       // preset load, which with the window focused is a CLOSE request, not a
       // no-op, and left a modal "Close MDropDX12 Visualizer?" on the user's
       // desktop with the app disabled behind it.
-      L"|warpLock=%d|compLock=%d|meshX=%d|meshY=%d|ui=%d",
+      // fps= as above: the ACHIEVED rate. Both PRESET_STATUS emitters carry it,
+      // or which one answered would decide whether the field exists.
+      L"|warpLock=%d|compLock=%d|meshX=%d|meshY=%d|ui=%d|fps=%.1f",
       m_szCurrentPresetFile, desc, loading,
       m_nLoadingPreset,
       m_bPresetLoadReady.load() ? 1 : 0,
@@ -4895,7 +5498,8 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
       m_bWarpShaderLock ? 1 : 0,
       m_bCompShaderLock ? 1 : 0,
       m_nGridX, m_nGridY,
-      (int)m_UI_mode);
+      (int)m_UI_mode,
+      GetFps());
     g_pipeServer.Send(status);
     return;
   }
@@ -5392,7 +5996,9 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
     g_pipeServer.Send(out);
     return;
   }
-  if (MSG_IS(sMessage, L"DIAG_GPU")) {
+  // MSG_EQ, not MSG_IS: DIAG_GPURISK= and DIAG_GPUTIME= both begin with this
+  // and are handled below, so a prefix match here made them unreachable.
+  if (MSG_EQ(sMessage, L"DIAG_GPU")) {
     // What this PROCESS is costing the GPU, plus the VRAM figures the engine
     // already samples. One instance per reply and keyed by pid, because the
     // question it exists for -- what does a parent plus N children cost --
@@ -5404,17 +6010,42 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
     // it is what a rate counter is.
     extern PipeServer g_pipeServer;
     m_gpuWantedUntilTick = GetTickCount64() + 8000;
-    wchar_t out[512];
+    // What the TEXTURE CACHE is holding, alongside the VRAM figure (#312).
+    //
+    // Chasing ~70 MB of VRAM per distinct preset, the first question is whether
+    // the cache is the thing growing -- and nothing reported its size, so the
+    // only way to ask was to read the log and count "loaded texture" lines,
+    // which says what was loaded and not what is still held.
+    //
+    // evictable is the part EvictSomeTexture is allowed to drop. It used to
+    // say here that nothing called that function; #312/#314 gave it callers,
+    // and EnforceTextureCacheBudget now evicts on most preset loads once the
+    // cache is at its cap.
+    //
+    // READ, not walked (#352). This runs on the IPC thread, and m_textures is
+    // a plain vector the render thread push_backs into -- reallocating -- and
+    // erases from. The render thread publishes these three numbers at every
+    // mutation instead; a diagnostic that reports a torn figure is worse than
+    // one that reports none, because the figure is what a measurement run
+    // then reasons from.
+    const size_t texCount     = (size_t)m_texCacheCount.load(std::memory_order_relaxed);
+    const size_t texBytes     = (size_t)m_texCacheBytes.load(std::memory_order_relaxed);
+    const size_t texEvictable = (size_t)m_texCacheEvictableBytes.load(std::memory_order_relaxed);
+    wchar_t out[640];
     FormatTo(out,
-      // child= is pinned to 0: -child is gone (#186 phase 6) and the field is
-      // kept so a client parsing by key keeps finding it.
-      L"DIAG_GPU|pid=%lu|child=0|gpu3d=%.2f|gpuall=%.2f"
-      L"|vramBudgetMB=%.1f|vramUsageMB=%.1f|vramAvailPct=%.1f",
+      L"DIAG_GPU|pid=%lu|child=%d|gpu3d=%.2f|gpuall=%.2f"
+      L"|vramBudgetMB=%.1f|vramUsageMB=%.1f|vramAvailPct=%.1f"
+      L"|texCount=%d|texMB=%.1f|texEvictableMB=%.1f|presetsLoaded=%d",
       (unsigned long)GetCurrentProcessId(),
+      m_bChildMode ? 1 : 0,
       m_gpuUsage.Percent3D(), m_gpuUsage.PercentAll(),
       (double)m_vramBudgetBytes / (1024.0 * 1024.0),
       (double)m_vramUsageBytes / (1024.0 * 1024.0),
-      m_vramAvailablePercent);
+      m_vramAvailablePercent,
+      (int)texCount,
+      (double)texBytes / (1024.0 * 1024.0),
+      (double)texEvictable / (1024.0 * 1024.0),
+      m_nPresetsLoadedTotal);
     g_pipeServer.Send(out);
     return;
   }
@@ -5508,10 +6139,17 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
       const td_supertext& st = m_supertexts[i];
       if (st.fStartTime == -1.0f)
         continue;   // free slot; only the live ones are interesting
+      // owner= is which display's message loop spawned this one: -1 the
+      // primary, otherwise a 1-based DISPLAYn (#255). Reported because it is
+      // the only way to see from outside that the loops are actually separate
+      // -- the slots are one shared pool, so without it a run cannot tell one
+      // clock driving every display from several clocks agreeing by chance.
       FormatTo(buf,
-        L"|st%d=start=%.3f,dur=%.3f,fadeOut=%.3f,burn=%.3f,redraw=%d,song=%d,text=%.24ls",
+        L"|st%d=start=%.3f,dur=%.3f,fadeOut=%.3f,burn=%.3f,redraw=%d,song=%d,"
+        L"owner=%d,text=%.24ls",
         i, st.fStartTime, st.fDuration, st.fFadeOutTime, st.fBurnTime,
-        st.bRedrawSuperText ? 1 : 0, st.bIsSongTitle ? 1 : 0, st.szTextW);
+        st.bRedrawSuperText ? 1 : 0, st.bIsSongTitle ? 1 : 0,
+        st.nOwnerDisplay, st.szTextW);
       out += buf;
     }
     g_pipeServer.Send(out.c_str());
@@ -5698,23 +6336,333 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
     // nothing else undoes the fullscreen/mirrors it applied. Restore first.
     if (!bEnable && bWasActivated)
       PostMessage(GetPluginWindow(), WM_MW_IDLE_RESTORE, 0, 0);
-    extern PipeServer g_pipeServer;
-    wchar_t buf[96];
-    FormatTo(buf, L"IDLE_TIMER=%d|%d|%d", m_bIdleTimerEnabled ? 1 : 0,
-               m_nIdleTimeoutMinutes, m_nIdleAction);
-    g_pipeServer.Send(buf);
+    SendIdleTimerReply();
     DLOG_INFO("Idle timer %s via IPC", bEnable ? "enabled" : "disabled");
     return;
   }
-  if (MSG_IS(sMessage, L"GET_IDLE_TIMER")) {
-    // Query only.  Reply: IDLE_TIMER=<enabled>|<timeoutMinutes>|<action>
-    extern PipeServer g_pipeServer;
-    wchar_t buf[96];
-    FormatTo(buf, L"IDLE_TIMER=%d|%d|%d", m_bIdleTimerEnabled ? 1 : 0,
-               m_nIdleTimeoutMinutes, m_nIdleAction);
-    g_pipeServer.Send(buf);
+  // Keep the whole SET_IDLE_* family together. MSG_IS is a PREFIX compare, so
+  // neighbours matter: SET_IDLE_TIMER= / SET_IDLE_TIMEOUT= and SET_IDLE_ACTIVE=
+  // / SET_IDLE_ACTION= each diverge before the '=', so neither shadows the
+  // other -- but that is only obvious while they sit next to each other.
+  if (MSG_IS(sMessage, L"SET_IDLE_TIMEOUT=")) {
+    int mins = _wtoi(sMessage + 17);
+    if (mins < 1) mins = 1;
+    if (mins > 60) mins = 60;
+    m_nIdleTimeoutMinutes = mins;
+    SaveIdleTimerSettings();
+    SendIdleTimerReply();
     return;
   }
+  if (MSG_IS(sMessage, L"SET_IDLE_ACTION=")) {
+    int act = _wtoi(sMessage + 16);
+    if (act < 0 || act > 3) act = 0;
+    m_nIdleAction = act;
+    SaveIdleTimerSettings();
+    SendIdleTimerReply();
+    return;
+  }
+  if (MSG_IS(sMessage, L"SET_IDLE_PROFILE=")) {
+    // An empty value clears it, the way SET_PRESET_SHADER_OVERRIDE= does.
+    const wchar_t* name = sMessage + 17;
+    while (*name == L' ') name++;
+    extern PipeServer g_pipeServer;
+    if (!*name) {
+      m_szIdleProfile[0] = 0;
+      SaveIdleTimerSettings();
+      SendIdleTimerReply();
+      return;
+    }
+    // Refused NOW rather than silently at idle time, hours later, with nobody
+    // watching: a profile that does not exist is the one failure mode where a
+    // walk-away feature gives no feedback at all.
+    const std::wstring path = ResolveDisplayProfilePath(name);
+    if (path.empty() || GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+      wchar_t err[MAX_PATH + 32];
+      FormatTo(err, L"IDLE_PROFILE=ERROR|%s", name);
+      g_pipeServer.Send(err);
+      return;
+    }
+    wcsncpy_s(m_szIdleProfile, name, _TRUNCATE);
+    SaveIdleTimerSettings();
+    SendIdleTimerReply();
+    return;
+  }
+  if (MSG_IS(sMessage, L"SET_IDLE_FULL_OPACITY=")) {
+    m_bIdleFullOpacity = (_wtoi(sMessage + 22) != 0);
+    SaveIdleTimerSettings();
+    SendIdleTimerReply();
+    return;
+  }
+  if (MSG_IS(sMessage, L"RESET_IDLE_TIMER")) {
+    // Exactly what a keypress would do, minus the keypress. The countdown is
+    // otherwise read from the SYSTEM-wide last-input tick, which no application
+    // can move -- so "restart the countdown" needs a second, local baseline,
+    // and IdleElapsedMs takes whichever of the two is shorter.
+    //
+    // Restoring an ACTIVE idle session is not a side effect, it is the same
+    // rule: real input would wake it, so pretending input happened wakes it
+    // too. Only when auto-restore is on, for the same reason.
+    m_nIdleResetTick = GetTickCount();
+    if (m_bIdleAutoRestore && m_bIdleActivated)
+      PostMessage(GetPluginWindow(), WM_MW_IDLE_RESTORE, 0, 0);
+    extern PipeServer g_pipeServer;
+    g_pipeServer.Send(L"IDLE_TIMER_RESET=1");
+    return;
+  }
+  if (MSG_IS(sMessage, L"GET_IDLE_TIMER")) {
+    SendIdleTimerReply();
+    return;
+  }
+  // DIAG_GPUTIME=<0|1>[,<ms>] -- per-stage GPU timing (#230).
+  //
+  // Every other instrument here averages over a frame, and the thing that kills
+  // the device is one draw inside one frame: primDt sat flat at 22 ms for 135
+  // seconds and then the device was gone. This times each stage on the GPU's
+  // own clock and logs only the frames where a stage exceeds the threshold, so
+  // it can be left on while waiting for a failure.
+  // DIAG_VRAMMARK=<0|1> -- VRAM checkpoints through the allocating paths (#344).
+  //
+  // Same shape and the same reason as DIAG_GPUTIME above: a diagnostic that
+  // costs nothing until asked for, because QueryVideoMemoryInfo is a real call
+  // and some of these marks sit in paths that run per surface. The engine's own
+  // VRAM sample is refreshed about every two seconds, so it can say the level
+  // but never which call moved it.
+  // SET_TEXCAP=<0|N> / GET_TEXCAP -- longest edge a disk texture keeps (#349).
+  //
+  // Takes effect on the NEXT load, not retrospectively: textures already
+  // resident were built at whatever cap was in force, and rebuilding them would
+  // mean releasing resources a command list may still name. Step a preset to
+  // see it, or let the cache evict.
+  if (MSG_IS(sMessage, L"SET_TEXCAP=")) {
+    extern PipeServer g_pipeServer;
+    SetMaxTextureDim(_wtoi(sMessage + 11));
+    Config().SetInt(L"Settings", L"MaxTextureDim", GetMaxTextureDim());
+    wchar_t out[64];
+    FormatTo(out, L"TEXCAP=%d", GetMaxTextureDim());
+    g_pipeServer.Send(out);
+    DLOG_WARN("texture cap set to %d (0 = none); applies to the next load",
+              GetMaxTextureDim());
+    return;
+  }
+  if (MSG_EQ(sMessage, L"GET_TEXCAP")) {
+    extern PipeServer g_pipeServer;
+    wchar_t out[64];
+    FormatTo(out, L"TEXCAP=%d", GetMaxTextureDim());
+    g_pipeServer.Send(out);
+    return;
+  }
+
+  if (MSG_IS(sMessage, L"DIAG_VRAMMARK=")) {
+    extern PipeServer g_pipeServer;
+    const bool on = (_wtoi(sMessage + 14) != 0);
+    VramMarkSetEnabled(on);
+    VMARK("DIAG_VRAMMARK (baseline)");
+    wchar_t out[64];
+    FormatTo(out, L"VRAMMARK=%d", VramMarkEnabled() ? 1 : 0);
+    g_pipeServer.Send(out);
+    return;
+  }
+
+  if (MSG_IS(sMessage, L"DIAG_GPUTIME=")) {
+    extern PipeServer g_pipeServer;
+    const wchar_t* args = sMessage + 13;
+    const bool on = (_wtoi(args) != 0);
+    if (m_lpDX) {
+      if (const wchar_t* comma = wcschr(args, L',')) {
+        const double ms = _wtof(comma + 1);
+        if (ms > 0.0) m_lpDX->m_gpuTimingReportMs = ms;
+      }
+      m_lpDX->EnableGpuStageTiming(on);
+      wchar_t out[96];
+      FormatTo(out, L"GPUTIME=%d,%.0f",
+               m_lpDX->GpuStageTimingOn() ? 1 : 0, m_lpDX->m_gpuTimingReportMs);
+      g_pipeServer.Send(out);
+    } else {
+      g_pipeServer.Send(L"GPUTIME=ERROR|no device");
+    }
+    return;
+  }
+
+  // DIAG_BALANCE[=<0|1>] -- the adaptive frame-rate balancer (#261).
+  //
+  // Replaces DIAG_GPURISK, which switched the automatic child isolation this
+  // superseded. Off exists for the same reason DIAG_MIRRORPACE's does: the only
+  // way to show a governor is doing something is to be able to stop it and
+  // look. Reports the whole state, because a probe that silently ruled a preset
+  // out is otherwise indistinguishable from one that never ran.
+  if (MSG_IS(sMessage, L"DIAG_BALANCE")) {
+    extern PipeServer g_pipeServer;
+    const wchar_t* eq = wcschr(sMessage, L'=');
+    if (eq) {
+      const bool on = (_wtoi(eq + 1) != 0);
+      if (!on && m_bFrameBalanceEnabled)
+        ResetFrameRateBalancer();     // give the user's cap back on the way out
+      m_bFrameBalanceEnabled = on;
+    }
+    static const wchar_t* kNames[] = { L"idle", L"probing", L"holding",
+                                       L"ruledout" };
+    int slowCount = 0;
+    const float slowest = SlowestDisplayFps(&slowCount);
+    wchar_t out[320];
+    FormatTo(out,
+             L"BALANCE=%d|state=%ls|main=%.1f|slowest=%.1f|displays=%d"
+             L"|ratio=%.2f|cap=%d|userCap=%d|baseline=%.1f"
+             // The ladder shares this reply because it shares the cap: one
+             // owner, one place to read who has it (#258).
+             L"|ladder=%d|rung=%d|starved=%d|stable=%.1f|mirrorCap=%d|mirrorOnly=%d",
+             m_bFrameBalanceEnabled ? 1 : 0,
+             kNames[(int)m_balanceState],
+             GetFps(), slowest, slowCount,
+             slowest > 0.0f ? GetFps() / slowest : 0.0f,
+             m_balanceAppliedCap, m_balanceUserCap, m_balanceBaseline,
+             m_bDistressLadderEnabled ? 1 : 0, m_ladderRung,
+             GpuStarved() ? 1 : 0, m_ladderStableFps,
+             m_nLadderMirrorCap, m_ladderTookMirrorOnly ? 1 : 0);
+    g_pipeServer.Send(out);
+    return;
+  }
+
+  // SET_LADDER_TRIGGER=<-1|fps> -- where the ladder falls back to copy
+  // mirrors (#267).
+  //
+  // Persisted, and deliberately a SETTING rather than a diagnostic: whether
+  // 23/25/31 fps across three displays is acceptable, or ought to collapse to
+  // one simulation, is a judgement about the person watching. The derived
+  // default is 34 for a high or unset frame cap and two thirds of it below
+  // that, and on this machine three independent Clouds1b renders land at ~35
+  // achievable -- one frame the right side of it -- so someone who wants that
+  // case to fall back needs to say so.
+  if (MSG_IS(sMessage, L"SET_LADDER_TRIGGER=")) {
+    extern PipeServer g_pipeServer;
+    int want = _wtoi(sMessage + 19);
+    if (want < -1) want = -1;
+    if (want > 720) want = 720;
+    m_nLadderTriggerSetting = want;
+    SaveDisplayOutputSettings();
+    wchar_t out[160];
+    FormatTo(out, L"LADDER_TRIGGER=%.1f|setting=%d|derived=%.1f|target=%d",
+             MirrorRungTriggerFps(), m_nLadderTriggerSetting,
+             DerivedMirrorRungTriggerFps(), UserFpsTarget());
+    g_pipeServer.Send(out);
+    return;
+  }
+  if (MSG_IS(sMessage, L"GET_LADDER_TRIGGER")) {
+    extern PipeServer g_pipeServer;
+    wchar_t out[160];
+    FormatTo(out, L"LADDER_TRIGGER=%.1f|setting=%d|derived=%.1f|target=%d",
+             MirrorRungTriggerFps(), m_nLadderTriggerSetting,
+             DerivedMirrorRungTriggerFps(), UserFpsTarget());
+    g_pipeServer.Send(out);
+    return;
+  }
+
+  // DIAG_LADDER[=<0|1>] -- the distress ladder (#258), separately switchable
+  // from the balancer because they answer different questions and a test needs
+  // to hold one still while exercising the other.
+  if (MSG_IS(sMessage, L"DIAG_LADDER")) {
+    extern PipeServer g_pipeServer;
+    const wchar_t* eq = wcschr(sMessage, L'=');
+    if (eq) {
+      const bool on = (_wtoi(eq + 1) != 0);
+      if (!on && m_bDistressLadderEnabled) ResetDistressLadder();
+      m_bDistressLadderEnabled = on;
+    }
+    wchar_t out[224];
+    FormatTo(out,
+             L"LADDER=%d|rung=%d|fps=%.1f|starved=%d|stable=%.1f"
+             L"|mirrorCap=%d|mirrorOnly=%d|cap=%d"
+             // The triggers are computed from the user's target, so they have
+             // to be readable -- otherwise "why did it not fire" is unanswerable
+             // from outside.
+             L"|target=%d|rung2At=%.1f|rung2Set=%d|fg=%d",
+             m_bDistressLadderEnabled ? 1 : 0, m_ladderRung, GetFps(),
+             GpuStarved() ? 1 : 0, m_ladderStableFps,
+             m_nLadderMirrorCap, m_ladderTookMirrorOnly ? 1 : 0,
+             m_balanceAppliedCap,
+             UserFpsTarget(), MirrorRungTriggerFps(), m_nLadderTriggerSetting,
+             RenderWindowHasFocus() ? 1 : 0);
+    g_pipeServer.Send(out);
+    return;
+  }
+
+  // DIAG_MIRRORPACE=<0|1> -- the closed-loop mirror pacer (#230). Off exists
+  // only to demonstrate the device removal it prevents: once it works there is
+  // no other way to show the failure is still reachable, and a fix nobody can
+  // see failing is a fix nobody can check.
+  if (MSG_IS(sMessage, L"DIAG_MIRRORPACE=")) {
+    extern PipeServer g_pipeServer;
+    m_bMirrorPacer.store(_wtoi(sMessage + 16) != 0, std::memory_order_relaxed);
+    wchar_t out[64];
+    FormatTo(out, L"MIRRORPACE=%d,skipped=%u",
+             m_bMirrorPacer.load(std::memory_order_relaxed) ? 1 : 0,
+             m_mirrorDiagSkipFrames.load(std::memory_order_relaxed));
+    g_pipeServer.Send(out);
+    return;
+  }
+
+  // DIAG_MIRRORCAP=<n> -- the mirror swap-chain long-edge cap; 0 removes it.
+  //
+  // Adjustable because its justification is in doubt (forgejo#252). The comment
+  // on CapMirrorSwapChainDim attributes it to a TDR; Shane's reading is that
+  // the device loss was a memory leak since fixed. Neither can be settled by
+  // argument, and the only way to find out whether a guard still earns its
+  // place is to remove it and watch -- the same reason DIAG_MIRRORPACE can be
+  // switched off.
+  //
+  // Marks both resize paths dirty so the change takes effect on live chains
+  // rather than only on the next one created.
+  if (MSG_IS(sMessage, L"DIAG_MIRRORCAP=")) {
+    extern PipeServer g_pipeServer;
+    const int want = _wtoi(sMessage + 15);
+    // -1 hands control back to the derivation; anything else is a diagnostic
+    // override that outranks it until then. Not persisted either way -- an
+    // evaluation must not turn into a setting by accident (#254).
+    if (want < 0) {
+      m_bMirrorScCapOverridden = false;
+      RefreshMirrorSwapChainCap();
+    } else {
+      m_bMirrorScCapOverridden = true;
+      SetMirrorSwapChainCap(want);
+    }
+    m_bMirrorStylesDirty.store(true);
+    m_bMirrorIndepSizeDirty.store(true);
+    wchar_t out[200];
+    FormatTo(out,
+             L"MIRRORCAP=%d|source=%ls|setting=%d|derived=%d|budgetMB=%.0f|share=%.0f%%",
+             GetMirrorSwapChainCap(),
+             m_bMirrorScCapOverridden ? L"diag"
+               : (m_nMirrorScCapSetting >= 0 ? L"setting" : L"derived"),
+             m_nMirrorScCapSetting,
+             DeriveMirrorSwapChainCap(),
+             (double)m_vramBudgetBytes / (1024.0 * 1024.0),
+             MirrorVramShare() * 100.0);
+    g_pipeServer.Send(out);
+    return;
+  }
+
+  // SET_MIRRORCAP=<n> -- the PERSISTED setting (#254).
+  //
+  // -1 derive from the VRAM budget (the default), 0 no cap, >0 a fixed long
+  // edge for a machine under real contention. Separate verb from
+  // DIAG_MIRRORCAP because they answer different questions: this one is a
+  // choice that survives a restart, that one is an experiment that does not.
+  if (MSG_IS(sMessage, L"SET_MIRRORCAP=")) {
+    extern PipeServer g_pipeServer;
+    int want = _wtoi(sMessage + 14);
+    if (want < -1) want = -1;
+    if (want > 16384) want = 16384;
+    m_nMirrorScCapSetting = want;
+    m_bMirrorScCapOverridden = false;   // an explicit choice clears the probe
+    RefreshMirrorSwapChainCap();
+    SaveDisplayOutputSettings();
+    m_bMirrorStylesDirty.store(true);
+    m_bMirrorIndepSizeDirty.store(true);
+    wchar_t out[96];
+    FormatTo(out, L"MIRRORCAP=%d|setting=%d", GetMirrorSwapChainCap(), want);
+    g_pipeServer.Send(out);
+    return;
+  }
+
   if (MSG_IS(sMessage, L"DIAG_MIRRORS")) {
     // Rich mirror diagnostics for IPC / MCP (portrait ghost, every-other-frame, path).
     // path: 0=none 1=orient 2=stretchMain 3=letterbox 4=copy 5=black 6=orientFail
@@ -5742,38 +6690,80 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
     // configuration and followed the primary looks exactly like one that was
     // never configured, so "it showed the primary's preset" cannot distinguish
     // working-as-asked from not-reading-the-config.
-    response += L"|ctxSource=";
-    response += OnlyMirrorSurface().sim.ownPresetPath.empty() ? L"follow" : L"own";
-    if (!OnlyMirrorSurface().sim.loadedOwnPath.empty()) {
-      response += L"|ctxPreset=";
-      const size_t sep = OnlyMirrorSurface().sim.loadedOwnPath.find_last_of(L"\\/");
-      response += (sep == std::wstring::npos)
-                    ? OnlyMirrorSurface().sim.loadedOwnPath
-                    : OnlyMirrorSurface().sim.loadedOwnPath.substr(sep + 1);
-    }
-    response += L"|ctxShaders=";
-    response += (OnlyMirrorSurface().sim.shaders.warp.bytecodeBlob ||
-                 OnlyMirrorSurface().sim.shaders.comp.bytecodeBlob) ? L"1" : L"0";
-
-    // One row per surface (#186 phase 4). The ctx* and orient* fields above
-    // describe the FIRST surface and are kept as they were, because the
-    // harness parses them; these rows are what tell displays apart now that
-    // each can hold a different preset.
+    // One row per surface (#186 phase 4), and now the ONLY place per-surface
+    // facts are reported. ctxSource, ctxPreset and ctxShaders used to sit here
+    // describing m_mirrorSurfaces.front() -- kept that way "because the
+    // harness parses them", which is how a diagnostic ends up lying to the
+    // thing that reads it. They are own=, preset= and shaders= on each row
+    // below (#202).
     for (auto& sp : SnapshotMirrorSurfaces()) {
       std::wstring name = sp->sim.loadedOwnPath;
       const size_t sep = name.find_last_of(L"\\/");
       if (sep != std::wstring::npos)
         name = name.substr(sep + 1);
-      wchar_t row[512];
+      const double pfv =
+          (sp->sim.pState && sp->sim.pState->var_pf_frame)
+              ? *sp->sim.pState->var_pf_frame : -1.0;
+      wchar_t row[768];
       FormatTo(row,
-               L"|surf=%ls,own=%d,preset=%ls,size=%dx%d,ready=%d,frames=%d,pub=%d",
+               L"|surf=%ls,own=%d,preset=%ls,size=%dx%d,ready=%d,frames=%d,pub=%d"
+               L",gate=%d,pipeRdy=%d,need=%dx%d,seenPf=%u,try=%d,rec=%d"
+               L",shaders=%d,fb=%d,simFps=%.1f,pf=%.0f,ovr=%d,simTime=%.3f"
+               // workUs is what the GPU last charged for ONE frame of this
+               // surface, submit to fence complete (#230). It is the input the
+               // closed-loop pacer throttles on, so without it the pacer's
+               // decisions cannot be checked from outside -- which is the
+               // mistake skipFrames= made for so long.
+               // psInv / prims / overdraw answer the question workUs cannot:
+               // whether an expensive frame was expensive per PIXEL or per
+               // FRAGMENT. overdraw is PSInvocations divided by this surface's
+               // own pixel count, so ~1 means each pixel was shaded about once
+               // and the shader is the cost, while a large number means the
+               // warp mesh is covering the canvas repeatedly and the geometry
+               // is what went wrong. Those need opposite fixes and nothing
+               // else here distinguishes them (#230).
+               // sub= and done= are this surface's OWN fence: what it has
+               // submitted, and what the GPU has signalled complete. The
+               // fence gate (gate=4) refuses to record a new frame until
+               // done >= sub, and a surface frozen there is the shape seen in
+               // #230 -- so these two numbers turn "its fence never signals"
+               // from an inference into a reading. done < sub, both static,
+               // means the submitted work is not completing.
+               L",bindBase=%u,parityMissed=%u,workUs=%u,sub=%llu,done=%llu"
+               L",prims=%llu,psInv=%llu,overdraw=%.1f,gpuUs=%u",
                sp->device.empty() ? L"(none)" : sp->device.c_str(),
                sp->sim.ownPresetPath.empty() ? 0 : 1,
                name.empty() ? L"-" : name.c_str(),
                sp->pipe.w, sp->pipe.h,
                sp->imageReady.load() ? 1 : 0,
                sp->pipe.frames,
-               sp->publishedIdx.load());
+               sp->publishedIdx.load(),
+               sp->lastGate.load(),
+               sp->pipe.ready ? 1 : 0,
+               sp->needW.load(), sp->needH.load(),
+               sp->seenPrimaryFrame,
+               sp->stepAttempts.load(), sp->stepRecords.load(),
+               (sp->sim.shaders.warp.bytecodeBlob ||
+                sp->sim.shaders.comp.bytecodeBlob) ? 1 : 0,
+               sp->pipe.fbIdx,
+               sp->sim.fFps,
+               pfv,
+               sp->sim.diagShaderFrame,
+               sp->sim.fTime,
+               sp->pipe.bindBase,
+               sp->parityMissed.load(std::memory_order_relaxed),
+               sp->lastWorkUs,
+               (unsigned long long)sp->workSubmitted,
+               (unsigned long long)(sp->workFence
+                                        ? sp->workFence->GetCompletedValue()
+                                        : 0ull),
+               (unsigned long long)sp->lastStats.CPrimitives,
+               (unsigned long long)sp->lastStats.PSInvocations,
+               (sp->pipe.w > 0 && sp->pipe.h > 0)
+                   ? (double)sp->lastStats.PSInvocations /
+                     ((double)sp->pipe.w * (double)sp->pipe.h)
+                   : 0.0,
+               sp->lastGpuUs);
       response += row;
     }
     {
@@ -5782,41 +6772,72 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
         L"|main=%dx%d,mainPort=%d,needSrv=%d,canSample=%d,anyOpp=%d,anyIndepMilk3=%d,"
         L"shadertoy=%d,compPso=%d,slots=%d,frame=%u,skipFrames=%u,"
         L"allocHr=0x%08X,listHr=0x%08X,auxUsed=%u,"
-        L"surfaces=%d,orient=%dx%d,orientReady=%d,orientFrames=%d,orientFb=%d,"
-        L"orientFps=%.1f,mirrorFps=%.1f,maxFps=%d,aspBad=%u,aspGood=%u"
+        // surfaces= is a count; orientFps/mirrorFps are aggregates over every
+        // surface. The per-surface orient=/orientReady=/orientFrames=/orientFb=
+        // that used to be here are size=, pipeRdy=, frames= and fb= on each
+        // surf= row (#202).
+        L"surfaces=%d,"
+        // workerCmdList counts GetActiveCmdList() calls made ON A MIRROR
+        // WORKER -- every one is a site that had a RenderContext and asked a
+        // global anyway. It is the progress measure for #206: it should fall
+        // to 0 as the drawing helpers are moved onto their context, and any
+        // rise afterwards is a new site doing the old thing.
+        // peakGpuUs is the value the isolation decision actually reads --
+        // the worst GPU cost any surface has reported for the CURRENT preset.
+        // Without it the only visible figure was each surface's LAST frame,
+        // which is a different quantity and reads far lower, so the threshold
+        // could not be checked from outside.
+        L"orientFps=%.1f,mirrorFps=%.1f,maxFps=%d,peakGpuUs=%u,aspBad=%u,aspGood=%u"
+        L",workerCmdList=%u,bindOverlap=%d"
         L"|pace_ms=orientDt(min=%.1f,avg=%.1f,max=%.1f),lock(avg=%.1f,max=%.1f),"
         L"rec(avg=%.1f,max=%.1f),sim(avg=%.1f,max=%.1f),fenceMiss=%d,"
+        L"fenceWait(avg=%.2f),"
         L"primDt(min=%.1f,avg=%.1f,max=%.1f)"
         // simFps is the ctx's OWN measured rate — the number the HUD's "mirror"
         // line shows and the one presets read as var_pf_fps. It was derived from
         // the primary's animation clock and so always echoed the primary's fps;
         // exposing it here is what makes that verifiable instead of eyeballed.
-        L"|simFps=%.1f"
         // Shadertoy iMouse as the shaders see it (primary target pixels).
+        // What WaitForSurfaceWork cost on the render thread, in microseconds:
+        // last call, worst since start, and how many calls actually waited.
+        L"|surfWait=last=%d,max=%d,n=%u,calls=%u"
         L"|stMouse=%.0f,%.0f,down=%d",
         m_mirrorDiagMainW, m_mirrorDiagMainH, m_mirrorDiagMainPortrait,
         m_mirrorDiagNeedMainSrv, m_mirrorDiagCanSampleMain,
         m_mirrorDiagAnyOpposite, m_mirrorDiagAnyIndepMilk3,
         m_mirrorDiagShadertoy, m_mirrorDiagCompPso, m_mirrorDiagSlotCount,
-        m_mirrorDiagFrameCounter, m_mirrorDiagSkipFrames,
+        m_mirrorDiagFrameCounter,
+        m_mirrorDiagSkipFrames.load(std::memory_order_relaxed),
         m_mirrorDiagAllocHr, m_mirrorDiagListHr, m_mirrorDiagAuxUsed,
         // surfaces= is the count of per-display mirror surfaces (#186 phase 3).
         // The orient* fields that follow describe the FIRST of them; phase 4
         // adds a row per surface, when they stop rendering the same preset.
         (int)MirrorSurfaceCount(),
-        OnlyMirrorSurface().pipe.w, OnlyMirrorSurface().pipe.h, OnlyMirrorSurface().pipe.ready ? 1 : 0,
-        OnlyMirrorSurface().pipe.frames, OnlyMirrorSurface().pipe.fbIdx,
         m_fOrientFps, m_fMirrorPresentFps, m_nMirrorMaxFps.load(),
-        m_diagOrientAspectBad, m_diagOrientAspectGood,
+        // MeasuredPeakGpuUs, not the raw surface high-water mark: the gate
+        // reads the primary's frame too, and a diagnostic that showed only
+        // half of that would make the decision unverifiable from outside --
+        // which is the whole reason this field was added (#245).
+        MeasuredPeakGpuUs(),
+        m_diagOrientAspectBad.load(), m_diagOrientAspectGood.load(),
+        m_lpDX ? m_lpDX->ActiveCmdListOnWorkerCount() : 0u,
+        // bindOverlap: pairs of live surfaces whose reserved SRV ranges
+        // intersect. Non-zero is ALWAYS a bug and is the thing nothing
+        // reported during #354 -- the two bindBase values were both printed,
+        // 11 apart, and that only reads as wrong if you know the reservation
+        // is 576 wide. This does the comparison so a reader does not have to.
+        OrientBindOverlapCount(),
         m_diagOrientDtMinUs.load() / 1000.0, m_diagOrientDtAvgUs.load() / 1000.0,
         m_diagOrientDtMaxUs.load() / 1000.0,
         m_diagOrientLockAvgUs.load() / 1000.0, m_diagOrientLockMaxUs.load() / 1000.0,
         m_diagOrientRecAvgUs.load() / 1000.0, m_diagOrientRecMaxUs.load() / 1000.0,
         m_diagOrientSimAvgUs.load() / 1000.0, m_diagOrientSimMaxUs.load() / 1000.0,
         m_diagOrientFenceWaits.load(),
+        m_diagOrientFenceMsAvg.load() / 1000.0,
         m_diagPrimDtMinUs.load() / 1000.0, m_diagPrimDtAvgUs.load() / 1000.0,
         m_diagPrimDtMaxUs.load() / 1000.0,
-        OnlyMirrorSurface().sim.fFps,
+        m_diagSurfaceWaitUs.load(), m_diagSurfaceWaitMaxUs.load(),
+        m_diagSurfaceWaitCount.load(), m_diagSurfaceWaitCalls.load(),
         m_stMouseX, m_stMouseY, m_stMouseDown ? 1 : 0);
       response += gbuf;
     }
@@ -5838,18 +6859,14 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
       // during the last record, and the context steps in between. A reader
       // should allow that skew; the defect this catches is a difference of
       // thousands, not of one.
-      wchar_t fbuf[192];
-      const double pfFrame =
-          (OnlyMirrorSurface().sim.pState && OnlyMirrorSurface().sim.pState->var_pf_frame)
-              ? *OnlyMirrorSurface().sim.pState->var_pf_frame : -1.0;
-      // simTime/primTime alongside them: the mirror's animation clock is its
-      // own now, advanced from its own step timing, so these are expected to
-      // drift apart. Reported so "independent" is observable rather than
-      // asserted -- two clocks that never diverge are not independent.
-      FormatTo(fbuf, L"|pfFrame=%.0f,ovrFrame=%d,primFrame=%d"
-                       L"|simTime=%.3f,primTime=%.3f",
-                 pfFrame, m_nDiagShaderFrame, GetFrame(),
-                 OnlyMirrorSurface().sim.fTime, (double)GetTime());
+      // The PRIMARY's frame and clock only. Each surface's own pf=, ovr= and
+      // simTime= are on its surf= row, where the comparison above is actually
+      // made per surface -- reading them off m_mirrorSurfaces.front() while
+      // sitting next to a primFrame that describes the instance is exactly the
+      // mismatch that let #198 hide (#202).
+      wchar_t fbuf[128];
+      FormatTo(fbuf, L"|primFrame=%d|primTime=%.3f",
+                 GetFrame(), (double)GetTime());
       response += fbuf;
     }
     // Report which monitor the render window is on
@@ -5867,14 +6884,14 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
           // stand down -- it would hand the display over to a window nobody
           // can see (forgejo#57).
           //
-          // revealed= was what the parent waited on: a child faded in over the
-          // mirror, so visible= went true at the START of the fade and retiring
-          // the mirror then would have shown the desktop through it. There is
-          // no fade and no handover now; the field is pinned to 1 rather than
-          // dropped, because a removed field is as silent as a removed verb.
+          // revealed= is the one the parent waits on: a child fades in over the
+          // mirror, so visible= goes true at the START of the fade and retiring
+          // the mirror then would show the desktop through it. Always 1 for
+          // anything that is not a fading child.
           response += IsWindowVisible(m_lpDX->GetHwnd()) ? L",visible=1"
                                                          : L",visible=0";
-          response += L",revealed=1";
+          response += m_bChildRevealComplete.load() ? L",revealed=1"
+                                                    : L",revealed=0";
           RECT wr;
           GetWindowRect(m_lpDX->GetHwnd(), &wr);
           wchar_t buf[128];
@@ -5899,30 +6916,6 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
       if (st == D3D12_RESOURCE_STATE_COPY_SOURCE) return L"COPY_SRC";
       return L"OTHER";
     };
-    // Every NON-monitor output, which nothing reported until now.
-    //
-    // The Displays window's panel draws one tile per Spout output, and the only
-    // way to see that list was to look at the window -- which is how a report
-    // of "a bunch of tiny little fake displays underneath the real ones" had to
-    // be made by eye (Shane, 2026-09-09). The mon<N>= rows below deliberately
-    // filter to monitors, so a Spout entry that should not exist was invisible
-    // to every diagnostic. A count and a row each makes it a measurement.
-    {
-      int spoutIdx = 0;
-      for (auto& out : m_displayOutputs) {
-        if (out.config.type == DisplayOutputType::Monitor) continue;
-        wchar_t row[256];
-        FormatTo(row, L"|spout%d=%ls,enabled=%d,fixed=%d,size=%dx%d",
-                 spoutIdx++, out.config.szName[0] ? out.config.szName : L"(unnamed)",
-                 out.config.bEnabled ? 1 : 0, out.config.bFixedSize ? 1 : 0,
-                 out.config.nWidth, out.config.nHeight);
-        response += row;
-      }
-      wchar_t tot[64];
-      FormatTo(tot, L"|outputs=%d,spout=%d", (int)m_displayOutputs.size(), spoutIdx);
-      response += tot;
-    }
-
     int idx = 0;
     for (auto& out : m_displayOutputs) {
       if (out.config.type != DisplayOutputType::Monitor) continue;
@@ -5936,20 +6929,53 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
       response += std::to_wstring(out.config.nOpacity);
       response += L",clickthru=";
       response += out.config.bClickThrough ? L"1" : L"0";
+      // #193. A remote wants a SWITCH for these two, and a switch has to show
+      // a position. Neither was readable per display, so a client had three
+      // bad options: infer watermark from clickthru && opacity<100, which also
+      // reports true for anyone who set those two by hand; remember what it
+      // last sent, which lies the moment anything changes at the PC; or start
+      // the switch in the wrong place. They arrive with the state the screen
+      // already polls, so a client needs no second round trip and cannot show
+      // a switch that disagrees with the opacity slider beside it.
+      //
+      // Scope is deliberately not disguised. Watermark covers every mirror at
+      // once and always-on-top is instance-wide, so both repeat the same value
+      // on every record. That is still the truthful answer to "is THIS
+      // display's window watermarked / on top", which is what a switch shows.
+      // What the SETTER covers is a different question, and its own reply
+      // already answers it: SET_DISPLAY_WATERMARK refuses a non-primary
+      // display with no_per_display_watermark.
+      response += L",watermark=";
+      // THIS display's own state, not the global gesture's. It echoed
+      // m_bMirrorWatermarkActive, so every monitor reported the same value and
+      // the field could not answer "is display 3 watermarked" -- which is the
+      // only question anyone asks it.
+      response += out.config.bWatermark ? L"1" : L"0";
+      // Read off the WINDOW where there is one, rather than echoing the flag
+      // that requested it. A flag says what was asked for; the ex-style says
+      // what is on screen, and those parting company without anyone noticing
+      // is the failure this field exists to prevent. A display with no window
+      // has no z-order of its own, so it reports the instance's intent.
+      response += L",alwaysontop=";
+      {
+        bool aot = m_bAlwaysOnTop;
+        if (out.monitorState && out.monitorState->hWnd)
+          aot = (GetWindowLongPtrW(out.monitorState->hWnd, GWL_EXSTYLE)
+                 & WS_EX_TOPMOST) != 0;
+        response += aot ? L"1" : L"0";
+      }
       response += L",independent=";
       response += out.config.bIndependentRender ? L"1" : L"0";
       response += L",skipped=";
       response += out.bSkippedSameMonitor ? L"1" : L"0";
-      // ownProcess is what was asked for; childOwns was whether the child
-      // process was actually up, and therefore whether the mirror had stood
-      // down -- the two differed for the seconds a spawn took. There is no
-      // spawn now, and no mirror standing down: the field is kept so a client
-      // keeps parsing, and reports whether the surface has drawn.
+      // ownProcess is what was asked for; childOwns is whether the child is
+      // actually up and therefore whether the mirror has stood down. The two
+      // differ for the seconds a child takes to spawn, and telling them apart
+      // is the difference between "starting" and "stuck" for any client.
       response += L",ownProcess=";
       response += out.config.bOwnProcess ? L"1" : L"0";
       response += L",childOwns=";
-      response += (out.config.bOwnProcess &&
-                   DisplayPresetStatus(out.config.szDeviceName).ready) ? L"1" : L"0";
+      response += ChildOwnsDisplay(out.config.szDeviceName) ? L"1" : L"0";
       auto& rc = out.config.rcMonitor;
       const int monW = rc.right - rc.left;
       const int monH = rc.bottom - rc.top;
@@ -6020,7 +7046,12 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
       // orientBind..orientBindEnd is the mirror's reserved block range: if any
       // slot= value below falls inside it, the per-frame fills are overwriting
       // that texture's own descriptor (see EnsureOrientPipeline's stillReserved).
-      const UINT bindSlots = 6 * DXContext::BINDING_BLOCK_SIZE;
+      // Was 6 * BINDING_BLOCK_SIZE = 192, which under-reported the reserved
+      // range by 384 slots: the reservation has been (6 + blur) blocks since
+      // #209. So orientBindEnd said a texture at bindBase+300 was OUTSIDE the
+      // block when it was squarely inside it -- the precise question this
+      // field exists to answer (#354).
+      const UINT bindSlots = OrientBindSlots();
       FormatTo(buf, L"|fallbackSrv=%u,nullSrv=%u,style=%d,srvUsed=%u,"
                       L"orientBind=%u,orientBindEnd=%u",
                  m_lpDX->m_fallbackTexture.srvIndex,
@@ -6059,7 +7090,19 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
       }
     };
     dumpSet(L"primary", m_bindSnapPrimary);
-    dumpSet(L"mirror", m_bindSnapMirror);
+    // Every surface, named by its device. The old single "mirror" set was one
+    // array all of them wrote, so with more than one surface this report was a
+    // shuffle of several -- which made it useless for exactly the multi-surface
+    // case it exists to diagnose (#206).
+    for (const auto& sp : SnapshotMirrorSurfaces()) {
+      std::wstring who = L"mirror";
+      if (!sp->device.empty()) {
+        who += L"[";
+        who += sp->device;
+        who += L"]";
+      }
+      dumpSet(who.c_str(), sp->bindSnap);
+    }
     g_pipeServer.Send(response.c_str());
     return;
   }
@@ -7004,6 +8047,42 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
     g_pipeServer.Send(buf);
     return;
   }
+  // ── Driving a SCRIPT FILE over the pipe (#303) ──
+  //
+  // The script engine could be driven only from its tool window, so a script
+  // could not be started by a harness -- which meant the script-as-test feature
+  // could not be regression tested, and a support script could not be run
+  // remotely for someone.
+  //
+  // Deliberately three verbs and not one: loading and playing are separate acts
+  // in the UI too, and a caller wanting to inspect what parsed before anything
+  // executes needs the gap.
+  if (MSG_IS(sMessage, L"SCRIPT_LOAD=") || MSG_EQ(sMessage, L"SCRIPT_PLAY") ||
+      MSG_EQ(sMessage, L"SCRIPT_STOP")) {
+    extern PipeServer g_pipeServer;
+  if (MSG_IS(sMessage, L"SCRIPT_LOAD=")) {
+    std::wstring path(sMessage + 12);
+    LoadScript(path.c_str());
+    wchar_t reply[MAX_PATH + 64];
+    FormatTo(reply, L"SCRIPT_LOADED=%d|%ls",
+             (int)m_script.lines.size(), path.c_str());
+    g_pipeServer.Send(reply);
+    return;
+  }
+  if (MSG_EQ(sMessage, L"SCRIPT_PLAY")) {
+    StartScript();
+    g_pipeServer.Send(L"SCRIPT_PLAYING");
+    return;
+  }
+  if (MSG_EQ(sMessage, L"SCRIPT_STOP")) {
+    StopScript();
+    wchar_t reply[64];
+    FormatTo(reply, L"SCRIPT_STOPPED|errors=%d", m_script.errors);
+    g_pipeServer.Send(reply);
+    return;
+  }
+  }
+
   // Fallback -- reached only when nothing above claimed the message.
   //
   // Treated as a pipe-chained script command (NEXT, PREV, LOCK, SEND=0x.., ...),
@@ -7246,7 +8325,7 @@ Cleanup:
   return hr;
 }
 
-int Engine::GetNextFreeSupertextIndex() {
+int Engine::GetNextFreeSupertextIndex(int ownerDisplay) {
   int index = 0;
   for (int i = 0; i < NUM_SUPERTEXTS; i++) {
     if (m_supertexts[i].fStartTime == -1.0f) {
@@ -7256,6 +8335,9 @@ int Engine::GetNextFreeSupertextIndex() {
   }
   // if no text is free, we'll reset and use index=0
   m_supertexts[index] = td_supertext(); // Reset the supertext at this index
+  // Stamped HERE, right after the reset that would otherwise clear it, so
+  // every spawn path gets it without each having to remember (#255).
+  m_supertexts[index].nOwnerDisplay = ownerDisplay;
   return index;
 }
 

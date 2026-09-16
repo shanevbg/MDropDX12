@@ -88,11 +88,14 @@ bool Engine::AddNoiseTex(const wchar_t* szTexName, int size, int zoom_factor) {
     x.d = 1;
     x.bEvictable = false;
     x.nAge = m_nPresetsLoadedTotal;
-    x.nSizeInBytes = size * size * 4;
     x.dx12Tex = m_lpDX->CreateTextureFromPixels(pixels.data(), size, size,
                                                  size * sizeof(DWORD),
                                                  DXGI_FORMAT_B8G8R8A8_UNORM);
+    // AFTER the resource exists, and from the device (#347) -- size*size*4 is
+    // the base level only, and these carry a mip chain like any other texture.
+    x.nSizeInBytes = (int)m_lpDX->TextureVramBytes(x.dx12Tex);
     m_textures.push_back(x);
+    PublishTextureCacheStats();   // #352
     return true;
   // The DX9 branch that stood here is gone (issue 17): there was never a DX9
   // device under DX12, so the block above always runs and always returns. The
@@ -188,7 +191,6 @@ bool Engine::AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor) {
     ti.d = size;
     ti.bEvictable = false;
     ti.nAge = m_nPresetsLoadedTotal;
-    ti.nSizeInBytes = size * size * size * 4;
     ti.dx12Tex = m_lpDX->CreateVolumeTextureFromPixels(
         pixels.data(), size, size, size,
         size * sizeof(DWORD),
@@ -196,7 +198,10 @@ bool Engine::AddNoiseVol(const wchar_t* szTexName, int size, int zoom_factor) {
     if (!ti.dx12Tex.IsValid()) {
       dumpmsg(L"DX12: Could not create 3D noise volume texture");
     }
+    // From the device, after the resource exists (#347).
+    ti.nSizeInBytes = (int)m_lpDX->TextureVramBytes(ti.dx12Tex);
     m_textures.push_back(ti);
+    PublishTextureCacheStats();   // #352
     return true;
   // The DX9 branch that stood here is gone (issue 17): there was never a DX9
   // device under DX12, so the block above always runs and always returns. The
@@ -234,11 +239,13 @@ bool Engine::AddNoiseTex_ST(const wchar_t* szTexName, int size) {
   x.d = 1;
   x.bEvictable = false;
   x.nAge = m_nPresetsLoadedTotal;
-  x.nSizeInBytes = size * size * 4;
   x.dx12Tex = m_lpDX->CreateTextureFromPixels(pixels.data(), size, size,
                                                size * sizeof(DWORD),
                                                DXGI_FORMAT_B8G8R8A8_UNORM);
+  // From the device, after the resource exists (#347).
+  x.nSizeInBytes = (int)m_lpDX->TextureVramBytes(x.dx12Tex);
   m_textures.push_back(x);
+  PublishTextureCacheStats();   // #352
   return true;
 }
 
@@ -266,13 +273,147 @@ bool Engine::AddNoiseVol_ST(const wchar_t* szTexName, int size) {
   ti.d = size;
   ti.bEvictable = false;
   ti.nAge = m_nPresetsLoadedTotal;
-  ti.nSizeInBytes = size * size * size * 4;
   ti.dx12Tex = m_lpDX->CreateVolumeTextureFromPixels(
       pixels.data(), size, size, size,
       size * sizeof(DWORD),
       DXGI_FORMAT_B8G8R8A8_UNORM);
+  // From the device, after the resource exists (#347).
+  ti.nSizeInBytes = (int)m_lpDX->TextureVramBytes(ti.dx12Tex);
   m_textures.push_back(ti);
+  PublishTextureCacheStats();   // #352
   return true;
+}
+
+// Evict until the texture cache is inside its configured caps (#312).
+//
+// EvictSomeTexture below has always existed and NOTHING EVER CALLED IT. Both
+// caps -- MaxBytes and MaxImages -- were read from settings.ini at startup and
+// written back out at shutdown, and never compared against anything in between.
+// So the cache grew for the life of the process.
+//
+// Measured on the harness before this: 50 presets from one library took the
+// cache from 2 MB to 3,228 MB, with 3,226 MB of that marked evictable, against
+// a configured MaxBytes of 2,000 MB. Process VRAM went 446 MB -> 4,948 MB. A
+// 1,270-preset sweep reached 13.4 GB and the low-VRAM guard shut the app down,
+// which is the only reason this presented as a clean exit rather than a
+// device-removed crash.
+//
+// At roughly 70 MB a distinct preset, an ordinary unattended session on a
+// 30-second cycle exhausts a 15 GB card in under two hours.
+//
+// Is this texture's descriptor named by anything that is about to draw? (#312)
+//
+// The age filter EvictSomeTexture uses -- nAge < m_nPresetsLoadedTotal - 1 --
+// is a proxy, and a weak one: "two presets ago" says nothing about what a
+// shader still holds. A .milk2 keeps both of its presets resident, a mirror
+// surface runs its OWN preset on its own schedule, and the fallback shaders are
+// substituted into live sets. Any of those can hold a binding to a texture the
+// counter calls old.
+//
+// So ask the bindings instead. Every set that could be bound next frame is
+// walked and its SRV indices collected; a texture whose index is in that set is
+// never evicted, whatever its age.
+bool Engine::TextureIsBound(const TexInfo& t) const {
+  const UINT srv = t.dx12Tex.srvIndex;
+  if (srv == UINT_MAX) return false;
+
+  auto bound = [srv](const CShaderParams& p) {
+    for (int i = 0; i < 32; i++)
+      if (p.m_texture_bindings[i].dx12SrvIndex == srv) return true;
+    return false;
+  };
+  auto boundSet = [&](const PShaderSet& s) {
+    return bound(s.warp.params) || bound(s.comp.params) ||
+           bound(s.bufferA.params) || bound(s.bufferB.params) ||
+           bound(s.bufferC.params) || bound(s.bufferD.params);
+  };
+
+  if (boundSet(m_shaders) || boundSet(m_OldShaders)) return true;
+  // The .milk2 second preset, which is co-resident rather than transitioning.
+  if (boundSet(m_Milk2OldShaders)) return true;
+  // Every mirror surface running its own preset. These are on their own
+  // timeline entirely, so preset age cannot speak for them at all.
+  for (const auto& surf : m_mirrorSurfaces)
+    if (surf && boundSet(surf->sim.shaders) && true) return true;
+  return false;
+}
+
+// Evict until the texture cache fits MaxBytes/MaxImages (#312).
+//
+// Both caps were read from settings.ini at startup and written back at
+// shutdown and compared against nothing in between, and EvictSomeTexture had no
+// callers at all, so the cache grew for the life of the process: 3.3 GB after
+// fifty presets against a configured 2 GB, and a 1,270-preset sweep reached
+// 13.4 GB of process VRAM before the low-VRAM guard closed the app.
+//
+// THE DRAIN IS NOT OPTIONAL. Calling eviction without it kills the device
+// inside a dozen presets -- "DRED: page fault VA = 0x0", device hung -- because
+// a command list already submitted is still sampling the texture being freed.
+// This is the same WaitForGpu-plus-engine-lock that LoadPresetTick performs
+// before it releases an outgoing preset's resources, and for the identical
+// reason.
+//
+// Cheap in practice despite that: the loop returns immediately unless the cache
+// is actually over budget, so the wait is paid only on the loads that evict,
+// not on every texture.
+// What the cache is holding, for anyone who is not the render thread (#352).
+//
+// The vector may only be WALKED by the thread that owns it, so the three
+// numbers DIAG_GPU wants are published here instead, at every point the cache
+// changes. Cheap: it is one pass over a container the caller has just finished
+// walking anyway, and it happens on preset loads, not per frame.
+void Engine::PublishTextureCacheStats() {
+  int count = 0;
+  long long bytes = 0, evictable = 0;
+  for (const auto& t : m_textures) {
+    count++;
+    bytes += (long long)t.nSizeInBytes;
+    if (t.bEvictable) evictable += (long long)t.nSizeInBytes;
+  }
+  m_texCacheCount.store(count, std::memory_order_relaxed);
+  m_texCacheBytes.store(bytes, std::memory_order_relaxed);
+  m_texCacheEvictableBytes.store(evictable, std::memory_order_relaxed);
+}
+
+void Engine::EnforceTextureCacheBudget() {
+  // Nothing to do is the common case -- check before paying for a drain.
+  auto overBudget = [this]() {
+    long long bytes = 0;
+    int count = 0;
+    for (const auto& t : m_textures) {
+      if (t.nSizeInBytes <= 0) continue;
+      bytes += t.nSizeInBytes;
+      count++;
+    }
+    return (m_nMaxBytes > 0 && bytes > (long long)m_nMaxBytes) ||
+           (m_nMaxImages > 0 && count > m_nMaxImages);
+  };
+  // Published on BOTH exits. This is the only path that grows the cache with a
+  // preset's own images and the only caller of EvictSomeTexture, so it is the
+  // one place that sees every change worth reporting (#352).
+  if (!overBudget()) { PublishTextureCacheStats(); return; }
+
+  // Drain, then hold the mirror workers off while the vector is mutated.
+  if (m_lpDX) m_lpDX->WaitForGpu();
+  else        WaitForSurfaceWork();
+  LockMirrorEngine();
+  struct Unlocker {
+    Engine* e;
+    ~Unlocker() { e->UnlockMirrorEngine(); }
+  } unlock{ this };
+
+  // Bounded rather than while(true): EvictSomeTexture returning false already
+  // ends it, and a cap set absurdly low would otherwise spin against a cache
+  // made entirely of textures that are bound and may not be dropped.
+  int evicted = 0;
+  for (int guard = 0; guard < 8192 && overBudget(); guard++) {
+    if (!EvictSomeTexture()) break;   // nothing left that may be dropped
+    evicted++;
+  }
+  if (evicted)
+    DLOG_INFO("texture cache: evicted %d texture(s) to stay inside "
+              "MaxBytes=%d / MaxImages=%d", evicted, m_nMaxBytes, m_nMaxImages);
+  PublishTextureCacheStats();
 }
 
 bool Engine::EvictSomeTexture() {
@@ -302,7 +443,9 @@ bool Engine::EvictSomeTexture() {
   int oldest = 0;
   bool bAtLeastOneFound = false;
   for (int i = 0; i < N; i++)
-    if (m_textures[i].bEvictable && m_textures[i].nSizeInBytes > 0 && m_textures[i].nAge < m_nPresetsLoadedTotal - 1) // note: -1 here keeps images around for the blend-from preset, too...
+    if (m_textures[i].bEvictable && m_textures[i].nSizeInBytes > 0 &&
+        m_textures[i].nAge < m_nPresetsLoadedTotal - 1 &&   // keeps the blend-from preset's images too
+        !TextureIsBound(m_textures[i]))                     // ...and anything still named by a live binding (#312)
     {
       newest = min(newest, m_textures[i].nAge);
       oldest = max(oldest, m_textures[i].nAge);
@@ -316,7 +459,9 @@ bool Engine::EvictSomeTexture() {
   int biggest_bytes = 0;
   int biggest_index = -1;
   for (int i = 0; i < N; i++)
-    if (m_textures[i].bEvictable && m_textures[i].nSizeInBytes > 0 && m_textures[i].nAge < m_nPresetsLoadedTotal - 1) // note: -1 here keeps images around for the blend-from preset, too...
+    if (m_textures[i].bEvictable && m_textures[i].nSizeInBytes > 0 &&
+        m_textures[i].nAge < m_nPresetsLoadedTotal - 1 &&   // keeps the blend-from preset's images too
+        !TextureIsBound(m_textures[i]))                     // ...and anything still named by a live binding (#312)
     {
       float size_mult = 1.0f + (m_textures[i].nAge - newest) / (float)(oldest - newest);
       int bytes = (int)(m_textures[i].nSizeInBytes * size_mult);
@@ -329,15 +474,24 @@ bool Engine::EvictSomeTexture() {
     return false;
 
   // evict that sucker
-  assert(m_textures[biggest_index].texptr);
-
+  //
+  // The assert(texptr) that used to stand here was a DX9 leftover and it was
+  // ALWAYS false on this backend: texptr is the legacy D3D9 pointer and is null
+  // for every texture the DX12 loader creates. In a release build it did
+  // nothing, which is how a release path that frees nothing survived.
+  //
   // The CShaderParams eviction-notify that used to be here walked a provably
-  // empty list and is gone (issue 17). The age filter above -- nAge <
-  // m_nPresetsLoadedTotal - 1 -- is what actually keeps an in-use texture from
-  // being evicted out from under a shader binding.
+  // empty list and is gone (issue 17). What keeps an in-use texture safe is the
+  // pair of filters above -- age AND TextureIsBound -- plus the drain the
+  // caller performs before entering here (#312).
 
-  // 2. erase the texture itself
-  SafeRelease(m_textures[biggest_index].texptr);
+  // Release the DX12 resource and hand the descriptor slots back. THIS is where
+  // the memory actually returns: SafeRelease(texptr) below frees nothing at
+  // all, because there is nothing on the other end of that pointer.
+  if (m_lpDX)
+    m_lpDX->RecycleTexture(m_textures[biggest_index].dx12Tex);
+
+  SafeRelease(m_textures[biggest_index].texptr);  // harmless no-op under DX12
   m_textures.erase(m_textures.begin() + biggest_index);
 
   return true;
@@ -349,16 +503,23 @@ extern const wchar_t szExtsWithSlashes[] = L".jpg|.png|.dds|etc.";
 typedef std::vector<std::wstring> StringVec;
 bool PickRandomTexture(const wchar_t* prefix, wchar_t* szRetTextureFilename)  //should be MAX_PATH chars
 {
-  static StringVec texfiles;
-  static DWORD     texfiles_timestamp = 0;   // update this a max of every ~2 seconds or so
+  // Cached one list PER SOURCE, in priority order, rather than as a single
+  // flattened list (#322).
+  //
+  // The scan cannot know the prefix -- it happens once per preset load, and the
+  // prefix arrives per texture. Flattening with an early-out therefore let a
+  // source that merely HAS textures shut out the source that has the RIGHT
+  // ones: with any file in the random-textures directory, `rand00_smalltiled`
+  // never reached the user's collection where the smalltiled_* files live, and
+  // reported "[rand00] smalltiled*" as a missing texture.
+  //
+  // Keeping the sources separate preserves the priority the early-out was for,
+  // and defers "is this source any use" to the point where the prefix is known.
+  static std::vector<StringVec> texsets;
 
-  // if it's been more than a few seconds since the last textures dir scan, redo it.
-  // (..just enough to make sure we don't do it more than once per preset load)
-  //DWORD t = timeGetTime(); // in milliseconds
-  //if (abs(t - texfiles_timestamp) > 2000)
   if (g_engine.m_bNeedRescanTexturesDir) {
     g_engine.m_bNeedRescanTexturesDir = false;
-    texfiles.clear();
+    texsets.clear();
 
     // Helper lambda: scan a directory for valid texture files (filename only, no path)
     auto scanDir = [](const wchar_t* szDir, StringVec& out) {
@@ -380,30 +541,48 @@ bool PickRandomTexture(const wchar_t* prefix, wchar_t* szRetTextureFilename)  //
       FindClose(hFind);
     };
 
+    // Every source is scanned now; which one supplies the texture is decided
+    // below, once the prefix is known. An empty source is simply dropped.
+    auto addSource = [&](StringVec&& v) {
+      if (!v.empty()) texsets.push_back(std::move(v));
+    };
+
     // 1) Dedicated random textures directory (highest priority)
-    if (g_engine.m_szRandomTexDir[0])
-      scanDir(g_engine.m_szRandomTexDir, texfiles);
-
-    // 2) Content base path
-    if (texfiles.empty() && g_engine.m_szContentBasePath[0])
-      scanDir(g_engine.m_szContentBasePath, texfiles);
-
-    // 3) Fallback paths (user's texture collection)
-    if (texfiles.empty()) {
-      // A copy: scanDir walks a whole directory per entry.
-      for (auto& fbPath : g_engine.FallbackPathsCopy())
-        scanDir(fbPath.c_str(), texfiles);
+    if (g_engine.m_szRandomTexDir[0]) {
+      StringVec v;
+      scanDir(g_engine.m_szRandomTexDir, v);
+      addSource(std::move(v));
     }
 
-    // 3) Built-in textures directory
-    if (texfiles.empty()) {
+    // 2) Content base path
+    if (g_engine.m_szContentBasePath[0]) {
+      StringVec v;
+      scanDir(g_engine.m_szContentBasePath, v);
+      addSource(std::move(v));
+    }
+
+    // 3) Fallback paths (user's texture collection) -- one source between them,
+    // because they are a single collection spread over several directories and
+    // none of them outranks another.
+    {
+      StringVec v;
+      // A copy: scanDir walks a whole directory per entry.
+      for (auto& fbPath : g_engine.FallbackPathsCopy())
+        scanDir(fbPath.c_str(), v);
+      addSource(std::move(v));
+    }
+
+    // 4) Built-in textures directory
+    {
       wchar_t szBuiltin[MAX_PATH];
       FormatTo(szBuiltin, L"%stextures\\", g_engine.m_szMilkdrop2Path);
-      scanDir(szBuiltin, texfiles);
+      StringVec v;
+      scanDir(szBuiltin, v);
+      addSource(std::move(v));
     }
   }
 
-  if (texfiles.size() == 0)
+  if (texsets.empty())
     return false;
 
   // Use high-resolution timer for a well-distributed random pick
@@ -412,28 +591,26 @@ bool PickRandomTexture(const wchar_t* prefix, wchar_t* szRetTextureFilename)  //
   QueryPerformanceCounter(&qpc);
   unsigned int rng = (unsigned int)(qpc.LowPart ^ (qpc.HighPart * 2654435761u));
 
-  // then randomly pick one
-  if (prefix == NULL || prefix[0] == 0) {
-    // pick randomly from entire list
-    int i = rng % texfiles.size();
-    lstrcpynW(szRetTextureFilename, texfiles[i].c_str(), MAX_PATH);
+  // Walk the sources in priority order and take the first that can actually
+  // satisfy the request. Unprefixed, that is the first source at all, which is
+  // exactly what the old early-out produced; prefixed, it is the first source
+  // holding a matching name, which is what the old code could not express.
+  const int len = prefix ? lstrlenW(prefix) : 0;
+  for (const StringVec& set : texsets) {
+    if (len == 0) {
+      lstrcpynW(szRetTextureFilename, set[rng % set.size()].c_str(), MAX_PATH);
+      return true;
+    }
+    StringVec matches;
+    for (const std::wstring& f : set)
+      if (!_wcsnicmp(prefix, f.c_str(), len))
+        matches.push_back(f);
+    if (!matches.empty()) {
+      lstrcpynW(szRetTextureFilename, matches[rng % matches.size()].c_str(), MAX_PATH);
+      return true;
+    }
   }
-  else {
-    // only pick from files w/the right prefix
-    StringVec temp_list;
-    int N = (int)texfiles.size();
-    int len = lstrlenW(prefix);
-    for (int i = 0; i < N; i++)
-      if (!_wcsnicmp(prefix, texfiles[i].c_str(), len))
-        temp_list.push_back(texfiles[i]);
-    N = (int)temp_list.size();
-    if (N == 0)
-      return false;
-    // pick randomly from the subset
-    int i = rng % temp_list.size();
-    lstrcpynW(szRetTextureFilename, temp_list[i].c_str(), MAX_PATH);
-  }
-  return true;
+  return false;
 }
 
 } // namespace mdrop

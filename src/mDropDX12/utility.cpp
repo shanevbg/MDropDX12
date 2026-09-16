@@ -248,6 +248,39 @@ void DownloadDirectX(HWND hwnd) {
   }
 }
 
+const wchar_t* BuildTimestampW() {
+  static wchar_t s_built[40] = {};
+  if (s_built[0])
+    return s_built;
+
+  // LOCAL time, to match what __DATE__/__TIME__ produced -- those are the
+  // compiling machine's wall clock, and switching to UTC here would look like
+  // the build had moved by the timezone offset.
+  wchar_t path[MAX_PATH] = {};
+  WIN32_FILE_ATTRIBUTE_DATA fad = {};
+  FILETIME local = {};
+  SYSTEMTIME st = {};
+  if (GetModuleFileNameW(NULL, path, MAX_PATH) &&
+      GetFileAttributesExW(path, GetFileExInfoStandard, &fad) &&
+      FileTimeToLocalFileTime(&fad.ftLastWriteTime, &local) &&
+      FileTimeToSystemTime(&local, &st)) {
+    static const wchar_t* kMon[] = { L"Jan", L"Feb", L"Mar", L"Apr", L"May",
+                                     L"Jun", L"Jul", L"Aug", L"Sep", L"Oct",
+                                     L"Nov", L"Dec" };
+    const int m = (st.wMonth >= 1 && st.wMonth <= 12) ? st.wMonth - 1 : 0;
+    // "%2d" for the day, as __DATE__ does -- it space-pads a single digit,
+    // and something out there may well be parsing by column.
+    swprintf(s_built, 40, L"%s %2d %04d %02d:%02d:%02d",
+             kMon[m], (int)st.wDay, (int)st.wYear,
+             (int)st.wHour, (int)st.wMinute, (int)st.wSecond);
+  } else {
+    // Never empty: an empty build string reads as a broken build rather than
+    // as an unreadable file, and this path is reachable if the exe is locked.
+    wcscpy_s(s_built, L"unknown");
+  }
+  return s_built;
+}
+
 void MissingDirectX(HWND hwnd) {
   // DIRECTX MISSING OR CORRUPT -> PROMPT TO GO TO WEB.
   wchar_t title[128];

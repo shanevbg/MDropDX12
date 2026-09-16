@@ -363,6 +363,16 @@ void PresetsWindow::DoBuildControls() {
     m_hEditTime = CreateEdit(hw, buf, IDC_MW_TIME_BETWEEN, x + slw + 4, y, 60, lineH, hFont);
     y += lineH + gap + 4;
 
+    // The LIVE lock, first, because it is the one that describes what the
+    // visualizer is doing right now. It sits directly above the startup
+    // preference so the pair reads as "locked now" / "locked at startup"
+    // rather than as two settings that might be the same one.
+    //
+    // Before this there was no way to SEE the live lock at all: it moved only
+    // by hotkey, game controller, IPC or the silence auto-lock, and the only
+    // way to learn its state was to press the key and watch whether presets
+    // began advancing.
+    m_hChkLockNow  = CreateCheck(hw, L"Preset Locked (now)",     IDC_MW_PRESETS_LOCK_NOW, x, y, rw, lineH, hFont, p->m_bPresetLockedByUser); y += lineH + 2;
     m_hChkHardCuts = CreateCheck(hw, L"Hard Cuts Disabled",      IDC_MW_HARD_CUTS,   x, y, rw, lineH, hFont, p->m_bHardCutsDisabled); y += lineH + 2;
     m_hChkLock     = CreateCheck(hw, L"Preset Lock on Startup",  IDC_MW_PRESET_LOCK, x, y, rw, lineH, hFont, p->m_bPresetLockOnAtStartup); y += lineH + 2;
     m_hChkSeq      = CreateCheck(hw, L"Sequential Preset Order", IDC_MW_SEQ_ORDER,   x, y, rw, lineH, hFont, p->m_bSequentialPresetOrder);
@@ -546,6 +556,8 @@ void PresetsWindow::LayoutControls() {
     y += lineH + gap + 4;
 
     // Checkboxes
+    MoveWindow(m_hChkLockNow, x, y, rw, lineH, TRUE);
+    y += lineH + 2;
     MoveWindow(m_hChkHardCuts, x, y, rw, lineH, TRUE);
     y += lineH + 2;
     MoveWindow(m_hChkLock, x, y, rw, lineH, TRUE);
@@ -584,7 +596,7 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         ofn.lpstrFile = szFile;
         ofn.nMaxFile = MAX_PATH;
         ofn.lpstrInitialDir = p->m_szPresetDir;
-        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
         if (GetOpenFileNameW(&ofn)) {
             RequestLoadPreset(-1, szFile);
             UpdateCurrentPresetDisplay();
@@ -895,12 +907,22 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
             if (p->m_fBlendTimeAuto > 10) p->m_fBlendTimeAuto = 10;
             p->SaveSettingToINI(SET_BLEND_TIME);
             return 0;
-        case IDC_MW_TIME_BETWEEN:
-            p->m_fTimeBetweenPresets = (float)_wtof(buf);
-            if (p->m_fTimeBetweenPresets < 0) p->m_fTimeBetweenPresets = 0;
-            if (p->m_fTimeBetweenPresets > 99999) p->m_fTimeBetweenPresets = 99999;
-            p->SaveSettingToINI(SET_TIME_BETWEEN);
+        case IDC_MW_TIME_BETWEEN: {
+            // Through SetMainRenderInterval, so a number the user just typed
+            // takes the value back off a display profile's session-only loan
+            // (#356). Writing the member directly left the loan standing, and
+            // both the profile save and the shutdown save then persisted the
+            // profile's interval instead of this one -- which is how the
+            // primary interval was measured wandering 41 -> 0 -> 60 across
+            // thirteen real profiles with no deliberate change behind any of
+            // it. The Displays window's copy of this field was fixed then;
+            // this one was not.
+            float secs = (float)_wtof(buf);
+            if (secs < 0) secs = 0;
+            if (secs > 99999) secs = 99999;
+            p->SetMainRenderInterval(secs);
             return 0;
+        }
         }
     }
 
@@ -911,6 +933,15 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         case IDC_MW_HARD_CUTS:
             p->m_bHardCutsDisabled = bChecked;
             p->SaveSettingToINI(SET_HARD_CUTS);
+            return 0;
+        case IDC_MW_PRESETS_LOCK_NOW:
+            // Through SetUserPresetLock, never by assigning the member: that
+            // is what relays the change to child instances, and it early-outs
+            // on no change. Nothing is written to the ini -- this is the live
+            // state, and the startup preference beside it is a separate
+            // setting that toggling the lock must not disturb (see
+            // DIAG_STARTUP_PRESET_LOCK, which exists to assert exactly that).
+            p->SetUserPresetLock(bChecked);
             return 0;
         case IDC_MW_PRESET_LOCK:
             p->m_bPresetLockOnAtStartup = bChecked;
@@ -1119,7 +1150,7 @@ LRESULT PresetsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         ofn.lpstrFile = file;
         ofn.nMaxFile = MAX_PATH;
         ofn.lpstrInitialDir = p->m_szPresetDir;
-        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
+        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER | OFN_NOCHANGEDIR;
         if (GetOpenFileNameW(&ofn)) {
             CopyTo(p->m_szPresetStartup, file);
             p->m_bEnablePresetStartup = true;
@@ -1148,6 +1179,34 @@ LRESULT PresetsWindow::DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
             m_nLastPresetCount = m_pEngine->m_nPresets;
             RefreshPresetList();
         }
+        // The live lock moves from four places that are not this window -- a
+        // hotkey, the game controller, IPC, and the auto-lock-on-silence timer
+        // -- so the box has to follow the engine rather than only lead it.
+        // Written only when it actually differs, so clicking the box does not
+        // fight the timer.
+        //
+        // These checkboxes are OWNER-DRAWN and paint from the "Checked" window
+        // property, not from the button's own state -- see the SetCheckbox
+        // note in engine_displays.cpp, which says outright that "BM_SETCHECK on
+        // an owner-drawn checkbox ... never reads the real state when
+        // painting". Setting BM_SETCHECK alone therefore changed a value
+        // nothing draws from: the engine moved, the box did not, and a
+        // full-window capture diff across a lock change came back completely
+        // empty. Property first, then the button state so IsChecked() agrees,
+        // then invalidate so it actually repaints.
+        if (m_hChkLockNow) {
+            const bool locked = m_pEngine->m_bPresetLockedByUser;
+            const bool shown =
+                (intptr_t)GetPropW(m_hChkLockNow, L"Checked") != 0;
+            if (shown != locked) {
+                SetPropW(m_hChkLockNow, L"Checked",
+                         (HANDLE)(intptr_t)(locked ? 1 : 0));
+                SendMessage(m_hChkLockNow, BM_SETCHECK,
+                            locked ? BST_CHECKED : BST_UNCHECKED, 0);
+                InvalidateRect(m_hChkLockNow, NULL, TRUE);
+            }
+        }
+
         // Sync current preset display with engine state
         UpdateCurrentPresetDisplay();
         // ...and the startup preset, which Last Used mode rewrites on exit and

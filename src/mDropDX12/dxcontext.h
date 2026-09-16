@@ -39,6 +39,9 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <d3dcompiler.h>
 #include <wrl/client.h>   // ComPtr
 #include <atomic>
+#include <functional>     // m_waitForAuxQueues
+#include <mutex>          // m_retiredMutex (#214)
+#include <vector>         // m_retiredObjects (#214)
 
 using Microsoft::WRL::ComPtr;
 
@@ -56,10 +59,39 @@ using Microsoft::WRL::ComPtr;
 #define DXC_MAX_RTV  96
 #define DXC_MIRROR_RTV_BASE  (DXC_MAX_RTV - DXC_MIRROR_RTV_RESERVE)
 // Texture SRVs + 32-slot binding blocks + second-orientation milk3 pipeline (~160 slots).
-#define DXC_MAX_SRV  4096
+// Shader-visible CBV/SRV/UAV descriptors.
+//
+// Was 4096, which is not enough to put an independent mirror on every display.
+// Each orient pipe reserves kBindSlots = (6 + DXC_FRAME_COUNT * MAX_BLUR_PASSES)
+// * BINDING_BLOCK_SIZE = 576 descriptors, and a normal texture set already
+// occupies most of the heap before any mirror exists. Measured on the live
+// instance, 2026-09-12: baseline 2534 used, so 1562 free, so exactly TWO orient
+// pipes fit and the third failed 76 times with "SRV heap full".
+//
+// That failure is not graceful. EnsureOrientPipeline returns false, the mirror
+// has no pipe of its own and draws the fallback texture while the primary
+// stays correct -- which is what "mirror mode and shadowing was not good"
+// looks like -- and the render loop then threw three SEH exceptions and the
+// device was removed.
+//
+// D3D12 allows up to 1,000,000 descriptors in this heap at Resource Binding
+// Tier 1, so 4096 was conservative rather than required. At 32 bytes each,
+// 16384 costs 512 KB of the two heaps combined -- room for a mirror on every
+// display of any plausible setup, with the texture set intact.
+#define DXC_MAX_SRV  16384
 #define DXC_MAX_SAMPLERS 4
 
 #define SNAP_WINDOWED_MODE_BLOCKSIZE  32
+
+// Longest edge a texture loaded from disk may keep (#349). 0 = no cap.
+//
+// A free function with a file-static behind it, the same shape as
+// SetMirrorSwapChainCap, so the value is readable from LoadTextureFromFile
+// without any ordering question about when settings load relative to the
+// device. Default 1024: measured bit-identical to the full 4160x3120 source at
+// both 1200x1600 and 2160x3840, sampled 1:1 with no warp.
+void SetMaxTextureDim(int maxDim);
+int  GetMaxTextureDim();
 
 typedef struct {
   int  nbackbuf;
@@ -114,7 +146,55 @@ public:
   void EndFrame();
 
   // CPU/GPU synchronisation helpers.
-  void WaitForGpu();      // flush all in-flight GPU work and idle the queue
+  void WaitForGpu();      // flush all in-flight GPU work and idle EVERY queue
+
+  // "All in-flight GPU work" has to mean every queue this process submits to,
+  // and DXContext can only see m_commandQueue. The mirror workers own
+  // m_mirrorQueue and a fence per surface, which live on the Engine, so the
+  // Engine installs a waiter here once and all 20 WaitForGpu call sites cover
+  // both without each having to remember (#206).
+  //
+  // Set on the render thread at mirror-queue creation; called from inside
+  // WaitForGpu. It was a use-after-free of the preset PSOs -- released while a
+  // mirror list still referenced them -- that showed this was needed: a GPU
+  // page fault at VA 0 on a draw in MirrorWork:\\.\DISPLAYn, then a TDR.
+  std::function<void()> m_waitForAuxQueues;
+
+  // True when every mirror surface's submitted work has completed. Installed
+  // beside m_waitForAuxQueues and retired with it, and absent when there are
+  // no mirrors -- in which case there is nothing but the main queue to satisfy.
+  std::function<bool()> m_auxQueuesIdle;
+
+  // DEFERRED RELEASE of GPU objects (#214).
+  //
+  // The teardown audit's recurring shape is: the render thread drops the last
+  // reference to something a submitted command list still names. WaitForGpu
+  // fixes that by stalling, which is right once per preset load and wrong at a
+  // site that fires every frame or every blend.
+  //
+  // So hold the reference instead, and drop it once the GPU has moved past the
+  // frame that used it. Same shape as the sprite retirement in #225, one level
+  // down, so it works for any COM-refcounted GPU object: PSOs, root signatures,
+  // resources, heaps.
+  //
+  // Both queues have to be satisfied, and the main-queue fence alone does NOT
+  // imply the mirrors are done -- they run their own queue and their own fence.
+  // A retirement therefore clears only when the recorded main fence has passed
+  // AND every surface reports idle.
+  void RetireComObject(const ComPtr<IUnknown>& obj);
+  void CollectRetiredObjects();
+
+  // Retire p and clear the caller's handle, so the ONLY surviving reference is
+  // the retirement queue's. Callers should reach for this rather than Reset().
+  template <class T>
+  void RetireAndReset(ComPtr<T>& p) {
+    if (!p) return;
+    RetireComObject(p);
+    p.Reset();
+  }
+
+  std::mutex m_retiredMutex;
+  std::vector<std::pair<UINT64, ComPtr<IUnknown>>> m_retiredObjects;
   void MoveToNextFrame(); // advance frame index; waits if the next slot is still in use
 
   // ----- Public data (read-only from outside) -----
@@ -171,10 +251,56 @@ public:
   bool                               m_cmdListRecording = false;
   // When set (e.g. independent-mirror orient pass), DrawVertices / TransitionResource
   // and DX12 draw helpers record into this list instead of the closed main list.
+  //
+  // THREAD-LOCAL, which is the whole point (#206). As a shared member this was
+  // one of the two reasons a mirror record had to hold m_mirrorEngineMutex for
+  // its entire duration: two workers, or a worker and the primary, would each
+  // be redirecting the same pointer.
+  //
+  // Plumbing an explicit list through every caller was the obvious alternative
+  // and is not worth it -- TransitionResource alone has 90 call sites and
+  // DrawVertices 43, and a missed one records into the wrong list and dies at
+  // execute time. This is the same answer the upload ring already got: the
+  // worker stopped contending for shared state by having its own, which is
+  // what MirrorRingForThisThread and SelectUploadRing do a few lines below.
+  //
+  // The member remains for the primary. A thread that never sets the
+  // thread-local reads nullptr and behaves exactly as before.
   ID3D12GraphicsCommandList*         m_cmdListOverride = nullptr;
+  // Per-thread override, consulted before the shared one. Defined in
+  // dxcontext.cpp; declared here so the hot accessor stays inline.
+  static thread_local ID3D12GraphicsCommandList* t_cmdListOverride;
+  // Set/clear the CALLING THREAD's override. A worker uses this; the primary
+  // keeps using m_cmdListOverride.
+  void SetThreadCmdListOverride(ID3D12GraphicsCommandList* cl) {
+    t_cmdListOverride = cl;
+  }
   ID3D12GraphicsCommandList* GetActiveCmdList() const {
+    // A MIRROR WORKER must never end up here (#206).
+    //
+    // A worker records into its own list, which it is handed on the
+    // RenderContext. Reaching for the shared one means a site that has a
+    // context and asked a global anyway -- and the failure mode is silent:
+    // the work is recorded into the wrong list and dies at EXECUTE time, far
+    // from the call, which is how this codebase has been caught before.
+    //
+    // So it is reported rather than inspected for. m_cmdListOverride exists to
+    // paper over exactly these sites and is being removed one at a time; every
+    // one still outstanding shows up here as a count on DIAG_MIRRORS and a
+    // one-shot error in the log.
+    if (t_cmdListOverride)
+      return t_cmdListOverride;
+    if (IsMirrorUploadThread())
+      NoteActiveCmdListOnWorker();
     return m_cmdListOverride ? m_cmdListOverride : m_commandList.Get();
   }
+  // Out of line: the header cannot log. One-shot warning, plus a count so a
+  // whole phase can be checked with one DIAG read instead of a log trawl.
+  void NoteActiveCmdListOnWorker() const;
+  UINT ActiveCmdListOnWorkerCount() const {
+    return m_activeCmdListOnWorker.load(std::memory_order_relaxed);
+  }
+  mutable std::atomic<UINT> m_activeCmdListOnWorker{0};
 
   // Per-frame resources (indexed by m_frameIndex)
   ComPtr<ID3D12CommandAllocator>     m_commandAllocators[DXC_FRAME_COUNT];
@@ -197,6 +323,12 @@ public:
   // Bump allocators for descriptor slots (slots 0..N-1 for back buffers already taken)
   UINT                               m_nextFreeRtvSlot;  // starts at DXC_FRAME_COUNT
   UINT                               m_nextFreeSrvSlot;  // starts at 0
+  // Descriptor slots handed back by RecycleTexture (#312). Single slots and
+  // BINDING_BLOCK_SIZE blocks are kept apart because a block has to be
+  // contiguous and a single slot cannot satisfy one.
+  UINT                               m_pendingSrvSlot = 0;
+  std::vector<UINT>                  m_freeSrvSlots;
+  std::vector<UINT>                  m_freeBindingBlocks;
 
   // Baseline values after one-time init (null texture + per-frame bindings).
   // ResetDynamicDescriptors() rewinds the bump allocators to these values so that
@@ -219,11 +351,142 @@ public:
   // all three at once.
   std::atomic<ID3D12Device*>         m_pDredDumpedFor{ nullptr };
 
+  // STAGE MAP (#222) — which render stage emitted which draw.
+  //
+  // DRED names the op that hung ("op[14] = DRAWINSTANCED") but not what drew
+  // it, and a frame is a dozen stages deep. Guessing from the op pattern sent
+  // two separate investigations at the wrong stage. This records, per frame,
+  // the draw ordinal at which each stage began; DumpDredToLog prints it beside
+  // the breadcrumbs, so the faulting op resolves to a named stage.
+  //
+  // Costs one increment per draw and a pointer store per stage, and logs
+  // nothing unless the device is actually removed — so it stays in for good
+  // rather than being re-added by hand the next time a GPU hangs.
+  // Stage names cover the big passes, but a name recorded at function ENTRY
+  // also swallows any later draw that no stage claims -- which is how the #222
+  // fault first read as "usersprites" on a machine with no sprites.ini at all.
+  // So every draw ALSO records its own return address, resolved through DbgHelp
+  // at dump time into the exact function and line that issued it. That needs no
+  // call-site changes and cannot silently mislabel.
+  void BeginStage(const char* name);   // call at each render stage boundary
+  void ResetStageMap();                // call once per frame, before recording
+
+  // GPU TIMESTAMPS PER STAGE (#230).
+  //
+  // Every engine-level measurement so far averages over a whole frame, and the
+  // thing that kills the device is ONE DRAW inside one frame. primDt sat flat
+  // at 22 ms for 135 seconds and then the device was gone between two samples,
+  // so the spike is invisible at that resolution -- not absent, just finer than
+  // the instrument.
+  //
+  // This puts a timestamp at each stage boundary on the GPU's own clock, so a
+  // stage that takes 700 ms shows up as 700 ms instead of being averaged into a
+  // 22 ms frame. Resolved into a readback buffer at the end of the frame and
+  // read once that frame's fence has passed, so nothing stalls to collect it.
+  //
+  // Off unless asked for: it costs a query per stage and a resolve per frame,
+  // which is small but not free, and nobody needs it until a device is dying.
+  void EnableGpuStageTiming(bool on);
+  bool GpuStageTimingOn() const { return m_bGpuTiming; }
+  // Report any stage at or above this many milliseconds. A frame at 60 fps is
+  // 16 ms, so 50 is already pathological and 2000 is fatal.
+  double m_gpuTimingReportMs = 50.0;
+
+  // WHOLE-FRAME GPU TIME FOR THE PRIMARY, ALWAYS ON (#245).
+  //
+  // Deliberately NOT part of the per-stage machinery above. That one is a
+  // diagnostic: a query per stage plus a resolve, off unless a device is
+  // dying. This is one pair around the frame, which the mirror surfaces
+  // already pay for themselves, and it has to be always on because something
+  // depends on it continuously.
+  //
+  // What depends on it: the GPU-cost isolation gate. peakGpuUs was fed only by
+  // INDEPENDENT mirror surfaces, so with none live -- every extra display
+  // already a child, or copy mirrors, or skipped as the render window's own
+  // monitor -- it read 0. PresetRisksTheDevice() then cannot tell
+  // 0-because-cheap from 0-because-nothing-was-measured, and treats both as
+  // cheap. Measured: a copy mirror gives surfaces=0 peakGpuUs=0 on the same
+  // preset an independent one reports at 30542 us.
+  //
+  // The primary renders that same preset and is never absent, so feeding it in
+  // means a reading always exists and "unknown" stops being representable.
+  unsigned LastFrameGpuUs() const {
+    return m_lastFrameGpuUs.load(std::memory_order_relaxed);
+  }
+
+private:
+  bool CreateFrameTimingResources();
+  void BeginFrameTimestamp();    // first thing recorded
+  void EndFrameTimestamp();      // last thing recorded, then resolved
+  void ReadFrameTimestamp();     // in BeginFrame, after this index's fence
+  ComPtr<ID3D12QueryHeap> m_frameTsHeap;
+  ComPtr<ID3D12Resource>  m_frameTsReadback[DXC_FRAME_COUNT];
+  UINT64                  m_frameTsFreq = 0;
+  bool                    m_frameTsPending[DXC_FRAME_COUNT] = {};
+  std::atomic<unsigned>   m_lastFrameGpuUs{0};
+
+  bool CreateGpuTimingResources();
+  void ResolveGpuTimestamps();   // end of frame, into the readback buffer
+  void ReportGpuTimestamps();    // after that frame's fence, out of it
+
+  static const int kMaxStamps = 64;      // stages per frame; the rest are dropped
+  bool m_bGpuTiming = false;
+  ComPtr<ID3D12QueryHeap>  m_tsHeap;
+  ComPtr<ID3D12Resource>   m_tsReadback[DXC_FRAME_COUNT];
+  UINT64                   m_tsFrequency = 0;
+  int                      m_tsCount = 0;             // stamps this frame
+  const char*              m_tsNames[kMaxStamps] = {};
+  int                      m_tsPending[DXC_FRAME_COUNT] = {};  // stamps awaiting readback
+  const char*              m_tsPendingNames[DXC_FRAME_COUNT][kMaxStamps] = {};
+
+public:
+  // 64 was too small and #225 proved it: a frame with 850 visible shape
+  // instances ran to 878 draws, so the call-site table stopped long before the
+  // faulting sprite draw and only the coarser stage map could name it. Two
+  // arrays of pointers, so 1024 costs 16 KB and covers a heavy frame whole.
+  static const int kMaxTrackedDraws = 1024;
+  void* m_frameDrawRet[kMaxTrackedDraws] = {};
+  void* m_prevDrawRet[kMaxTrackedDraws] = {};
+  UINT m_frameDrawOrdinal = 0;
+  struct StageMark { UINT draw; const char* name; };
+  static const int kMaxStageMarks = 48;
+  StageMark m_stageMarks[kMaxStageMarks] = {};
+  int       m_stageMarkCount = 0;
+  // The CPU runs ahead of the GPU, so the frame that hung is usually the one
+  // BEFORE the map being built. Keep both and print both.
+  StageMark m_prevStageMarks[kMaxStageMarks] = {};
+  int       m_prevStageMarkCount = 0;
+  UINT      m_prevFrameDrawCount = 0;
+
   // Helpers for allocating descriptor slots
   void DumpDredToLog(const char* whence = nullptr); // last GPU ops + page-fault VA after a device removal
   D3D12_CPU_DESCRIPTOR_HANDLE AllocateRtv();   // returns CPU handle, bumps m_nextFreeRtvSlot
-  D3D12_CPU_DESCRIPTOR_HANDLE AllocateSrvCpu(); // returns CPU handle at m_nextFreeSrvSlot
-  D3D12_GPU_DESCRIPTOR_HANDLE AllocateSrvGpu(); // returns GPU handle, bumps m_nextFreeSrvSlot
+  D3D12_CPU_DESCRIPTOR_HANDLE AllocateSrvCpu(); // returns CPU handle at PendingSrvSlot()
+  D3D12_GPU_DESCRIPTOR_HANDLE AllocateSrvGpu(); // returns GPU handle, consumes the pending slot
+
+  // ── Reclaiming descriptor slots, so a texture can be evicted (#312) ──
+  //
+  // The SRV heap was a pure bump allocator: m_nextFreeSrvSlot only ever went
+  // up. That is fine while nothing is ever released, which was the case --
+  // EvictSomeTexture had no callers. It stops being fine the moment textures
+  // are evicted and re-loaded, because each disk texture costs one SRV slot
+  // plus a BINDING_BLOCK_SIZE block, and DXC_MAX_SRV / 33 is about 500
+  // textures before the heap is exhausted.
+  //
+  // The slot a creation path is about to use. AllocateSrvCpu sets it -- to a
+  // recycled slot when one is free, otherwise to m_nextFreeSrvSlot -- and
+  // AllocateSrvGpu consumes it. Call sites read this instead of
+  // m_nextFreeSrvSlot, which is no longer the same thing.
+  UINT PendingSrvSlot() const { return m_pendingSrvSlot; }
+
+  // Release a texture's GPU memory and return its descriptor slots to the free
+  // lists. Points every descriptor it owned at the null texture FIRST, so a
+  // command list still in flight that names one samples null instead of freed
+  // memory. That ordering is the whole safety argument.
+  void RecycleTexture(DX12Texture& tex);
+
+  UINT RecycledSrvSlotCount() const { return (UINT)m_freeSrvSlots.size(); }
+  UINT RecycledBlockCount() const { return (UINT)m_freeBindingBlocks.size(); }
   D3D12_CPU_DESCRIPTOR_HANDLE GetSrvCpuHandleAt(UINT srvIndex); // handle at specific index, no bump
   // Same index, m_srvHeapCpu instead of m_srvHeap -- the one that is
   // actually legal to read (as a CopyDescriptorsSimple source). forgejo#16.
@@ -243,6 +506,35 @@ public:
 
   // Reset bump allocators to post-init baseline (call before re-creating dynamic textures)
   void ResetDynamicDescriptors();
+
+  // What a texture ACTUALLY costs in VRAM: every mip level, with the driver's
+  // own alignment, asked of the device rather than estimated (#347).
+  //
+  // The texture cache used to compute `w * h * 4 + 16384` -- the base level and
+  // a flat 16 KB. CreateTextureFromFile uploads a full mip chain, which is 4/3
+  // of the base, and 64 KB subresource alignment on the small mips takes the
+  // real figure to about 1.4x what was recorded. Measured across nine preset
+  // loads on a live instance, the unrecorded part was 39-40% of the reported
+  // cache size on EVERY step, and it showed up outside texMB looking like a
+  // separate leak. It also made `MaxBytes` mean roughly 1.4x what it says, so
+  // eviction ran that much later than configured.
+  //
+  // GetResourceAllocationInfo is the device's own answer for the desc it was
+  // given, so mips, padding and alignment are included by construction instead
+  // of being approximated by a constant that has to be kept in step.
+  UINT64 TextureVramBytes(const DX12Texture& tex) {
+    if (!tex.resource || !m_device)
+      return 0;
+    const D3D12_RESOURCE_DESC rd = tex.resource->GetDesc();
+    const D3D12_RESOURCE_ALLOCATION_INFO ai =
+        m_device->GetResourceAllocationInfo(0, 1, &rd);
+    // UINT64_MAX is the documented "invalid desc" answer; fall back to the old
+    // estimate rather than recording a zero, which would make the entry look
+    // free and never evictable.
+    if (ai.SizeInBytes == UINT64_MAX)
+      return (UINT64)tex.width * tex.height * 4ull + 16384ull;
+    return ai.SizeInBytes;
+  }
 
   // Texture creation helpers (Phase 2)
   // clearAlpha is the ALPHA THIS TARGET WILL ACTUALLY BE CLEARED WITH, and it
@@ -449,7 +741,9 @@ public:
   // Create a DX12 3D volume texture from CPU pixel data (synchronous GPU upload)
   DX12Texture CreateVolumeTextureFromPixels(const void* pixels, UINT width, UINT height, UINT depth,
                                              UINT srcRowPitch, DXGI_FORMAT format);
-  // Load a texture from an image file via WIC
+  // Load a texture from an image file via WIC, falling back to our own DDS and
+  // TGA decoders for the flavours WIC returns nothing for — 24bpp DDS, which
+  // has no DXGI format to map onto, and TGA, for which Windows ships no codec.
   DX12Texture LoadTextureFromFile(const wchar_t* szFilename);
 
   // Null texture (1x1 black) for filling unused SRV slots
@@ -511,8 +805,13 @@ public:
   static const UINT MAX_BLUR_PASSES = 6; // NUM_BLUR_TEX
   UINT m_blurBindingBase = UINT_MAX;
   bool AllocateBlurBindings();
-  void UpdateBlurPassBinding(UINT passIndex, UINT sourceSrvIndex);
-  D3D12_GPU_DESCRIPTOR_HANDLE GetBlurPassBindingGpuHandle(UINT passIndex);
+  // baseOverride: the caller's own reserved block set, already offset for its
+  // frame rotation. UINT_MAX keeps the shared engine-wide blocks, which is the
+  // primary's path and is unchanged (#209).
+  void UpdateBlurPassBinding(UINT passIndex, UINT sourceSrvIndex,
+                             UINT baseOverride = UINT_MAX);
+  D3D12_GPU_DESCRIPTOR_HANDLE GetBlurPassBindingGpuHandle(UINT passIndex,
+                             UINT baseOverride = UINT_MAX);
 
   // Current frame index within [0, DXC_FRAME_COUNT)
   UINT  m_frameIndex;
@@ -520,6 +819,23 @@ public:
   // Fence for CPU/GPU synchronisation
   ComPtr<ID3D12Fence> m_fence;
   UINT64              m_fenceValues[DXC_FRAME_COUNT];
+
+  // Deferred-release fences (#225).
+  //
+  // MoveToNextFrame signals m_fenceValues[m_frameIndex] for the frame being
+  // recorded, so a GPU object that frame references is safe to free only once
+  // the fence has reached that value. Callers that must drop something from
+  // inside a frame record this value and act on it later.
+  UINT64 CurrentFrameFenceValue() const { return m_fenceValues[m_frameIndex]; }
+
+  // UINT64_MAX when there is no fence, and the D3D12 runtime also returns
+  // UINT64_MAX once the device is removed. Both mean the same thing to a
+  // caller holding retired objects -- nothing is executing, release them --
+  // so this deliberately reports "everything has completed" in both cases
+  // rather than stranding resources that would then leak at shutdown.
+  UINT64 CompletedFenceValue() const {
+    return m_fence ? m_fence->GetCompletedValue() : UINT64_MAX;
+  }
   HANDLE              m_fenceEvent;
 
   bool  m_tearingSupported = false;

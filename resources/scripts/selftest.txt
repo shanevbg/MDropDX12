@@ -1,0 +1,43 @@
+# MDropDX12 self-test / bug-report script
+#
+# Load this from Settings -> Script (or the Script tool window), press Play, and
+# send the resulting log\debug.log with your report. Nothing here changes any of
+# your settings or files.
+#
+# STRICT is the important line. Without it, any command this build does not
+# recognise is DRAWN ON SCREEN as a message instead of failing -- so a script
+# written for a newer version would appear to run perfectly on an older one and
+# report nothing. With it, every unknown command is logged as an error and
+# counted, and the last line of the run says how many there were.
+#
+# LOG= writes a marker into debug.log so that whatever goes wrong can be pinned
+# to the step that caused it. WAITREADY holds until the preset has actually
+# finished compiling, rather than guessing at a number of beats -- which matters
+# most on exactly the slow machine where a report is worth having.
+
+STRICT
+LOG=--- MDropDX12 self-test begins ---
+LOGSTATE
+
+BPM=120|BEATS=2
+
+LOG=step 1: next preset
+NEXT
+WAITREADY
+LOGSTATE
+
+LOG=step 2: next preset again
+NEXT
+WAITREADY
+LOGSTATE
+
+LOG=step 3: previous preset
+PREV
+WAITREADY
+LOGSTATE
+
+# Add your own steps here. Anything in the scripting guide works; if you mistype
+# a command it will be reported rather than silently painted over the frame.
+
+LOG=--- MDropDX12 self-test ends ---
+STOP

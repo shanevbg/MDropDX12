@@ -885,6 +885,8 @@ on the wire as well as idle.
 
 ## Limits
 
+- A `-child` instance never starts the mixer. A child is a headless renderer and
+  owns no external interfaces.
 - The subsystem runs only while MDropDX12 runs.
 - `MIXER_SUBSCRIBE` is currently counted process-wide rather than per
   connection, so a client that disconnects without sending `MIXER_SUBSCRIBE=0`

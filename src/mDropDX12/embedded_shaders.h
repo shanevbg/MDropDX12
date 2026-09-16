@@ -2,13 +2,21 @@
 // Embedded shader files for self-bootstrapping.
 // When resources/data/*.fx files are missing, these are used as fallbacks
 // and auto-extracted to disk for future runs and user editing.
+//
+// Every literal below is delimited R"HLSL( ... )HLSL" rather than R"( ... )".
+// Keep it that way. With the bare form, a close-paren immediately followed by a
+// double quote ENDS THE STRING, so writing a comment that quotes a call such as
+// tex2D(s, uv)" silently terminates the shader source and the compiler then
+// blames a line well below the real one. That happened while adding the tex1D
+// macros in #317. HLSL source contains no )HLSL" sequence, so the named
+// delimiter removes the hazard instead of leaving it for the next editor.
 
 struct EmbeddedShader {
     const wchar_t* filename;  // e.g. L"include.fx"
     const char* data;
 };
 
-static const char k_include_fx[] = R"(#define  M_PI   3.14159265359
+static const char k_include_fx[] = R"HLSL(#define  M_PI   3.14159265359
 #define  M_PI_2 6.28318530718
 #define  M_INV_PI_2  0.159154943091895
 
@@ -171,6 +179,8 @@ SamplerState _samp_lw : register(s0);  // LINEAR + WRAP  (default)
 SamplerState _samp_lc : register(s1);  // LINEAR + CLAMP (fc_main, blur)
 SamplerState _samp_pc : register(s2);  // POINT  + CLAMP (pc_main)
 SamplerState _samp_pw : register(s3);  // POINT  + WRAP  (pw_main)
+SamplerState _samp_lm : register(s4);  // LINEAR + MIRROR (preset sampler_state)
+SamplerState _samp_pm : register(s5);  // POINT  + MIRROR (preset sampler_state)
 
 // Legacy compatibility: sampler2D/sampler/sampler3D → Texture2D/Texture3D
 #define sampler2D Texture2D
@@ -184,6 +194,21 @@ SamplerState _samp_pw : register(s3);  // POINT  + WRAP  (pw_main)
 #define tex2Dlod(t, v)    t.SampleLevel(_samp_lw, (v).xy, (v).w)
 #define tex2Dbias(t, v)   t.SampleBias(_samp_lw, (v).xy, (v).w)
 #define tex3D(t, uvw)     t.Sample(_samp_lw, uvw)
+// tex1D against a 2D texture, which is what presets actually do with it:
+//   ret = tex1D(sampler_rand00, v)*0.04*bass + ...
+// sampler_rand00 is a Texture2D, so this is a scalar lookup along the top row,
+// not a Texture1D. Supporting real 1D textures would mean teaching the SRV and
+// binding machinery a second texture dimension for no preset that asks for one.
+// (u).x, not (u): presets pass a float2 here and DX9 silently truncated it --
+// a preset declares float2 v and then samples tex1D with it. HLSL accepts .x on
+// a scalar too, so the one spelling covers both, and float2((u), 0.0) does not.
+//
+// Mind the quoting in this file: the whole include lives in an R-string, so a
+// close-paren immediately followed by a double quote ENDS IT. Writing the
+// example call inline, in quotes, silently terminated the literal here and the
+// compiler blamed a line fifteen further down.
+#define tex1D(t, u)       t.Sample(_samp_lw, float2((u).x, 0.0))
+#define tex1Dlod(t, v)    t.SampleLevel(_samp_lw, float2((v).x, 0.0), (v).w)
 #define tex3Dlod(t, v)    t.SampleLevel(_samp_lw, (v).xyz, (v).w)
 #define tex2d(t, uv)      t.Sample(_samp_lw, uv)
 #define tex3d(t, uvw)     t.Sample(_samp_lw, uvw)
@@ -359,7 +384,7 @@ Texture2D sampler_audio;
 
 #define HAS_FFT_PEAK 1
 
-)" R"(// Shape of get_fft, from the active audio profile.
+)HLSL" R"HLSL(// Shape of get_fft, from the active audio profile.
 //   _fftExp   0.5 applies the perceptual sqrt this engine has always used;
 //             1.0 is a raw fetch, which is what MilkDrop 3 PRO does -- its
 //             preamble reads tex2D(sampler_fft, float2(clamp(pos,0,1),0.5)).r
@@ -398,7 +423,7 @@ float get_fft_peak_hz(float freq) {
     return get_fft_peak(freq / _fftParams.y);
 }
 
-)" R"(// MD3 PRO's FFT texel domain lives in the PRESETS now, not here (#141).
+)HLSL" R"HLSL(// MD3 PRO's FFT texel domain lives in the PRESETS now, not here (#141).
 //
 // md3_fft_bin / md3_fft / md3_fft_tex, and the MD3_FFT_REL_GATE and
 // MD3_FFT_TAPS that tune them, were defined in this preamble and were reached
@@ -460,9 +485,9 @@ float3 shiftHSV(float3 c)
 #define acos _safe_acos
 #define atan2 _safe_atan2
 #define smoothstep _safe_smoothstep
-)";
+)HLSL";
 
-static const char k_warp_vs_fx[] = R"(void VS( float3 vPosIn     : POSITION,
+static const char k_warp_vs_fx[] = R"HLSL(void VS( float3 vPosIn     : POSITION,
          float4 vDiffuseIn : COLOR,
          float2 uv_in      : TEXCOORD0,  // warped UVs (tu, tv)
          float2 uv_orig_in : TEXCOORD1,  // original UVs (tu_orig, tv_orig)
@@ -477,9 +502,9 @@ static const char k_warp_vs_fx[] = R"(void VS( float3 vPosIn     : POSITION,
     _uv = float4(uv_in.xy, uv_orig_in.xy);
     _rad_ang = rad_ang_in.xy;
 }
-)";
+)HLSL";
 
-static const char k_warp_ps_fx[] = R"(shader_body
+static const char k_warp_ps_fx[] = R"HLSL(shader_body
 {
     //************************************************************
     // NOTE: the body of this shader will be replaced by MilkDrop
@@ -497,9 +522,9 @@ static const char k_warp_ps_fx[] = R"(shader_body
     //       whenever a pre-MilkDrop-2 preset is loaded!
     //************************************************************
 }
-)";
+)HLSL";
 
-static const char k_comp_vs_fx[] = R"(void VS( float3 vPosIn     : POSITION,
+static const char k_comp_vs_fx[] = R"HLSL(void VS( float3 vPosIn     : POSITION,
          float4 vDiffuseIn : COLOR,
          float2 uv_in      : TEXCOORD0,  // tu, tv (current UVs)
          float2 uv_orig_in : TEXCOORD1,  // tu_orig, tv_orig (original UVs)
@@ -513,9 +538,9 @@ static const char k_comp_vs_fx[] = R"(void VS( float3 vPosIn     : POSITION,
     _vDiffuse = vDiffuseIn;
     _uv = float4(uv_in.xy, uv_orig_in.xy);
     _rad_ang = rad_ang_in.xy;
-})";
+})HLSL";
 
-static const char k_comp_ps_fx[] = R"(shader_body
+static const char k_comp_ps_fx[] = R"HLSL(shader_body
 {
     //************************************************************
     // NOTE: the body of this shader will be replaced by MilkDrop
@@ -528,9 +553,9 @@ static const char k_comp_ps_fx[] = R"(shader_body
     // NOTE: the body of this shader will be replaced by MilkDrop
     //       whenever a pre-MilkDrop-2 preset is loaded!
     //************************************************************
-})";
+})HLSL";
 
-static const char k_blur_vs_fx[] = R"(void VS( float3 vPosIn     : POSITION,
+static const char k_blur_vs_fx[] = R"HLSL(void VS( float3 vPosIn     : POSITION,
          float4 vDiffuseIn : COLOR,
          float4 uv1        : TEXCOORD0,  // .xy = warped UVs, .zw = orig UVs
          float2 uv2        : TEXCOORD1,  // .x = rad, .y = ang
@@ -540,9 +565,9 @@ static const char k_blur_vs_fx[] = R"(void VS( float3 vPosIn     : POSITION,
     vPosProj = float4(vPosIn.xy,1,1);
     uv = uv1.xy;
 }
-)";
+)HLSL";
 
-static const char k_blur1_ps_fx[] = R"(//texture   PrevFrameImage;
+static const char k_blur1_ps_fx[] = R"HLSL(//texture   PrevFrameImage;
 //sampler2D sampler_main = sampler_state { Texture = <PrevFrameImage>; };
 //float4 _c0; // source texsize (.xy), and inverse (.zw)
 //float4 _c1; // w1..w4
@@ -602,9 +627,9 @@ void PS( float2 uv       : TEXCOORD,
     ret.w   = 1;
     //ret.xyzw = tex2D(sampler_main, uv + 0*srctexsize.zw);
 }
-)";
+)HLSL";
 
-static const char k_blur2_ps_fx[] = R"(//texture   PrevFrameImage;
+static const char k_blur2_ps_fx[] = R"HLSL(//texture   PrevFrameImage;
 //sampler2D sampler_main = sampler_state { Texture = <PrevFrameImage>; };
 //float4 _c0; // source texsize (.xy), and inverse (.zw)
 
@@ -666,7 +691,7 @@ void PS( float2 uv       : TEXCOORD,
     ret.w   = 1;
     //ret.xyzw = tex2D(sampler_main, uv + 0*srctexsize.zw);
 }
-)";
+)HLSL";
 
 // Lookup table for embedded shader fallback.
 // Filenames include the "data\" prefix to match how ReadFileToString is called.

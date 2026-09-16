@@ -36,6 +36,29 @@ bool PipeNameBaseIsValid(const wchar_t* base) {
     return n > 0 && n < 40;
 }
 
+void PipeChildNameBase(const wchar_t* parentBase, wchar_t* out, size_t outCount) {
+    if (!out || outCount == 0) return;
+    // Every early return below leaves the default in place, so a caller cannot
+    // end up with a half-built name -- which would be a name nobody serves.
+    if (outCount <= wcslen(PIPE_CHILD_BASE_DEFAULT)) return;
+    wcsncpy_s(out, outCount, PIPE_CHILD_BASE_DEFAULT, _TRUNCATE);
+    if (!parentBase || !*parentBase) return;
+
+    wchar_t derived[64] = {};
+    wcsncpy_s(derived, parentBase, _TRUNCATE);
+    size_t n = wcslen(derived);
+    if (n && derived[n - 1] == L'_') derived[--n] = L'\0';   // the separator is Start's
+    if (!PipeNameBaseIsValid(derived)) return;
+
+    AppendTo(derived, L"Child");
+    // 39 characters is a legal parent base and 39 + "Child" is not. Keeping the
+    // default beats handing the child a name it will reject, because it would
+    // then serve mDxChild_ while the parent waited on the long one.
+    if (!PipeNameBaseIsValid(derived)) return;
+    if (wcslen(derived) >= outCount) return;
+    wcsncpy_s(out, outCount, derived, _TRUNCATE);
+}
+
 // ─── PipeServer ────────────────────────────────────────────────────────────────
 
 PipeServer::PipeServer() {}
@@ -45,7 +68,7 @@ PipeServer::~PipeServer() {
 }
 
 void PipeServer::Start(HWND hTargetWindow, UINT wmIPCMessage, UINT wmSignalBase,
-                       DWORD dwOnlyFromPid) {
+                       bool bChildMode, DWORD dwOnlyFromPid) {
     if (m_bRunning.load())
         return;
 
@@ -56,9 +79,14 @@ void PipeServer::Start(HWND hTargetWindow, UINT wmIPCMessage, UINT wmSignalBase,
     m_dwOnlyFromPid = dwOnlyFromPid;
 
     // Build pipe name: \\.\pipe\Milkwave_<PID>
-    // <base>_<pid>, where the base is whatever Rename last set or the default.
-    // The PID is always appended -- see Rename.
-    const wchar_t* nameBase = m_szNameBase[0] ? m_szNameBase : L"Milkwave_";
+    // A child gets its own namespace so nothing that goes looking for a
+    // visualizer to drive can find it -- see the header.
+    m_bChildMode = bChildMode;
+    // <base>_<pid>, where the base is whatever Rename last set or the default
+    // for this mode. The PID is always appended -- see Rename.
+    const wchar_t* nameBase = m_szNameBase[0] ? m_szNameBase
+                            : (bChildMode ? PIPE_CHILD_BASE_DEFAULT L"_"
+                                          : L"Milkwave_");
     FormatTo(m_szPipeName, L"\\\\.\\pipe\\%s%u", nameBase,
              GetCurrentProcessId());
 
@@ -181,11 +209,12 @@ bool PipeServer::Rename(const wchar_t* base)
     const HWND  hWnd     = m_hTargetWindow;
     const UINT  wmIPC    = m_wmIPCMessage;
     const UINT  wmSig    = m_wmSignalBase;
+    const bool  bChild   = m_bChildMode;
     const DWORD onlyFrom = m_dwOnlyFromPid;
 
     Stop();
     SetNameBase(base);
-    Start(hWnd, wmIPC, wmSig, onlyFrom);
+    Start(hWnd, wmIPC, wmSig, bChild, onlyFrom);
     return true;
 }
 

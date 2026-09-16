@@ -444,6 +444,28 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
                         if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) { fbFound = true; break; }
                       }
                     }
+                    // LAST: "../<whatever subdirectory>", the convention every
+                    // pre-MDropDX12 build honoured (#299).
+                    //
+                    // The sibling check above is this same idea, but it only
+                    // ever tried a folder named exactly "textures". MilkDrop 3
+                    // PRO keeps them in "sprites", so a preset in
+                    // Milkdrop3\presets1\ asking for 'spirale3' could not find
+                    // Milkdrop3\sprites\Spirale3.jpg one folder over -- which
+                    // is the report this came from.
+                    //
+                    // Last deliberately: every ordered path above keeps
+                    // priority, so nothing that resolves today can start
+                    // resolving somewhere else. This only ever converts a
+                    // failure into a hit. The list is cached per preset
+                    // directory, so the directory listing is not repeated for
+                    // each texture and extension.
+                    if (!fbFound) {
+                      for (const auto& dir : g_engine.SiblingResourceDirs()) {
+                        FormatTo(szFilename, L"%s%s.%s", dir.c_str(), szRootName, texture_exts[z].c_str());
+                        if (GetFileAttributesW(szFilename) != 0xFFFFFFFF) { fbFound = true; break; }
+                      }
+                    }
                     if (!fbFound) continue;
                   }
                 }
@@ -455,7 +477,14 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
                 x.d = 1;
                 x.bEvictable = true;
                 x.nAge = g_engine.m_nPresetsLoadedTotal;
-                x.nSizeInBytes = x.w * x.h * 4 + 16384;
+                // What the device says it allocated, not w*h*4+16384 (#347).
+                // That estimate was the BASE MIP ONLY, while this texture was
+                // uploaded with a full mip chain -- 4/3 of the base, plus 64 KB
+                // subresource alignment on the small levels. Measured live, the
+                // unrecorded part was 39-40% of the reported cache size on every
+                // preset load, and because it sat outside texMB it read as a
+                // separate leak.
+                x.nSizeInBytes = (int)g_engine.m_lpDX->TextureVramBytes(x.dx12Tex);
                 found = true;
                 DLOG_VERBOSE("CacheParams: loaded texture '%ls' from '%ls'", szRootName, szFilename);
                 break;
@@ -464,6 +493,11 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
             }
 
             if (!found) {
+              // Counted per preset (#307), so a sweep can say WHICH preset is
+              // missing art. A missing texture is not a compile failure -- the
+              // preset renders, just wrongly -- so nothing that asks "did the
+              // shaders build" will ever notice it.
+              g_engine.m_nTextureMissesThisLoad++;
               wchar_t buf[2048], title[64];
               FormatResTo(buf, IDS_COULD_NOT_LOAD_TEXTURE_X, szRootName, szExtsWithSlashes);
               g_engine.dumpmsg(buf, LOG_WARN);
@@ -478,6 +512,17 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
             }
 
             g_engine.m_textures.push_back(x);
+            // Keep the cache inside MaxBytes/MaxImages (#312). This is the only
+            // place a preset's own images enter it, and nothing ever took any
+            // of them back out.
+            //
+            // Safe here only because EnforceTextureCacheBudget drains the GPU
+            // and takes the mirror engine lock before it touches anything --
+            // calling the old eviction from this same spot produced a page
+            // fault at VA 0 within a dozen presets. It returns immediately
+            // when the cache is inside budget, so the drain is paid on the
+            // loads that evict rather than on every load.
+            g_engine.EnforceTextureCacheBudget();
             m_texture_bindings[cd.RegisterIndex].dx12SrvIndex = x.dx12Tex.srvIndex;
           }
         }
@@ -1040,6 +1085,17 @@ void Engine::CreateDX12PresetPSOs() {
   // The sync that used to sit at the top of the builder. It belongs HERE: the
   // assignments below release the outgoing PSOs, and the GPU may still be
   // executing a command list that references them.
+  //
+  // WaitForGpu now covers the MIRROR queue as well as the main one, via the
+  // waiter the Engine installs on DXContext (#206) -- and this call site is
+  // why. A mirror records with THESE PSOs whenever its preset has no custom
+  // warp/comp bytecode, because FillPresetPipeline(rc, c) falls back to the
+  // engine's set, which is most classic .milk presets. The mirror submits to
+  // m_mirrorQueue with its own fence, about which the old main-queue-only wait
+  // said nothing, so the assignment below released PSOs an in-flight mirror
+  // list still referenced: a GPU page fault at VA 0 on a draw in
+  // MirrorWork:\\.\DISPLAYn, then a TDR. Reproduced in roughly one 90-second
+  // soak in two, with two independent mirrors and a preset load every 1.2s.
   if (m_lpDX) m_lpDX->WaitForGpu();
   m_dx12WarpPSO      = out.warp;
   m_dx12OldWarpPSO   = out.oldWarp;
@@ -1623,6 +1679,449 @@ static void FixSelfReferentialMacroShadow(std::string& text) {
 // GLSL allows `vec2 R2D = uv * R2D(100.);` where R2D is both a function and local variable.
 // HLSL rejects this with X3005: "identifier represents a variable, not a function".
 // We scan for function definitions, then rename variable-use occurrences of the same name.
+// Preprocessor: give the preset's OWN globals static linkage (#326).
+//
+// A preset declares scratch variables at file scope and then writes to them
+// from the shader body:
+//
+//     float near, noise, z, k1, ftu, nshape, nmask, iswater;
+//     bool  istube;
+//     ...
+//     z = q8/uv1.y;
+//
+// Under DX9 that worked. In SM5 a file-scope variable without `static` is a
+// uniform -- it lives in a constant buffer and is read-only -- so the write is
+// rejected. With backwards compatibility enabled, which is how this engine
+// compiles, the rejection arrives in disguise:
+//
+//     error X4555: cannot use casts on l-values
+//
+// and without it as the plainer `error X3025: global variables are implicitly
+// constant`. Same cause, and neither message mentions the word the fix needs.
+//
+// Marking them static also settles a second error from the same root:
+//
+//     error X3011: 'r3': initial value must be a literal expression
+//
+// A uniform's initialiser has to be a compile-time constant because it is
+// baked into the constant buffer, so `float r3 = sqrt(3);` -- which DX9 folded
+// -- is refused. A static has no such restriction; it is initialised at entry.
+// Presets that already say `static` prove it: `martin - the sewers` writes
+// `static float trad = 0.008, tlen = q7;` in the same shader that fails, and
+// that line has always compiled.
+//
+// Scoped to the preset's own text via `from`, and that is the whole safety
+// argument. Everything before it is the engine's prelude, where the globals ARE
+// uniforms -- q1..q32, the texsize constants, _c0 -- and making any of those
+// static would cut it off from the values the CPU writes each frame.
+//
+// Only a declaration is touched: a name followed by '(' is a function, a name
+// followed by ':' carries a semantic and belongs to the pipeline, and a
+// statement whose first token is static/const/uniform/struct is left as it is
+// because its first token is not a type. Samplers and textures never match for
+// the same reason, which matters -- a static sampler does not compile.
+//
+// NOT EVERY PRESET GLOBAL IS SCRATCH, which is the trap here and it was caught
+// by comparing compiled output rather than by reading the code. A preset
+// declares
+//
+//     float4 texsize_bw3;
+//
+// and the ENGINE fills that in: CacheParams reflects over the compiled
+// constants and binds anything named texsize_* to the dimensions of the matching
+// texture. Made static, it is cut off from that and reads as zero -- which
+// compiles, and silently folds away every expression it feeds. On
+// `Nivush - Bouncing Sounds` the constant buffer fell from 115 vectors to 25
+// and a whole block of arithmetic vanished. No error, just a different picture.
+//
+// So a global is made static only when it CANNOT be one of those:
+//
+//   * the preset assigns to it somewhere -- engine-supplied constants are
+//     read-only, and a write is the very thing X4555/X3025 complain about; or
+//   * its initialiser is not a constant expression, which no engine-bound
+//     constant has and which is exactly what X3011 rejects.
+//
+// Both conditions describe a variable the preset owns. Names the engine binds
+// by reflection are excluded outright as well, because that contract is known
+// rather than inferred and costs one comparison to honour.
+static void MakePresetGlobalsStatic(std::string& text, size_t from) {
+  static const char* kTypes[] = {
+    "float", "float2", "float3", "float4",
+    "float2x2", "float3x3", "float4x4",
+    "float2x3", "float3x2", "float2x4", "float4x2", "float3x4", "float4x3",
+    "half", "half2", "half3", "half4",
+    "double", "double2", "double3", "double4",
+    "int", "int2", "int3", "int4",
+    "uint", "uint2", "uint3", "uint4",
+    "bool", "bool2", "bool3", "bool4",
+  };
+  auto isIdent = [](char c) -> bool {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_';
+  };
+  auto isTypeName = [&](const std::string& t) {
+    for (const char* ty : kTypes) if (t == ty) return true;
+    return false;
+  };
+
+  // Names CacheParams binds by reflection, from the shader's own constant
+  // table. The preset declares them; the engine supplies the value.
+  auto engineBound = [](const std::string& n) {
+    return n.compare(0, 8, "texsize_") == 0 ||
+           n.compare(0, 4, "rot_")     == 0 ||
+           n == "rand_frame" || n == "rand_preset" ||
+           (!n.empty() && n[0] == '_');
+  };
+
+  // Is `name` written to anywhere after `from`? Allows a swizzle or an index
+  // in between, and rejects the comparison operators that also contain '='.
+  auto isAssigned = [&](const std::string& body, size_t start, const std::string& name) {
+    for (size_t p = body.find(name, start); p != std::string::npos;
+         p = body.find(name, p + 1)) {
+      if (p > 0 && isIdent(body[p - 1])) continue;          // part of a longer name
+      size_t q = p + name.size();
+      if (q < body.size() && isIdent(body[q])) continue;
+      // step over `.xyz` and `[i]`
+      for (;;) {
+        while (q < body.size() && (unsigned char)body[q] <= ' ') q++;
+        if (q < body.size() && body[q] == '.') {
+          q++;
+          while (q < body.size() && isIdent(body[q])) q++;
+        } else if (q < body.size() && body[q] == '[') {
+          int d = 0;
+          while (q < body.size()) {
+            if (body[q] == '[') d++;
+            else if (body[q] == ']') { q++; if (--d == 0) break; continue; }
+            q++;
+          }
+        } else break;
+      }
+      while (q < body.size() && (unsigned char)body[q] <= ' ') q++;
+      if (q >= body.size()) continue;
+      const char c0 = body[q];
+      const char c1 = (q + 1 < body.size()) ? body[q + 1] : 0;
+      if (c0 == '=' && c1 != '=') return true;                       // x =
+      if ((c0 == '+' || c0 == '-') && c1 == c0) return true;         // x++ / x--
+      if ((c0 == '+' || c0 == '-' || c0 == '*' || c0 == '/' ||
+           c0 == '%') && c1 == '=') return true;                     // x += ...
+    }
+    return false;
+  };
+
+  if (from >= text.size()) return;
+
+  std::string out = text.substr(0, from);
+  out.reserve(text.size() + 256);
+
+  const size_t n = text.size();
+  int paren = 0, depth = 0, changed = 0;
+  char prevSig = 0;
+
+  for (size_t i = from; i < n; ) {
+    const char c = text[i];
+
+    if (c == '/' && i + 1 < n && text[i + 1] == '/') {
+      while (i < n && text[i] != '\n') out += text[i++];
+      continue;
+    }
+    if (c == '/' && i + 1 < n && text[i + 1] == '*') {
+      out += text[i++]; out += text[i++];
+      while (i < n && !(text[i] == '*' && i + 1 < n && text[i + 1] == '/'))
+        out += text[i++];
+      if (i < n) { out += text[i++]; if (i < n) out += text[i++]; }
+      continue;
+    }
+    // A preprocessor line is not a declaration however it starts. It DOES end
+    // a statement though, and forgetting that is what made this miss
+    // `float r3 = sqrt(3);` when it followed `#define hue_shader ...` with no
+    // semicolon between them: prevSig was still the 'z' of `.xyz`, so the next
+    // line did not look like the start of one.
+    if (c == '#' && (prevSig == 0 || out.empty() || out.back() == '\n')) {
+      while (i < n && text[i] != '\n') out += text[i++];
+      prevSig = ';';
+      continue;
+    }
+
+    if (c == '(') paren++;
+    else if (c == ')') { if (paren > 0) paren--; }
+    else if (c == '{') depth++;
+    else if (c == '}') { if (depth > 0) depth--; }
+
+    const bool atGlobalStatement =
+        (paren == 0 && depth == 0 &&
+         (prevSig == 0 || prevSig == ';' || prevSig == '}' || prevSig == '{'));
+
+    if (atGlobalStatement && isIdent(c) && (i == from || !isIdent(text[i - 1]))) {
+      size_t e = i;
+      while (e < n && isIdent(text[e])) e++;
+      const std::string tok = text.substr(i, e - i);
+
+      bool isType = false;
+      for (const char* ty : kTypes)
+        if (tok == ty) { isType = true; break; }
+
+      if (isType) {
+        size_t a = e;
+        while (a < n && (unsigned char)text[a] <= ' ') a++;
+        if (a < n && isIdent(text[a])) {
+          size_t ne = a;
+          while (ne < n && isIdent(text[ne])) ne++;
+          size_t after = ne;
+          while (after < n && (unsigned char)text[after] <= ' ') after++;
+          // ',' ';' '=' '[' -> a variable. '(' is a function, ':' a semantic.
+          if (after < n && (text[after] == ',' || text[after] == ';' ||
+                            text[after] == '=' || text[after] == '[')) {
+            // Find the end of the statement, then weigh every declarator in it.
+            size_t semi = std::string::npos;
+            int dp = 0;
+            for (size_t s = a; s < n; s++) {
+              const char d = text[s];
+              if (d == '(' || d == '[') dp++;
+              else if (d == ')' || d == ']') dp--;
+              else if (dp == 0 && d == ';') { semi = s; break; }
+              else if (dp == 0 && (d == '{' || d == '}')) break;
+            }
+
+            bool qualifies = false, blocked = (semi == std::string::npos);
+            for (size_t s = a; semi != std::string::npos && s < semi; ) {
+              while (s < semi && (unsigned char)text[s] <= ' ') s++;
+              size_t nb = s;
+              while (s < semi && isIdent(text[s])) s++;
+              const std::string nm = text.substr(nb, s - nb);
+
+              // The initialiser, if any, up to the next top-level comma.
+              size_t init = std::string::npos, t = s;
+              int d2 = 0;                 // int: '(' /')' can go unbalanced
+              for (; t < semi; t++) {
+                if (text[t] == '(' || text[t] == '[') d2++;
+                else if (text[t] == ')' || text[t] == ']') d2--;
+                else if (d2 == 0 && text[t] == ',') break;
+                else if (d2 == 0 && text[t] == '=' && init == std::string::npos)
+                  init = t + 1;
+              }
+
+              if (nm.empty()) { s = t + 1; continue; }
+              if (engineBound(nm)) { blocked = true; break; }
+
+              if (!qualifies) {
+                if (isAssigned(text, semi, nm)) qualifies = true;
+                else if (init != std::string::npos) {
+                  // Non-constant initialiser: any identifier that is not a
+                  // type name. `float3(0,0,0)` is constant, `sqrt(3)` and `q7`
+                  // are not.
+                  for (size_t k = init; k < t && !qualifies; ) {
+                    if (!isIdent(text[k])) { k++; continue; }
+                    size_t kb = k;
+                    while (k < t && isIdent(text[k])) k++;
+                    const std::string tok2 = text.substr(kb, k - kb);
+                    if (tok2.empty() || (tok2[0] >= '0' && tok2[0] <= '9')) continue;
+                    if (!isTypeName(tok2)) qualifies = true;
+                  }
+                }
+              }
+              s = t + 1;
+            }
+
+            if (qualifies && !blocked) {
+              out += "static ";
+              changed++;
+            }
+          }
+        }
+      }
+    }
+
+    if ((unsigned char)c > ' ') prevSig = c;
+    out += c;
+    i++;
+  }
+
+  if (changed) {
+    DLOG_INFO("MakePresetGlobalsStatic: %d preset global declaration(s)", changed);
+    text.swap(out);
+  }
+}
+
+// Preprocessor: zero-initialize bare local declarations (#230).
+//
+// GLSL implementations zero locals in practice, so shaders ported by hand from
+// Shadertoy rely on it without saying so. HLSL leaves them undefined. Clouds1b
+// is the case that made this worth doing:
+//
+//     float i,e,g,R,s;
+//     float3 q,p,d=float3(...);
+//     for(q.zy=float2(-1,-1); i++<99.; )   <-- i is the loop's ONLY bound
+//
+// so the outer loop's trip count is an undefined register. It is not what
+// hangs the GPU on that preset -- measured, a zero-initialized build dies in
+// the same five seconds -- but it is undefined behaviour producing visuals
+// that need not be the same twice, and it costs nothing to close.
+//
+// The Shadertoy IMPORTER already does this (engine_shader_import_ui.cpp) and
+// says why in its own comment. Presets ported by hand into a .milk file never
+// pass through it, which is the gap this closes.
+//
+// Deliberately per-DECLARATOR, unlike the importer's version, which skips any
+// declaration containing '='. That misses `float3 q,p,d=float3(...)` -- the
+// initializer belongs to d, while q and p are exactly as undefined as before.
+//
+// Conservative by construction: only plain scalar/vector declarators made of
+// identifier characters are touched. Arrays, anything with parentheses,
+// function parameters, struct members and both comment forms are left alone,
+// because a wrong rewrite here is a compile error on a preset that used to
+// work.
+static void FixUninitializedLocals(std::string& text) {
+  static const char* kTypes[] = {
+    "float4", "float3", "float2", "float",
+    "half4", "half3", "half2", "half",
+    "int4", "int3", "int2", "int",
+    "uint4", "uint3", "uint2", "uint",
+    "bool4", "bool3", "bool2", "bool",
+  };
+  auto isIdent = [](char c) -> bool {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_';
+  };
+
+  std::string out;
+  out.reserve(text.size() + 256);
+
+  const size_t n = text.size();
+  int paren = 0, depth = 0, structDepth = -1;
+  char prevSig = 0;             // last significant (non-space) character
+  int changed = 0;
+
+  for (size_t i = 0; i < n; ) {
+    const char c = text[i];
+
+    // Comments pass through untouched -- a 'float' inside one is prose.
+    if (c == '/' && i + 1 < n && text[i + 1] == '/') {
+      while (i < n && text[i] != '\n') out += text[i++];
+      continue;
+    }
+    if (c == '/' && i + 1 < n && text[i + 1] == '*') {
+      out += text[i++]; out += text[i++];
+      while (i < n && !(text[i] == '*' && i + 1 < n && text[i + 1] == '/'))
+        out += text[i++];
+      if (i < n) { out += text[i++]; if (i < n) out += text[i++]; }
+      continue;
+    }
+
+    if (c == '(') paren++;
+    else if (c == ')') { if (paren > 0) paren--; }
+    else if (c == '{') {
+      // Remember whether this block is a struct body, so its members are not
+      // treated as locals -- `struct S { float a; };` must stay as it is.
+      //
+      // The tag name has to be stepped over first (#326). Looking only at the
+      // token immediately before '{' recognises the anonymous `struct {` and
+      // misses every NAMED one, so `struct MarchData { float d; }` had " = 0"
+      // appended to each member and the compiler rejected it:
+      //
+      //     error X3009: 'MarchData::d': struct/class members cannot have
+      //                  default values
+      size_t b = out.size();
+      while (b > 0 && (unsigned char)out[b - 1] <= ' ') b--;
+      size_t tag = b;                       // skip an optional `MarchData`
+      while (tag > 0 && (isIdent(out[tag - 1]))) tag--;
+      if (tag < b) {
+        size_t ws = tag;
+        while (ws > 0 && (unsigned char)out[ws - 1] <= ' ') ws--;
+        if (ws < tag) b = ws;               // there was `struct <tag> {`
+      }
+      const bool isStruct = (b >= 6 && out.compare(b - 6, 6, "struct") == 0) ||
+                            (b >= 5 && out.compare(b - 5, 5, "class") == 0) ||
+                            (structDepth >= 0);
+      depth++;
+      if (isStruct && structDepth < 0) structDepth = depth;
+    }
+    else if (c == '}') {
+      if (structDepth >= 0 && depth == structDepth) structDepth = -1;
+      if (depth > 0) depth--;
+    }
+
+    const bool atStatement = (paren == 0 && structDepth < 0 &&
+                              (prevSig == 0 || prevSig == ';' ||
+                               prevSig == '{' || prevSig == '}'));
+    bool handled = false;
+
+    if (atStatement && (i == 0 || !isIdent(text[i - 1]))) {
+      for (const char* ty : kTypes) {
+        const size_t tl = strlen(ty);
+        if (text.compare(i, tl, ty) != 0) continue;
+        if (i + tl < n && (isIdent(text[i + tl]) || text[i + tl] == 'x'))
+          continue;                       // float2x2, floaty, ...
+        if (i + tl >= n || text[i + tl] != ' ') continue;
+
+        // Find the end of the statement. A '{' at depth 0 means this was a
+        // function definition, not a declaration.
+        size_t semi = std::string::npos;
+        int dp = 0;
+        for (size_t s = i + tl; s < n; s++) {
+          const char d = text[s];
+          if (d == '(' || d == '[') dp++;
+          else if (d == ')' || d == ']') dp--;
+          else if (dp == 0 && d == ';') { semi = s; break; }
+          else if (dp == 0 && (d == '{' || d == '}')) break;
+        }
+        if (semi == std::string::npos) break;
+
+        // Split the declarator list on top-level commas and give a bare one
+        // "= 0". HLSL promotes the scalar across a vector, so one form works
+        // for every type here.
+        const std::string decls = text.substr(i + tl, semi - (i + tl));
+        std::string rebuilt;
+        size_t start = 0;
+        int dp2 = 0;
+        bool safe = true;
+        std::vector<std::string> parts;
+        for (size_t s = 0; s <= decls.size(); s++) {
+          if (s == decls.size() || (dp2 == 0 && decls[s] == ',')) {
+            parts.push_back(decls.substr(start, s - start));
+            start = s + 1;
+          } else if (decls[s] == '(' || decls[s] == '[') dp2++;
+          else if (decls[s] == ')' || decls[s] == ']') dp2--;
+        }
+        for (auto& p : parts) {
+          if (p.find('=') != std::string::npos) continue;   // already has one
+          size_t a = 0, b2 = p.size();
+          while (a < b2 && (unsigned char)p[a] <= ' ') a++;
+          while (b2 > a && (unsigned char)p[b2 - 1] <= ' ') b2--;
+          if (a >= b2) { safe = false; break; }
+          for (size_t k = a; k < b2; k++)
+            if (!isIdent(p[k])) { safe = false; break; }   // array, call, ...
+          if (!safe) break;
+          p.insert(b2, " = 0");
+        }
+        if (!safe) break;
+        for (size_t k = 0; k < parts.size(); k++) {
+          if (k) rebuilt += ',';
+          rebuilt += parts[k];
+        }
+        if (rebuilt != decls) changed++;
+        out.append(ty, tl);
+        out += rebuilt;
+        out += ';';
+        i = semi + 1;
+        prevSig = ';';
+        handled = true;
+        break;
+      }
+    }
+
+    if (handled) continue;
+    out += c;
+    if ((unsigned char)c > ' ') prevSig = c;
+    i++;
+  }
+
+  if (changed) {
+    DLOG_INFO("FixUninitializedLocals: zero-initialized %d local declaration(s)",
+              changed);
+    text.swap(out);
+  }
+}
+
 static void FixShadowedUserFunctions(std::string& text) {
   char* szShaderText = &text[0];
   auto isIdentChar = [](char c) -> bool {
@@ -1882,11 +2381,78 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   for (int i = 0; i <= 3; i++) {
     char decl[40];
     sprintf(decl, "Texture2D sampler_rand%02d", i);
-    if (strstr(szOrigShaderText, decl)) {
+    // The name has to END at the match. "Texture2D sampler_rand00" is a prefix
+    // of "Texture2D sampler_rand00_smalltiled", and taking the prefix as a hit
+    // would strip the include's bare declaration because a preset happened to
+    // declare a SUFFIXED one -- a different texture entirely. The strip below
+    // had the same flaw in the other direction and it cost four presets.
+    const char* found = strstr(szOrigShaderText, decl);
+    while (found) {
+      const char after = *(found + strlen(decl));
+      if (!(isalnum((unsigned char)after) || after == '_')) break;
+      found = strstr(found + 1, decl);
+    }
+    if (found) {
       char fullDecl[44];
       sprintf(fullDecl, "%s;", decl);
       char* pos = strstr(szShaderText, fullDecl);
       if (pos) memset(pos, ' ', strlen(fullDecl));
+    }
+  }
+
+  // Declare the SUFFIXED random-texture samplers (#305).
+  //
+  // MilkDrop lets a preset write sampler_rand00_smalltiled, where the part
+  // after the digits is a filename hint -- "pick a random texture whose name
+  // starts with smalltiled". CacheParams already understands that form: it
+  // peels the prefix off and calls PickRandomTexture with it.
+  //
+  // But the include only ever declared the BARE names, sampler_rand00 through
+  // sampler_rand15, so the suffixed identifier was never declared and the
+  // shader failed to compile before CacheParams could look at anything:
+  //
+  //   error X3004: undeclared identifier 'sampler_rand00_smalltiled'
+  //
+  // Found by sweeping the preset libraries: every compile failure across 2,885
+  // presets was this one fault -- one in BeatDrop and four in the folder named
+  // "Not working with the Original Milkdrop", which is what those four had been
+  // failing on all along.
+  //
+  // Declaring it is the whole fix. Reflection then reports the texture under
+  // its full name and the existing rand handling does the rest.
+  {
+    std::set<std::string> wanted;
+    for (const char* s = strstr(szOrigShaderText, "sampler_rand"); s;
+         s = strstr(s, "sampler_rand")) {
+      const char* p = s + 12;                       // past "sampler_rand"
+      if (!isdigit((unsigned char)p[0]) || !isdigit((unsigned char)p[1]) ||
+          p[2] != '_') {
+        s = p;                                      // bare form; the include has it
+        continue;
+      }
+      const char* q = p + 3;
+      while (*q && (isalnum((unsigned char)*q) || *q == '_')) q++;
+      wanted.insert(std::string(s, q - s));
+      s = q;
+    }
+    for (const std::string& name : wanted) {
+      // Not if the preset declares it itself -- that is the same redefinition
+      // the bare-name strip exists to avoid, from the other direction.
+      //
+      // BOTH spellings. Checking only "Texture2D <name>" missed the DX9 form,
+      // and the sweep found four presets redefining sampler_rand00_smalltiled
+      // for exactly that reason -- a fault introduced by #305 declaring a name
+      // the preset had already declared as `sampler <name>;`.
+      char own[160], ownDx9[160];
+      sprintf(own, "Texture2D %s", name.c_str());
+      sprintf(ownDx9, "sampler %s", name.c_str());
+      if (strstr(szOrigShaderText, own) || strstr(szOrigShaderText, ownDx9))
+        continue;
+      char decl[176];
+      sprintf(decl, "Texture2D %s;\n", name.c_str());
+      strncpy_s(&szShaderText[writePos], MAX_SHADER_TEXT_LEN - (size_t)writePos,
+                decl, _TRUNCATE);
+      writePos += (int)strlen(decl);
     }
   }
 
@@ -2087,14 +2653,253 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // Strip DX9-style "sampler sampler_randNN;" declarations from preset text.
   // The include already declares "Texture2D sampler_randNN;" — having both
   // causes a redefinition error (sampler = SamplerState in SM5.0).
+  //
+  // 0..3 ONLY, and that bound is load-bearing: the include declares exactly
+  // sampler_rand00 through sampler_rand03 and no more. Raising it to 15 on the
+  // assumption that the ceiling was arbitrary stripped the declarations that
+  // presets using rand04 and above provide for THEMSELVES, and the next sweep
+  // reported twelve new "undeclared identifier 'sampler_rand04'" errors.
+  //
+  // EVERY sampler keyword, not just the bare `sampler`. Presets overwhelmingly
+  // write `sampler2D`, and matching only `sampler ` meant this strip almost
+  // never fired -- which is why redefinitions of sampler_rand00 were the single
+  // commonest compile failure in the corpus. Read out of the engine's own
+  // generated-shader dump rather than guessed: line 460 was `sampler2D
+  // sampler_pic;` against the include's `Texture2D sampler_rand00;` on 337.
+  // TOKENISED, not matched literally. Three separate faults came out of
+  // building the needle with sprintf and calling strstr:
+  //
+  //   "sampler X"   missed `sampler2D X`, which is how presets actually write
+  //                 it -- so this strip almost never fired, and redefinition of
+  //                 sampler_rand00 became the commonest failure in the corpus;
+  //   one space     missed `sampler  sampler_rand03`, which is just as legal;
+  //   prefix match  ate `sampler sampler_rand00_smalltiled` when stripping
+  //                 sampler_rand00, leaving a needed declaration undeclared.
+  //
+  // So: keyword as a whole token, any run of spaces or tabs, the exact name
+  // with a boundary after it, any spaces, a semicolon.
+  // Remove ONE declarator named `name` from any sampler declaration, and blank
+  // the whole statement when that was the only declarator.
+  //
+  // The declarator list is the fifth spelling of this declaration to turn up in
+  // the corpus, after sampler2D, two spaces, the #define alias and the
+  // state-block form (#305, #316, #318). Presets write
+  //
+  //     sampler sampler_rand00,sampler_rand01,sampler_rand02,sampler_rand03;
+  //
+  // and the previous version matched the keyword, matched sampler_rand00, then
+  // required a ';' -- found a ',' and gave up, leaving the declaration to
+  // collide with the include's own as "redefinition of 'sampler_rand00'".
+  //
+  // Blanking the whole statement is NOT the answer, and the second preset that
+  // hit this shows why: it declares sampler_rand01 through sampler_rand15 in one
+  // list, and the include provides only rand00..rand03. Dropping the statement
+  // would take rand04..rand15 with it and turn a redefinition into fifteen
+  // undeclared identifiers -- the same trap as raising the strip ceiling, which
+  // was tried and reverted in #316. So the list is edited, not deleted.
+  //
+  // Everything is overwritten with spaces rather than spliced out, so byte
+  // offsets and line numbers survive and the compiler's error lines still point
+  // at the user's source.
+  auto blankSamplerDecl = [](char* body, const char* name) {
+    static const char* kw[] = {
+        "sampler2D", "sampler1D", "sampler3D", "samplerCUBE", "sampler"
+    };
+    const size_t nameLen = strlen(name);
+    auto isIdent = [](char c) { return isalnum((unsigned char)c) || c == '_'; };
+    auto skipWs  = [](char* c) {
+      while (*c == ' ' || *c == '\t' || *c == '\r' || *c == '\n') c++;
+      return c;
+    };
+
+    for (const char* k : kw) {
+      const size_t kLen = strlen(k);
+      for (char* p = strstr(body, k); p; p = strstr(p + 1, k)) {
+        if (p != body && isIdent(p[-1]))
+          continue;                                   // not a token start
+        char* q = p + kLen;
+        if (isIdent(*q))
+          continue;                                   // "sampler" inside "sampler2D"
+        q = skipWs(q);
+
+        // Find where the statement ends. A state-block initialiser contains its
+        // own semicolons, so brace depth decides. A '(' means this is a function
+        // parameter or a call, not a declaration -- leave it alone, which is what
+        // the old "next char must be ';'" test was really protecting against.
+        char* end = q;
+        int depth = 0;
+        for (; *end; end++) {
+          if (*end == '{') depth++;
+          else if (*end == '}') { if (depth > 0) depth--; }
+          else if (depth == 0 && (*end == '(' || *end == ')')) break;
+          else if (depth == 0 && *end == ';') break;
+        }
+        if (*end != ';') continue;
+
+        // Split the declarator list on top-level commas.
+        struct Span { char* begin; char* end; };       // [begin, end)
+        Span decl[64];
+        int nDecl = 0;
+        char* s = q;
+        depth = 0;
+        for (char* c = q; c <= end && nDecl < 64; c++) {
+          if (*c == '{') depth++;
+          else if (*c == '}') { if (depth > 0) depth--; }
+          else if (depth == 0 && (*c == ',' || c == end)) {
+            decl[nDecl].begin = s;
+            decl[nDecl].end   = c;
+            nDecl++;
+            s = c + 1;
+          }
+        }
+        if (nDecl == 0) continue;
+
+        // Which declarator is this one? Its leading identifier is the name.
+        int hit = -1;
+        for (int i = 0; i < nDecl; i++) {
+          char* a = skipWs(decl[i].begin);
+          if (strncmp(a, name, nameLen) != 0) continue;
+          if (isIdent(a[nameLen])) continue;           // a longer name
+          hit = i;
+          break;
+        }
+        if (hit < 0) continue;
+
+        if (nDecl == 1) {
+          memset(p, ' ', (size_t)(end - p) + 1);       // keyword through ';'
+          continue;
+        }
+
+        // One of several: take the declarator and one adjacent comma with it, so
+        // the remaining list stays well formed at either end.
+        char* from = (hit == 0) ? decl[hit].begin : decl[hit - 1].end;
+        char* to   = (hit == 0) ? decl[hit].end + 1 : decl[hit].end;  // past its comma
+        if (to > end) to = end;
+        memset(from, ' ', (size_t)(to - from));
+      }
+    }
+  };
+
   for (int ri = 0; ri <= 3; ri++) {
-    char dx9Decl[48];
-    sprintf(dx9Decl, "sampler sampler_rand%02d", ri);
-    char* pos = strstr(&szShaderText[shaderStartPos], dx9Decl);
-    if (pos) {
-      // Blank the declaration up to and including the semicolon
-      char* end = strchr(pos, ';');
-      if (end) memset(pos, ' ', end - pos + 1);
+    char name[32];
+    sprintf(name, "sampler_rand%02d", ri);
+    blankSamplerDecl(&szShaderText[shaderStartPos], name);
+  }
+
+  // Drop DX9 "= sampler_state { ... }" initialisers, keeping the declaration
+  // itself (#318).
+  //
+  // The include maps the DX9 keyword straight through -- `#define sampler
+  // Texture2D` -- which is what makes `sampler tex;` work at all. It also means
+  //
+  //     sampler sampler_cells = sampler_state { AddressU = mirror; };
+  //
+  // becomes `Texture2D sampler_cells = sampler_state {...};`, and the compiler
+  // says exactly that:
+  //
+  //     error X3017: cannot implicitly convert from 'const StateBlock'
+  //                  to 'Texture2D<float4>'
+  //
+  // The DECLARATION has to survive -- sampler_cells is a disk texture, and
+  // reflection is what tells CacheParams to go and load `cells`. Blanking the
+  // whole statement, as the sampler_rand strip above does, would leave it
+  // undeclared instead. So only the initialiser goes.
+  //
+  // The ADDRESSING MODE IS KEPT. The block is parsed before it is removed, the
+  // filter and address mode inside it are mapped to one of the shared
+  // SamplerStates, and the sampler's tex2D calls are routed through that state
+  // further down -- the same mechanism replaceTex2D already uses for the
+  // built-in sampler_pw_*/sampler_fc_* names.
+  //
+  // Dropping the mode silently was the first version of this, and it is the
+  // kind of fix that looks complete and changes the picture: a texture declared
+  // `AddressU = mirror` sampled WRAP instead, with nothing said. MIRROR had
+  // nowhere to go at all until _samp_lm/_samp_pm were added at s4/s5.
+  std::vector<std::pair<std::string, std::string>> presetSamplerStates;
+  {
+    char* body = &szShaderText[shaderStartPos];
+    for (char* s = strstr(body, "sampler_state"); s;
+         s = strstr(s, "sampler_state")) {
+      char* eq = s - 1;
+      while (eq > body && (*eq == ' ' || *eq == '\t' || *eq == '\r' || *eq == '\n'))
+        eq--;
+      char* b = strchr(s, '{');
+      if (eq <= body || *eq != '=' || !b) { s += 13; continue; }
+      int depth = 0;
+      char* c = b;
+      for (; *c; c++) {
+        if (*c == '{') depth++;
+        else if (*c == '}') { if (--depth == 0) break; }
+      }
+      if (*c != '}') { s += 13; continue; }   // unbalanced; leave it alone
+
+      // The name being declared, walking back from the '=' over whitespace.
+      char* nameEnd = eq;
+      while (nameEnd > body &&
+             (nameEnd[-1] == ' ' || nameEnd[-1] == '\t' || nameEnd[-1] == '\r' ||
+              nameEnd[-1] == '\n'))
+        nameEnd--;
+      char* nameStart = nameEnd;
+      while (nameStart > body &&
+             (isalnum((unsigned char)nameStart[-1]) || nameStart[-1] == '_'))
+        nameStart--;
+      const std::string name(nameStart, (size_t)(nameEnd - nameStart));
+
+      // What the block asks for. Only the two axes the shared states cover;
+      // anything else in there (MaxAnisotropy, MipFilter...) is ignored rather
+      // than guessed at.
+      std::string block(b, (size_t)(c - b) + 1);
+      for (char& ch : block) ch = (char)tolower((unsigned char)ch);
+      const bool wantPoint  = block.find("point") != std::string::npos;
+      const bool wantMirror = block.find("mirror") != std::string::npos;
+      const bool wantClamp  = block.find("clamp") != std::string::npos;
+      const char* state = nullptr;
+      if (wantMirror)     state = wantPoint ? "_samp_pm" : "_samp_lm";
+      else if (wantClamp) state = wantPoint ? "_samp_pc" : "_samp_lc";
+      else if (wantPoint) state = "_samp_pw";
+      // plain LINEAR+WRAP is what tex2D already expands to; no rewrite needed.
+      if (state && !name.empty())
+        presetSamplerStates.emplace_back(name, state);
+
+      memset(eq, ' ', (size_t)(c - eq) + 1);  // from '=' through '}', keeping ';'
+      s = c + 1;
+    }
+  }
+
+  // The same declaration reached through a #define ALIAS (#315).
+  //
+  // This is the single commonest failure in the whole preset corpus -- 156 of
+  // roughly 180 shader errors across a 4,767-preset sweep, all of them
+  // "redefinition of 'sampler_rand00'". Presets write:
+  //
+  //     #define sampler_pic sampler_rand00
+  //     sampler sampler_pic;
+  //
+  // The compiler expands that to `sampler sampler_rand00;`, which collides with
+  // the include's Texture2D of the same name. Neither strip above can see it:
+  // both match literal text, and the alias is not resolved until compilation.
+  // The strip's own comment describes exactly this pattern as the reason it
+  // exists, and then matches on the one spelling that does not occur.
+  //
+  // So resolve the aliases first and strip what they expand to.
+  {
+    char* body = &szShaderText[shaderStartPos];
+    for (const char* p = strstr(body, "#define "); p; p = strstr(p, "#define ")) {
+      p += 8;
+      while (*p == ' ' || *p == '\t') p++;
+      const char* nameStart = p;
+      while (*p && (isalnum((unsigned char)*p) || *p == '_')) p++;
+      const std::string alias(nameStart, p - nameStart);
+      const char* q = p;
+      while (*q == ' ' || *q == '\t') q++;
+      if (alias.empty() || strncmp(q, "sampler_rand", 12) != 0)
+        continue;
+
+      // Same tokeniser as the direct case above, so the alias path cannot
+      // drift away from it -- and it is the alias path that matters most here,
+      // because `#define sampler_pic sampler_rand00` + `sampler2D sampler_pic;`
+      // is by far the commonest way a preset produces the duplicate.
+      blankSamplerDecl(body, alias.c_str());
     }
   }
 
@@ -2290,6 +3095,11 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   {
     std::string src(szShaderText);
 
+    // Zero-initialize bare locals BEFORE the renaming passes, so it sees
+    // declarations in the form the preset author wrote them. Adding "= 0"
+    // cannot affect what the passes below rename.
+    FixUninitializedLocals(src);
+
     // Fix variables that shadow HLSL built-in functions (e.g. float2 pow = ...)
     FixShadowedBuiltins(src);
 
@@ -2314,6 +3124,13 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
     // string can carry a NUL before its end; trim to the C string the rest of
     // this function expects.
     src.resize(strlen(src.c_str()));
+
+    // LAST, deliberately (#326). It inserts a keyword ahead of a type, and
+    // every pass above matches on `<type> <name>` -- running it earlier would
+    // put `static ` between them for no benefit, since nothing above cares
+    // whether a global is static. Scoped to the preset's own text: the prelude
+    // before shaderStartPos declares the real uniforms.
+    MakePresetGlobalsStatic(src, (size_t)shaderStartPos);
 
     if (src.size() + 1 > MAX_SHADER_TEXT_LEN) {
       wchar_t errMsg[512];
@@ -2704,6 +3521,14 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
       sprintf(from, "tex2dlod(%s,", sampName);
       replacePattern(from, to);
     };
+    // The preset's OWN sampler_state declarations first (#318), so a preset
+    // that names a sampler after a built-in still gets what it actually asked
+    // for rather than the built-in's assumption. replacePattern only rewrites
+    // what is still spelled tex2D(name, so the later built-in calls cannot undo
+    // one of these.
+    for (const auto& ps : presetSamplerStates)
+      replaceTex2D(ps.first.c_str(), ps.second.c_str());
+
     replaceTex2D("sampler_fc_main", "_samp_lc");  // LINEAR+CLAMP
     replaceTex2D("sampler_pc_main", "_samp_pc");  // POINT+CLAMP
     replaceTex2D("sampler_pw_main", "_samp_pw");  // POINT+WRAP
@@ -3038,12 +3863,42 @@ void Engine::GenCompPShaderText(char* szShaderText, float hue_shader, bool bBrig
   p += sprintf(p, "}%c", LF);
 }
 
+// The shader cache directory, ABSOLUTE (#289).
+//
+// This was the bare relative string "cache", which Windows resolves against the
+// process CURRENT DIRECTORY -- and a Win32 common file dialog changes that to
+// whatever folder it was last browsing unless OFN_NOCHANGEDIR is set. Twenty-two
+// of this app's dialogs did not set it. So opening Save.../Load... in the
+// Displays window moved the CWD to resources\profiles\display\, and every
+// shader compiled from then on was written to, and looked for in, a "cache"
+// folder underneath it. Found on the live install: 467 .shader files, 4.2 MB,
+// sitting in resources\profiles\display\cache\ -- every one of them a cache
+// miss for the real directory.
+//
+// The dialogs get OFN_NOCHANGEDIR as well, but that is the belt and this is the
+// braces: an absolute path cannot be moved by a CWD change that has not been
+// thought of yet, and the precompile path in App.cpp already built it this way.
+std::string Engine::ShaderCacheDir() const {
+  std::wstring dir = m_szBaseDir;
+  if (!dir.empty() && dir.back() != L'\\' && dir.back() != L'/')
+    dir += L'\\';
+  dir += L"cache";
+  // Narrow, because the callers here use std::ofstream/ifstream on char paths.
+  // The base directory is the install path; a non-ANSI one would have broken
+  // the relative form too, and everything else in this file already assumes it.
+  const int n = WideCharToMultiByte(CP_ACP, 0, dir.c_str(), -1, nullptr, 0, nullptr, nullptr);
+  if (n <= 1) return std::string("cache");
+  std::string out((size_t)n - 1, '\0');
+  WideCharToMultiByte(CP_ACP, 0, dir.c_str(), -1, &out[0], n, nullptr, nullptr);
+  return out;
+}
+
 void Engine::SaveShaderBytecodeToFile(ID3DXBuffer* pShaderByteCode, uint32_t checksum, char* prefix) {
   if (!pShaderByteCode || !checksum) return;
 
-  // Ensure the "cache" directory exists
-  const char* cacheDir = "cache";
-  if (_mkdir(cacheDir) != 0 && errno != EEXIST) {
+  // Ensure the cache directory exists
+  const std::string cacheDir = ShaderCacheDir();
+  if (_mkdir(cacheDir.c_str()) != 0 && errno != EEXIST) {
     std::cerr << "Failed to create or access cache directory: " << cacheDir << std::endl;
     return;
   }
@@ -3065,7 +3920,8 @@ ID3DXBuffer* Engine::LoadShaderBytecodeFromFile(uint32_t checksum, char* prefix)
   ID3DXBuffer* pBuffer = nullptr;
 
   std::ostringstream filePath;
-  filePath << "cache\\" << prefix << "-" << std::hex << std::uppercase << checksum << ".shader";
+  filePath << ShaderCacheDir() << "\\" << prefix << "-" << std::hex
+           << std::uppercase << checksum << ".shader";
 
   std::ifstream inFile(filePath.str(), std::ios::binary | std::ios::ate);
   if (!inFile.is_open()) return nullptr;

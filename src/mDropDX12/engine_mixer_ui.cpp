@@ -427,6 +427,8 @@ static void LvSelect(HWND hList, int row) {
 MixerWindow::MixerWindow(Engine* pEngine) : ToolWindow(pEngine, 640, 900) {}
 
 void Engine::OpenAudioMixerWindow() {
+  // A child instance owns no external interfaces, and the mixer is one.
+  if (m_bChildMode) return;
   OpenToolWindow(m_mixerWindow);
 }
 
@@ -2734,6 +2736,20 @@ LRESULT MixerWindow::DoHScroll(HWND hWnd, int id, int pos) {
 bool MixerWindow::LooksActive() const {
   if (!m_hWnd || !IsWindow(m_hWnd)) return false;
   if (IsIconic(m_hWnd)) return false;
+  // SUBSCRIBING stays on being in front. What follows visibility is the
+  // refresh, in DoMessage's tick -- the two were briefly made one and this is
+  // the half that had to go back (#328).
+  //
+  // Subscribing makes the worker poll every provider, Sonar over HTTP among
+  // them. Driven by a window merely being on screen, that runs constantly, and
+  // the moment it costs most is a headset switch: the route moves, devices
+  // come and go, and the providers are re-read underneath it. Shane, on the
+  // build where these were coupled: "when I switched headsets the lag was
+  // horrible."
+  //
+  // Reading the battery and the failover list needs none of that. It touches
+  // the Bluetooth nodes and a snapshot that already exists, so it can follow
+  // visibility while this does not.
   return GetForegroundWindow() == m_hWnd;
 }
 
@@ -2878,7 +2894,31 @@ LRESULT MixerWindow::DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
   if (msg == WM_TIMER && wParam == 1) {
     SetActive(LooksActive());
+
+    // Refreshing follows being ON SCREEN; subscribing follows being in front,
+    // and LooksActive above says why they are not the same question (#328).
+    //
+    // Both used to hang off m_subscribed, so a mixer window in plain sight but
+    // not focused -- which is how it is normally read -- updated nothing at
+    // all. The battery column held whatever it had when focus last left. Shane
+    // caught it against the HUD: 38% there, 68% in the list, the same headset,
+    // because the HUD has a poll of its own and the list had none.
+    //
+    // Every tick in front, every fifth while merely visible, none while hidden
+    // or minimised. Shane's figure: "it's relatively cheap to do every 5
+    // seconds if the window is not hidden".
+    const bool visible = m_hWnd && IsWindow(m_hWnd) &&
+                         IsWindowVisible(m_hWnd) && !IsIconic(m_hWnd);
+    bool refresh = false;
     if (m_subscribed) {
+      m_idleTicks = 0;
+      refresh = true;
+    } else if (visible && ++m_idleTicks >= 5) {
+      m_idleTicks = 0;
+      refresh = true;
+    }
+
+    if (refresh) {
       RefreshValues();
       // Values are not the only thing that moves.
       //

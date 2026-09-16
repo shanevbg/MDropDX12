@@ -100,6 +100,25 @@ tools/comparison/
 !resources/presets/TEST/FFTMAG.milk
 !resources/presets/TEST/GETFFT.milk
 
+# ...and except bundle/, which is the OPPOSITE of resources/presets.
+#
+# Nothing writes to bundle/ at runtime -- it is not a working directory, it is
+# the demo set that ships in the ZIP, and every file in it was chosen against
+# stated criteria rather than swept up by a `git add -A`:
+#
+#   * .milk only. A .milk3 is a converted GLSL shader and carries its author's
+#     terms; one in this tree states them outright ("You cannot host, display,
+#     distribute or share this Work neither as is or altered").
+#   * no port of an individual shader artist's published work, even where the
+#     port is a .milk -- same concern, different extension.
+#   * no third-party texture. Every preset here needs either no image at all or
+#     only the randNN slots, which bundle/textures fills.
+#   * classic MilkDrop lineage: authors whose presets have shipped inside
+#     MilkDrop, projectM and BeatDrop distributions for about twenty years.
+#
+# See bundle/CREDITS.md. Add nothing here that has not been through that list.
+!bundle/presets/*.milk
+
 
 # MD3 PRO-derived shaders are personal-use only: recovered from a local licensed
 # install by tools/md3_shader_import.py, and never redistributable. Keep them

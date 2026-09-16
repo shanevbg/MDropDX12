@@ -1578,6 +1578,38 @@ void EngineShell::DrawAndDisplay(int redraw) {
     explicit MirrorEngineGuard(EngineShell* p) : s(p) { s->LockMirrorEngine(); }
     ~MirrorEngineGuard() { s->UnlockMirrorEngine(); }
   } mirrorEngineGuard(this);
+
+  // Releases the guard again for a stretch that provably does not need it.
+  //
+  // The guard above is scoped over the whole of DrawAndDisplay, and that is
+  // what makes an in-process mirror slower than one in its own process on the
+  // same hardware. Measured, Clouds1b with two independent mirrors:
+  //
+  //   lock  avg 20.0 ms   max 23.4 ms    waiting for this mutex
+  //   rec   avg  0.48 ms  max  0.70 ms   work done while holding it
+  //
+  // 38% of the mirror's frame is spent waiting to do half a millisecond of
+  // recording, and the wait scales with the PRIMARY's frame time -- which is
+  // why an ordinary preset never notices (smoke0: lock 0.2 ms) and an
+  // expensive one starves.
+  //
+  // Every reason the guard was made this wide has since been removed by #186,
+  // and it was simply never narrowed to match:
+  //
+  //   upload ring   workers own a per-thread MirrorUploadRing and "must never
+  //                 touch the shared aux state"
+  //   command list  each surface records into its own (phase 5b)
+  //   SRV slots     measured flat at 3,740 across 931 primary frames with two
+  //                 mirrors live -- nothing allocates descriptors mid-frame
+  //   SizeGuard     gone; the comment that replaced it in milkdropfs.cpp says
+  //                 outright that it "is why a record could never run beside a
+  //                 primary frame", and the canvas now arrives on a
+  //                 RenderContext instead of being written into engine members
+  struct MirrorEngineUnlock {
+    EngineShell* s;
+    explicit MirrorEngineUnlock(EngineShell* p) : s(p) { s->UnlockMirrorEngine(); }
+    ~MirrorEngineUnlock() { s->LockMirrorEngine(); }
+  };
   // Orient mirror pass can temporarily rewrite texsize/aspect; never carry
   // that into this frame's primary render. MUST run under the guard: calling
   // it before the lock raced the worker's record and flattened mirror shapes
@@ -1603,6 +1635,14 @@ void EngineShell::DrawAndDisplay(int redraw) {
     m_text.ClearAll();
 
     // The main visualizer render function records its commands into m_lpDX->m_commandList
+    // Stays INSIDE the guard, deliberately.
+    //
+    // Releasing it here was tried and is not worth its risk. It moved the
+    // mirror's lock wait only 20.0 -> 17.8 ms, because the render thread's
+    // time is not spent recording -- and MyRenderFn queues into m_text, which
+    // the mirror worker reads to re-draw the HUD onto its panels (see the
+    // ClearAll note above). That is a real race for almost no gain. All of the
+    // win is at the Present below.
     MyRenderFn(redraw);
 
     PrepareFor2DDrawing_B(GetWidth(), GetHeight());
@@ -1628,7 +1668,13 @@ void EngineShell::DrawAndDisplay(int redraw) {
     if (hideMirrorHud || indepMirrors)
       CopyPrimaryToMirrorSrc();
 
-    m_text.DrawNow(nullptr, 0, 0, false);
+    // A child instance owns one display while the user watches the primary
+    // somewhere else, so "HUD only on the primary display" has to suppress the
+    // HUD a child draws for ITSELF. Messages and song-title animations are not
+    // in this queue -- they are supertexts, drawn separately -- so they still
+    // appear, which matches how DrawOverlaysToMirror treats the mirror side.
+    if (!ShouldHideOwnHud())
+      m_text.DrawNow(nullptr, 0, 0, false);
 
     if (indepMirrors)
       DrawDeferredMessages();
@@ -1723,8 +1769,23 @@ void EngineShell::DrawAndDisplay(int redraw) {
     // (text queue is cleared at the START of the next frame's text build —
     // the mirror sim worker re-draws it between frames)
 
-    // Present primary + advance frame
-    m_lpDX->EndFrame();
+    // Present primary + advance frame.
+    //
+    // Unlocked, because this BLOCKS and the block is the whole problem.
+    // EndFrame calls Present with syncInterval 1 whenever mirrors are live --
+    // m_bSerializeWithMirrors forces vsync so the primary and the panels never
+    // show different frames -- so the render thread sleeps here until the next
+    // vblank. Holding the mirror engine mutex across that sleep starves the
+    // very workers the forced vsync exists for.
+    //
+    // Measured with Clouds1b and two independent mirrors: lock wait 17.8 ms
+    // against a 0.46 ms record, 36% of the mirror's frame. Releasing
+    // MyRenderFn first moved it only 20.0 -> 17.8 ms, which is what pointed
+    // here: the render thread's time is not in recording, it is in waiting.
+    {
+      MirrorEngineUnlock unlocked(this);
+      m_lpDX->EndFrame();
+    }
 
     // Save screenshot after GPU completes the copy
     if (m_bScreenshotRequested && screenshotReadback) {
@@ -1842,6 +1903,16 @@ void EngineShell::DrawAndDisplay(int redraw) {
 void EngineShell::EnforceMaxFPS() {
   int max_fps = m_max_fps_w;
 
+  // A preset may LOWER the cap but never raise it. This is the only place the
+  // two ceilings meet, and it applies even when the user's own cap is 0
+  // (unlimited) -- a preset too heavy for this GPU needs holding back most
+  // precisely when nothing else is holding it back.
+  //
+  // This is a performance control, not a TDR guard; see PresetAnnotation::
+  // fpsMax for why that distinction is written down rather than assumed.
+  if (m_nPresetFpsCap > 0)
+    max_fps = (max_fps > 0) ? min(max_fps, m_nPresetFpsCap) : m_nPresetFpsCap;
+
   if (max_fps <= 0)
     return;
 
@@ -1929,6 +2000,46 @@ void EngineShell::DoTime() {
     m_fps = (m_max_fps_w > 0) ? (float)m_max_fps_w : 60.0f;
     m_time = 0;
     m_time_hist_pos = 0;
+  }
+
+  // STARTUP FRAME COST (#222), verbose only and only for the first seconds.
+  //
+  // Written to answer "how expensive are the first frames really?", because
+  // every runtime measurement found 1-2 ms, nowhere near a hang, while the
+  // failure only ever happened in the first seconds.
+  //
+  // It answered it in one line -- frame 59 cost 2525.6 ms among frames costing
+  // half a millisecond -- and that number is what broke #222 open. A factor of
+  // 5000 is not a preset gradually outgrowing its budget; it is one frame
+  // stalling, and 2525 ms is the ~2 s watchdog plus detection. The cause was a
+  // sprite texture freed, and its descriptor nulled in the live heap, while
+  // the GPU still held a reference.
+  //
+  // The reading first recorded here -- "a genuine DEVICE_HUNG, so this took
+  // too long, not a bad binding" -- was wrong, and wrong in the expensive
+  // direction: it treated the debug layer's silence as evidence of no binding
+  // fault when the Debug build simply never reached the timing. It stays in
+  // because the next hang will want the same question asked, and because the
+  // measurement was right even though the conclusion drawn from it was not.
+  //
+  // Bounded on purpose -- 240 frames, and gated on LOG_VERBOSE -- so it cannot
+  // become a per-frame log on anyone's normal run.
+  if (m_frame > 0 && m_frame <= 240 && g_debugLogLevel >= LOG_VERBOSE) {
+    static LARGE_INTEGER s_prev = {};
+    static LARGE_INTEGER s_qpf = [] {
+      LARGE_INTEGER f; QueryPerformanceFrequency(&f); return f;
+    }();
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    if (s_prev.QuadPart != 0 && s_qpf.QuadPart > 0) {
+      const double ms = (double)(now.QuadPart - s_prev.QuadPart) * 1000.0
+                        / (double)s_qpf.QuadPart;
+      // Every frame for the first 30, then only the slow ones -- a 4 ms frame
+      // says nothing and 240 of them bury the one that matters.
+      if (m_frame <= 30 || ms > 20.0)
+        DebugLogAFmt(LOG_VERBOSE, "STARTUP frame %d: %.1f ms", m_frame, ms);
+    }
+    s_prev = now;
   }
 
   double new_raw_time = 0.0;

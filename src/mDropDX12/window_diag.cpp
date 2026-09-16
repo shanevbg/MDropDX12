@@ -392,8 +392,225 @@ void SendWindowCapture(const std::wstring& title, const std::wstring& baseDir) {
   }
 }
 
-bool HandleWindowDiagIPC(const wchar_t* sMessage, const std::wstring& baseDir) {
+// One window's geometry, as a field run. Screen coordinates, because that is
+// the frame a layout has to reason in -- a client placing its own window
+// beside ours cannot use our client coordinates.
+//
+// client= is reported separately from w/h and is not redundant: the render
+// cost, the swap-chain size and every capture are all client-sized, while a
+// layout has to reserve the FRAME. On a borderless window they are equal; on a
+// tool window they differ by the caption and border, which is exactly the
+// margin a layout gets wrong when it only has one of the two.
+static std::wstring GeometryFields(HWND hWnd) {
+  RECT wr = {}, cr = {};
+  GetWindowRect(hWnd, &wr);
+  GetClientRect(hWnd, &cr);
+
+  // Which monitor it is ON, by the same device name the display commands use,
+  // so a caller can join this against GET_DISPLAY_MODE without guessing from
+  // coordinates.
+  wchar_t device[36] = L"";
+  MONITORINFOEXW mi = {};
+  mi.cbSize = sizeof(mi);
+  HMONITOR hm = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+  if (hm && GetMonitorInfoW(hm, &mi))
+    wcsncpy_s(device, mi.szDevice, _TRUNCATE);
+
+  const LONG_PTR ex = GetWindowLongPtrW(hWnd, GWL_EXSTYLE);
+  wchar_t buf[512];
+  FormatTo(buf,
+           // monitor=, not display=: display= is the 1-based INDEX in
+           // RoleFields, and two different keys spelled the same way in one
+           // row means a caller building a dictionary silently keeps whichever
+           // it parsed last. Device names go out RAW here, unescaped, because
+           // that is how GET_DISPLAY_MODE and every other display verb emits
+           // them and clients already parse that form.
+           L"x=%d|y=%d|w=%d|h=%d|client=%dx%d|monitor=%ls"
+           L"|visible=%d|minimized=%d|maximized=%d|topmost=%d|dpi=%u",
+           (int)wr.left, (int)wr.top,
+           (int)(wr.right - wr.left), (int)(wr.bottom - wr.top),
+           (int)cr.right, (int)cr.bottom,
+           device[0] ? device : L"?",
+           IsWindowVisible(hWnd) ? 1 : 0,
+           IsIconic(hWnd) ? 1 : 0,
+           IsZoomed(hWnd) ? 1 : 0,
+           (ex & WS_EX_TOPMOST) ? 1 : 0,
+           GetDpiForWindow(hWnd));
+  return buf;
+}
+
+// role=, plus the display it belongs to when it belongs to one.
+//
+// Kept separate from GeometryFields because these are the facts the engine
+// supplied and those are the ones Win32 measured -- and when a row is wrong it
+// matters a great deal which half produced it.
+static std::wstring RoleFields(const KnownWindow* k) {
+  if (!k) return L"role=tool";
+  std::wstring s = L"role=" + k->role;
+  if (k->display > 0) s += L"|display=" + std::to_wstring(k->display);
+  // Raw, not Escape()d, to match GET_DISPLAY_MODE. device= is the monitor the
+  // engine ASSIGNED this window to; monitor= in GeometryFields is where Windows
+  // says it actually is. They are usually the same, and the case where they are
+  // not is worth being able to see.
+  if (!k->device.empty()) s += L"|device=" + k->device;
+  if (k->pid) s += L"|pid=" + std::to_wstring(k->pid);
+  return s;
+}
+
+namespace {
+
+struct ListCtx {
+  std::wstring out;
+  int count = 0;
+  const std::vector<KnownWindow>* known = nullptr;
+};
+
+const KnownWindow* Lookup(const std::vector<KnownWindow>& known, HWND h) {
+  for (const KnownWindow& k : known)
+    if (k.hWnd == h) return &k;
+  return nullptr;
+}
+
+BOOL CALLBACK ListProc(HWND hWnd, LPARAM lp) {
+  ListCtx* ctx = (ListCtx*)lp;
+  DWORD pid = 0;
+  GetWindowThreadProcessId(hWnd, &pid);
+  if (pid != GetCurrentProcessId()) return TRUE;
+
+  // Titled top-level windows only. Untitled ones are tooltips, IME helpers and
+  // message-only plumbing -- nothing a layout can address or would want to.
+  wchar_t title[256] = {};
+  GetWindowTextW(hWnd, title, 256);
+  if (!title[0]) return TRUE;
+
+  // Zero-area windows are plumbing, not layout. Measured: "MSCTFIME UI" and
+  // two "Default IME" windows come back from EnumWindows with a title, so
+  // filtering on the title alone leaves three rows of noise that no caller can
+  // place anything relative to. Every real window of ours has an area, even
+  // when hidden.
+  RECT wr = {};
+  GetWindowRect(hWnd, &wr);
+  if (wr.right <= wr.left || wr.bottom <= wr.top) return TRUE;
+
+  wchar_t cls[128] = {};
+  GetClassNameW(hWnd, cls, 128);
+
+  // Hidden windows ARE listed, with visible=0 -- a child in hidden mode is a
+  // real window with a real rect. Note that a CLOSED tool window is not here
+  // at all: ToolWindow::Close destroys the window rather than hiding it, so
+  // its remembered position lives in the ini, not in an HWND.
+  ctx->out += L"\nWINDOW|" + RoleFields(Lookup(*ctx->known, hWnd)) +
+              L"|title=" + Escape(title) +
+              L"|class=" + Escape(cls) + L"|" + GeometryFields(hWnd);
+  ctx->count++;
+  return TRUE;
+}
+
+}  // namespace
+
+// Every top-level window this process owns, with where it is (#259).
+//
+// The render window, every tool window, and any per-display window, in one
+// terminated batch. Nothing could read a window's position back before this:
+// SET_WINDOW could move the render window and UI_MOVE could move a tool
+// window, but neither had a reader, so a client arranging itself around us --
+// which is what Milkwave Remote does -- had to guess.
+void SendWindowList(const std::vector<KnownWindow>& known) {
+  ListCtx ctx;
+  ctx.known = &known;
+  EnumWindows(ListProc, (LPARAM)&ctx);
+
+  // A child renders in its OWN PROCESS, so the enumeration above -- filtered
+  // to our pid, as it must be -- cannot see it. Without this a three-display
+  // setup with two children reports one window and looks correct.
+  for (const KnownWindow& k : known) {
+    if (!k.pid || k.pid == GetCurrentProcessId()) continue;
+    ctx.out += L"\nWINDOW|" + RoleFields(&k);
+    if (!k.hWnd) {
+      // Spawned but its window is not up yet, or it died. Reported rather than
+      // omitted: "display 1 is a child whose window has not appeared" and
+      // "display 1 is not a child" are different states and a caller waiting
+      // for the first must not read it as the second.
+      ctx.out += L"|title=|class=|state=nowindow";
+    } else {
+      wchar_t t[256] = {};
+      GetWindowTextW(k.hWnd, t, 256);
+      wchar_t cls[128] = {};
+      GetClassNameW(k.hWnd, cls, 128);
+      ctx.out += L"|title=" + Escape(t) + L"|class=" + Escape(cls) +
+                 L"|" + GeometryFields(k.hWnd);
+    }
+    ctx.count++;
+  }
+
+  // Terminated, deliberately. UI_LIST is not, so a client has no way to know
+  // it has them all and waits out its timeout instead -- which is how a probe
+  // reading UI_LIST looked like a hang in this very session.
+  wchar_t head[64];
+  FormatTo(head, L"WINDOWS|count=%d", ctx.count);
+  g_pipeServer.Send((std::wstring(head) + ctx.out + L"\nWINDOWS_END").c_str());
+}
+
+// One window: the render window when no title is given, else a match.
+//
+// A title is matched against our own windows first and then against the known
+// table, so "the child on display 2" is reachable by its caption even though
+// it is another process and FindToolWindowByTitle cannot see it.
+void SendWindowGeometry(const std::wstring& title,
+                        const std::vector<KnownWindow>& known) {
+  const KnownWindow* k = nullptr;
+  HWND hWnd = nullptr;
+
+  if (title.empty()) {
+    for (const KnownWindow& e : known)
+      if (e.role == L"render") { k = &e; hWnd = e.hWnd; break; }
+  } else {
+    hWnd = FindToolWindowByTitle(title);
+    if (hWnd) {
+      k = Lookup(known, hWnd);
+    } else {
+      const std::wstring want = Lower(title);
+      for (const KnownWindow& e : known) {
+        if (!e.hWnd) continue;
+        wchar_t t[256] = {};
+        GetWindowTextW(e.hWnd, t, 256);
+        if (Lower(t) == want) { k = &e; hWnd = e.hWnd; break; }
+      }
+    }
+  }
+
+  if (!hWnd) {
+    g_pipeServer.Send(L"WINDOW=NOTFOUND");
+    return;
+  }
+  wchar_t t[256] = {};
+  GetWindowTextW(hWnd, t, 256);
+  g_pipeServer.Send((L"WINDOW|" + RoleFields(k) + L"|title=" + Escape(t) +
+                     L"|" + GeometryFields(hWnd)).c_str());
+}
+
+bool HandleWindowDiagIPC(const wchar_t* sMessage, const std::wstring& baseDir,
+                         const std::vector<KnownWindow>& known) {
   if (!sMessage) return false;
+
+  // GET_WINDOWS before GET_WINDOW: the shorter verb is a PREFIX of the longer
+  // one, so checking it first would swallow the plural and report a single
+  // window to a caller that asked for every one of them. These are exact
+  // compares rather than prefix ones, which makes the ordering belt and
+  // braces -- but the ordering is kept, because the next verb added here will
+  // be written by copying one of these.
+  if (wcscmp(sMessage, L"GET_WINDOWS") == 0) {
+    SendWindowList(known);
+    return true;
+  }
+  if (wcscmp(sMessage, L"GET_WINDOW") == 0) {
+    SendWindowGeometry(L"", known);
+    return true;
+  }
+  if (wcsncmp(sMessage, L"GET_WINDOW=", 11) == 0) {
+    SendWindowGeometry(sMessage + 11, known);
+    return true;
+  }
 
   // Every control on one of our own tool windows: class, id, rect, visibility,
   // whether the client edge clips it, its text AND that text's codepoints.

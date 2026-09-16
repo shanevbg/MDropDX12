@@ -68,8 +68,25 @@ struct PresetPsoOwned {
   Microsoft::WRL::ComPtr<ID3D12PipelineState> bufferA, bufferB, bufferC, bufferD;
 };
 
+struct MirrorSimContext;   // defined below; RenderContext only names it
+
 struct RenderContext {
   ID3D12GraphicsCommandList* cmdList = nullptr;
+
+  // WHICH surface this context belongs to. Null on the primary.
+  //
+  // Everything else here describes the surface -- its canvas, its aspect, its
+  // frame, its state pair -- without ever saying WHICH surface it is, and that
+  // gap is what forced per-surface facts to be latched on engine members. A
+  // latch shared by every consumer reports whichever ran last, so `ovrFrame`
+  // in DIAG_MIRRORS reported the primary's frame beside a mirror's `pfFrame`
+  // and the pair that exists to catch a disagreement could not (#198).
+  //
+  // Const on purpose: a record must stay a pure function of its context. The
+  // single thing written through this is a diagnostic, and it is `mutable` at
+  // its declaration so that intent is stated where the field lives rather than
+  // cast away here.
+  const MirrorSimContext* sim = nullptr;
 
   // THIS surface's canvas, not the engine's. See above.
   int canvasW = 0;
@@ -128,6 +145,20 @@ struct RenderContext {
   // engine's m_pState/m_pOldState; for a mirror they are its context's own.
   CState* pState = nullptr;
   CState* pOldState = nullptr;
+
+  // This draw is happening inside a MIRROR WORKER'S ORIENT RECORD.
+  //
+  // Was the engine member m_bOrientOppositeAspect, set true around the whole
+  // record and false after -- one of the two globals that forced the record to
+  // hold m_mirrorEngineMutex exclusively, since two records could need it at
+  // different values (#206). Same shape as SizeGuard and FrameOverrideGuard,
+  // which #121 deleted the same way.
+  //
+  // The name it had described orientation, but it was set for EVERY worker
+  // record regardless, so what it actually selected was mirror-record versus
+  // primary. Named for that now. The constants it still chooses between --
+  // kSoftMaxOpposite / kSoftMaxSameOrient -- keep their older names.
+  bool bOrientRecord = false;
 
   // True for a mirror worker's surface. Kept because the paths do genuinely
   // differ and pretending otherwise is how the mirror pipeline acquired its
@@ -235,6 +266,27 @@ struct RenderContext {
   //
   // Non-const because ApplyShaderParams writes through to the constant table.
   // Borrowed, never owned -- see PresetPsoSet.
+  // Which feedback texture textured custom shapes sample, when it is not the
+  // engine's VS0. Was the engine member m_pShapeVsOverride, set around part of
+  // a mirror record and cleared after -- so two workers cross-contaminated and
+  // a worker's write leaked into the primary's shapes (#206). Same shape as
+  // m_cmdListOverride, retired the same way.
+  // Base of THIS surface's blur descriptor blocks, already offset for the
+  // surface's own frame rotation. UINT_MAX means "the engine's", which is the
+  // primary.
+  //
+  // The blur pass was the ONE binding path with no per-surface home: its block
+  // was m_blurBindingBase + m_frameIndex*... + passIndex*..., with no surface
+  // and no thread term, so the primary and every worker wrote the same block
+  // (#209). Every other path already had one -- pipe.bindBase blocks 0-5.
+  //
+  // The mutex did not cover it. A descriptor is read by the GPU when the list
+  // executes, which outlives the CPU-side lock, so serialising the writes only
+  // narrowed the window.
+  unsigned int blurBindBase = 0xFFFFFFFFu;
+
+  const DX12Texture* shapeVs = nullptr;
+
   PShaderSet*  shaders    = nullptr;
   PShaderSet*  oldShaders = nullptr;
   PresetPsoSet psos;
@@ -243,6 +295,14 @@ struct RenderContext {
 };
 
 struct MirrorSimContext {
+  // What ApplyShaderParams last gave THIS surface's `frame` uniform.
+  //
+  // Mutable because a record is otherwise a pure function of its context and
+  // should stay that way: this is written for diagnostics only and is never
+  // read back by rendering. It exists so DIAG_MIRRORS can report the uniform
+  // and the per-frame variable for the SAME surface (#198).
+  mutable int diagShaderFrame = -1;
+
   // ── preset state (own EEL VMs; compiled AFTER SetRegBase/SetGRAM) ──
   CState*  pState = nullptr;      // current preset
   CState*  pOldState = nullptr;   // blend-from preset (own blend timeline)
@@ -301,6 +361,38 @@ struct MirrorSimContext {
   // ── own warp mesh, sized (gridX+1)*(gridY+1) like the primary's m_verts ──
   std::vector<MYVERTEX>    verts;
   std::vector<td_vertinfo> vertinfo;
+
+  // Does this context render from its OWN compiled preset, or borrow the
+  // engine's? (#206)
+  //
+  // ONE place, because it used to be spelled twice -- once in
+  // RenderClassicOrientPipeline for the shader set, once in
+  // FillPresetPipeline for the PSOs -- and two copies of a predicate is how
+  // the shader set and the pipeline it is drawn with drift apart.
+  //
+  // The test is about the CONTEXT, not about what its preset happened to
+  // contain: a preset with no custom warp or comp shader compiles to no
+  // bytecode, and that is a fact about the preset, not evidence that this
+  // context has nothing of its own.
+  // ADOPTION, not bytecode. The old test was
+  //
+  //     shaders.warp.bytecodeBlob || shaders.comp.bytecodeBlob
+  //
+  // which asks what the preset contained, and answers "borrow the engine's"
+  // for any preset with no custom warp or comp shader -- a fact about the
+  // preset, not about this context. The comment on the shader-set site says
+  // what that costs when the two sets hold different presets:
+  // BuildBindingSlots resolves the ENGINE preset's texture list into the
+  // table and the CONTEXT preset's shader then samples whatever is in those
+  // slots. Reported as "presets are rendering but they're incorrect".
+  //
+  // Once adoption has run this context owns a compiled set, empty or not, and
+  // an empty one is the right answer for a preset that has no shaders -- the
+  // engine's set for that same preset is equally empty. The borrow survives
+  // only for the pre-adoption frame it was written for.
+  bool HasOwnPipeline() const {
+    return pState != nullptr && (presetVersion != 0 || !loadedOwnPath.empty());
+  }
 
   // ── audio (copied from Engine::m_audioSnap at sim frame start) ──
   AudioSnapshot audio;

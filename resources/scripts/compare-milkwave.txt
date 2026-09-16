@@ -1,0 +1,93 @@
+# Compare MDropDX12 against Milkwave, preset by preset.
+#
+# Milkwave 4 ships MDropDX12 v3, so both are already on this machine. This puts
+# MDropDX12 into a steady state, makes sure Milkwave is up, and hands off to
+# compare_milkwave.py, which plays the same preset in each, photographs both and
+# writes a ranked report.
+#
+# Run it from the Script tool window, or over IPC:
+#
+#     SCRIPT=compare-milkwave
+#
+# ---------------------------------------------------------------------------
+# BEFORE THE FIRST RUN, edit the two paths at the bottom.
+#
+# They cannot be worked out for you: Python may be anywhere, and so may
+# Milkwave. Both are ordinary Windows paths -- no quotes around the whole
+# LAUNCH= value, only around the program itself.
+#
+#     where python           in a terminal, prints your Python
+#     right-click Milkwave in the Start menu -> Open file location
+# ---------------------------------------------------------------------------
+#
+# Nothing here changes a setting you will have to put back. The comparison never
+# focuses or moves either window, so the machine stays usable while it runs --
+# it photographs windows that are completely covered.
+#
+# One line per beat. BPM is set high so the setup lines run back to back instead
+# of over half a minute; the helper does its own waiting, and --settle is what
+# controls how long each preset is given.
+
+STRICT|BPM=3000|BEATS=1
+
+# Make this instance a fair subject: a known frame rate, and no preset changing
+# underneath the comparison. Milkwave has no equivalent of testing mode, so the
+# helper re-asserts the preset on its side instead.
+# SET_PRESET_LOCK=1 rather than LOCK: LOCK TOGGLES, so on an instance that was
+# already locked it would unlock and the comparison would drift preset by
+# preset. The absolute form does what it says whatever the state was.
+LOG=comparison: putting MDropDX12 into a steady state
+SET_FPS=60
+SET_PRESET_LOCK=1
+
+# Start Milkwave if it is not already running. LAUNCH= focuses it when it is, so
+# this is safe to run twice, and the helper will wait for its window either way.
+#
+# FIRST LAUNCH ONLY: Milkwave runs a TCP server, so Windows Defender may put up
+# a firewall prompt and hold it there until you answer. Nothing is wrong -- but
+# the comparison will find no Milkwave window until you do, and will say so.
+#
+# Milkwave must not be MINIMISED. It does not need to be in front, or even
+# visible, but a minimised window has nothing to photograph.
+#
+#   EDIT THIS PATH -- the file name is right, the folder is a guess.
+#   Installs vary: G:\Tools\Milkwave\MilkwaveVisualizer.exe is just as likely.
+LAUNCH=C:\Program Files\Milkwave\MilkwaveVisualizer.exe
+
+# Give it a moment to open its window before the helper goes looking for it.
+BEATS=40
+LOG=comparison: waiting for Milkwave
+
+# Hand off. The quoted path is the program; everything after it is arguments --
+# that is what quoting turns on, and it also forces a NEW process rather than
+# focusing one from an earlier run.
+#
+#   EDIT THE PYTHON PATH. The script path is correct as shipped.
+#
+# The script path is relative to the MDropDX12 folder, which is where the
+# visualizer runs from -- leave it as it is unless you moved the file.
+#
+# Useful arguments:
+#   --presets N     how many to compare        (default 20)
+#   --dir PATH      a different folder         (default: what is playing now)
+#   --list FILE     specific presets, one path per line
+#   --settle SECS   longer for heavy presets   (default 2.5)
+#   --size WxH      client size for BOTH       (default: the smaller of the two)
+#   --device NAME   capture device for BOTH    (default: MDropDX12's)
+#
+# The helper makes the two comparable before it measures anything: it gives both
+# windows the same client size and points both at the same audio device, then
+# puts the sizes back when it finishes. Both matter more than they sound --
+# comparing a tall window against a wide one measures the window rather than the
+# engine, and two engines listening to different devices are visualising
+# different songs.
+#
+LOG=comparison: starting the helper -- see resources/scripts/comparison/report.txt
+LAUNCH="C:\Python313\python.exe" "resources\scripts\compare_milkwave.py" --presets 20
+
+# The helper runs on its own from here and writes its report when it finishes.
+# Unlock so the visualizer behaves normally again while it works.
+BEATS=4
+UNLOCK
+LOG=comparison: handed off; this script is done
+LOGSUMMARY

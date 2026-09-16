@@ -556,7 +556,7 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       ofn.lpstrFile = szFile;
       ofn.nMaxFile = MAX_PATH;
       ofn.lpstrInitialDir = p->m_szPresetDir;
-      ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+      ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
       if (GetOpenFileNameW(&ofn)) {
         RequestLoadPreset(-1, szFile);
         // Update current preset display -- the name, matching how the field is
@@ -774,8 +774,22 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     // Idle timer action combo box
     if (id == IDC_MW_IDLE_ACTION && code == CBN_SELCHANGE) {
       int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
-      if (sel >= 0 && sel <= 2) {
+      if (sel >= 0 && sel <= 3) {
         p->m_nIdleAction = sel;
+        p->SaveIdleTimerSettings();
+        // The profile only means anything to the action that loads one.
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_IDLE_PROFILE), sel == 3);
+      }
+      return 0;
+    }
+
+    // Which display profile the Load-display-profile action loads
+    if (id == IDC_MW_IDLE_PROFILE && code == CBN_SELCHANGE) {
+      int sel = (int)SendMessage((HWND)lParam, CB_GETCURSEL, 0, 0);
+      if (sel >= 0) {
+        wchar_t name[MAX_PATH] = {};
+        SendMessage((HWND)lParam, CB_GETLBTEXT, sel, (LPARAM)name);
+        wcsncpy_s(p->m_szIdleProfile, name, _TRUNCATE);
         p->SaveIdleTimerSettings();
       }
       return 0;
@@ -965,6 +979,9 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       case IDC_MW_SHOW_FPS:
         p->m_bShowFPS = bChecked;
         p->SaveSettingToINI(SET_SHOW_FPS);
+        // Each child reports its OWN frame rate, which is the point of showing
+        // it there: one number per process, on the screen that process drives.
+        p->RelayHudStateToChildren();
         return 0;
       case IDC_MW_SHOW_BATTERY:
         // Through the setter, not straight onto the member: the checkbox is
@@ -983,10 +1000,22 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         return 0;
       case IDC_MW_IDLE_ENABLE: {
         p->m_bIdleTimerEnabled = bChecked;
-        if (!bChecked) p->m_bIdleActivated = false;  // Reset activation state
+        // Restore FIRST, the way SET_IDLE_TIMER=0 already does. Clearing
+        // m_bIdleActivated on its own only forgot that idle was on screen: the
+        // fullscreen and the mirrors it had put up stayed up with nothing left
+        // that knew how to take them down. With a profile-loading action that
+        // would have left the user's whole display arrangement replaced,
+        // permanently, for unticking a checkbox.
+        if (!bChecked && p->m_bIdleActivated) {
+          HWND hr = p->GetPluginWindow();
+          if (hr) PostMessage(hr, WM_MW_IDLE_RESTORE, 0, 0);
+        }
         EnableWindow(GetDlgItem(hWnd, IDC_MW_IDLE_TIMEOUT), bChecked);
         EnableWindow(GetDlgItem(hWnd, IDC_MW_IDLE_TIMEOUT_SPIN), bChecked);
         EnableWindow(GetDlgItem(hWnd, IDC_MW_IDLE_ACTION), bChecked);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_IDLE_PROFILE),
+                     bChecked && p->m_nIdleAction == 3);
+        EnableWindow(GetDlgItem(hWnd, IDC_MW_IDLE_FULL_OPACITY), bChecked);
         EnableWindow(GetDlgItem(hWnd, IDC_MW_IDLE_AUTO_RESTORE), bChecked);
         p->SaveIdleTimerSettings();
         return 0;
@@ -994,9 +1023,17 @@ LRESULT SettingsWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       case IDC_MW_MIRROR_HUD_DISABLE:
         p->m_bDisableMirrorHud = bChecked;
         Config().SetInt(L"Settings", L"bDisableMirrorHud", bChecked ? 1 : 0);
+        // A child reads this from settings.ini once, at startup, so unticking
+        // the box did nothing to one already running -- it went on hiding its
+        // HUD for the rest of its life.
+        p->RelayHudStateToChildren();
         break;
       case IDC_MW_IDLE_AUTO_RESTORE:
         p->m_bIdleAutoRestore = bChecked;
+        p->SaveIdleTimerSettings();
+        return 0;
+      case IDC_MW_IDLE_FULL_OPACITY:
+        p->m_bIdleFullOpacity = bChecked;
         p->SaveIdleTimerSettings();
         return 0;
       // IDC_MW_DARK_THEME handled as CBN_SELCHANGE combo above
@@ -1302,6 +1339,8 @@ void SettingsWindow::DoBuildControls() {
   #define m_nIdleTimeoutMinutes _e->m_nIdleTimeoutMinutes
   #define m_nIdleAction _e->m_nIdleAction
   #define m_bIdleAutoRestore _e->m_bIdleAutoRestore
+  #define m_szIdleProfile _e->m_szIdleProfile
+  #define m_bIdleFullOpacity _e->m_bIdleFullOpacity
   #define m_szBaseDir _e->m_szBaseDir
   #define m_LogLevel _e->m_LogLevel
   #define m_LogOutput _e->m_LogOutput
@@ -1426,8 +1465,41 @@ void SettingsWindow::DoBuildControls() {
     SendMessageW(hIdleActionCombo, CB_ADDSTRING, 0, (LPARAM)L"Fullscreen");
     SendMessageW(hIdleActionCombo, CB_ADDSTRING, 0, (LPARAM)L"Stretch/Mirror");
     SendMessageW(hIdleActionCombo, CB_ADDSTRING, 0, (LPARAM)L"Mirror all");
+    SendMessageW(hIdleActionCombo, CB_ADDSTRING, 0, (LPARAM)L"Load display profile");
     SendMessageW(hIdleActionCombo, CB_SETCURSEL, m_nIdleAction, 0);
     PAGE_CTRL(SP_SYSTEM, hIdleActionCombo);
+
+    // Which profile the Load-display-profile action loads. Listed rather than
+    // typed: ListDisplayProfiles is the same set every other profile control
+    // offers, and a name that is not in it would simply fail at idle time,
+    // hours later, with nobody watching.
+    y += lineH + gap;
+    PAGE_CTRL(SP_SYSTEM, CreateLabel(hw, L"Profile:", x, y, lblW, lineH, hFont, false));
+    HWND hIdleProfileCombo = CreateCombo(hw, IDC_MW_IDLE_PROFILE, x + lblW, y,
+      rw - lblW, lineH * 8, hFont, CBS_DROPDOWNLIST | WS_VSCROLL, false);
+    {
+      int sel = -1, i = 0;
+      for (const auto& leaf : _e->ListDisplayProfiles()) {
+        // Shown without the .json, stored without it too -- a bare name is what
+        // ResolveDisplayProfilePath expects and what every profile verb takes.
+        std::wstring name = leaf;
+        if (name.size() > 5 && _wcsicmp(name.c_str() + name.size() - 5, L".json") == 0)
+          name.resize(name.size() - 5);
+        SendMessageW(hIdleProfileCombo, CB_ADDSTRING, 0, (LPARAM)name.c_str());
+        if (_wcsicmp(name.c_str(), m_szIdleProfile) == 0) sel = i;
+        i++;
+      }
+      if (sel >= 0) SendMessageW(hIdleProfileCombo, CB_SETCURSEL, sel, 0);
+    }
+    PAGE_CTRL(SP_SYSTEM, hIdleProfileCombo);
+
+    // Composes with all four actions, which is why it is a checkbox beside the
+    // dropdown rather than an action of its own: a set of displays left in
+    // watermark mode is dim, and nobody is looking through them once the user
+    // has walked away.
+    y += lineH + gap;
+    PAGE_CTRL(SP_SYSTEM, CreateCheck(hw, L"All displays to 100% opacity", IDC_MW_IDLE_FULL_OPACITY,
+      x, y, rw, lineH, hFont, m_bIdleFullOpacity, false));
 
     y += lineH + gap;
     PAGE_CTRL(SP_SYSTEM, CreateCheck(hw, L"Auto-restore on input", IDC_MW_IDLE_AUTO_RESTORE,
@@ -1438,8 +1510,12 @@ void SettingsWindow::DoBuildControls() {
       EnableWindow(GetDlgItem(hw, IDC_MW_IDLE_TIMEOUT), FALSE);
       EnableWindow(hSpin, FALSE);
       EnableWindow(hIdleActionCombo, FALSE);
+      EnableWindow(GetDlgItem(hw, IDC_MW_IDLE_FULL_OPACITY), FALSE);
       EnableWindow(GetDlgItem(hw, IDC_MW_IDLE_AUTO_RESTORE), FALSE);
     }
+    // The profile only means anything to the action that loads one.
+    if (!m_bIdleTimerEnabled || m_nIdleAction != 3)
+      EnableWindow(hIdleProfileCombo, FALSE);
   }
   y += lineH + gap + 8;
 
@@ -1463,7 +1539,11 @@ void SettingsWindow::DoBuildControls() {
     PAGE_CTRL(SP_SYSTEM, hPct);
   }
   y += lineH + gap;
-  PAGE_CTRL(SP_SYSTEM, CreateCheck(hw, L"Disable HUD on mirrors",
+  // "on mirrors" undersold it and mismatched the behaviour: a display running
+  // its own process is a child, not a mirror, and kept its HUD. The flag now
+  // covers every non-primary display, so the label says what it does. The ini
+  // key stays bDisableMirrorHud -- renaming it would orphan the setting.
+  PAGE_CTRL(SP_SYSTEM, CreateCheck(hw, L"Show HUD only on primary display",
     IDC_MW_MIRROR_HUD_DISABLE, x, y, rw, lineH, hFont, _e->m_bDisableMirrorHud, false));
 
   // ====== PAGE 4: Files (created hidden) ======
@@ -1662,11 +1742,12 @@ void SettingsWindow::DoBuildControls() {
   y += lineH + 4;
 
   {
+    // The EXE's own timestamp, not __DATE__/__TIME__ -- those expand when THIS
+    // FILE compiles, so an incremental build that did not touch it left the
+    // About tab showing a build that was days old while the exe was minutes
+    // old. Reported as "f8 shows the wrong build time".
     wchar_t szBuild[128];
-    wchar_t wDate[32], wTime[32];
-    MultiByteToWideChar(CP_ACP, 0, __DATE__, -1, wDate, 32);
-    MultiByteToWideChar(CP_ACP, 0, __TIME__, -1, wTime, 32);
-    swprintf(szBuild, 128, L"Built: %s  %s", wDate, wTime);
+    swprintf(szBuild, 128, L"Built: %s", BuildTimestampW());
     PAGE_CTRL(SP_ABOUT, CreateLabel(hw, szBuild, x, y, rw, lineH, hFont, false));
     y += lineH + 4;
   }
@@ -1794,6 +1875,8 @@ void SettingsWindow::DoBuildControls() {
   #undef m_nIdleTimeoutMinutes
   #undef m_nIdleAction
   #undef m_bIdleAutoRestore
+  #undef m_szIdleProfile
+  #undef m_bIdleFullOpacity
   #undef m_szBaseDir
   #undef m_LogLevel
   #undef m_LogOutput
@@ -2084,9 +2167,20 @@ void SettingsWindow::EnsureVisible() {
 static bool g_bResourceViewerClassRegistered = false;
 
 void Engine::OpenResourceViewer() {
+  // Asked for BEFORE the window is built, not after (#352). The snapshot now
+  // comes from the render thread, so it arrives a frame late; requesting it
+  // first means the frame is spent creating and theming the window rather
+  // than staring at an empty list.
+  if (!m_bResourceSnapshotPending.exchange(true))
+    EnqueueRenderCmd(RenderCmd::SnapshotResources);
+
   if (m_hResourceWnd && IsWindow(m_hResourceWnd)) {
-    ShowWindow(m_hResourceWnd, SW_SHOW);
-    SetForegroundWindow(m_hResourceWnd);
+    if (m_bTestingMode) {
+      ShowWindow(m_hResourceWnd, SW_SHOWNOACTIVATE);
+    } else {
+      ShowWindow(m_hResourceWnd, SW_SHOW);
+      SetForegroundWindow(m_hResourceWnd);
+    }
     PopulateResourceViewer();
     return;
   }
@@ -2103,13 +2197,21 @@ void Engine::OpenResourceViewer() {
     g_bResourceViewerClassRegistered = true;
   }
 
+  // Created HIDDEN and shown at the bottom of this function, once it has been
+  // put somewhere sensible.
+  //
+  // WS_VISIBLE with CW_USEDEFAULT let Windows cascade it, which is the primary
+  // display as often as not -- and it came up activated. This is not a
+  // ToolWindow, so none of ToolWindow::Open's placement or its testing-mode
+  // quiet applies to it, and both had to be spelled out here.
+  HWND hOwner = m_settingsWindow ? m_settingsWindow->GetHWND() : NULL;
   m_hResourceWnd = CreateWindowExW(
     WS_EX_TOOLWINDOW,
     L"MDropDX12ResourceViewer",
     L"Resource Viewer",
-    WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_VISIBLE,
+    WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
     CW_USEDEFAULT, CW_USEDEFAULT, 750, 420,
-    m_settingsWindow ? m_settingsWindow->GetHWND() : NULL,
+    hOwner,
     NULL,
     GetModuleHandle(NULL),
     NULL);
@@ -2185,6 +2287,34 @@ void Engine::OpenResourceViewer() {
     ListView_SetTextColor(m_hResourceList, m_colSettingsText);
   }
 
+  // On the OWNER's monitor, offset from its corner, clamped into the work
+  // area -- so it lands beside the Settings window the user opened it from
+  // rather than wherever Windows felt like cascading it, and in particular
+  // not on the primary display when nothing else of ours is there.
+  {
+    HMONITOR hMon = MonitorFromWindow(hOwner ? hOwner : m_hResourceWnd,
+                                      MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = { sizeof(mi) };
+    if (hMon && GetMonitorInfoW(hMon, &mi)) {
+      RECT rcOwner = mi.rcWork;
+      if (hOwner) GetWindowRect(hOwner, &rcOwner);
+      const int w = 750, h = 420;
+      int x = rcOwner.left + 40;
+      int y = rcOwner.top + 40;
+      if (x + w > mi.rcWork.right)  x = mi.rcWork.right - w;
+      if (y + h > mi.rcWork.bottom) y = mi.rcWork.bottom - h;
+      if (x < mi.rcWork.left)       x = mi.rcWork.left;
+      if (y < mi.rcWork.top)        y = mi.rcWork.top;
+      SetWindowPos(m_hResourceWnd, HWND_TOP, x, y, w, h, SWP_NOACTIVATE);
+    }
+  }
+
+  // Shown without activation under testing mode, for the reason every other
+  // window here is: a run must not take the focus out from under someone who
+  // is typing, because his keystrokes then land in the window under test and
+  // the measurement is wrong as well as the interruption rude.
+  ShowWindow(m_hResourceWnd, m_bTestingMode ? SW_SHOWNOACTIVATE : SW_SHOW);
+
   LayoutResourceViewer();
   PopulateResourceViewer();
 }
@@ -2196,6 +2326,23 @@ LRESULT CALLBACK Engine::ResourceViewerWndProc(HWND hWnd, UINT uMsg, WPARAM wPar
   case WM_CLOSE:
     ShowWindow(hWnd, SW_HIDE);
     return 0;
+
+  // The render thread has a fresh snapshot (#352). Draw it -- and DRAW only:
+  // calling PopulateResourceViewer here would request another snapshot, whose
+  // arrival would request another, forever.
+  case WM_MW_RESOURCES_READY:
+    if (p) p->DrawResourceViewerRows();
+    return 0;
+
+  // The render thread PostMessages to m_hResourceWnd, so it must not be left
+  // holding an HWND that Windows has recycled. This window is normally only
+  // hidden, but it is owned by the Settings ToolWindow and goes down with it.
+  case WM_NCDESTROY:
+    if (p && p->m_hResourceWnd == hWnd) {
+      p->m_hResourceWnd = NULL;
+      p->m_hResourceList = NULL;
+    }
+    break;
 
   case WM_SIZE:
     if (p) p->LayoutResourceViewer();
@@ -2371,12 +2518,33 @@ static void RV_AddRow(HWND hList, int idx, const wchar_t* status, const wchar_t*
   SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&item);
 }
 
-void Engine::PopulateResourceViewer() {
-  if (!m_hResourceList) return;
+// Build the Resource Viewer's snapshot. RENDER THREAD ONLY (#352).
+//
+// Everything read here -- m_textures, m_shaders, m_pState, the search paths --
+// belongs to this thread, so none of it is locked. The guard at the bottom
+// covers the handoff and nothing else, and is held across a move, never across
+// file I/O or a SendMessage.
+//
+// What this does NOT do is search the disk for a texture. That is up to 8
+// extensions x 6 directories per custom texture and it stays on the UI side;
+// see DrawResourceViewerRows.
+void Engine::BuildResourceSnapshot() {
+  m_bResourceSnapshotPending.store(false);
 
-  SendMessageW(m_hResourceList, LVM_DELETEALLITEMS, 0, 0);
-  int row = 0;
+  ResourceSnapshot snap;
+  snap.bEverBuilt = true;
+
   wchar_t szDetails[128];
+  auto addRow = [&](const wchar_t* type, const wchar_t* name, const wchar_t* path,
+                    const wchar_t* details, bool valid) {
+    ResourceRow r;
+    r.sType = type;
+    r.sName = name;
+    r.sPath = path;
+    r.sDetails = details;
+    r.bValid = valid;
+    snap.rows.push_back(std::move(r));
+  };
 
   // 1. Render Targets
   for (int i = 0; i < 2; i++) {
@@ -2384,8 +2552,7 @@ void Engine::PopulateResourceViewer() {
     swprintf(szName, 32, L"VS[%d]", i);
     bool valid = m_dx12VS[i].IsValid();
     swprintf(szDetails, 128, L"%dx%d", m_dx12VS[i].width, m_dx12VS[i].height);
-    RV_AddRow(m_hResourceList, row++, valid ? L"\u2713" : L"\u2717",
-              L"Render Target", szName, L"(render target)", valid ? szDetails : L"");
+    addRow(L"Render Target", szName, L"(render target)", valid ? szDetails : L"", valid);
   }
 
   // 2. Noise Textures (non-evictable)
@@ -2396,8 +2563,7 @@ void Engine::PopulateResourceViewer() {
       swprintf(szDetails, 128, L"%dx%dx%d", m_textures[i].w, m_textures[i].h, m_textures[i].d);
     else
       swprintf(szDetails, 128, L"%dx%d", m_textures[i].w, m_textures[i].h);
-    RV_AddRow(m_hResourceList, row++, valid ? L"\u2713" : L"\u2717",
-              L"Noise", m_textures[i].texname, L"(procedural)", valid ? szDetails : L"");
+    addRow(L"Noise", m_textures[i].texname, L"(procedural)", valid ? szDetails : L"", valid);
   }
 
   // 3. Blur Targets
@@ -2406,8 +2572,7 @@ void Engine::PopulateResourceViewer() {
     swprintf(szName, 32, L"blur[%d]", i);
     bool valid = m_dx12Blur[i].IsValid();
     swprintf(szDetails, 128, L"%dx%d", m_nBlurTexW[i], m_nBlurTexH[i]);
-    RV_AddRow(m_hResourceList, row++, valid ? L"\u2713" : L"\u2717",
-              L"Blur Target", szName, L"(render target)", valid ? szDetails : L"");
+    addRow(L"Blur Target", szName, L"(render target)", valid ? szDetails : L"", valid);
   }
 
   // 4. Shaders
@@ -2416,15 +2581,13 @@ void Engine::PopulateResourceViewer() {
     bool warpOk = m_shaders.warp.bytecodeBlob != NULL;
     wchar_t szVer[32] = L"";
     if (m_pState) swprintf(szVer, 32, L"ps_%d_0", m_pState->m_nWarpPSVersion);
-    RV_AddRow(m_hResourceList, row++, warpOk ? L"\u2713" : L"\u2717",
-              L"Warp Shader", L"warp", warpHasCode ? L"(custom)" : L"(default)", szVer);
+    addRow(L"Warp Shader", L"warp", warpHasCode ? L"(custom)" : L"(default)", szVer, warpOk);
 
     bool compHasCode = m_pState && m_pState->m_nCompPSVersion > 0 && m_pState->m_szCompShadersText[0] != 0;
     bool compOk = m_shaders.comp.bytecodeBlob != NULL;
     szVer[0] = 0;
     if (m_pState) swprintf(szVer, 32, L"ps_%d_0", m_pState->m_nCompPSVersion);
-    RV_AddRow(m_hResourceList, row++, compOk ? L"\u2713" : L"\u2717",
-              L"Comp Shader", L"comp", compHasCode ? L"(custom)" : L"(default)", szVer);
+    addRow(L"Comp Shader", L"comp", compHasCode ? L"(custom)" : L"(default)", szVer, compOk);
   }
 
   // 5. Custom Textures — reflect sampler names from both warp and comp shader CTs
@@ -2512,67 +2675,125 @@ void Engine::PopulateResourceViewer() {
         // For rand textures resolved via SRV index, use the actual loaded texture name
         const wchar_t* szLookupName = (texIdx >= 0) ? m_textures[texIdx].texname : szRootName;
 
-        // Build full file path by searching the same way CacheParams does
-        wchar_t szFullPath[MAX_PATH * 2] = {};
-        {
-          bool pathFound = false;
-          for (int z = 0; z < 8; z++) {  // 8 extensions in texture_exts
-            wchar_t szTry[MAX_PATH];
-            swprintf(szTry, MAX_PATH, L"%stextures\\%s.%s", m_szMilkdrop2Path, szLookupName, texture_exts[z].c_str());
-            if (GetFileAttributesW(szTry) != 0xFFFFFFFF) {
-              CopyTo(szFullPath, szTry);
-              pathFound = true;
-              break;
-            }
-            swprintf(szTry, MAX_PATH, L"%s%s.%s", m_szPresetDir, szLookupName, texture_exts[z].c_str());
-            if (GetFileAttributesW(szTry) != 0xFFFFFFFF) {
-              CopyTo(szFullPath, szTry);
-              pathFound = true;
-              break;
-            }
-            // Search random textures directory
-            if (m_szRandomTexDir[0]) {
-              swprintf(szTry, MAX_PATH, L"%s%s.%s", m_szRandomTexDir, szLookupName, texture_exts[z].c_str());
-              if (GetFileAttributesW(szTry) != 0xFFFFFFFF) {
-                CopyTo(szFullPath, szTry);
-                pathFound = true;
-                break;
-              }
-            }
-            // Search content base path
-            if (m_szContentBasePath[0]) {
-              swprintf(szTry, MAX_PATH, L"%s%s.%s", m_szContentBasePath, szLookupName, texture_exts[z].c_str());
-              if (GetFileAttributesW(szTry) != 0xFFFFFFFF) {
-                CopyTo(szFullPath, szTry);
-                pathFound = true;
-                break;
-              }
-            }
-            // Search fallback paths. A copy: the loop probes the disk.
-            for (auto& fbPath : FallbackPathsCopy()) {
-              swprintf(szTry, MAX_PATH, L"%s%s.%s", fbPath.c_str(), szLookupName, texture_exts[z].c_str());
-              if (GetFileAttributesW(szTry) != 0xFFFFFFFF) {
-                CopyTo(szFullPath, szTry);
-                pathFound = true;
-                break;
-              }
-            }
-            if (pathFound) break;
-          }
-          if (!pathFound) {
-            // Show expected primary search path for missing textures
-            swprintf(szFullPath, MAX_PATH * 2, L"%stextures\\%s", m_szMilkdrop2Path, szLookupName);
-          }
-        }
-
+        // The disk search that used to stand here runs in
+        // DrawResourceViewerRows now. It is file I/O -- up to eight extensions
+        // across six directories per texture -- and the render thread has no
+        // business paying that to fill a list. All this half owes the UI is
+        // the name to look for.
+        ResourceRow r;
+        r.sType = L"Custom Tex";
+        r.sName = szSamplerName;
+        r.sLookup = szLookupName;
+        r.bSearchPath = true;
+        r.bValid = found;
         if (found) {
           swprintf(szDetails, 128, L"%dx%d", m_textures[texIdx].w, m_textures[texIdx].h);
-          RV_AddRow(m_hResourceList, row++, L"\u2713", L"Custom Tex", szSamplerName, szFullPath, szDetails);
+          r.sDetails = szDetails;
         } else {
-          RV_AddRow(m_hResourceList, row++, L"\u2717", L"Custom Tex", szSamplerName, szFullPath, L"(missing)");
+          r.sDetails = L"(missing)";
         }
+        snap.rows.push_back(std::move(r));
       }
     }
+  }
+
+  // The search paths, copied. m_sz*Path are rewritten on preset load, and
+  // SiblingResourceDirs() is a cache that clears and rebuilds a vector and
+  // hands back a REFERENCE to it -- which the UI thread used to call, from the
+  // other side of a directory listing this thread performs (#352).
+  snap.sMilkdrop2Path   = m_szMilkdrop2Path;
+  snap.sPresetDir       = m_szPresetDir;
+  snap.sRandomTexDir    = m_szRandomTexDir;
+  snap.sContentBasePath = m_szContentBasePath;
+  snap.fallbackPaths    = FallbackPathsCopy();
+  snap.siblingDirs      = SiblingResourceDirs();
+
+  m_resourceSnapshot.with([&](ResourceSnapshot& dst) { dst = std::move(snap); });
+
+  // Tell the viewer, if it is still there. PostMessage and not Send: this is
+  // the render thread, and blocking it on a ToolWindow's message pump is the
+  // deadlock RefreshDisplaysTab documents at length.
+  if (m_hResourceWnd && IsWindow(m_hResourceWnd))
+    PostMessageW(m_hResourceWnd, WM_MW_RESOURCES_READY, 0, 0);
+}
+
+//----------------------------------------------------------------------
+// Resource Viewer: the UI half
+//----------------------------------------------------------------------
+
+// Ask for a fresh snapshot, then draw whichever one is on hand. UI thread.
+//
+// Asynchronous on purpose. Blocking here until the render thread answers would
+// make a stalled renderer freeze the very window that exists to report what
+// the renderer is holding.
+void Engine::PopulateResourceViewer() {
+  if (!m_hResourceList) return;
+  // Collapsed, so leaning on Refresh queues one rebuild rather than thirty.
+  if (!m_bResourceSnapshotPending.exchange(true))
+    EnqueueRenderCmd(RenderCmd::SnapshotResources);
+  DrawResourceViewerRows();
+}
+
+// Draw the current snapshot. UI thread, and it reads NO engine state: the
+// snapshot is copied out under its guard and everything after that -- the
+// per-texture disk search, the ListView -- runs against the copy.
+void Engine::DrawResourceViewerRows() {
+  if (!m_hResourceList) return;
+
+  const ResourceSnapshot snap =
+      m_resourceSnapshot.with([](const ResourceSnapshot& s) { return s; });
+
+  // The first snapshot is still a frame away. Leave whatever is on screen
+  // rather than blinking the list empty on the way past.
+  if (!snap.bEverBuilt) return;
+
+  // Where a custom texture's file actually is, searched in the order
+  // CacheParams searches -- sibling directories included (#299). A viewer that
+  // disagrees with the loader is worse than no viewer: it reports a texture
+  // MISSING while the engine has it on screen, and sends whoever reads it
+  // looking for a problem with the preset.
+  const std::wstring texSub = snap.sMilkdrop2Path + L"textures\\";
+  auto findTexturePath = [&](const std::wstring& lookup,
+                             wchar_t (&szFullPath)[MAX_PATH * 2]) {
+    bool pathFound = false;
+    for (int z = 0; z < texture_exts_count; z++) {
+      wchar_t szTry[MAX_PATH];
+      auto probe = [&](const wchar_t* dir) {
+        if (!dir || !dir[0]) return false;
+        swprintf(szTry, MAX_PATH, L"%s%s.%s", dir, lookup.c_str(), texture_exts[z].c_str());
+        if (GetFileAttributesW(szTry) == 0xFFFFFFFF) return false;
+        CopyTo(szFullPath, szTry);
+        return true;
+      };
+      if (probe(texSub.c_str()))                { pathFound = true; break; }
+      if (probe(snap.sPresetDir.c_str()))       { pathFound = true; break; }
+      if (probe(snap.sRandomTexDir.c_str()))    { pathFound = true; break; }
+      if (probe(snap.sContentBasePath.c_str())) { pathFound = true; break; }
+      for (const auto& fb : snap.fallbackPaths)
+        if (probe(fb.c_str())) { pathFound = true; break; }
+      if (pathFound) break;
+      for (const auto& dir : snap.siblingDirs)
+        if (probe(dir.c_str())) { pathFound = true; break; }
+      if (pathFound) break;
+    }
+    if (!pathFound)  // show the expected primary search path for a miss
+      swprintf(szFullPath, MAX_PATH * 2, L"%s%s", texSub.c_str(), lookup.c_str());
+  };
+
+  SendMessageW(m_hResourceList, LVM_DELETEALLITEMS, 0, 0);
+
+  int row = 0;
+  for (const auto& r : snap.rows) {
+    const wchar_t* status = r.bValid ? L"\u2713" : L"\u2717";
+    if (!r.bSearchPath) {
+      RV_AddRow(m_hResourceList, row++, status, r.sType.c_str(), r.sName.c_str(),
+                r.sPath.c_str(), r.sDetails.c_str());
+      continue;
+    }
+    wchar_t szFullPath[MAX_PATH * 2] = {};
+    findTexturePath(r.sLookup, szFullPath);
+    RV_AddRow(m_hResourceList, row++, status, r.sType.c_str(), r.sName.c_str(),
+              szFullPath, r.sDetails.c_str());
   }
 
   // Sort: failed items first, then by type, name, path

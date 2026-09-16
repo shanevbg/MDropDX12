@@ -186,7 +186,7 @@ A sortable ListView of all standalone ToolWindows with two columns: **Tool** (na
 
 - **Audio Device**: Select from system output and input devices. Input devices appear with `[Input]` suffix.
 - **Hotkeys...**: Opens the Hotkeys window (also available via Ctrl+F7). See the Configurable Hotkeys section below.
-- **Idle Timer**: Screensaver mode that activates after a configurable idle timeout (1-60 minutes). Action can be Fullscreen or Stretch/Mirror. Auto-restore returns to previous state when input is detected.
+- **Idle Timer**: Screensaver mode that activates after a configurable idle timeout (1-60 minutes). The Action can be **Fullscreen**, **Stretch/Mirror**, **Mirror all**, or **Load display profile** — the last taking a saved display profile from the Profile dropdown beside it, so walking away can put up a whole arrangement of screens rather than just one window. **All displays to 100% opacity** applies with any of the four: displays left in watermark mode are dim, and nothing needs to be seen through once you have walked away. Idle also brings the screens to the front. **Auto-restore** puts everything back — opacity, z-order and the display arrangement alike — when input is detected.
 
 ### Files Tab
 

@@ -15,6 +15,7 @@
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shlobj.h>   // SHBrowseForFolderW for the per-display preset dir
+#include <shellapi.h> // SHFileOperationW, via Engine::DeleteDisplayProfile
 #include "config_store.h"
 
 namespace mdrop {
@@ -368,13 +369,25 @@ void DisplaysWindow::BuildOutputsPage(int x, int y, int rw, int lineH, int gap) 
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP | BS_AUTORADIOBUTTON,
         rx, gy, rW, lineH, hw, (HMENU)(INT_PTR)IDC_MW_DISP_MODE_MIRROR,
         GetModuleHandle(NULL), NULL);
-      HWND hChi = CreateWindowExW(0, L"BUTTON", L"Own preset",
+      // Three tiers, cheapest first, so the row reads as increasing cost.
+      // "Own preset" used to be the only way to get a different preset on a
+      // display and silently cost a whole second instance; it is now the
+      // in-process one, and the process is a separate choice beside it.
+      const int rW2 = MulDiv(112, lineH, 26);
+      HWND hOwn = CreateWindowExW(0, L"BUTTON", L"Own preset",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTORADIOBUTTON,
-        rx + rW + MulDiv(6, lineH, 26), gy, MulDiv(130, lineH, 26), lineH, hw,
+        rx + rW + MulDiv(6, lineH, 26), gy, rW2, lineH, hw,
+        (HMENU)(INT_PTR)IDC_MW_DISP_MODE_PRESET, GetModuleHandle(NULL), NULL);
+      HWND hChi = CreateWindowExW(0, L"BUTTON", L"+ own process",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTORADIOBUTTON,
+        rx + rW + rW2 + MulDiv(12, lineH, 26), gy, MulDiv(150, lineH, 26),
+        lineH, hw,
         (HMENU)(INT_PTR)IDC_MW_DISP_MODE_CHILD, GetModuleHandle(NULL), NULL);
       if (hMir && hFont) SendMessage(hMir, WM_SETFONT, (WPARAM)hFont, TRUE);
+      if (hOwn && hFont) SendMessage(hOwn, WM_SETFONT, (WPARAM)hFont, TRUE);
       if (hChi && hFont) SendMessage(hChi, WM_SETFONT, (WPARAM)hFont, TRUE);
       PAGE_TC(0, hMir);
+      PAGE_TC(0, hOwn);
       PAGE_TC(0, hChi);
       gy += row;
     }
@@ -403,6 +416,19 @@ void DisplaysWindow::BuildOutputsPage(int x, int y, int rw, int lineH, int gap) 
       PAGE_TC(0, CreateLabel(hw, L"%", gx + lw + 2 + edW + 2, gy,
                              LabelW(hw, hFont, L"%"), lineH, hFont));
       PAGE_TC(0, CreateCheck(hw, L"Click-through", IDC_MW_DISP_CLICKTHRU,
+                             gx + gw / 2, gy, gw / 2, lineH, hFont, false));
+      gy += row;
+      // Per-display watermark, in the "Selected display" group with the
+      // settings it composes with. The "Mirror Watermark" button elsewhere on
+      // this page is the every-display gesture; this is the state it sets, and
+      // until now that state did not exist to be set on one display.
+      PAGE_TC(0, CreateCheck(hw, L"Watermark this display", IDC_MW_DISP_WATERMARK,
+                             gx, gy, gw / 2, lineH, hFont, false));
+      // Beside watermark, because it is the piece of watermark someone often
+      // wants on its own (#276). Click-through with nothing on top is close to
+      // useless -- the window cannot be clicked, so nothing will ever raise it
+      // and the next thing opened on that monitor buries it for good.
+      PAGE_TC(0, CreateCheck(hw, L"Keep on top", IDC_MW_DISP_ONTOP,
                              gx + gw / 2, gy, gw / 2, lineH, hFont, false));
       gy += row;
     }
@@ -593,8 +619,8 @@ void DisplaysWindow::BuildOutputsPage(int x, int y, int rw, int lineH, int gap) 
       gy += row;
     }
 
-    // Same flag as Settings -> System -> "Disable HUD on mirrors".
-    PAGE_TC(0, CreateCheck(hw, L"Hide HUD on mirrors", IDC_MW_DISP_HUD_DISABLE,
+    // Same flag as Settings -> System -> "Show HUD only on primary display".
+    PAGE_TC(0, CreateCheck(hw, L"Show HUD only on primary display", IDC_MW_DISP_HUD_DISABLE,
                            gx, gy, gw, lineH, hFont, p->m_bDisableMirrorHud));
     gy += row;
 
@@ -616,7 +642,7 @@ void DisplaysWindow::BuildOutputsPage(int x, int y, int rw, int lineH, int gap) 
     int btnGap = MulDiv(8, lineH, 26);
 
     {
-      // All three profile buttons share the startup checkbox's row.
+      // All four profile buttons share the startup checkbox's row.
       //
       // They were on a row of their own, and the rows this window gained --
       // the preset lock, the per-display Prev/Next, the Layout/Details pair --
@@ -631,28 +657,38 @@ void DisplaysWindow::BuildOutputsPage(int x, int y, int rw, int lineH, int gap) 
       // Presets window's Save button, and for the same reason: ConfigStore
       // buffers writes, so without a button that flushes and says so there is
       // no way to tell it took.
-      const int saveW = LabelW(hw, hFont, L"Save Profile...") + profPad;
-      const int loadW = LabelW(hw, hFont, L"Load Profile...") + profPad;
-      const int defW  = LabelW(hw, hFont, L"Set as Default")  + profPad;
-      const int bandW = saveW + loadW + defW + btnGap * 2;
-      int bx = gx + gw - bandW;
-      PAGE_TC(0, CreateCheck(hw, L"Load this profile at startup",
-                             IDC_MW_DISP_PROFILE_ONSTART, gx, gy,
-                             max(MulDiv(60, lineH, 26), bx - gx - btnGap),
-                             lineH, hFont,
-                             p->m_bLoadDisplayProfileOnStart));
-      PAGE_TC(0, CreateBtn(hw, L"Save Profile...", IDC_MW_DISP_SAVE_PROFILE,
-                           bx, gy, saveW, lineH, hFont));
-      bx += saveW + btnGap;
-      PAGE_TC(0, CreateBtn(hw, L"Load Profile...", IDC_MW_DISP_LOAD_PROFILE,
-                           bx, gy, loadW, lineH, hFont));
-      bx += loadW + btnGap;
-      PAGE_TC(0, CreateBtn(hw, L"Set as Default", IDC_MW_DISP_PROFILE_DEFAULT,
-                           bx, gy, defW, lineH, hFont));
+      //
+      // Four buttons now, so the two long labels lost the word the heading
+      // directly above them already says. Widening the band instead would set
+      // this window's minimum width, which is the fault recorded above.
+      // Shaped like the PRESET startup row, which is what Shane asked for:
+      // "profiles should be similar to presets with options of Profile to load
+      // at start / None / Current / FileName, with a save button instead of
+      // 'Load this profile at startup'" (#278).
+      //
+      // The checkbox it replaces could only say on/off, so the third state --
+      // "start from whatever the displays are set to right now" -- had nowhere
+      // to live, and the stored file name was the only answer the UI could
+      // give. Save writes through for the same reason the preset one does:
+      // ConfigStore buffers, so a choice alone gives no sign it took.
+      const int lblW  = LabelW(hw, hFont, L"Startup:") + 4;
+      const int saveW = LabelW(hw, hFont, L"Save") + profPad;
+      PAGE_TC(0, CreateLabel(hw, L"Startup:", gx, gy, lblW, lineH, hFont));
+      HWND hMode = CreateCombo(hw, IDC_MW_DISP_PROFILE_MODE, gx + lblW, gy,
+                               gw - lblW - saveW - btnGap, lineH * 5, hFont);
+      PAGE_TC(0, hMode);
+      SendMessageW(hMode, CB_ADDSTRING, 0, (LPARAM)L"None");
+      SendMessageW(hMode, CB_ADDSTRING, 0, (LPARAM)L"Current");
+      {
+        const wchar_t* leaf = FileNameOnly(p->m_szStartupDisplayProfile);
+        SendMessageW(hMode, CB_ADDSTRING, 0,
+                     (LPARAM)((leaf && *leaf) ? leaf : L"(no saved profile)"));
+      }
+      SendMessage(hMode, CB_SETCURSEL, p->DisplayProfileStartupMode(), 0);
+      PAGE_TC(0, CreateBtn(hw, L"Save", IDC_MW_DISP_PROFILE_MODESAVE,
+                           gx + gw - saveW, gy, saveW, lineH, hFont));
     }
     gy += row;
-    // Its own row: the row above is full -- a checkbox and three buttons -- and
-    // at a narrow client the label is the part that gets clipped.
     PAGE_TC(0, CreateCheck(hw, L"Autostart all displays when a profile loads",
                            IDC_MW_DISP_PROFILE_AUTOSTART, gx, gy, gw, lineH,
                            hFont, p->m_bProfileAutostartAll));
@@ -663,6 +699,31 @@ void DisplaysWindow::BuildOutputsPage(int x, int y, int rw, int lineH, int gap) 
     // part that differs, was the part pushed off the end.
     PAGE_TC(0, CreateReadonlyField(hw, FileNameOnly(p->m_szStartupDisplayProfile),
                           IDC_MW_DISP_PROFILE_PATH, gx, gy, gw, lineH, hFont));
+    gy += row;
+
+    // The four actions, at the BOTTOM of the group rather than crowded onto
+    // the startup row -- Shane: "put the buttons at the bottom of the window".
+    // They act on profiles as files; the row above says which one starts.
+    {
+      const int profPad2 = MulDiv(18, lineH, 26);
+      const int btnGap2  = MulDiv(6, lineH, 26);
+      const int sW = LabelW(hw, hFont, L"Save...")     + profPad2;
+      const int lW = LabelW(hw, hFont, L"Load...")     + profPad2;
+      const int dW = LabelW(hw, hFont, L"Delete...")   + profPad2;
+      const int fW = LabelW(hw, hFont, L"Set Default") + profPad2;
+      int bx = gx + gw - (sW + lW + dW + fW + btnGap2 * 3);
+      PAGE_TC(0, CreateBtn(hw, L"Save...", IDC_MW_DISP_SAVE_PROFILE,
+                           bx, gy, sW, lineH, hFont));
+      bx += sW + btnGap2;
+      PAGE_TC(0, CreateBtn(hw, L"Load...", IDC_MW_DISP_LOAD_PROFILE,
+                           bx, gy, lW, lineH, hFont));
+      bx += lW + btnGap2;
+      PAGE_TC(0, CreateBtn(hw, L"Delete...", IDC_MW_DISP_PROFILE_DELETE,
+                           bx, gy, dW, lineH, hFont));
+      bx += dW + btnGap2;
+      PAGE_TC(0, CreateBtn(hw, L"Set Default", IDC_MW_DISP_PROFILE_DEFAULT,
+                           bx, gy, fW, lineH, hFont));
+    }
     gy += row;
 
     y = gy + gap;
@@ -857,7 +918,7 @@ LRESULT DisplaysWindow::DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
         // Only when it would say something different: RefreshDisplaysTab is a
         // full LB_RESETCONTENT and rebuild, and doing that every second flickers
         // for no reason on a window where nothing is usually changing.
-        std::wstring sig = m_pEngine->DisplayListSignature();
+        std::wstring sig = m_pEngine->ChildListSignature();
         if (sig != m_lastChildSig) {
             m_lastChildSig = sig;
             m_pEngine->RefreshDisplaysTab();
@@ -914,8 +975,23 @@ LRESULT DisplaysWindow::DoNotify(HWND hWnd, NMHDR* pnm) {
     std::lock_guard<std::recursive_mutex> lkDisp(p->m_displayOutputsMutex);
     if (sel >= 0 && sel < (int)p->m_displayOutputs.size() &&
         p->m_displayOutputs[sel].config.type == DisplayOutputType::Monitor) {
-      p->m_displayOutputs[sel].config.nOpacity = newVal;
+      // The SAME two things the edit box's handler does (#293).
+      //
+      // This wrote nOpacity and stopped: no watermark branch, so spinning the
+      // arrows on a watermarked display moved a value the style pass ignores;
+      // and no save, so the number lived in memory until the next thing to
+      // write displays.json happened to carry it, or -- far more often -- was
+      // simply replaced when the panel was repainted from config.
+      //
+      // Reported as "the opacity doesn't seem to update when spinner changes,
+      // e.g. selected display1 changed opacity from 75 to 90 went to display2
+      // came back to display1 and opacity was 75". 75 is what displays.json
+      // held, which is the tell: the 90 never reached it.
+      auto& cfg = p->m_displayOutputs[sel].config;
+      if (cfg.bWatermark) cfg.nWatermarkOpacity = newVal;
+      else                cfg.nOpacity = newVal;
       p->m_bMirrorStylesDirty.store(true);
+      p->SaveDisplayOutputSettings();
     }
     return 0;
   }
@@ -925,6 +1001,37 @@ LRESULT DisplaysWindow::DoNotify(HWND hWnd, NMHDR* pnm) {
 //----------------------------------------------------------------------
 // Command handling (WM_COMMAND)
 //----------------------------------------------------------------------
+
+// Commit whatever is being TYPED before the selected display changes (#301).
+//
+// Every edit box on this tab applies on EN_KILLFOCUS -- deliberately, so a
+// half-typed number is not written on each keystroke. But clicking a display
+// box in the layout panel does not move keyboard focus: the panel synthesises
+// an LBN_SELCHANGE (display_panel.cpp) and the edit keeps the caret. So no
+// EN_KILLFOCUS arrives, the typed value is never committed, and
+// UpdateDisplaysTabSelection then repaints the box from config -- putting the
+// OLD number back in front of the user.
+//
+// Reported for opacity: "click on display 1 change the opacity by hand to a
+// number click on display 2 and come back it's the same opacity as before I
+// changed it ... if I click off the window and back it seems to get fixed".
+// Clicking off the window IS a focus change, which is why that worked, and why
+// the spin control was unaffected -- it commits in its own handler (#293).
+//
+// Moving focus to the list rather than re-reading the text here: that fires the
+// existing EN_KILLFOCUS handler, so every field commits through the one tested
+// path and nothing has to know which fields exist. It runs while
+// m_nDisplaysTabSel still names the OLD display, which is the display the typed
+// value belongs to.
+static void CommitFocusedEdit(HWND hWnd) {
+  HWND hFocus = GetFocus();
+  if (!hFocus || !IsChild(hWnd, hFocus)) return;
+  wchar_t cls[32] = {};
+  GetClassNameW(hFocus, cls, 32);
+  if (_wcsicmp(cls, L"EDIT") != 0) return;
+  HWND hList = GetDlgItem(hWnd, IDC_MW_DISP_LIST);
+  if (hList && hList != hFocus) SetFocus(hList);
+}
 
 LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
   Engine* p = m_pEngine;
@@ -1054,6 +1161,74 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       }
       return 0;
     }
+    case IDC_MW_DISP_ONTOP: {
+      int sel = p->m_nDisplaysTabSel;
+      // m_displayOutputsMutex: #27.
+      std::lock_guard<std::recursive_mutex> lkDisp(p->m_displayOutputsMutex);
+      if (sel >= 0 && sel < (int)p->m_displayOutputs.size() &&
+          p->m_displayOutputs[sel].config.type == DisplayOutputType::Monitor) {
+        auto& cfg = p->m_displayOutputs[sel].config;
+        // The PRIMARY row means the render window, so it drives the global
+        // (#338). That display is refused a mirror -- it IS the render window
+        // -- so cfg.bAlwaysOnTop had nothing to act on: the box stored a value,
+        // drew itself checked forever and no SetWindowPos ever ran.
+        //
+        // The global flag is the same request for that row, so it drives the
+        // same value the Settings window's "Always On Top" drives rather than a
+        // second copy that can disagree with it.
+        wchar_t renderDev[32] = {};
+        const bool isPrimary = p->GetRenderMonitorDevice(renderDev) &&
+                               renderDev[0] &&
+                               wcscmp(cfg.szDeviceName, renderDev) == 0;
+        if (isPrimary) {
+          // Exactly what the Settings window's own checkbox does, so the two
+          // cannot drift: set the flag, persist it, and let the render window's
+          // thread apply it. Never SetWindowPos on that HWND from here.
+          p->m_bAlwaysOnTop = bChecked;
+          p->SaveSettingToINI(SET_ALWAYS_ON_TOP);
+          if (hw) PostMessage(hw, WM_MW_SET_ALWAYS_ON_TOP, 0, 0);
+          return 0;
+        }
+        cfg.bAlwaysOnTop = bChecked;
+        p->m_bMirrorStylesDirty.store(true);
+        p->SaveDisplayOutputSettings();
+        // A display running its own process has its OWN window, which the style
+        // pass cannot reach -- it only walks this process's mirror windows. The
+        // watermark checkbox below already relays for exactly this reason; this
+        // one never did, so Keep on top was inert on a child-owned display and
+        // toggling it off and on did not even fix it (#338).
+        if (cfg.bOwnProcess)
+          p->RequestChildSend(cfg.szDeviceName,
+                              bChecked ? L"SET_ALWAYS_ON_TOP=1"
+                                       : L"SET_ALWAYS_ON_TOP=0");
+      }
+      return 0;
+    }
+    case IDC_MW_DISP_WATERMARK: {
+      int sel = p->m_nDisplaysTabSel;
+      std::lock_guard<std::recursive_mutex> lkDisp(p->m_displayOutputsMutex);
+      if (sel >= 0 && sel < (int)p->m_displayOutputs.size() &&
+          p->m_displayOutputs[sel].config.type == DisplayOutputType::Monitor) {
+        auto& cfg = p->m_displayOutputs[sel].config;
+        cfg.bWatermark = bChecked;
+        p->m_bMirrorStylesDirty.store(true);
+        p->SaveDisplayOutputSettings();
+        // A display running its own process has its OWN window, which the
+        // style pass above cannot reach -- it only walks the parent's mirror
+        // windows. Without this the checkbox would tick and nothing on that
+        // monitor would change, which is how the watermark got stuck on a
+        // child-owned display in the first place.
+        if (cfg.bOwnProcess)
+          p->RequestChildSend(cfg.szDeviceName,
+                              bChecked ? L"SET_WATERMARK=1" : L"SET_WATERMARK=0");
+        // The Opacity control now means a different value either side of this
+        // toggle -- the watermark opacity while on, the normal one while off
+        // (#276) -- so it has to be repainted or it keeps showing the one that
+        // is no longer in force.
+        p->UpdateDisplaysTabSelection(sel);
+      }
+      return 0;
+    }
     case IDC_MW_DISP_MIRROR_ALTS:
       // A combo, so the interesting notification is CBN_SELCHANGE; the
       // checkbox auto-toggle the base class does for buttons does not apply.
@@ -1072,6 +1247,9 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     case IDC_MW_DISP_HUD_DISABLE:
       p->m_bDisableMirrorHud = bChecked;
       Config().SetInt(L"Settings", L"bDisableMirrorHud", bChecked ? 1 : 0);
+      // The twin of the System-tab box: same flag, so the same relay. Missing
+      // it here would make the fix depend on which window it was toggled from.
+      p->RelayHudStateToChildren();
       return 0;
     case IDC_MW_DISP_INDEPENDENT: {
       // Soft path switch only — never force-reinit SCs (that left mirrors black
@@ -1107,6 +1285,10 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
 
   // ── Displays listbox selection ──
   if (id == IDC_MW_DISP_LIST && code == LBN_SELCHANGE) {
+    // BEFORE the selection moves: anything half-typed belongs to the display
+    // being left, not the one being opened (#301). The layout panel routes its
+    // clicks through here too, and those never move focus on their own.
+    CommitFocusedEdit(hWnd);
     int sel = (int)SendMessage((HWND)lParam, LB_GETCURSEL, 0, 0);
     p->UpdateDisplaysTabSelection(sel);
     return 0;
@@ -1174,7 +1356,14 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       std::lock_guard<std::recursive_mutex> lkDisp(p->m_displayOutputsMutex);
       if (sel >= 0 && sel < (int)p->m_displayOutputs.size() &&
           p->m_displayOutputs[sel].config.type == DisplayOutputType::Monitor) {
-        p->m_displayOutputs[sel].config.nOpacity = val;
+        auto& cfg = p->m_displayOutputs[sel].config;
+        // While watermarked, this edits the WATERMARK opacity (#276). It used
+        // to write nOpacity unconditionally, which the style pass then ignored
+        // for as long as the watermark was on -- a control that moved and did
+        // nothing. nOpacity still has to keep the normal-mode value, because
+        // that is what the display returns to when the watermark comes off.
+        if (cfg.bWatermark) cfg.nWatermarkOpacity = val;
+        else                cfg.nOpacity = val;
         p->m_bMirrorStylesDirty.store(true);
         p->SaveDisplayOutputSettings();
       }
@@ -1309,15 +1498,26 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       rc.fParam = p->m_fBlendTimeUser;
       p->EnqueueRenderCmd(rc);
     } else if (cfg.bOwnProcess) {
-      // In process since #186. This used to push SIGNAL|NEXT_PRESET down the
-      // child's pipe and let the child choose; the same call the IPC verb makes
-      // now does it here, so the button and DISPLAY_NEXT cannot diverge.
-      const wchar_t* err = nullptr;
-      std::wstring detail;
-      if (!p->AdvanceDisplayPreset(p->m_displayOutputs[sel], next, err, detail))
-        p->AddNotification((wchar_t*)(_wcsicmp(err, L"no_presets") == 0
-                                          ? L"That display's preset folder is empty"
-                                          : L"That display is not rendering yet"));
+      p->RequestChildSend(cfg.szDeviceName,
+                          next ? L"SIGNAL|NEXT_PRESET" : L"SIGNAL|PREV_PRESET");
+    } else if (cfg.bOwnPreset) {
+      // The IN-PROCESS own-preset tier. This arm was missing (#274): a display
+      // set to "Own preset" but not "+ own process" fell through to the mirror
+      // message below, so the button said it mirrored the main window and did
+      // nothing at all.
+      //
+      // The IPC verbs had already been widened for exactly this -- their own
+      // comment says asking the old question "told a display in `preset` mode
+      // -- which has a preset of its own and a surface to step it on -- that it
+      // was a mirror" -- and the button was left behind. Both now go through
+      // StepDisplayOwnPreset so they cannot drift apart again.
+      const wchar_t* why = nullptr;
+      if (!p->StepDisplayOwnPreset(cfg, next, &why)) {
+        p->AddNotification((wchar_t*)(
+            wcscmp(why, L"no_surface") == 0
+                ? L"That display has no render surface yet"
+                : L"No presets in that display's preset folder"));
+      }
     } else {
       // A mirror shows the main window's preset; there is nothing of its own
       // to step, and silently stepping the main window would be a surprise.
@@ -1366,15 +1566,10 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       for (auto& out : p->m_displayOutputs) {
         if (out.config.type != DisplayOutputType::Monitor) continue;
         if (!out.config.bOwnProcess) continue;
-        // The display's window is this process's own mirror swap-chain window
-        // now, so it is raised directly. It used to be a child process's, which
-        // is why this went down a pipe as RAISE_WINDOW -- only the owning
-        // process may safely reorder its own window.
-        if (out.monitorState && out.monitorState->hWnd) {
-          SetWindowPos(out.monitorState->hWnd, HWND_TOP, 0, 0, 0, 0,
-                       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-          raised++;
-        }
+        // RAISE_WINDOW, not a SetWindowPos from here: the child's window belongs
+        // to another process and only that process may reorder it safely.
+        p->RequestChildSend(out.config.szDeviceName, L"RAISE_WINDOW");
+        raised++;
       }
     }
     HWND hRender = p->GetPluginWindow();
@@ -1417,6 +1612,66 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     return 0;
   }
 
+  // ===== Delete Profile =====
+  //
+  // Picks the file rather than acting on the shown one: the shown profile is
+  // whichever was last saved or loaded, so a "delete the current profile"
+  // button deletes something the user did not choose, and cannot see the name
+  // of until it is already gone. The engine does the deleting -- to the
+  // Recycle Bin, and clearing the startup pointer if this was it.
+  if (code == BN_CLICKED && id == IDC_MW_DISP_PROFILE_DELETE) {
+    wchar_t filePath[MAX_PATH] = {};
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hWnd;
+    ofn.lpstrFilter = L"Display Profile (*.json)\0*.json\0All Files\0*.*\0";
+    ofn.lpstrFile = filePath;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrTitle = L"Delete Display Profile";
+    const std::wstring profileDir = p->DisplayProfileDir();
+    ofn.lpstrInitialDir = profileDir.c_str();
+    ofn.lpstrDefExt = L"json";
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (!GetOpenFileNameW(&ofn))
+      return 0;
+
+    // "normally", because FOF_ALLOWUNDO is a request and not a guarantee --
+    // Windows deletes outright when the bin is off or full for that drive.
+    // Same wording as the annotations window, for the same reason: the app
+    // must not promise something it cannot know is true.
+    const bool wasDefault =
+        (_wcsicmp(p->m_szStartupDisplayProfile, filePath) == 0);
+    wchar_t prompt[512];
+    FormatTo(prompt,
+        L"Delete the display profile \"%s\"?\n\n"
+        L"It normally goes to the Recycle Bin, but Windows removes it "
+        L"permanently if it is on a network drive or the bin is off or full "
+        L"for that drive.%s",
+        FileNameOnly(filePath),
+        wasDefault ? L"\n\nThis is the profile set to load at startup, so "
+                     L"nothing will load at startup until another is set."
+                   : L"");
+    if (MessageBoxW(hWnd, prompt, L"Delete Display Profile",
+                    MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES)
+      return 0;
+
+    if (!p->DeleteDisplayProfile(filePath)) {
+      MessageBoxW(hWnd, L"Failed to delete the display profile.", L"Error",
+                  MB_OK | MB_ICONERROR);
+      return 0;
+    }
+    if (wasDefault) {
+      HWND hPath = GetDlgItem(hWnd, IDC_MW_DISP_PROFILE_PATH);
+      if (hPath) SetTextIfChanged(hPath, L"");
+      HWND hChk = GetDlgItem(hWnd, IDC_MW_DISP_PROFILE_ONSTART);
+      if (hChk) SendMessage(hChk, BM_SETCHECK, BST_UNCHECKED, 0);
+    }
+    wchar_t note[MAX_PATH + 32];
+    FormatTo(note, L"Deleted profile %s", FileNameOnly(filePath));
+    p->AddNotification(note);
+    return 0;
+  }
+
   // ===== Save / Load Profile =====
   if (code == BN_CLICKED && (id == IDC_MW_DISP_SAVE_PROFILE || id == IDC_MW_DISP_LOAD_PROFILE)) {
     wchar_t filePath[MAX_PATH] = {};
@@ -1441,7 +1696,7 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     ofn.lpstrInitialDir = profileDir.c_str();
 
     if (id == IDC_MW_DISP_SAVE_PROFILE) {
-      ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+      ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
       ofn.lpstrDefExt = L"json";
       // Open with the name a snapshot would have used. The generator existed
       // already but only the snapshot action reached it, so this dialog opened
@@ -1463,14 +1718,22 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         // The main-render block is written every time and costs nothing when
         // it is all "(default)": the inherit sentinels mean the profile
         // carries no opinion, and loading it leaves the globals in charge.
-        const int extras = MessageBoxW(hWnd,
-          L"Also store the custom messages in this profile?\n\n"
-          L"Either way the profile records the preset each display is playing "
-          L"now -- and the main render settings from the group above -- so "
-          L"loading it puts those presets back.",
-          L"Save Display Profile", MB_YESNOCANCEL | MB_ICONQUESTION);
-        if (extras != IDCANCEL) {
-          const bool withExtras = (extras == IDYES);
+        // No prompt. Messages are stored, always (#279).
+        //
+        // It used to ask "Also store the custom messages in this profile?" and
+        // Shane's verdict on it was "I forgot what this window really means
+        // when I save a display profile" -- then, once the wording was fixed,
+        // "just get rid of modal and assume yes". He is right that the better
+        // fix was removing the question rather than explaining it: a profile is
+        // a snapshot of how things are set up, messages are part of that, and
+        // the choice was being put to the user on every single save for a
+        // decision almost nobody makes differently twice.
+        //
+        // Nothing is lost by dropping Cancel with it -- the file dialog above
+        // is already the place this is called off, and reaching this line means
+        // the user has picked a name and pressed Save.
+        {
+          const bool withExtras = true;
           // Snapshot, always.
           //
           // This passed bSnapshot=false, so a profile stored each display's
@@ -1499,7 +1762,7 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         }
       }
     } else {
-      ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+      ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
       if (GetOpenFileNameW(&ofn)) {
         // Through the render command queue, NOT directly. Loading rewrites
         // m_displayOutputs and spawns/retires child processes, and this runs on
@@ -1540,23 +1803,27 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     }
 
     if (code == BN_CLICKED &&
-        (id == IDC_MW_DISP_MODE_MIRROR || id == IDC_MW_DISP_MODE_CHILD)) {
+        (id == IDC_MW_DISP_MODE_MIRROR || id == IDC_MW_DISP_MODE_PRESET ||
+         id == IDC_MW_DISP_MODE_CHILD)) {
       if (haveSel) {
         // m_displayOutputsMutex: #27.
         std::lock_guard<std::recursive_mutex> lkDisp(p->m_displayOutputsMutex);
         auto& cfg = p->m_displayOutputs[sel].config;
         if (cfg.type == DisplayOutputType::Monitor) {
-          const bool wantChild = (id == IDC_MW_DISP_MODE_CHILD);
+          const bool wantChild  = (id == IDC_MW_DISP_MODE_CHILD);
+          const bool wantPreset = (id == IDC_MW_DISP_MODE_PRESET) || wantChild;
+          cfg.bOwnPreset  = wantPreset;
           cfg.bOwnProcess = wantChild;
-          if (wantChild) {
+          if (wantPreset) {
             cfg.bEnabled = true;
             // A display cannot be both: bIndependentRender is the in-process
             // mirror sim, which renders the PRIMARY's preset.
             cfg.bIndependentRender = false;
           }
-          // Spawning and killing a child process stood here. The surface that
-          // renders this display is created and retired from the config by
-          // SendToDisplayOutputs, which reads what was just written.
+          if (wantChild)
+            p->RequestChildSpawn(cfg.szDeviceName);
+          else
+            p->RequestChildKill(cfg.szDeviceName);
           p->SaveDisplayOutputSettings();
           p->UpdateDisplaysTabSelection(sel);
           p->RefreshDisplaysTab();
@@ -1680,6 +1947,7 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
             // editing this field does not yank a running display back to it --
             // the new value takes effect the next time the display starts,
             // which is what "Startup" means.
+            p->RequestChildReconfigure(cfg.szDeviceName);
             p->UpdateDisplaysTabSelection(sel);
           }
         }
@@ -1712,6 +1980,7 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
                 auto& cfg = p->m_displayOutputs[sel].config;
                 wcsncpy_s(cfg.szPresetDir, path, _TRUNCATE);
                 p->SaveDisplayOutputSettings();
+                p->RequestChildReconfigure(cfg.szDeviceName);
               }
             }
           }
@@ -1765,16 +2034,38 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         o.lpstrFile = file;
         o.nMaxFile = MAX_PATH;
         o.lpstrInitialDir = initDir.c_str();
-        o.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
+        o.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER | OFN_NOCHANGEDIR;
         if (GetOpenFileNameW(&o)) {
+          // The folder the preset came from becomes this display's preset
+          // directory (#330).
+          //
+          // Picking a preset and setting the directory were two separate
+          // chores, and the directory was the one easy to forget: the display
+          // would start on the chosen preset and then cycle through a different
+          // library entirely, because the two settings are resolved separately.
+          // Shane asked for one selection to do both.
+          //
+          // Only the folder is taken, never a guess at anything else, and the
+          // preset keeps its full path -- so a preset that lives outside the
+          // folder it is stored against still opens.
+          std::wstring folder(file);
+          const size_t slash = folder.find_last_of(L"\\/");
+          folder = (slash == std::wstring::npos) ? std::wstring()
+                                                 : folder.substr(0, slash);
+
           if (mainRender) {
             wcsncpy_s(p->m_primaryProfile.szStartupPreset, file, _TRUNCATE);
+            if (!folder.empty())
+              wcsncpy_s(p->m_primaryProfile.szPresetDir, folder.c_str(), _TRUNCATE);
           } else {
             std::lock_guard<std::recursive_mutex> lkDisp(p->m_displayOutputsMutex);
             if (sel < (int)p->m_displayOutputs.size()) {
               auto& cfg = p->m_displayOutputs[sel].config;
               wcsncpy_s(cfg.szStartupPreset, file, _TRUNCATE);
+              if (!folder.empty())
+                wcsncpy_s(cfg.szPresetDir, folder.c_str(), _TRUNCATE);
               p->SaveDisplayOutputSettings();
+              p->RequestChildReconfigure(cfg.szDeviceName);
             }
           }
         }
@@ -1812,6 +2103,7 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         } else {
           cfg.fTimeBetweenPresets = secsF;
           p->SaveDisplayOutputSettings();
+          p->RequestChildReconfigure(cfg.szDeviceName);
           p->UpdateDisplaysTabSelection(sel);
         }
       }
@@ -1844,10 +2136,12 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         } else {
           cfg.nPresetLock = want;
           p->SaveDisplayOutputSettings();
-          // Pushing the resolved lock down the child's pipe stood here.
-          // SendToDisplayOutputs reads EffectiveChildPresetLock(cfg) on every
-          // pass, so choosing Inherit already moves this display to whatever
-          // the main window is now.
+          // Resolved, not raw: choosing Inherit must move the child to whatever
+          // the main window is now rather than leaving it on its last pinned
+          // value.
+          p->RequestChildSend(cfg.szDeviceName,
+                              p->EffectiveChildPresetLock(cfg)
+                                  ? L"SET_PRESET_LOCK=1" : L"SET_PRESET_LOCK=0");
           p->RefreshDisplaysTab();
         }
       }
@@ -1870,6 +2164,7 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         } else {
           cfg.bSequentialOrder = seq;
           p->SaveDisplayOutputSettings();
+          p->RequestChildReconfigure(cfg.szDeviceName);
           p->UpdateDisplaysTabSelection(sel);
         }
       }
@@ -1890,6 +2185,7 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
         } else {
           cfg.fTimeBetweenPresets = (float)secs;
           p->SaveDisplayOutputSettings();
+          p->RequestChildReconfigure(cfg.szDeviceName);
         }
       }
       return 0;
@@ -1907,6 +2203,66 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     const bool onStart = IsChecked(id);
     p->m_bLoadDisplayProfileOnStart = onStart;
     Config().SetInt(L"Settings", L"bLoadDisplayProfileOnStart", onStart ? 1 : 0);
+    return 0;
+  }
+
+  // Profiles startup: None / Current / <file>, applied by Save (#278).
+  //
+  // The choice does nothing until Save, deliberately -- the same as the preset
+  // startup row it is modelled on. Selecting "Current" is a REQUEST to snapshot,
+  // and a combo that snapshotted on selection would write a profile to disk
+  // every time someone browsed the list.
+  if (code == BN_CLICKED && id == IDC_MW_DISP_PROFILE_MODESAVE) {
+    HWND hMode = GetDlgItem(hWnd, IDC_MW_DISP_PROFILE_MODE);
+    const int mode = hMode ? (int)SendMessage(hMode, CB_GETCURSEL, 0, 0) : -1;
+    if (mode < 0) return 0;
+
+    if (mode == 0) {                       // None
+      p->m_bLoadDisplayProfileOnStart = false;
+      Config().SetInt(L"Settings", L"bLoadDisplayProfileOnStart", 0);
+      p->AddNotification((wchar_t*)L"No profile will load at startup");
+    } else {
+      if (mode == 1) {
+        // Shane: "if they select current and save it will save the current
+        // settings as a new profile and use that as the default." So this is
+        // two actions in one press -- write a new timestamped profile from the
+        // live display state, then adopt it -- and the combo stops saying
+        // "Current" afterwards because it has become a file.
+        const std::wstring path = p->SaveDisplayProfileSnapshot();
+        if (path.empty()) {
+          p->AddNotification((wchar_t*)L"Could not save the current settings");
+          return 0;
+        }
+        wcsncpy_s(p->m_szStartupDisplayProfile, path.c_str(), _TRUNCATE);
+        Config().SetString(L"Settings", L"szStartupDisplayProfile",
+                           p->m_szStartupDisplayProfile);
+      }
+      if (!p->m_szStartupDisplayProfile[0]) {
+        p->AddNotification((wchar_t*)L"No profile saved yet -- pick Current, or Save...");
+        return 0;
+      }
+      p->m_bLoadDisplayProfileOnStart = true;
+      Config().SetInt(L"Settings", L"bLoadDisplayProfileOnStart", 1);
+      p->AddNotification((wchar_t*)L"Startup profile saved");
+    }
+    // Written THROUGH: ConfigStore buffers for about a second, so without this
+    // the button gives no sign it took -- which is the whole reason the preset
+    // startup row grew a Save in the first place.
+    ConfigFlushAll();
+
+    // Repaint the row rather than rebuild the page: the third combo entry and
+    // the name field both show the stored profile, and after a Current-snapshot
+    // both are stale. Rebuilding the whole tab would also lose the scroll
+    // position and the focus.
+    const wchar_t* leaf = FileNameOnly(p->m_szStartupDisplayProfile);
+    if (HWND hPath = GetDlgItem(hWnd, IDC_MW_DISP_PROFILE_PATH))
+      SetWindowTextW(hPath, leaf ? leaf : L"");
+    if (hMode) {
+      SendMessage(hMode, CB_DELETESTRING, 2, 0);
+      SendMessageW(hMode, CB_INSERTSTRING, 2,
+                   (LPARAM)((leaf && *leaf) ? leaf : L"(no saved profile)"));
+      SendMessage(hMode, CB_SETCURSEL, p->DisplayProfileStartupMode(), 0);
+    }
     return 0;
   }
 
@@ -2002,7 +2358,7 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     ofn.lpstrFilter = L"Video Files (*.mp4;*.avi;*.wmv;*.mkv;*.mov)\0*.mp4;*.avi;*.wmv;*.mkv;*.mov\0All Files (*.*)\0*.*\0";
     ofn.lpstrFile = szFile;
     ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     if (GetOpenFileNameW(&ofn)) {
       CopyTo(p->m_szVideoFile, szFile);
       SetWindowTextW(GetDlgItem(hWnd, IDC_MW_VIDINPUT_FILE_EDIT), szFile);

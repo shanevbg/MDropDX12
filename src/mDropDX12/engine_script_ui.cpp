@@ -121,7 +121,7 @@ LRESULT ScriptWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     ofn.lpstrFile = filePath;
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrInitialDir = p->m_szBaseDir;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     ofn.lpstrTitle = L"Open Script File";
     if (GetOpenFileNameW(&ofn)) {
       p->LoadScript(filePath);

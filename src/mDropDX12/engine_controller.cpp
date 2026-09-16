@@ -220,6 +220,13 @@ void Engine::EnumerateControllers(HWND hDeviceCombo)
 // ---------------------------------------------------------------------------
 void Engine::PollController()
 {
+    // A -child instance polls no controller. joyGetPosEx reads a shared system
+    // device rather than a per-window input queue, so parent and child would
+    // both observe the same button press and both act on it -- one press, two
+    // preset changes. The parent owns physical input and relays whatever it
+    // wants a child to do over the named pipe.
+    if (m_bChildMode)
+        return;
     if (!m_bControllerEnabled || m_nControllerDeviceID < 0)
         return;
 
@@ -306,7 +313,10 @@ void Engine::ExecuteControllerCommand(const std::string& cmdRaw)
         AddNotification(m_bPresetLockedByUser ? L"Preset locked" : L"Preset unlocked");
     }
     else if (cmd == "RAND") {
-        m_bSequentialPresetOrder = !m_bSequentialPresetOrder;
+        // Through the one writer (#356). This path matters more than it looks:
+        // Shane drives the app from a programmable game pad, so the controller
+        // is a primary route to this setting rather than an exotic corner.
+        SetMainRenderOrder(!m_bSequentialPresetOrder);
         AddNotification(m_bSequentialPresetOrder ? L"Sequential order" : L"Random order");
     }
     else if (cmd == "MASHUP") {

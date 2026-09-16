@@ -363,6 +363,8 @@ int GroupIndex(const std::wstring& text) {
 }  // namespace
 
 void Engine::MixerInit() {
+  // A child instance is a headless renderer and owns no external interfaces.
+  if (m_bChildMode) return;
   // Settings first: whether the subsystem runs at all is one of them.
   MixerCfg().SetResourceDir(m_szMilkdrop2Path);
   MixerCfg().Load();
@@ -424,6 +426,8 @@ void Engine::MixerShutdown() {
 bool Engine::MixerIsEnabled() const { return g_enabled && g_mixer != nullptr; }
 
 bool Engine::MixerSetEnabled(bool enabled) {
+  if (m_bChildMode) return false;
+
   if (!enabled) {
     MixerShutdown();
     MixerCfg().Get().enabled = false;
