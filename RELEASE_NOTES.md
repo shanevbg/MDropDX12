@@ -277,7 +277,7 @@ Press **F8** for Settings, **F1** for keyboard shortcuts, **Ctrl+F8** for
 Displays.
 
 **New in this release: the zip comes with something to look at.** 93 community
-MilkDrop presets and 25 photographs, so it does something on first run instead
+MilkDrop presets and 22 photographs, so it does something on first run instead
 of asking you to go and find a preset library.
 
 The presets are classic-lineage `.milk` files — Flexi, Geiss, Se7enSlasher,

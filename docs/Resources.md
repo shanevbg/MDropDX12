@@ -2,7 +2,7 @@
 
 MDropDX12 uses `.milk` / `.milk3` preset files and texture images to generate visuals. The exe is self-bootstrapping — it creates the `resources/presets/` and `resources/textures/` directories automatically on first run, and comes up on a preset built into the executable so a fresh install is never a black screen.
 
-**Since v3.1 the portable zip includes a small starter set**: 93 community MilkDrop presets and 25 photographs, in `resources/presets/` and `resources/textures/`, with attribution in `resources/CREDITS.md`. It is a demonstration, not a library — for a real collection, use one below. Nothing in the starter set is required, and deleting it changes nothing except what you see on first run.
+**Since v3.1 the portable zip includes a small starter set**: 93 community MilkDrop presets and 22 photographs, in `resources/presets/` and `resources/textures/`, with attribution in `resources/CREDITS.md`. It is a demonstration, not a library — for a real collection, use one below. Nothing in the starter set is required, and deleting it changes nothing except what you see on first run.
 
 ## Getting Presets
 

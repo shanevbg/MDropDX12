@@ -116,7 +116,7 @@ addressing, struct member defaults and preset-level globals.
 - Startup no longer reports an empty preset directory that has 933 files in it.
 
 **The zip now comes with something to look at.** 93 community MilkDrop presets
-and 25 photographs, so a fresh install does something on first run instead of
+and 22 photographs, so a fresh install does something on first run instead of
 asking you to go and find a preset library.
 
 - Classic-lineage `.milk` presets — Flexi, Geiss, Se7enSlasher, martin,

@@ -1,6 +1,6 @@
 # What is in this folder, and who made it
 
-`presets/` holds 93 MilkDrop presets. `textures/` holds 25 images.
+`presets/` holds 93 MilkDrop presets. `textures/` holds 22 images.
 
 ## The presets
 
@@ -55,7 +55,7 @@ included, say so and it will be removed in the next release.
 
 ## The textures
 
-All 25 are photographs taken by Shane Vincent, the author of MDropDX12,
+All 22 are photographs taken by Shane Vincent, the author of MDropDX12,
 included here with his permission. They are downscaled to 1024 pixels on the
 longest edge, which is the engine's default load-time cap — beyond that the
 resolution is not visible once an image is sampled onto a warp mesh, and it
