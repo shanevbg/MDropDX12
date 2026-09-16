@@ -386,7 +386,11 @@ texelFetch_conv(sampler_feedback, coords, 0)    // divides by texsize.zw
 
 ## The Shadertoy Render Pipeline
 
-Shadertoy imports run on a completely separate render path from regular MilkDrop presets — no warp mesh, no blur, no custom shapes or waves. Just raw shader math. Controlled by `m_bShadertoyMode` flag, rendering goes through `RenderFrameShadertoy()`.
+Shadertoy imports run on a completely separate render path from regular MilkDrop presets — no warp mesh, no blur, no custom shapes or waves. Just raw shader math. On the main render window the flag is `m_bShadertoyMode` and rendering goes through `RenderFrameShadertoy()`.
+
+**A display holding its own preset decides for itself (v3.2).** `m_bShadertoyMode` describes the *main window's* preset, so using it to decide what a display does meant the main window loading any `.milk3` made every own-preset display abandon its own preset and draw the main window's Shadertoy. A display now answers `Engine::SurfaceUsesMilk3(surf)` — its own preset when it has one, the main window's only when it is mirroring — and renders through `RenderMilk3OrientPipeline` with **its own** compiled Image and Buffer A–D passes, its own PSOs and its own clock. Two displays can run two different Shadertoy presets while the main window runs a third.
+
+The surface-side parse is `Engine::ParseMilk3IntoState`, shared with the main window's loader: everything a `.milk3` contributes is ordinary `CState` — the Image pass as `m_szCompShadersText`, Buffer A–D as `m_szBuffer*ShadersText`, all at `MD2_PS_5_0`, plus neutralised warp defaults. Before that existed, `CState::Import` was handed the JSON, matched nothing, and returned **success** on a default state, so a display given a `.milk3` went black while reporting that it was playing.
 
 ```
 Frame N:

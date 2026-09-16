@@ -2,7 +2,7 @@
 
 MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geisswerks.com/milkdrop/) visualizer engine, with GPU-accelerated text rendering, an in-app settings UI, broad preset compatibility improvements, and a different preset on every screen. Works with [Milkwave](https://github.com/IkeC/Milkwave) Remote via Named Pipe IPC for extended control (messaging, wave manipulation, screenshots, and more).
 
-**Current version: 3.1.0** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
+**Current version: 3.2.0** — version numbers from upstream projects (BeatDrop, MilkDrop3, etc.) do not apply to MDropDX12.
 
 [**Download the latest release**](https://github.com/shanevbg/MDropDX12/releases/latest).
 
@@ -13,7 +13,7 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geiss
 
 ## Visualizer Features
 
-* **A different preset on every screen.** Set a display to "Own preset" and it gets its own preset folder, startup preset, cycle interval and order, advancing independently of the main window and of every other screen — each rendered by its own thread inside the one process, so every display runs at the frame rate you set
+* **A different preset on every screen.** Set a display to "Own preset" and it gets its own preset folder, startup preset, cycle interval and order, advancing independently of the main window and of every other screen — each rendered by its own thread inside the one process, so every display runs at the frame rate you set. Pick what a screen is playing right now from the Displays window (Ctrl+F8) without re-pointing the folder it cycles through, and run `.milk3` Shadertoy presets on a display too, with their own Image and Buffer passes
 * **Audio Mixer window** — every playback and capture device with a fader and a mute, renameable and hideable; SteelSeries Sonar channels with both of their levels (what you hear and what a stream hears, which Windows cannot do at all); optional audio failover when a headset goes flat; headset battery on the HUD
 * **`.milk2` blend patterns** — all thirty are now correct rather than approximations, and a frozen `.milk2` renders identically on every load
 * **Preset Editor** (Scintilla-backed) for the running preset's code — init / per-frame / per-pixel, warp and comp shaders, 16 waves and 16 shapes — with live Apply and shader errors mapped back to your own source line
@@ -27,7 +27,7 @@ MDropDX12 is a ground-up DirectX 12 rebuild of the [MilkDrop2](https://www.geiss
 * Standalone Song Info window (Shift+Ctrl+F8) with track info source selector and display options
 * Standalone Displays window (Ctrl+F8) with Display Outputs and Video Input tabs
 * Save Screenshot from Settings UI with file dialog, or via IPC `CAPTURE` command
-* TDR recovery and GPU protection with automatic device restart
+* GPU crash recovery — a lost device is rebuilt in place; a full GPU hang restarts the visualizer automatically, stepping the mirror resolution down and giving up after three attempts rather than looping
 * Async shader compilation — non-blocking preset transitions, no render stalls
 * Display current track information and artwork from Spotify, YouTube or other media sources playing on your PC
 * Window title regex parsing with named profiles — extract artist/title/album from any media player's window title using configurable regex patterns with named capture groups

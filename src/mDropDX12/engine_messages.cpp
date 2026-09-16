@@ -2875,6 +2875,78 @@ bool Engine::StepDisplayOwnPreset(const DisplayOutputConfig& cfg, bool next,
   return true;
 }
 
+std::wstring Engine::DisplayCurrentPresetPath(const DisplayOutputConfig& cfg)
+{
+  // The two tiers answer from different places, and a caller should not have
+  // to know which tier a display is on to ask what it is showing.
+  ChildInstance ci;
+  if (cfg.bOwnProcess && GetChildInfo(cfg.szDeviceName, ci) &&
+      ci.szCurrentPreset[0])
+    return ci.szCurrentPreset;
+  if (cfg.bOwnPreset) {
+    MirrorSurface* ps = MirrorSurfaceFor(cfg.szDeviceName);
+    if (ps && !ps->sim.ownPresetPath.empty())
+      return ps->sim.ownPresetPath;
+  }
+  return std::wstring();
+}
+
+bool Engine::ShowPresetOnDisplay(const DisplayOutputConfig& cfg,
+                                 const std::wstring& path,
+                                 const wchar_t** reason)
+{
+  if (path.empty()) {
+    if (reason) *reason = L"empty";
+    return false;
+  }
+
+  // The render host takes the ordinary global load: for that display, "show
+  // this preset" and "load this preset" are the same request.
+  wchar_t renderDev[32] = {};
+  if (GetRenderMonitorDevice(renderDev) && renderDev[0] &&
+      wcscmp(renderDev, cfg.szDeviceName) == 0) {
+    // No existence check: this may be called from the render thread, and
+    // stat-ing a UNC path would stall the frame loop.
+    RenderCommand rc;
+    rc.cmd = RenderCmd::LoadPresetPath;
+    rc.iParam1 = -1;
+    rc.fParam = m_fBlendTimeUser;
+    rc.sParam = path;
+    EnqueueRenderCmd(rc);
+    return true;
+  }
+
+  // A display showing the primary's frame has nothing of its own to put a
+  // preset into, and silently promoting it would change what the display IS
+  // rather than what it shows.
+  if (!DisplayHoldsOwnPreset(cfg)) {
+    if (reason) *reason = L"not_own_preset";
+    return false;
+  }
+
+  // A .milk3 is accepted here now (#373): a surface parses one into its own
+  // CState via ParseMilk3IntoState, compiles its own Image and Buffer A-D
+  // passes, and renders them through RenderMilk3OrientPipeline with its own
+  // shaders and PSOs. The interim refusal that lived here -- added when the
+  // adopt path could only produce an empty classic state -- is gone with the
+  // limitation it described.
+
+  if (ChildOwnsDisplayForIpc(cfg.szDeviceName)) {
+    RequestChildSend(cfg.szDeviceName, (L"PRESET=" + path).c_str());
+    return true;
+  }
+
+  MirrorSurface* ps = MirrorSurfaceFor(cfg.szDeviceName);
+  if (!ps) {
+    if (reason) *reason = L"no_surface";
+    return false;
+  }
+  // Posted rather than assigned: the worker owns sim.ownPresetPath, and this
+  // is whichever thread the caller happens to be on.
+  PostSurfacePreset(*ps, path);
+  return true;
+}
+
 // Per-display render mode and the child registry (forgejo#22).
 //
 // Another early-return helper for the same reason as HandlePresetCycleIPC:
@@ -4070,36 +4142,31 @@ bool Engine::HandleDisplayPresetIPC(const wchar_t* sMessage) {
       DisplayReplyErr(v->reply, n, L"malformed", L"empty path");
       return true;
     }
-    if (isPrimary) {
-      // No existence check here: LaunchMessage runs on the render thread, and
-      // stat-ing a UNC path would stall the frame loop.
-      RenderCommand rc;
-      rc.cmd = RenderCmd::LoadPresetPath;
-      rc.iParam1 = -1;
-      rc.fParam = m_fBlendTimeUser;
-      rc.sParam = value;
-      EnqueueRenderCmd(rc);
-    } else if (ChildOwnsDisplayForIpc(target)) {
-      // A child holds this display's preset in ANOTHER PROCESS, so there is no
-      // surface here to post to and reaching for one answered no_surface --
-      // refusing exactly the displays that have a preset of their own (#236).
-      RequestChildSend(target, (L"PRESET=" + value).c_str());
-      DisplayReplyOk(v->reply, n, L"child", value.c_str());
+    // ShowPresetOnDisplay carries the three-way this arm used to spell out:
+    // the primary takes a render command, a child takes a pipe message (#236 --
+    // reaching for a surface here answered no_surface for exactly the displays
+    // that DO have a preset of their own), and an in-process display takes a
+    // post to its surface (#186 phase 4).
+    //
+    // Shared with the Displays window's file dialog (#364) rather than written
+    // out twice. Prev/Next is the standing warning: the IPC path was widened to
+    // the in-process tier and the button was not, so the button spent a release
+    // telling a display with its own preset that it was a mirror.
+    const wchar_t* why = nullptr;
+    if (!ShowPresetOnDisplay(out->config, value, &why)) {
+      const wchar_t* detail = L"";
+      if (wcscmp(why, L"no_surface") == 0)
+        detail = L"display has no render surface yet; enable it first";
+      else if (wcscmp(why, L"milk3_needs_primary") == 0)
+        detail = L"a .milk3 can only play on the main render window; a display "
+                 L"renders its own preset through the classic pipeline (#373)";
+      DisplayReplyErr(v->reply, n, why, detail);
       return true;
-    } else {
-      // #186 phase 4: the display holds its own preset IN PROCESS, so this
-      // goes to its surface instead of down a pipe to a child. Posted rather
-      // than assigned -- the worker owns sim.ownPresetPath, and this is the
-      // IPC thread.
-      MirrorSurface* ps = MirrorSurfaceFor(target);
-      if (!ps) {
-        DisplayReplyErr(v->reply, n, L"no_surface",
-                        L"display has no render surface yet; enable it first");
-        return true;
-      }
-      PostSurfacePreset(*ps, value);
     }
-    DisplayReplyOk(v->reply, n, isPrimary ? L"primary" : L"display",
+    DisplayReplyOk(v->reply, n,
+                   isPrimary ? L"primary"
+                             : (ChildOwnsDisplayForIpc(target) ? L"child"
+                                                               : L"display"),
                    value.c_str());
     return true;
   }
@@ -6663,6 +6730,24 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
     return;
   }
 
+  if (MSG_IS(sMessage, L"DIAG_SIMULATE_TDR")) {
+    // Drive the TDR relaunch path on demand (#368), so the backoff, the
+    // relaunch, the successor's wait and the three-relaunch bound can be
+    // exercised without resetting the display driver for the whole machine.
+    //
+    // TESTING MODE ONLY. This verb makes the app exit and start a replacement,
+    // which is exactly what nobody wants arriving down a pipe by accident.
+    extern PipeServer g_pipeServer;
+    if (!m_bTestingMode) {
+      g_pipeServer.Send(L"SIMULATE_TDR|ok=0|err=not_testing|detail=TESTING_MODE=1 first");
+      return;
+    }
+    g_pipeServer.Send(L"SIMULATE_TDR|ok=1");
+    extern void MDropSimulateGpuFatal();
+    MDropSimulateGpuFatal();
+    return;
+  }
+
   if (MSG_IS(sMessage, L"DIAG_MIRRORS")) {
     // Rich mirror diagnostics for IPC / MCP (portrait ghost, every-other-frame, path).
     // path: 0=none 1=orient 2=stretchMain 3=letterbox 4=copy 5=black 6=orientFail
@@ -6704,9 +6789,30 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
       const double pfv =
           (sp->sim.pState && sp->sim.pState->var_pf_frame)
               ? *sp->sim.pState->var_pf_frame : -1.0;
-      wchar_t row[768];
+      // WHICH PRESET IS ACTUALLY ON THE GLASS, which until now nothing reported
+      // (#351). preset= names the surface's OWN preset, and that stays true of
+      // its configuration even while something else is being drawn -- so during
+      // the #351 bug this row asserted "01 - Martin - blue haze.milk" for three
+      // straight phases while the primary's Shadertoy was on screen, and the
+      // frame counter advanced the whole time. The one diagnostic that exists
+      // for this said nothing was wrong.
+      //
+      // Reads the same predicate the worker dispatches on, so it cannot drift
+      // from what is actually drawn. Now that #351 is fixed an own-preset
+      // surface reports "own" whatever the primary is doing, and a mirror
+      // reports "primary_milk3" while the primary is on a .milk3 -- which for a
+      // mirror is correct, since it IS rendering the primary's preset.
+      //
+      // Names the PIPELINE, not the ownership -- own= already says whether the
+      // surface has a preset of its own, and "own"/"primary_milk3" read as a
+      // second opinion on that. An independent mirror with no preset of its own
+      // legitimately renders classic while the primary is on a .milk, and
+      // "renders=own" for it was actively misleading.
+      const wchar_t* renders = SurfaceUsesMilk3(*sp) ? L"milk3" : L"classic";
+      wchar_t row[832];
       FormatTo(row,
-               L"|surf=%ls,own=%d,preset=%ls,size=%dx%d,ready=%d,frames=%d,pub=%d"
+               L"|surf=%ls,own=%d,preset=%ls,renders=%ls"
+               L",size=%dx%d,ready=%d,frames=%d,pub=%d"
                L",gate=%d,pipeRdy=%d,need=%dx%d,seenPf=%u,try=%d,rec=%d"
                L",shaders=%d,fb=%d,simFps=%.1f,pf=%.0f,ovr=%d,simTime=%.3f"
                // workUs is what the GPU last charged for ONE frame of this
@@ -6734,6 +6840,7 @@ void Engine::LaunchMessage(wchar_t* sMessage, bool bStrict) {
                sp->device.empty() ? L"(none)" : sp->device.c_str(),
                sp->sim.ownPresetPath.empty() ? 0 : 1,
                name.empty() ? L"-" : name.c_str(),
+               renders,
                sp->pipe.w, sp->pipe.h,
                sp->imageReady.load() ? 1 : 0,
                sp->pipe.frames,

@@ -10,6 +10,9 @@ Reference visualizer for comparison: **MilkDrop 3PRO** (MilkDrop3) at `c:\Code\E
   VS[0] (previous frame)
     |
     v
+  Motion Vectors ──> VS[0]  Drawn BEFORE warp, so they enter the feedback loop
+    |
+    v
   Warp Pass ──> VS[1]       Reads VS[0], applies warp mesh distortion, writes VS[1]
     |
     v
@@ -21,6 +24,18 @@ Reference visualizer for comparison: **MilkDrop 3PRO** (MilkDrop3) at `c:\Code\E
     v
   Comp Pass ──> Backbuffer  Reads VS[1] + blur textures, applies comp shader
 ```
+
+**Motion vectors are drawn into VS[0], not VS[1]** — before the warp rather than
+after it — which is why they smear through the feedback instead of sitting on
+top of the frame as an overlay. For a few presets they are the *only* thing that
+draws: with no waves, no shapes, transparent borders and no custom shader, the
+motion-vector lines are the entire image.
+
+That matters when a preset looks different on a display than on the main window.
+Until v3.2 this stage ran only on the main window's path, so such a preset was
+black on a display and correct on the primary, and nothing in the pipeline above
+would have explained it. If you are looking at that class of difference, check
+whether the stage runs on both paths before suspecting the preset.
 
 - **VS[0] and VS[1] ping-pong** each frame. After comp writes to backbuffer, VS[1] becomes VS[0] next frame.
 - **Blur passes read VS[0]** (the previous frame), not VS[1]. This is correct and matches MilkDrop3.

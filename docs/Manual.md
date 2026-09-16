@@ -256,16 +256,16 @@ The Displays window has two sub-tabs: **Display Outputs** and **Video Input**.
 
 #### Display Outputs Sub-Tab
 
-- **Output List**: Shows all detected monitors and Spout senders with status (OFF / ON / ACTIVE)
+- **Layout / Details**: Two views of the same outputs. **Layout** draws your desktop to scale, one tile per output, with Spout senders on their own row beneath. **Details** switches to a text list — monitors read PRIMARY (no mirror), OFF, ON (not active), SKIPPED or MIRRORING, and Spout senders ON or OFF. A monitor set to **+ own process** shows its child's state instead — `starting`, `CHILD` or `FAILED` — followed by the preset it is playing
 - **Enable**: Toggle the selected output on or off
 - **Fullscreen**: Toggle fullscreen mode for monitor mirrors
 - **Add Spout**: Create a new Spout sender with a unique name
 - **Remove**: Delete the selected Spout sender
 - **Refresh**: Re-enumerate connected monitors
-- **Activate Displays**: Activate or deactivate every enabled display, whether it mirrors or holds its own preset. Displays are always inactive at startup for safety; press this button to create the windows.
-- **Click-through**: When checked, mouse events pass through mirror windows to applications behind them. Mirror windows are always topmost so they remain visible in click-through mode. Click-through is off by default at each launch (not persisted).
-- **Opacity**: Mirror window opacity (1-100%). Applied to all active mirror windows in real time. Persisted to settings.ini.
-- **Use mirrors for ALT-S**: When checked, ALT+S fullscreens the primary render window on its current monitor and activates display mirrors on all enabled outputs. ALT+S again deactivates mirrors and restores the primary window to its previous size and position. When unchecked, ALT+S uses the legacy stretch behavior (spanning one window across all monitors). If no mirrors are enabled but other displays are detected, a prompt asks whether to mirror to all displays. Persisted to settings.ini.
+- **Activate Mirror/Children**: Activate every enabled display, whether it mirrors or holds its own preset; the caption becomes **Deactivate Mirror/Children** once they are running. Displays are always inactive at startup for safety; press this button to create the windows.
+- **Click-through**: Applies to the selected display. When checked, mouse events pass through that mirror window to applications behind it. Tick **Keep on top** beside it as well — a click-through window that is not topmost can never be raised, so the next window opened on that monitor buries it. Both settings are per display and saved in `resources/displays.json`.
+- **Opacity**: Opacity of the selected display's window (1-100%), applied in real time. Per display and saved in `resources/displays.json`. Monitor outputs only. When that display is watermarked, the box shows and sets its watermark opacity instead.
+- **ALT-S hotkey**: A drop list with three answers for what ALT+S does. **Stretch** spans one window across all monitors (the legacy behavior). **Mirror** fullscreens the primary render window on its current monitor and activates display mirrors on all enabled outputs; ALT+S again deactivates them and restores the window. **Load profile** loads the default display profile instead. With Mirror selected and no mirrors enabled, a prompt asks whether to mirror to all detected displays. Persisted to settings.ini.
 - **Don't ask when no mirrors are enabled**: When checked, ALT+S automatically enables all detected monitors for mirroring without showing the confirmation prompt. Useful for single-key activation workflows. Persisted to settings.ini.
 - **Sender Name**: Name visible to Spout receivers (Spout outputs only)
 - **Fixed Size**: Lock Spout output to a specific resolution (Spout outputs only)
@@ -628,9 +628,15 @@ that output. **Details** switches the panel to a text list of the same thing.
 
 Set a display's **Render** to **Own preset** and it stops mirroring: it gets
 its own preset folder, its own startup preset, its own cycle interval and its
-own random/sequential order, advancing independently of the main window and of
-every other screen. Pressing Next moves each display on to *its* next preset
-rather than putting the same one everywhere.
+own preset order (**Sequential** ticked, or random when it is not), advancing
+independently of the main window and of every other screen. Pressing Next moves
+each display on to *its* next preset rather than putting the same one
+everywhere.
+
+A display's own preset can be a **`.milk3`** Shadertoy preset as well as a
+`.milk` or `.milk2`. It is rendered with its own Image and Buffer A–D passes and
+its own clock, so two screens can run two different Shadertoy presets while the
+main window runs a third.
 
 Each such display is rendered by a thread inside the one MDropDX12 process, so
 it runs at the frame rate you set. (Development builds up to v3.0 launched a
@@ -640,6 +646,18 @@ a second on any screen that was not focused.)
 The **< Prev** and **Next >** buttons step the selected display's preset by
 hand. **Preset lock** decides whether that display follows the global lock
 (*Inherit*) or ignores it (*Unlocked* / *Locked*).
+
+**Playing:** names the preset that display is showing *right now*, updating
+about once a second so it follows a display cycling on its own. The **...**
+button beside it opens a file picker and puts the preset you choose on that
+display immediately — which is how you reach one particular preset without
+pressing **Next >** until it arrives.
+
+That choice is **shown, not pinned.** Unlike the **Startup:** browse directly
+above it, it does not become the display's startup preset and does not re-point
+the folder the display cycles through. Picking something to watch for a minute
+should not change what plays for the rest of the night; when you do want it
+permanent, set **Startup:** instead.
 
 Mirroring and Own preset are mutually exclusive — a mirror re-draws the *main
 window's* preset at another orientation, and cannot hold one of its own.
@@ -652,7 +670,7 @@ Pick an entry in the layout panel or the details list and the controls below
 describe it.
 
 The tile labelled **MAIN WINDOW** is selectable like any other, and its preset
-controls — preset directory, startup preset, cycle interval, random/sequential
+controls — preset directory, startup preset, cycle interval, **Sequential**
 and the preset lock — set **what a saved display profile asks the main render
 to do**. They are not the application's settings:
 
@@ -662,9 +680,16 @@ to do**. They are not the application's settings:
   apply for that session; never load it and your normal settings are untouched.
 - **`<Default>` means inherit** — the profile carries no opinion about that
   field and your global setting stays in charge.
+
 - Change one of these settings yourself afterwards, from the Presets window or
   a hotkey, and that becomes your global again. A profile borrows a setting;
   you own it.
+
+**Playing: and its ... button are the exception to all of that.** Every other
+control in this group describes a saved setup; those two act on the display in
+front of you, immediately, and persist nothing. That is deliberate — the row
+exists to answer "what is on that screen, and put this on it instead", which is
+a question about now rather than about a profile.
 
 Loading a profile puts the main render on its preset, the same way every
 other display gets its preset back. The main window used to be the one screen a
@@ -672,17 +697,17 @@ profile could not restore.
 
 ### Monitor Mirroring
 
-MDropDX12 can mirror its visualization output to additional monitors connected to your system. The Displays window lists all detected monitors (excluding the one running the main visualizer window). Enable a monitor and press **Activate Displays** to create borderless fullscreen windows on those displays.
+MDropDX12 can mirror its visualization output to additional monitors connected to your system. The Displays window lists all detected monitors (excluding the one running the main visualizer window). Enable a monitor and press **Activate Mirror/Children** to create borderless fullscreen windows on those displays.
 
-**Safety**: Mirror windows are always inactive at startup. You must explicitly press the **Activate Displays** button on the Displays window to create them. This prevents accidental full-screen coverage of monitors.
+**Safety**: Mirror windows are always inactive at startup. You must explicitly press the **Activate Mirror/Children** button on the Displays window to create them. This prevents accidental full-screen coverage of monitors.
 
 **ALT+S failsafe**: When "Use mirrors for ALT-S" is enabled and you press ALT+S with no monitors enabled, MDropDX12 detects available displays and prompts: "No mirrors enabled. Found N display(s). Mirror to all?" Choose **Yes** to enable all detected monitors and activate mirrors, **No** to go fullscreen without mirrors, or **Cancel** to abort. Check "Don't ask when no mirrors are enabled" on the Displays window to skip the prompt and automatically enable all monitors.
 
-**Z-order**: Mirror windows are always topmost so they stay above normal desktop windows. The Settings window (also topmost) sits above mirrors naturally when focused.
+**Z-order**: A mirror window is topmost when its **Keep on top** is ticked (or watermark mode forces it); otherwise it stacks like a normal window. The Settings window (topmost) sits above mirrors naturally when focused.
 
-**Click-through**: By default, mirror windows are opaque and block mouse input. Check **Click-through** on the Displays window to allow mouse events to pass through to applications behind the mirror. Click-through state is not persisted — it resets to off each launch.
+**Click-through**: By default, mirror windows are opaque and block mouse input. Check **Click-through** on the Displays window to allow mouse events to pass through to applications behind the mirror. Click-through is set per display and saved in `resources/displays.json`.
 
-**Opacity**: Use the **Opacity** spin box (1-100%) to control mirror window transparency. This is useful in combination with click-through to see and interact with windows behind the visualization. Opacity is persisted to settings.ini.
+**Opacity**: Use the **Opacity** spin box (1-100%) to control mirror window transparency. This is useful in combination with click-through to see and interact with windows behind the visualization. Opacity is per display and saved in `resources/displays.json`.
 
 Monitors are enumerated automatically at startup and when displays are connected or disconnected. Use the "Refresh" button to manually re-scan.
 
@@ -1284,7 +1309,7 @@ Animations render using DX12 warped text directly in the visualizer viewport.
 
 MDropDX12 includes safeguards against GPU overload:
 
-- **TDR Recovery**: Automatic recovery from GPU timeout detection and recovery events, with window focus restoration
+- **GPU Crash Recovery**: A device that is *lost* — a driver update, a reset, an adapter change — is rebuilt in place and the visualizer carries on. A full GPU **hang** is not recovered in place: the adapter refuses the process that caused it for roughly two minutes afterwards, while a freshly started one is served in about twenty seconds — so MDropDX12 restarts itself instead, stepping the mirror resolution down each time. It gives up after three attempts rather than looping, and an instance that has run cleanly for five minutes gets the full allowance again
 - **Async Shader Compilation**: Shaders compile on a background thread to prevent GPU stalls during preset transitions
 - **Shader Compile Timeout**: Shaders that take too long to compile are automatically skipped
 - **Max Shape Instances**: Limit the number of custom shape instances per frame (Visual window)
@@ -1300,12 +1325,16 @@ MDropDX12 includes safeguards against GPU overload:
 | `sprites.ini` | Sprite definitions |
 | `controller.json` | Game controller button-to-command mappings |
 | `midi.json` | MIDI controller mapping definitions (50 slots) |
-| `debug.log` | Application log (verbosity set in About tab) |
+| `log/debug.log` | Application log (verbosity set in About tab); the previous run is kept as `log/debug.prev.log` |
 | `resources/presets/` | Preset directory |
 | `resources/presets/Quicksave/` | Quicksave destination (CTRL+S) |
 | `resources/presets/Quicksave2/` | Alternate quicksave (SHIFT+CTRL+S) |
 | `capture/` | Screenshot output directory |
 | `resources/textures/` | Texture files referenced by presets |
+| `resources/displays.json` | Per-display settings and the global mirror flags (was `[DisplayOutputs]` in `settings.ini`) |
+| `presets.json` | Preset annotations — ratings, flags, notes, usage stats and captured shader errors |
+| `resources/profiles/<type>/` | Saved profiles, one file each: `display`, `audio`, `vfx`, `mixer` |
+| `resources/shaderoverrides.json` | Custom warp/comp shader overrides matched by preset tag |
 
 ## Troubleshooting
 
@@ -1313,9 +1342,11 @@ MDropDX12 includes safeguards against GPU overload:
 
 **Presets render black**: This may be caused by missing textures. Check Settings > Files to configure fallback search paths. Missing textures fall back to a 1x1 white texture to prevent black-screen artifacts.
 
-**Shader compilation errors**: Some presets may fail to compile on certain GPUs. MDropDX12 auto-skips failed shaders and moves to the next preset. Enable verbose logging (About tab > Log Level: Verbose) and check `debug.log` for details.
+**Shader compilation errors**: Some presets may fail to compile on certain GPUs. MDropDX12 auto-skips failed shaders and moves to the next preset. Enable verbose logging (About tab > Log Level: Verbose) and check `log/debug.log` for details.
 
 **High GPU usage**: Reduce render quality in the Visual window, enable Auto Quality, or lower the FPS cap. If using Spout fixed size, reduce the output resolution.
+
+**The visualizer closed and reopened by itself**: that is the GPU crash recovery working, not a fault. Windows reset the graphics card — usually an overheating or over-driven GPU, sometimes a preset that is simply too heavy — and MDropDX12 does not try to recover a full GPU hang in place, so it restarts itself. Expect a few seconds of black, and mirrored displays to come back at a lower resolution than before: each attempt steps them down (1920 → 1280 → 960 → mirrors off) so the restart does not simply repeat the crash. It gives up after three attempts rather than looping forever, and an instance that has run cleanly for five minutes starts again with the full allowance. If it is happening repeatedly, the cause is the GPU load — lower the FPS cap, reduce the number of displays running their own presets, or skip the preset that triggers it.
 
 **Window appears frozen**: The visualizer may be in black mode (CTRL+F12) or the preset may be locked on a static visual. Press SPACE to advance to the next preset.
 

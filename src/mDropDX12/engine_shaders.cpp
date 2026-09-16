@@ -650,6 +650,8 @@ void CShaderParams::CacheParams(LPD3DXCONSTANTTABLE pCT, bool bHardErrors) {
 //----------------------------------------------------------------------
 
 thread_local const wchar_t* mdrop::Engine::t_shaderCompilePreset = nullptr;
+thread_local int mdrop::Engine::t_shaderCompileKind =
+    mdrop::Engine::kCompileKindUnset;
 
 bool Engine::RecompileVShader(const char* szShadersText, VShaderInfo* si, int shaderType, bool bHardErrors, bool bCompileOnly) {
   si->Clear();
@@ -2280,6 +2282,28 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   const char szCompParams[] = "float4 _vDiffuse : COLOR, float4 _uv : TEXCOORD0, float2 _rad_ang : TEXCOORD1, out float4 _return_value : COLOR0";
   const char szFirstLine[] = "    float3 ret = 0;";
 
+  // Is THIS compile a Shadertoy one? (#380, from #373)
+  //
+  // Four places below shape the generated shader by preset kind: the Shadertoy
+  // texture declarations, the q1..q32 #undefs, the `ret` type, and the closing
+  // _return_value wrapper. All four used to read the GLOBAL
+  // m_bLoadingShadertoyMode, which describes what the ENGINE is loading — fine
+  // while the render thread was the only thing that ever compiled a preset, and
+  // wrong now that a surface compiles its own on its own thread.
+  //
+  // Both directions broke. A classic surface preset compiled while the engine
+  // was mid-.milk3-load had its q-macros #undef'd out from under it, giving
+  // "error X3004: undeclared identifier 'q10'"; it also got `float4 ret`
+  // against a float3 body (X3017). The reverse — a .milk3 surface preset
+  // compiled while the engine was on a classic one — has its Shadertoy texture
+  // declarations blanked instead.
+  //
+  // Decided ONCE here so the four sites cannot drift apart again.
+  const bool compilingShadertoy =
+      (t_shaderCompileKind != kCompileKindUnset)
+        ? (t_shaderCompileKind == kCompileKindShadertoy)
+        : m_bLoadingShadertoyMode;
+
   char szWhichShader[64];
   switch (shaderType) {
   case SHADER_WARP:  CopyToA(szWhichShader, "warp"); break;
@@ -2458,7 +2482,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
 
   // Strip Shadertoy-specific texture declarations for non-Shadertoy presets
   // to avoid unused t-register slots and potential reflection noise.
-  if (!m_bLoadingShadertoyMode) {
+  if (!compilingShadertoy) {
     auto blankDecl = [&](const char* pattern) {
       char* pos = strstr(szShaderText, pattern);
       if (pos && pos < &szShaderText[writePos]) {
@@ -2491,7 +2515,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
   // Shadertoy shaders: #undef MilkDrop Q-variable macros (q1..q32 → _qa.x etc.)
   // to avoid collisions with local GLSL variable names like "float3 q2 = abs(p2);"
   // which would expand to "float3 _qa.y = abs(p2);" and fail to compile.
-  if (m_bLoadingShadertoyMode) {
+  if (compilingShadertoy) {
     for (int qi = 1; qi <= 32; qi++) {
       char undef[20];
       int n = sprintf(undef, "#undef q%d\n", qi);
@@ -2990,10 +3014,10 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         p++;
         // then insert first line(s)
         std::string firstLine;
-        if (m_bLoadingShadertoyMode && !bHardErrors) {
-          // Shadertoy: float4 ret to preserve alpha channel (temporal accumulation data)
-          // Use m_bLoadingShadertoyMode (set before async thread) not m_bShadertoyMode
-          // (set after compilation in LoadPresetTick — too late for shader text generation)
+        // Shadertoy wants `float4 ret` to preserve the alpha channel, which
+        // carries temporal accumulation data; classic wants `float3`. Decided
+        // for this compile at the top of the function (#373).
+        if (compilingShadertoy && !bHardErrors) {
           firstLine = "    float4 ret = 0;\n";
         } else {
           firstLine = std::string(szFirstLine) + "\n";
@@ -3028,7 +3052,7 @@ bool Engine::LoadShaderFromMemory(const char* szOrigShaderText, char* szFn, char
         // find the ending curly brace
         p = strrchr(p, '}');
         if (p) {
-          if (m_bLoadingShadertoyMode && !bHardErrors) {
+          if (compilingShadertoy && !bHardErrors) {
             // Shadertoy output: Buffer A/B preserve full float4 (alpha stores data);
             // Image/comp forces alpha=1 (shaders that write .rgb leave alpha=0 which
             // would be transparent — the old non-Shadertoy wrapper used _vDiffuse.w=1).

@@ -173,7 +173,8 @@ To test a release build manually, run `Release/MDropDX12.exe` after the release 
 | `-pipe=<base>` | serve `\\.\pipe\<base>_<pid>` instead of the default name |
 | `-spoutout` | Spout **output** on for this run |
 | `-spoutin[=<sender>]` | Spout **input** on for this run, from `<sender>`; bare, it uses whatever the settings already hold |
-| `-nostartupchildren` | accepted and ignored (the child-process mode is gone; the harness still passes it) |
+| `-nostartupchildren` | come up occupying **no display but the render window's** — do not spawn the own-process children a saved arrangement asks for. Meaningful again: it was accepted-and-ignored during the period the child subsystem was deleted, and that is what this table used to say. Children came back in **v3.1**, and the harness passes this on every launch precisely so a test run does not take over the machine's monitors |
+| `-tdrrelaunch=<oldpid>,<attempt>,<ceiling>` | **set by the app on itself, never by a user.** After a GPU hang the process relaunches (see Architecture.md); this is how the successor learns what it must not repeat — it waits for `<oldpid>` to exit before asking for an adapter, continues the **session** budget at `<attempt>` rather than starting a fresh three, and comes up with the mirror ceiling stepped down to `<ceiling>` (1280 / 960 / 0 = mirrors off) |
 
 `--` forms work equally (`--test`, `--spoutin=…`).
 
@@ -196,9 +197,15 @@ publishes a second sender under the same name, at which point which one gets
 received is anyone's guess.
 
 `-child`, `-childindex=`, `-display=`, `-fade=`, `-rect=`, `-hidewindow` and
-`-foreground` configured the child-process mode. That mode was deleted in v3.0
-— one process renders every display — and an instance started with any of them
-now ignores them and comes up as an ordinary visualizer.
+`-foreground` configure the **child-process mode**: a second instance that owns
+one display, spawned by the parent when a display is set to "+ own process".
+The parent passes them; they are not meant to be typed.
+
+This paragraph used to say the mode was deleted in v3.0 and that an instance
+started with any of them ignored them. That was true for one release. The child
+subsystem came back in **v3.1**, and all seven are parsed and acted on today —
+so a reader who trusted the old text would conclude the switches were inert
+while the parent was actively using them.
 
 ## Project Structure
 

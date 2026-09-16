@@ -1128,6 +1128,25 @@ public:
   // the UI.
   bool StepDisplayOwnPreset(const DisplayOutputConfig& cfg, bool next,
                             const wchar_t** reason = nullptr);
+  // What this display is showing RIGHT NOW -- empty if it is showing the
+  // primary's frame, or holds its own preset but has not loaded one yet.
+  //
+  // Both tiers answer here, and which one a display is on is not something a
+  // caller should have to ask: a child keeps its preset in another process and
+  // is asked through the child table, an in-process display keeps it on its
+  // mirror surface. Written out inline in SaveDisplayProfile first, where
+  // getting the tiers wrong had banked an empty startup preset for every
+  // display whose preset was chosen rather than pinned.
+  std::wstring DisplayCurrentPresetPath(const DisplayOutputConfig& cfg);
+  // Show `path` on this display now, without disturbing what it is set to
+  // start on. The same three-way the SET_DISPLAY_PRESET verb performs: the
+  // primary takes a render command, a child takes a pipe message, and an
+  // in-process display takes a post to its surface.
+  //
+  // Returns false with *reason set when the display has no way to show it.
+  bool ShowPresetOnDisplay(const DisplayOutputConfig& cfg,
+                           const std::wstring& path,
+                           const wchar_t** reason = nullptr);
   std::wstring ResolveDisplayStartupPreset(const DisplayOutputConfig& cfg,
                                            const wchar_t* dir) const;
   // fTimeBetweenPresets < 0 means "inherit the parent's". Resolving that was
@@ -1275,6 +1294,12 @@ public:
   };
   MirrorPresetBundle                 m_presetBundle;
   std::mutex                         m_presetBundleMutex;
+  // Mirror canvas ceiling learned from actual device losses (#230). 0 = none.
+  // Stepped down by each successful TDR recovery; see ClampOrientCanvas. Lives
+  // for the session only -- a machine that TDRs once should not be permanently
+  // softened by a file on disk, and a real problem re-teaches this in seconds.
+  std::atomic<int>                   m_nTdrMirrorCeiling{0};
+
   std::atomic<uint32_t>              m_presetBundleVersion{0};
   // Serializes every CState::Import across threads: the GetFast line cache
   // keys on consecutively-allocated FILE*s (see engine_presets.cpp:2267), so
@@ -1336,6 +1361,9 @@ public:
   // and "mirrors turned off", which is still exactly what they mean.
   void StartMirrorThread();
   void StopMirrorThread();
+  // Everything the mirror subsystem holds on the device, for TDR recovery
+  // (#230) -- the workers, the queue, and each surface's fence/list/allocator.
+  void ReleaseAllMirrorGpuObjects();
   // StartSurfaceWorker / StopSurfaceWorker / MirrorThreadMain /
   // MirrorThreadDrawAndPresent are declared with MirrorSurface, below.
   //
@@ -1568,6 +1596,24 @@ public:
     // panel (2560x1440 = 1.7778) reads as slightly-flat circles otherwise.
     std::atomic<int> panelW{0};
     std::atomic<int> panelH{0};
+
+    // Does this display hold a preset OF ITS OWN? Latched from the config by
+    // the render thread; read by the worker to pick its pipeline (#351).
+    //
+    // It must come from the CONFIG and not from sim.ownPresetPath, which is
+    // what the first version of SurfaceUsesMilk3 tested and is a trap:
+    // ownPresetPath is assigned in exactly one place, DrainSurfacePreset, which
+    // has exactly one call site -- inside the very block the predicate gates.
+    // So a surface that had not drained yet answered "no own preset", the guard
+    // skipped the block, the drain never ran, and the string stayed empty
+    // forever. The predicate latched itself ON and reproduced #351 permanently
+    // for any display that became own-preset while the primary was on a .milk3
+    // -- which includes the ordinary case of resolving a display's FIRST preset
+    // while a .milk3 happens to be playing.
+    //
+    // Atomic because the render thread writes it and the surface worker reads
+    // it every frame.
+    std::atomic<bool> holdsOwnPreset{false};
 
     // ── The display's own preset, requested here, adopted by the worker ──
     //
@@ -1803,6 +1849,60 @@ public:
     if (m_mirrorSurfaces.empty())
       m_mirrorSurfaces.emplace_back(std::make_shared<MirrorSurface>());
     return *m_mirrorSurfaces.front();
+  }
+  // Which pipeline THIS SURFACE renders with (#351).
+  //
+  // m_bShadertoyMode describes the PRIMARY's preset. For a surface that MIRRORS
+  // the primary that is the right answer -- it is literally rendering that
+  // preset. For a surface holding its OWN preset it is not, and its preset is
+  // always classic by construction: MirrorSimAdoptPreset synthesises the bundle
+  // with isMilk2=false and imports through CState::Import, which has no .milk3
+  // branch at all, so a .milk3 handed to a surface parses as an empty classic
+  // state rather than as Shadertoy.
+  //
+  // Before this the global decided for every surface, so the primary loading
+  // any .milk3 made every own-preset display stop simulating its own preset and
+  // draw the primary's Shadertoy instead -- while DIAG_MIRRORS went on naming
+  // the display's own preset and its frame counter went on advancing, so the
+  // only diagnostic for it asserted that nothing was wrong.
+  //
+  // This also makes pipe rebuilds RARER rather than commoner, which is the
+  // opposite of what #351 feared. An own-preset surface's mode is now constant,
+  // so it stops rebuilding its pipe every time the primary crosses between a
+  // .milk and a .milk3.
+  //
+  // Reads surf.holdsOwnPreset, which the render thread latches from the display
+  // CONFIG -- deliberately not sim.ownPresetPath. See the note on that member:
+  // testing the path made the predicate self-latching, because the only code
+  // that sets the path is inside the block this predicate gates.
+  // The compiled set THIS surface draws with (#373): its own when it holds its
+  // own preset, the engine's when it is rendering the primary's. One place,
+  // because the pipe builder, the readiness test and the record all have to
+  // agree about which Buffer A-D passes exist -- and a disagreement between the
+  // builder and the readiness test is what froze every mirror on 2026-08-23.
+  const PShaderSet& SurfaceShaderSet(const MirrorSurface& surf) const {
+    return surf.sim.HasOwnPipeline() ? surf.sim.shaders : m_shaders;
+  }
+  // Which Buffer passes that set actually compiled. Derived from the bytecode
+  // exactly as the primary derives its own flags at engine_presets.cpp:4030,
+  // so the two cannot drift.
+  void SurfaceBufferFlags(const MirrorSurface& surf,
+                          bool& a, bool& b, bool& c, bool& d) const {
+    const PShaderSet& s = SurfaceShaderSet(surf);
+    a = s.bufferA.bytecodeBlob != nullptr;
+    b = s.bufferB.bytecodeBlob != nullptr;
+    c = s.bufferC.bytecodeBlob != nullptr;
+    d = s.bufferD.bytecodeBlob != nullptr;
+  }
+  bool SurfaceUsesMilk3(const MirrorSurface& surf) const {
+    // Its OWN preset decides, when it has one (#373). sim.isMilk3 is set by
+    // MirrorSimAdoptPreset and only after the parse succeeded, so a surface
+    // never claims a mode it has no compiled shaders for.
+    if (surf.holdsOwnPreset.load(std::memory_order_relaxed))
+      return surf.sim.isMilk3.load(std::memory_order_relaxed);
+    // Otherwise it is rendering the PRIMARY's preset, so the primary's mode is
+    // the right answer -- that is what a mirror IS.
+    return m_bShadertoyMode;
   }
   // Ask a surface to change preset. Safe from any thread -- the worker adopts
   // it at the top of its next frame. Empty path means "follow the primary".
@@ -2169,6 +2269,14 @@ public:
   wchar_t m_szStartupDisplayProfile[MAX_PATH] = {};
   bool    m_bLoadDisplayProfileOnStart = false;
   void UpdateDisplaysTabSelection(int sel);
+  // Just the "Playing:" field, for the Displays window's 1 s timer.
+  //
+  // Not UpdateDisplaysTabSelection on a clock: that repaints thirty controls
+  // including the combos and the seconds edit, and doing that once a second
+  // would fight anything being typed into them. This one field changes on its
+  // own -- a display cycling its own presets -- so it is the only one that
+  // needs a tick.
+  void RefreshDisplayNowPlaying();
   // Cheap "has anything the Displays list shows about children changed", so a
   // timer can refresh only when it would say something different.
   std::wstring ChildListSignature() const;
@@ -2551,11 +2659,49 @@ public:
   //
   // Saves and restores rather than clearing, because compiles nest.
   static thread_local const wchar_t* t_shaderCompilePreset;
+  // Which KIND of preset is being compiled ON THIS THREAD? (#380, from #373)
+  //
+  // The comp template injects `float4 ret` for Shadertoy and `float3 ret` for
+  // classic, and it used to read the GLOBAL m_bLoadingShadertoyMode. That was
+  // fine while only the render thread ever compiled a preset. A SURFACE now
+  // compiles its own, on its own thread, and a classic preset compiled while
+  // the ENGINE happened to be on a .milk3 got `float4 ret` injected into a body
+  // doing `ret = tex2D(sampler_main, uv).xyz` — X3017, float3 to float4, and
+  // the surface fell back to the default shader with the failure logged against
+  // the wrong file.
+  //
+  // THREE states, not two, and that is the whole point. A bool ORed with the
+  // global cannot tell "no scope open" from "scope open, saying classic", so it
+  // leaves the reported failure open: the classic surface compile still reads
+  // the engine's .milk3 load through the fallback. Unset has to be its own
+  // value so an open scope can say classic and WIN.
+  //
+  // Thread-local for the same reason t_shaderCompilePreset is: the question is
+  // about the compile in progress here, not about what the engine is showing.
+  enum ShaderCompileKind {
+    kCompileKindUnset = -1,   // no scope open — defer to the engine's global
+    kCompileKindClassic = 0,  // .milk / .milk2
+    kCompileKindShadertoy = 1 // .milk3
+  };
+  static thread_local int t_shaderCompileKind;
   struct ShaderCompileScope {
     const wchar_t* prev;
-    explicit ShaderCompileScope(const wchar_t* preset)
-        : prev(t_shaderCompilePreset) { t_shaderCompilePreset = preset; }
-    ~ShaderCompileScope() { t_shaderCompilePreset = prev; }
+    int prevKind;
+    explicit ShaderCompileScope(const wchar_t* preset,
+                                int kind = kCompileKindUnset)
+        : prev(t_shaderCompilePreset), prevKind(t_shaderCompileKind) {
+      t_shaderCompilePreset = preset;
+      t_shaderCompileKind = kind;
+    }
+    // Convenience for the callers that already hold a bool (a surface's
+    // c.isMilk3, say) rather than having to spell the enum out.
+    ShaderCompileScope(const wchar_t* preset, bool shadertoy)
+        : ShaderCompileScope(preset, shadertoy ? kCompileKindShadertoy
+                                               : kCompileKindClassic) {}
+    ~ShaderCompileScope() {
+      t_shaderCompilePreset = prev;
+      t_shaderCompileKind = prevKind;
+    }
   };
   // The file to flag: the preset being compiled on THIS thread, or the current
   // one when no compile scope is open (a Preset Editor Apply, say).
@@ -4881,6 +5027,12 @@ public:
   void        ParseEmbeddedSprites(const std::string& buf);
   bool        LoadEmbeddedSpritesFromFile(const wchar_t* szPath);
   void        LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime);
+  // Read a .milk3 into a CState and nothing else (#373). Everything a .milk3
+  // contributes is ordinary CState -- the Image pass and Buffer A-D as shader
+  // text at MD2_PS_5_0, plus neutralised warp defaults -- so this is shareable
+  // between the primary's loader and a display filling its own state. Returns
+  // false if the file is not a usable .milk3, Image pass included.
+  bool        ParseMilk3IntoState(const wchar_t* szPresetFilename, CState* out);
   void        LoadPresetTick();
   bool        WaitForPendingLoad(DWORD timeoutMs = 3000); // waits for bg thread, applies via LoadPresetTick
   void        FindValidPresetDir();
@@ -4891,7 +5043,12 @@ public:
   void		RenamePresetFile(wchar_t* szOldFile, wchar_t* szNewFile);
   void		SetCurrentPresetRating(float fNewRating);
   void		SeekToPreset(wchar_t cStartChar);
-  bool		ReversePropagatePoint(float fx, float fy, float* fx2, float* fy2);
+  // `verts` is the warp mesh to trace back through -- the engine's m_verts for
+  // the primary, the surface's own c.verts for an own-preset display. Null
+  // keeps the primary's, which is what every caller wanted while only the
+  // primary traced anything.
+  bool		ReversePropagatePoint(float fx, float fy, float* fx2, float* fy2,
+                                      const MYVERTEX* verts = nullptr);
   int 		HandleRegularKey(WPARAM wParam);
   void    SaveCurrentPresetToQuicksave(bool altDir);
   // ownerDisplay: -1 for the primary, or a 1-based DISPLAYn whose own message
@@ -5321,7 +5478,21 @@ public:
   void		RetireFinishedSprites();   // #225: release sprites whose fence has passed
   int         GetNextFreeSupertextIndex(int ownerDisplay = -1);
   void        DoCustomSoundAnalysis();
-  void        DX12_DrawMotionVectors();
+  // The last injector to take an override (#366). Shapes, waves, sprites and
+  // the wave/border/darken-centre stage were all given one by #186 so an
+  // own-preset display could inject ITS preset rather than the primary's;
+  // this one had no override to give it, so it was left out of that list
+  // entirely and own-preset displays simply never drew motion vectors. A
+  // preset whose only light source is motion vectors was therefore black
+  // there and correct on the primary.
+  //
+  // pCtx null means the primary: engine state, engine canvas, engine mesh,
+  // and VS[0] as the target -- the behaviour this had when it was the only
+  // caller. Otherwise everything comes from the context, and pTarget is the
+  // face the warp is about to read.
+  void        DX12_DrawMotionVectors(CState* pStateOverride = nullptr,
+                                     RenderContext* pCtx = nullptr,
+                                     DX12Texture* pTarget = nullptr);
 
   bool        LoadShaders(PShaderSet* sh, CState* pState, bool bTick, bool bCompileOnly);
   void        UvToMathSpace(float u, float v, float* rad, float* ang);

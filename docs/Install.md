@@ -132,7 +132,7 @@ Delete the folder. No registry entries or system files are affected.
 
 ### GPU timeout / TDR crash
 
-- MDropDX12 includes TDR recovery and will automatically restart the GPU device.
+- MDropDX12 recovers from these by itself. A device that is merely lost is rebuilt without interrupting you. A full GPU hang cannot be recovered inside the running program, so the visualizer **restarts itself** — expect it to vanish and come back after a few seconds, with mirrored displays at a lower resolution than before. It tries three times and then stays closed, so a repeating fault will not loop.
 - If crashes persist, open Settings (F8) -> System tab and enable "Skip Heavy Presets" or reduce the shader timeout.
 - Some complex presets may exceed your GPU's capabilities — press SPACE to skip them.
 

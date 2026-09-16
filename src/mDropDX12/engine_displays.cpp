@@ -2348,6 +2348,38 @@ void Engine::StartMirrorThread()
     VMARK("StartMirrorThread exit");
 }
 
+// Release EVERY GPU object the mirror subsystem holds (#230).
+//
+// For TDR recovery specifically. After a device loss, D3D12CreateDevice keeps
+// returning DXGI_ERROR_DEVICE_HUNG with no adapter selectable at all for as
+// long as this process still references the removed device -- measured:
+// `D3D12CreateDevice failed hr=0x887A0006 adapter=NONE`, instantly, on all six
+// retry attempts, which is why waiting patiently for the driver achieved
+// nothing.
+//
+// StopMirrorThread alone is not enough. It stops the workers and drops the
+// mirror queue, but each surface keeps its fence, command list and allocator,
+// and every one of those holds the dead device.
+void Engine::ReleaseAllMirrorGpuObjects()
+{
+    StopMirrorThread();
+    for (auto& sp : SnapshotMirrorSurfaces()) {
+        ReleaseOrientPipeline(*sp);
+        ReleaseSurfaceWorkObjects(*sp);
+    }
+}
+
+// NOT adding Spout / video-capture teardown here, deliberately.
+//
+// I assumed Spout was holding the removed device and started writing this.
+// Shane pointed out it should not be initialised unless actually used, and the
+// failing run's log confirmed it: ZERO Spout lines anywhere in it. It was never
+// running, so releasing it would have been decoration, not a fix.
+//
+// If a Spout sender IS open when a device is lost it genuinely does hold the
+// device and the queue through its D3D11On12 wrapper, and this is where that
+// teardown belongs -- but only once a failure has actually shown it.
+
 void Engine::StopMirrorThread()
 {
     m_bMirrorThreadQuit.store(true);
@@ -2700,7 +2732,24 @@ void Engine::MirrorThreadDrawAndPresent(MirrorSurface& surf)
     // two surfaces free-running spend sim 1.6 ms, record 0.4 ms and lock-wait
     // 0.2 ms of a 3.8 ms iteration.
     int simUs = 0;
-    if (!m_bShadertoyMode) {
+    // THIS surface's mode, not the primary's (#351). While this asked the
+    // global, the primary loading any .milk3 skipped the whole block for every
+    // own-preset display -- no grid, no preset drain, no adopt, no sim step --
+    // so the display silently stopped running its own preset.
+    // UNCONDITIONAL, whatever pipeline this surface renders with (#373).
+    //
+    // These three were inside the mode guard, and that made the guard
+    // self-latching for the second time in this file: a surface in milk3 mode
+    // skipped DrainSurfacePreset and MirrorSimAdoptPreset, which are the only
+    // things that could ever take it back OUT of milk3 mode. Handing such a
+    // display a .milk left it stuck on its old Shadertoy preset forever.
+    //
+    // MirrorSimEnsureGrid belongs here for a second reason: it is what carries
+    // the PANEL's aspect into the sim grid. Skipped, the grid keeps whatever
+    // shape it was last given, which is what "the blue haze on display 1 is
+    // squished" looks like -- a classic preset drawn on a grid built for
+    // something else.
+    {
         const int gw = surf.pipe.ready ? surf.pipe.w : needW;
         const int gh = surf.pipe.ready ? surf.pipe.h : needH;
         MirrorSimEnsureGrid(surf.sim, gw, gh,
@@ -2711,6 +2760,14 @@ void Engine::MirrorThreadDrawAndPresent(MirrorSurface& surf)
         // No bundle yet (startup): keep the last presented image.
         if (!MirrorSimAdoptPreset(surf.sim))
             return;
+    }
+
+    // The per-frame SIMULATION is the part a Shadertoy preset does not use --
+    // it has no per-frame equations and does not draw the warp mesh. Its CLOCK
+    // still has to advance, though, because c.fTime and c.nFrame are what
+    // become iTime and iFrame, so the step runs either way and the milk3 cost
+    // is an unused mesh rather than a frozen preset.
+    {
         LARGE_INTEGER simA, simB;
         QueryPerformanceCounter(&simA);
         MirrorSimStepFrame(surf.sim);
@@ -2796,7 +2853,9 @@ void Engine::MirrorThreadDrawAndPresent(MirrorSurface& surf)
         if (timing)
             cmd->EndQuery(surf.timeHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0);
 
-        const bool ok = m_bShadertoyMode
+        // THIS surface's mode (#351). Asking the global here is what put the
+        // primary's Shadertoy on a display that had a preset of its own.
+        const bool ok = SurfaceUsesMilk3(surf)
             ? RenderMilk3OrientPipeline(surf, cmd, needW, needH)
             : RenderClassicOrientPipeline(surf, cmd, needW, needH);
 
@@ -3073,6 +3132,13 @@ std::wstring Engine::PickDisplayPreset(const std::wstring& dir, bool sequential,
         const wchar_t* dot = wcsrchr(fd.cFileName, L'.');
         if (!dot)
             continue;
+        // .milk3 is back (#373). It was excluded for one release because a
+        // display's own preset went through CState::Import, which has no .milk3
+        // branch and returns success on a default state -- so cycling onto one
+        // took the display to 0.2% lit and left it there while IPC reported
+        // ok=1. A surface now parses .milk3 into its own CState and renders it
+        // with its own compiled Image and Buffer A-D passes, so cycling can
+        // offer them again.
         if (_wcsicmp(dot, L".milk") == 0 || _wcsicmp(dot, L".milk2") == 0 ||
             _wcsicmp(dot, L".milk3") == 0)
             files.push_back(fd.cFileName);
@@ -3886,6 +3952,11 @@ void Engine::SendToDisplayOutputs()
         // were switched on. Idempotent, so this is a no-op on every later pass.
         if (m_bMirrorsActive && !m_bMirrorThreadQuit.load())
             StartSurfaceWorker(msp);
+        // Latch what the CONFIG says, every frame, so the worker's pipeline
+        // choice never depends on state the worker has not produced yet (#351).
+        // Unconditional and before the ownPreset branch below: a display that
+        // has just STOPPED holding its own preset has to be told too.
+        ms.holdsOwnPreset.store(ownPreset, std::memory_order_relaxed);
         // Resolve the display's preset ONCE, not every frame: <Random> picks a
         // new file each time it is asked, so re-resolving per frame would
         // reload a different preset sixty times a second. After this the
@@ -5193,7 +5264,7 @@ static void ClearDisplayChildControls(HWND hWnd)
     };
     const int kRadios[] = {
         IDC_MW_DISP_MODE_MIRROR, IDC_MW_DISP_MODE_PRESET, IDC_MW_DISP_MODE_CHILD,
-        IDC_MW_DISP_ORDER_RANDOM, IDC_MW_DISP_ORDER_SEQ,
+        IDC_MW_DISP_ORDER_SEQ,
         IDC_MW_DISP_LOCK_INHERIT, IDC_MW_DISP_LOCK_OFF, IDC_MW_DISP_LOCK_ON,
         IDC_MW_DISP_CYCLE_ON,
     };
@@ -5213,9 +5284,37 @@ static void ClearDisplayChildControls(HWND hWnd)
         SetWindowTextW(h, L"");
         EnableWindow(h, FALSE);
     }
-    for (int id : { IDC_MW_DISP_PRESETDIR_BR, IDC_MW_DISP_STARTUP_BR }) {
+    if (HWND h = GetDlgItem(hWnd, IDC_MW_DISP_NOW_PRESET)) {
+        SetTextIfChanged(h, L"");
+        EnableWindow(h, FALSE);
+    }
+    for (int id : { IDC_MW_DISP_PRESETDIR_BR, IDC_MW_DISP_STARTUP_BR,
+                    IDC_MW_DISP_NOW_BROWSE }) {
         if (HWND h = GetDlgItem(hWnd, id)) EnableWindow(h, FALSE);
     }
+}
+
+void Engine::RefreshDisplayNowPlaying()
+{
+    HWND hWnd = m_displaysWindow ? m_displaysWindow->GetHWND() : NULL;
+    if (!hWnd) return;
+    HWND hNowPre = GetDlgItem(hWnd, IDC_MW_DISP_NOW_PRESET);
+    // Disabled means the selection has no preset of its own, which the
+    // selection sync has already worked out -- no need to decide it twice.
+    if (!hNowPre || !IsWindowEnabled(hNowPre)) return;
+
+    const int sel = m_nDisplaysTabSel;
+    std::lock_guard<std::recursive_mutex> lkDisp(m_displayOutputsMutex);
+    if (sel < 0 || sel >= (int)m_displayOutputs.size()) return;
+    const auto& cfg = m_displayOutputs[sel].config;
+
+    wchar_t renderDev[32] = {};
+    const bool isRenderHost =
+        GetRenderMonitorDevice(renderDev) && renderDev[0] &&
+        wcscmp(renderDev, cfg.szDeviceName) == 0;
+    const std::wstring now = isRenderHost ? std::wstring(m_szCurrentPresetFile)
+                                          : DisplayCurrentPresetPath(cfg);
+    SetTextIfChanged(hNowPre, FileNameOnly(now.c_str()));
 }
 
 void Engine::UpdateDisplaysTabSelection(int sel)
@@ -5376,8 +5475,9 @@ void Engine::UpdateDisplaysTabSelection(int sel)
         HWND hStartBr  = GetDlgItem(hWnd, IDC_MW_DISP_STARTUP_BR);
         HWND hCycleOn  = GetDlgItem(hWnd, IDC_MW_DISP_CYCLE_ON);
         HWND hCycleSec = GetDlgItem(hWnd, IDC_MW_DISP_CYCLE_SECS);
-        HWND hOrdRnd   = GetDlgItem(hWnd, IDC_MW_DISP_ORDER_RANDOM);
         HWND hOrdSeq   = GetDlgItem(hWnd, IDC_MW_DISP_ORDER_SEQ);
+        HWND hNowPre   = GetDlgItem(hWnd, IDC_MW_DISP_NOW_PRESET);
+        HWND hNowBr    = GetDlgItem(hWnd, IDC_MW_DISP_NOW_BROWSE);
 
         const bool isChild = isMon && cfg.bOwnProcess;
 
@@ -5492,10 +5592,31 @@ void Engine::UpdateDisplaysTabSelection(int sel)
             ? (pp.nSequentialOrder >= 0 ? pp.nSequentialOrder != 0
                                         : m_bSequentialPresetOrder)
             : cfg.bSequentialOrder;
-        if (hOrdRnd) { SetCheckbox(hOrdRnd, hasPresets && !seq);
-                       EnableWindow(hOrdRnd, hasPresets); }
+        // One checkbox now: unticked is random. Random was never a separate
+        // setting, only the other half of this boolean.
         if (hOrdSeq) { SetCheckbox(hOrdSeq, hasPresets && seq);
                        EnableWindow(hOrdSeq, hasPresets); }
+
+        // What is on this display right now (#364), which is not the same
+        // question as what it starts on and until now had no answer anywhere
+        // in the UI. The 1 s child-poll timer refreshes it, so it tracks a
+        // display cycling on its own as well as one just changed from here.
+        //
+        // Only the file name: the full path is what the field holds for
+        // copying, but a whole path in a field this wide shows its useless
+        // half. The main render is included -- it is a display too, and the
+        // row already describes its preset settings.
+        if (hNowPre) {
+            std::wstring now = isRenderHost ? std::wstring(m_szCurrentPresetFile)
+                                            : DisplayCurrentPresetPath(cfg);
+            const wchar_t* show = hasPresets ? FileNameOnly(now.c_str()) : L"";
+            SetTextIfChanged(hNowPre, show);
+            // Enabled so the text can be selected and copied; it is read-only
+            // either way, and a greyed-out field is unreadable rather than
+            // merely uneditable.
+            EnableWindow(hNowPre, hasPresets);
+        }
+        if (hNowBr) EnableWindow(hNowBr, hasPresets);
 
         // Preset lock: the RAW value picks the radio, because which of the
         // three is selected is exactly the thing the user set. Showing the
@@ -5685,21 +5806,12 @@ bool Engine::SaveDisplayProfile(const wchar_t* filePath,
                 // empty, for any display whose preset was chosen rather than
                 // pinned. Loading that profile then wrote the empty value back
                 // and every display came up with no preset name at all.
-                auto livePreset = [&]() -> std::wstring {
-                    ChildInstance ci;
-                    if (cfg.bOwnProcess &&
-                        GetChildInfo(cfg.szDeviceName, ci) && ci.szCurrentPreset[0])
-                        return ci.szCurrentPreset;
-                    if (cfg.bOwnPreset) {
-                        MirrorSurface* ps = MirrorSurfaceFor(cfg.szDeviceName);
-                        if (ps && !ps->sim.ownPresetPath.empty())
-                            return ps->sim.ownPresetPath;
-                    }
-                    return std::wstring();
-                };
-
+                // DisplayCurrentPresetPath, not another copy of the tier walk:
+                // the Displays window needs the same answer to show what is
+                // playing (#364), and two hand-written copies of "which tier
+                // holds this display's preset" is how this one went wrong.
                 if (bSnapshot) {
-                    const std::wstring live = livePreset();
+                    const std::wstring live = DisplayCurrentPresetPath(cfg);
                     if (!live.empty()) startup = live;
                 }
                 // <Current> is resolved HERE, not left for the load (#284).
@@ -5713,7 +5825,7 @@ bool Engine::SaveDisplayProfile(const wchar_t* filePath,
                 // whatever the profile is about to replace. Neither is the
                 // preset the user was looking at when they pressed Save.
                 if (_wcsicmp(startup.c_str(), kDispModeCurrent) == 0) {
-                    std::wstring live = livePreset();
+                    std::wstring live = DisplayCurrentPresetPath(cfg);
                     // A display following the main window has no preset of its
                     // own, so <Current> there means the main window's.
                     if (live.empty()) {

@@ -10,7 +10,7 @@ faders and never needs to know which provider it is talking to.
 The subsystem is **off by default**. Turn it on with `MIXER_ENABLE=1`, from the
 window, or by setting `"enabled": true` in `resources/mixer.json`.
 
-It starts with the app when enabled, on a thread of its own — see forgejo#46 for
+It starts with the app when enabled, on a thread of its own — see #46 for
 why that is worth a thread. An armed failover route is therefore being watched
 from launch, without anyone opening a window.
 
@@ -232,7 +232,7 @@ For everything else it is the last-write time of the endpoint's registry key,
 which is an approximation and a poor one: Windows rewrites every endpoint key
 whenever the audio stack re-enumerates, so after a reboot each device reads as
 "seen at boot" -- one boot here stamped 33 endpoints with the same second
-(forgejo#70). It is kept only because it beats a blank, and Windows regards
+(#70). It is kept only because it beats a blank, and Windows regards
 non-Bluetooth devices as permanently connected anyway, so the question barely
 applies to them.
 
@@ -578,7 +578,7 @@ sits at 1.000, accepts `SetMasterVolumeLevelScalar`, returns success, and holds
 its level — because Sonar owns that channel and the endpoint volume is not
 where its level lives. Meanwhile the real `sonar:aux|monitoring` sits at 0.030
 below the fold. Every signal on screen pointed away from the actual control
-(forgejo#51).
+(#51).
 
 `EndpointInfo::isVirtual` marks them, from the **container** rather than the
 name: Windows puts a device belonging to no physical container into the null
@@ -596,7 +596,7 @@ its endpoint volume works. So it marks "a provider may own me", not "I am
 inert" — which is why the window hides these rows by **default** rather than
 removing them, with `showVirtualEndpoints` on the Options tab to show them
 again. They stay fully addressable over IPC either way: a view rule, exactly as
-forgejo#50 requires of hiding.
+#50 requires of hiding.
 
 ### Verbs
 
@@ -641,7 +641,7 @@ sort and a channel climbed the list on its own.
 **The Move Up / Move Down arrows appear only in Preferred order.** A move edits
 the rule; seen through a column sort it would take the row somewhere off screen
 while the visible list sat still, so the button would read as broken. Same trap
-as forgejo#65 -- a list drawn in one order and moved in another -- and hiding
+as #65 -- a list drawn in one order and moved in another -- and hiding
 the control is the honest answer rather than explaining it afterwards. The
 heading changes with the mode too, since "most preferred first" would otherwise
 be a plain lie about the rows on screen.
@@ -702,7 +702,7 @@ your ears. Exercise it deliberately, never from a test.
 `MIXER_ORDER` is the **stored** arrangement — the one `mixer.json` holds and the
 one a move edits. What the Mixer tab draws is that list with three view rules on
 top of it, so the two are not the same list and a client rendering `MIXER_ORDER`
-shows something the person at the PC is not looking at (forgejo#65):
+shows something the person at the PC is not looking at (#65):
 
 | rule | what it does |
 |---|---|
@@ -731,7 +731,7 @@ the list on its own every time anything was reordered.
 ## Per-fader preferences: hidden, and a short name
 
 Three things now key on the same `<channel>|<faderId>` space, and share their
-storage rather than each inventing a scheme (forgejo#50, forgejo#52):
+storage rather than each inventing a scheme (#50, #52):
 
 | | verb | stored as |
 |---|---|---|
@@ -936,7 +936,7 @@ single call that must ask rather than act.
 ### The health-triggered restart offer was dropped
 
 An offer that watched channel health and proposed a restart when Sonar looked
-wedged — "Plan 3 Task 5" — is **decided against**, not pending. Shane's call on
+wedged — "Plan 3 Task 5" — is **decided against**, not pending. Decided on
 2026-09-08, on the recommendation in #48.
 
 Three reasons, and the third is the general one: the restart stays a deliberate

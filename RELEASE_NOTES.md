@@ -1,302 +1,223 @@
-# MDropDX12 v3.1.0
+# MDropDX12 v3.2.0
 
-**v3.0 made every screen able to hold its own preset. v3.1 is about making that
-survive a long night.**
+**v3.0 gave every screen its own preset. v3.1 made that survive a long night.
+v3.2 makes it actually work.**
 
-Almost everything here is memory, frame rate or not-crashing. There are new
-features, and they are at the bottom, because they are not the point of the
-release.
+## Why this follows v3.1 so closely
 
-A note on how this is written: where a change came out of a measurement, the
-measurement is quoted. Several of the decisions below reversed an earlier
-belief held confidently for weeks, and the numbers are the only reason they
-moved. `docs/multidisplay_cost.md` is the long form of that for multi-display
-rendering specifically.
+Because using v3.1 is what found these.
 
-Special thanks to [IkeC](https://github.com/IkeC) for
-[Milkwave](https://github.com/IkeC/Milkwave) — the reference visualizer, and the
-collaboration that keeps both projects honest. Thanks to
-[Incubo_](https://github.com/OfficialIncubo) for
-[BeatDrop](https://github.com/OfficialIncubo/BeatDrop-Music-Visualizer) testing
-and comparison reports.
+v3.0's headline was that a second or third monitor could hold a preset of its
+own rather than mirroring the main window, and v3.1 spent its effort on making
+that survive hours of running — memory, frame rate, not crashing. What neither
+release did was put that feature through a week of ordinary use on a real
+preset library.
+
+Doing that surfaced five separate ways it did not hold up, and four of them put
+a **black or wrong picture on a screen**:
+
+* a display never drew motion vectors at all, so a preset whose only light
+  source is motion vectors was black there while the same file was correct on
+  the main window;
+* a display silently lost its own preset — and rendered the main window's —
+  whenever the main window happened to load a `.milk3`;
+* a display handed a `.milk3` went black and stayed black, reporting success,
+  and ordinary preset cycling reached that by itself;
+* a display holding a preset of a different *kind* from the main window's had
+  its shaders built with the wrong scaffolding, so they failed to compile, the
+  display dropped to a plain default shader and compile errors flashed across
+  the screen;
+* and there was no way to choose what a display played, only Next and Previous.
+
+All five are in the same feature area. Four were found by using it; the fifth
+turned up while measuring one of the other four. v3.2 is the correctness release
+for what v3.0 and v3.1 introduced. If you are packaging MDropDX12 and skipped
+v3.1, skip straight to this one.
+
+One of the five outgrew being a fix. Rather than teach a display to refuse a
+`.milk3`, a display can now hold and render one of its own — something no screen
+but the main window could do before. The only other genuinely new thing is the
+ability to pick which preset a display plays, listed last because it is the
+smallest part of the release.
+
+One section below sits outside that feature area: a GPU crash no longer ends the
+session.
 
 ---
 
-## Memory
+## A display keeps its own preset, whatever the main window is doing
 
-Video memory grew for the life of the process. On a long unattended session it
-ran the card out, and the low-VRAM guard closed the visualizer — which looked
-like a clean exit and was really a resource leak arriving.
+`m_bShadertoyMode` — the flag that says the *main window's* preset is a
+Shadertoy `.milk3` — was being read to decide what a **display** should do, at
+seven separate places. So the moment the main window loaded any `.milk3`, every
+display holding its own preset stopped simulating that preset and drew the main
+window's Shadertoy instead. It came back when the main window returned to a
+`.milk`.
 
-Four separate causes, found in order, each one only visible once the one before
-it was gone.
+Measured, one display left on the same preset for the whole run while **only**
+the main window changed:
 
-**The texture cache never evicted anything.** Both of its limits — a byte
-budget and an image count — were read from `settings.ini` at startup, written
-back at shutdown, and compared against nothing in between. The eviction
-function existed and had no callers at all. Measured: fifty presets from one
-library took the cache from 2 MB to 3,228 MB against a configured 2,000 MB
-limit, and a 1,270-preset sweep reached 13.4 GB before the app shut itself
-down. At roughly 70 MB a distinct preset, an ordinary session on a 30-second
-cycle exhausts a 15 GB card in under two hours.
+| main window on | the display showed | mean brightness |
+|---|---|---|
+| a `.milk` | its own preset | 31.9 |
+| a `.milk3` | **the main window's Shadertoy** | 52.6 |
+| a `.milk` again | its own preset | 26.3 |
 
-The budget is now enforced on every texture load. Eviction is not simply
-"drop the oldest": age turned out to be a poor proxy for "nobody is using
-this", because a `.milk2` keeps two presets resident and a display running its
-own preset is on its own timeline entirely. Instead every shader set that could
-draw next frame is asked which textures it has bound, and a bound texture is
-never dropped whatever its age.
+Two things hid this. The display never stalled — its frame counter advanced at
+the same rate throughout — and the diagnostics went on reporting the display's
+own preset while something else was on the glass. The one tool that existed for
+this said nothing was wrong.
 
-**The cache was measuring textures at about 70% of their real size.** It
-counted the base image only, and every texture carries a mip chain — which is
-exactly 4/3 of the base level, plus 64 KB alignment per subresource. So
-`MaxBytes=2000` was really holding about 2.8 GB. Sizes now come from the
-graphics device rather than from width × height × 4. That alone took the
-plateau down by 794 MB, and it explained a long-standing mystery: a
-consistently unaccounted ~750 MB that had been attributed to several other
-things over several weeks. The cache was 1,877 MB, and 1,877 × 0.40 is 750.
+Fixed by making the decision per display. The diagnostics gained a `renders=`
+field naming the pipeline that actually ran, read from the same test the
+renderer uses, so it cannot drift from what is drawn.
 
-**Textures loaded from disk are now capped at 1024 pixels on the longest
-edge**, downscaled on load with a box filter. This one is a deliberate default
-rather than a bug fix. A modern photo used as a preset texture is 4000 pixels
-wide and is being sampled onto a mesh; the resolution is not visible, and it
-costs 16× the memory of a 1024 version. The cap is a setting and can be raised
-from a remote if a particular library needs it. Measured on a real library: the
-VRAM plateau moved from ~3,100 MB to ~1,455 MB, with 70 textures resident
-costing 219 MB where the same 70 would previously have been about 4.3 GB.
+## A display can now hold a `.milk3` of its own
 
-**Shadertoy presets allocated their feedback buffers whether or not they were
-used.** A `.milk3` preset can declare up to four feedback buffers; the engine
-allocated all of them, in 32-bit float, for every rendering surface, from
-startup, for the life of the process — 128 bytes per pixel per surface. Now
-they are allocated when a `.milk3` actually loads, only the ones the preset
-declares, and given back after a spell with no `.milk3` on screen. The release
-is debounced so that stepping past one Shadertoy preset does not churn.
+Before this, handing a display a Shadertoy preset failed in the worst available
+way: the file opened, matched nothing, reported **success**, and the display
+went black — then cached the path so it never tried again, while the
+diagnostics named the `.milk3` as what was playing.
 
-Measured at 1600×2600:
+It was not an exotic thing to do. Preset **cycling** offered `.milk3` files, and
+in a typical library they sit in the same folders as everything else, so a
+display working through a folder reached one on its own and went dark at a
+moment of its own choosing.
+
+A display now parses, compiles and renders a `.milk3` for itself — its own Image
+pass, its own Buffer A–D feedback, its own clock — independently of whatever the
+main window is doing. Two displays can run two different Shadertoy presets while
+the main window runs a third.
+
+It is cheaper than you might expect. Measured on a 2160×3840 primary with two
+1440p secondaries, going from three classic presets to three Shadertoy ones
+costs **+382 MB of video memory — and two thirds of that is the main window
+alone.** Each extra display running its own `.milk3` adds about **65 MB**,
+because the FLOAT32 feedback buffers are allocated only for the passes a preset
+actually declares. Those are upper-bound figures: everything scales with
+resolution, and most setups are smaller than that one.
+
+## Shaders are built for the preset in hand, not the main window's
+
+Four places in the shader generator shape the HLSL it produces according to
+whether the preset is a Shadertoy `.milk3` or a classic `.milk`: which Shadertoy
+texture declarations survive, whether the `q1`–`q32` preset variables stay
+defined, whether the output is a `float3` or a `float4`, and how the final line
+is wrapped.
+
+All four asked a **global** — *is the main window loading a Shadertoy?* — which
+was the right question for exactly as long as the main window was the only thing
+that ever compiled a preset. Since v3.0 a display compiles its own, on its own
+thread. So a display compiling a classic preset at the moment the main window
+happened to be loading a `.milk3` had its `q` variables undefined out from under
+it and its output type changed underneath its code, and the shader did not
+compile:
 
 ```
-classic .milk only                547.0 MB
-stepping another classic .milk    547.0 MB   (+0.0)
-first .milk3                      670.9 MB   (+123.9, against 634.8 for a fixed ten)
-back to classic, before delay     670.9 MB   (+0.0, debounce holding)
-after the delay                   547.1 MB   (-123.8, released)
-a .milk3 again                    670.9 MB   (+123.8, reallocates cleanly)
+error X3004: undeclared identifier 'q10'
+error X3017: cannot implicitly convert from 'float3' to 'float4'
 ```
 
-**Descriptor heap.** The shader-resource heap was too small to put an
-independent mirror on every display — measured on a live instance, exactly two
-fit and the third failed 76 times with "heap full", after which that display
-drew the missing-texture placeholder while the main window looked fine. The
-heap is larger, retired displays hand their reservations back, and a diagnostic
-now reports when two displays' reservations overlap, which is a defect that
-used to be invisible.
+The display then fell back to a plain default shader, so the picture was wrong
+rather than absent, and the errors were briefly visible on screen as they went
+past. The failure was also logged against the *main window's* file rather than
+the preset that actually failed to compile — which is why it was first looked
+for in entirely the wrong file.
 
-**Mirror swap chains** now size themselves from the VRAM budget rather than
-from a fixed number.
+It is a race, and that is why it outlived v3.1: changing presets one after
+another never reproduces it. Only an overlap does, and an overlap is an ordinary
+thing to cause — it needs nothing more than changing one screen while another is
+still loading.
 
----
+Each compile now carries its own answer instead of asking what the main window
+is doing.
 
-## Stability
+## Motion vectors are drawn on every display
 
-### Recovering from a lost graphics device
+`DX12_DrawMotionVectors` had exactly one call site, in the main window's render
+path. A display holding its own preset rendered everything else — warp, shapes,
+waves, sprites, borders — and not this.
 
-A GPU timeout — Windows resetting the display driver, usually because one frame
-took too long — used to close the visualizer. It now rebuilds and carries on.
-That is the intended design and the exit was a regression, not a policy.
+For most presets that is invisible, because something else is drawing too. For a
+preset whose *only* light source is motion vectors, the display was black.
 
-Several of the specific ways the device was being lost are also gone, and they
-were all the same mistake in different places: **freeing something the GPU was
-still reading.**
+Across a 7,678-preset library: **4 presets were completely black** on a display
+and **545 more were quietly degraded**, drawing motion vectors on the main
+window and not on the displays — about 7% of the library rendering differently
+depending on which screen it was on.
 
-- A sprite texture could be released mid-frame while a submitted command list
-  still named it. Sprite textures are now retired on a fence.
-- Loading a preset could free GPU state that a display's render list was still
-  using.
-- Turning mirror watermark off and on took the device down on some machines.
-- A mirror's own snapshot could be freed mid-frame.
+## A GPU crash no longer ends the session
 
-When a device removal does happen, the crash report now says which draw call
-hung and which surface submitted it, rather than a generic device-removed
-error.
+Recovering from a lost graphics device rather than exiting is a long-standing
+principle here, and it had regressed to exiting.
 
-### One preset must not be able to end the session
+What was measured after a device hang is this: the adapter refuses **the process
+that caused it** for about two minutes, while a freshly started process gets a
+working device in about twenty seconds. So MDropDX12 now restarts itself.
 
-The heaviest preset in the test library costs 26–31.8 ms of GPU per frame,
-against 75–130 µs for an ordinary one — a spread of 200–350×. There is now a
-per-preset frame-rate ceiling, so a single expensive preset lowers its own rate
-instead of running the machine into a timeout.
+That is not the same as proving a hung device can never be recovered in place.
+The process is still holding device objects at that point, and a device stays
+alive as long as its children do — so nothing has yet tested what a genuinely
+complete release would do. Restarting is the right answer for a better reason
+than "nothing else works": a fresh process is the only teardown that is provably
+complete, and it stays complete as the code grows.
 
-### Displays that render independently
+The restart carries what it needs to not simply die the same way: it waits for
+the old process to exit before asking for the adapter, it steps the mirror
+resolution down (1920 → 1280 → 960 → mirrors off), and it counts attempts across
+the whole chain rather than giving each new process a fresh three. After three
+it exits, as before. An instance that has run healthily for five minutes and
+then hits a crash gets the full allowance again, because what is being bounded
+is a *loop*, not a rare event.
 
-Each display running its own preset has its own simulation, and several things
-that were per-engine had to become per-display before that was safe: the
-composite mesh, the warp and composite shader constants, the blur passes, the
-texture bindings, and the `.milk2` blend field. While these were shared, one
-display's preset could write into another's — the visible symptom being
-"presets are rendering but they're incorrect", which is precisely what a shader
-reading another preset's textures looks like.
+Device losses that are **not** hangs — a driver update, a reset, an adapter
+change — are still recovered in place without restarting, exactly as before.
 
-A related fix this release: two displays each set to their own preset could end
-up rendering the *same* preset, because their reservations in the descriptor
-heap overlapped and whichever wrote last won. Each display's own bookkeeping was
-entirely correct throughout — right preset, right shaders, own frame counter —
-which is what made it hard to see. The per-display **messages** stayed correct
-too, and that detail is what identified it.
+## Choosing what a display plays
 
-### Threading
+The Displays window's **Selected display** panel gained a **Playing:** row: what
+that display is rendering right now, and a **...** button that opens a file
+picker to put a chosen preset on it immediately.
 
-Window threads were reading engine state while the render thread rewrote it.
-The Resource Viewer walked the texture list from the settings window's thread
-while the render thread added to and removed from it; the diagnostic that
-reports cache size did the same from the remote-control thread. Both now read a
-snapshot the render thread publishes.
+Until now a display could only be moved with **< Prev** and **Next >**, so
+reaching one particular preset meant stepping through the folder until it came
+up.
 
-Worth being straight about this one: a soak test driving that race hard — 1,788
-preset loads against 60,535 refreshes in 90 seconds — does **not** crash the
-old build. These particular mutations corrupt without faulting, so the symptom
-was wrong rows and an occasional crash rather than a reliable one. The fix is
-justified structurally, not by a reproduction, and the guard against it coming
-back is a source-level check rather than the soak.
+The chosen preset is shown, not pinned — it does not become the display's
+startup preset and does not re-point the folder it cycles through. Picking
+something to watch for a minute should not quietly change what plays for the
+rest of the night.
 
----
-
-## Frame rate
-
-### Separate processes per display are gone, and that was the performance win
-
-v3.0 already rendered every display from one process. v3.1 finished removing
-the alternative and wrote down why, because the belief that heavy presets
-should be isolated into their own process had survived for weeks on plausible
-reasoning and no measurement.
-
-Measured, it was backwards. Windows holds a window that is not focused to about
-66 frames a second, so a display in its own process ran at a third of the rate
-you asked for no matter how much hardware was idle. Three independent
-simulations in one process cost **+100 MB of VRAM — 0.66% of a 15 GB budget —
-and 75–130 µs of GPU per surface.** Moving the heaviest preset in the library
-back in-process took the side displays from 15.4 and 15.8 fps to 26.1, with GPU
-per surface down 3.6×.
-
-Every argument that had been recorded in favour of multiple processes turned
-out to describe a bug in the single-process path — bugs which are now fixed.
-`docs/multidisplay_cost.md` has the full record, including the measurement
-traps that produced the wrong answer the first three times.
-
-### Adaptive frame-rate balancing
-
-When several displays are competing and one is starving, the engine now steps
-down through a short ladder — lower the cap, then fall back to the cheapest
-copy that fits — rather than isolating anything. Two deliberate rules:
-
-- **Starvation must be sustained, not sampled.** A single slow frame is not a
-  problem; a second of them is.
-- **It must not react to a rate Windows imposed.** A backgrounded window sitting
-  at 22 fps with the GPU at 20% is not distressed, it is unfocused, and treating
-  that as starvation made it worse. The ladder is gated accordingly.
-
-The triggers scale with the frame rate you asked for, rather than being fixed
-numbers that only made sense at 60.
-
-### Smaller ones
-
-- The engine no longer holds its mirror lock across presenting a frame.
-- Mirrors are paced on measured GPU time rather than wall-clock time.
-- Mirrored displays no longer show bands of an older frame after a resize or a
-  profile load — the buffer wipe that clears them had not run since August.
+The **Random / Sequential** pair of radio buttons is now a single **Sequential**
+checkbox. It was one setting spending two rows to say it; unticked means random,
+which is the default. That is the row **Playing:** now occupies.
 
 ---
 
-## Settings that stay where you put them
+## Also fixed
 
-A loaded display profile used to *lend* its main-window settings — preset
-order, cycle interval — to the session, keeping your own values hidden
-underneath to be restored at shutdown. That gave those settings two values, and
-different parts of the program disagreed about which was real: saving a profile
-recorded one, shutting down recorded the other, and only some of the ways you
-can change the setting cleared the loan.
+* **Three controls in the Displays window shared ID numbers with three others**
+  — "Keep on top", and the startup-profile picker and its Save button, collided
+  with the Layout/Details buttons and the arrangement panel. Windows can only
+  find one control per number, so the startup-profile picker was being read
+  through a handle to the "Details" button.
+* **The `SET_DISPLAY_PRESET` script command and the new file picker now share
+  one code path.** They previously spelled the same logic out separately, which
+  is how the window's Prev/Next buttons and the equivalent script commands drifted
+  apart in an earlier release.
+* A display could be left **stuck on the wrong renderer** after switching preset
+  types, and the sim grid could keep a stale shape — visible as a squashed
+  picture on one screen.
 
-The result was a setting that would not stay put. It is now one value: loading a
-profile changes the setting, the same as changing it anywhere else, and saving
-records what is actually in use.
+## For script and tool authors
 
-Also fixed: a per-display **Keep on top** that was stored but never applied
-until you toggled it off and on; **Next preset** skipping displays holding their
-own preset; and a display profile silently dropping several per-display settings
-when it loaded.
+* `DIAG_MIRRORS` gains **`renders=`** on each surface row: `classic` or `milk3`,
+  naming the pipeline that actually ran. `preset=` still names the display's own
+  preset, which is a different question and was the only one answerable before.
+* **`DIAG_SIMULATE_TDR`** drives the device-loss recovery path without a GPU, so
+  the restart chain can be tested without resetting the display driver. Testing
+  mode only — it makes the application exit and start a replacement.
+* `SET_DISPLAY_PRESET=<n>,<path>` accepts `.milk3` for a display now.
 
----
-
-## Presets that would not load before
-
-- Sampler declaration lists, `sampler_rand` in all four spellings, `tex1D`, and
-  preset-declared sampler addressing.
-- Struct member defaults and preset-level globals.
-- DDS and TGA files that Windows' own imaging component refuses to decode.
-- Textures kept in a folder *beside* the preset folder, which older MilkDrop
-  libraries rely on and which this engine had stopped looking in.
-- Random textures with a prefix now reach your own collection rather than only
-  the bundled set.
-
----
-
-## Also in this release
-
-- **The idle timer can set up the whole room.** A fourth action loads a display
-  profile, so walking away can rearrange every screen rather than just putting
-  one window fullscreen. A separate option takes every display to full opacity,
-  including ones in watermark mode. It brings screens to the front and puts the
-  z-order back on wake, and does not reload a profile that is already loaded.
-  All of it is drivable from a remote.
-- **Delete display profiles** from the Displays window; deleted ones go to the
-  Recycle Bin.
-- **Per-display watermark opacity** and **Keep on top** checkboxes.
-- **Scripts can drive a test and report on it**, including sweeping a whole
-  library and reporting which presets failed to compile.
-- `GET_WINDOW` / `GET_WINDOWS` report where the program's windows are and tell
-  the render windows apart.
-- A blank startup screen with an elapsed-second counter, so a slow first load
-  looks like work rather than a hang.
-- The shader cache no longer follows the working directory.
-
----
-
-## Related apps
-
-- **[Milkwave](https://github.com/IkeC/Milkwave)** — Windows companion app with
-  Remote control, wave manipulation, messaging and more
-- **[MilkRemote](https://github.com/shanevbg/MilkRemote)** — Android remote for
-  MDropDX12 ([latest APK](https://github.com/shanevbg/MilkRemote/releases/latest))
-
-## Installation
-
-Download the portable zip below, extract to any folder with write access, and
-run `MDropDX12.exe`. No installer, no admin rights, no VC++ Redistributable.
-
-Press **F8** for Settings, **F1** for keyboard shortcuts, **Ctrl+F8** for
-Displays.
-
-**New in this release: the zip comes with something to look at.** 93 community
-MilkDrop presets and 22 photographs, so it does something on first run instead
-of asking you to go and find a preset library.
-
-The presets are classic-lineage `.milk` files — Flexi, Geiss, Se7enSlasher,
-martin, fiShbRaiN, Stahlregen, Rovastar, Cope, Zylot, Aderrasi, Krash and
-others, credited in full in `resources/CREDITS.md`. None of them needs a
-texture we cannot ship: they use either no image at all or the `randNN` slots,
-which the bundled photographs fill. No Shadertoy or GLSL Sandbox conversions
-are included — those carry their original authors' terms, and some of those
-terms forbid redistribution outright.
-
-The photographs are Shane's own, downscaled to 1024 pixels on the longest edge
-— which is the engine's new default cap, and past which the detail is not
-visible once an image is sampled onto a warp mesh.
-
-Point it at your own library any time from **Settings → Files**; nothing in the
-bundle is required, and the engine will still start on a preset compiled into
-the executable if you delete the lot.
-
-## Full changelog
-
-See [docs/Changes.md](https://github.com/shanevbg/MDropDX12/blob/main/docs/Changes.md)
-for the complete list across all releases.
+Full detail in [docs/Changes.md](docs/Changes.md). Earlier releases are in
+[docs/releases/](docs/releases/).

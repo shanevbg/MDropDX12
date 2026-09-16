@@ -32,7 +32,7 @@ The net effect is that per-frame driver overhead drops from thousands of validat
 
 ### Modern Shader Compilation
 
-MDropDX12 uses the DirectX Shader Compiler (DXC) targeting Shader Model 6. Benefits include:
+MDropDX12 compiles preset HLSL at runtime with `D3DCompile` (`d3dcompiler_47.dll`), targeting Shader Model 5.0. The profile a preset declares — `ps_2_0` through `ps_5_0`, bounded by the `MinPSVersion` / `MaxPSVersion` settings — selects how the preset's source is translated, and the compatibility shim compiles the result at `ps_5_0` with `D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY` so legacy `.milk`/`.milk2` shader code builds unchanged. `.milk3` Shadertoy presets declare Shader Model 5.0 outright. Benefits include:
 
 - **Async compilation**: Preset transitions compile the next preset's shaders on a background thread. The visualizer never stalls waiting for a shader to compile.
 - **Compile timeout**: If a shader takes too long (malformed or pathologically complex), it is automatically skipped — preventing GPU hangs.
@@ -70,14 +70,50 @@ The interop layer adds minimal overhead — it shares the same GPU command queue
 
 ## TDR Recovery
 
-A Timeout Detection and Recovery (TDR) occurs when Windows resets the GPU after detecting a hang. In DX9, TDR was fatal — the visualizer would crash. MDropDX12 handles TDR gracefully:
+A Timeout Detection and Recovery (TDR) occurs when Windows resets the GPU after
+detecting a hang. In DX9 this was fatal. MDropDX12 recovers — but **the two
+kinds of device loss are recovered differently, and conflating them is what made
+an earlier attempt fail.**
 
-- `ID3D12Device::GetDeviceRemovedReason()` detects the lost device
-- The entire DX12 pipeline (device, swap chain, render targets, descriptors) is rebuilt
-- Window focus is restored if MDropDX12 was the foreground window
-- The user can also manually trigger a device restart from the Settings UI
+`ID3D12Device::GetDeviceRemovedReason()` detects the loss and distinguishes them.
 
-This is especially important for a visualizer that runs for hours and executes arbitrary user-authored shaders.
+**`DXGI_ERROR_DEVICE_REMOVED` / `_RESET` — recovered in place.** A driver
+update, a reset, an adapter change. The whole DX12 pipeline (device, swap chain,
+render targets, descriptors, per-surface mirror objects) is rebuilt and the
+visualizer carries on. `PerformDeviceRecovery` in `App.cpp` does this, and the
+user can trigger the same path deliberately from the Settings UI or over IPC
+with `RESTART_DEVICE`.
+
+**`DXGI_ERROR_DEVICE_HUNG` — the process relaunches itself.** In-process
+recovery was implemented for this case and then measured: after a hang the
+adapter refuses **the offending process** for around 120 seconds, while a
+freshly started process is served a device in about 22 seconds. Relaunching
+clears it; whether a genuinely complete in-process release would too has never
+been tested — the process still holds device objects at that point. So a hang
+starts a successor and exits, because a fresh process is the one teardown that
+is provably complete.
+
+Three things cross to the successor on its command line as
+`-tdrrelaunch=<oldpid>,<attempt>,<ceiling>`, because a relaunch that carries
+nothing simply repeats the death:
+
+| | why |
+|---|---|
+| old pid | the successor waits for its predecessor to exit before asking for the adapter, rather than racing a dying process for it |
+| attempt | the budget is a **session** budget of three, not three per process — otherwise every successor starts fresh and the bound is an infinite loop |
+| ceiling | the mirror resolution steps down, 1920 → 1280 → 960 → mirrors off, so the successor does not restore the arrangement that just killed the GPU |
+
+After three the application exits as it used to. The budget resets once an
+instance has run healthily for five minutes, because what is bounded is a
+*loop*, not a rare event — a machine that hangs once a month should not stop
+recovering on the fourth month.
+
+`DIAG_SIMULATE_TDR` (testing mode only) drives the whole response with no GPU
+involved, so the chain can be exercised without resetting the display driver for
+the entire machine.
+
+This matters for a visualizer that runs for hours executing arbitrary
+user-authored shaders.
 
 ## GDI Overlay HUD
 

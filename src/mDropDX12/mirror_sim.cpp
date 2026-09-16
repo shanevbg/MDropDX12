@@ -315,7 +315,29 @@ bool Engine::MirrorSimAdoptPreset(MirrorSimContext& c)
             }
         }
     } else if (!b.isMilk2 && !b.path.empty()) {
-        ok = newState->Import(b.path.c_str(), nowT, nullptr, STATE_ALL);
+        // A .milk3 takes the Shadertoy parse, not CState::Import (#373).
+        //
+        // Import has no .milk3 branch: the JSON opens, matches no keys and
+        // returns SUCCESS on a default state, so a surface used to adopt an
+        // empty preset, render black, cache the path so it never retried, and
+        // report the .milk3 over IPC as what was playing -- with nothing
+        // logged. ParseMilk3IntoState fills the same CState fields the primary
+        // uses, after which this surface's own LoadShaders and
+        // CreateDX12PresetPSOs below compile the Image and Buffer A-D passes
+        // and build their PSOs, exactly as they already do for a classic
+        // preset. PresetPsoOwned has carried bufferA-D and compFloat all along.
+        const size_t dot = b.path.find_last_of(L'.');
+        const bool wantMilk3 =
+            dot != std::wstring::npos &&
+            _wcsicmp(b.path.c_str() + dot, L".milk3") == 0;
+        if (wantMilk3) {
+            ok = ParseMilk3IntoState(b.path.c_str(), newState);
+            if (!ok)
+                DLOG_WARN("MirrorSim: %ls is not a usable .milk3 — keeping "
+                          "previous (#373)", b.path.c_str());
+        } else {
+            ok = newState->Import(b.path.c_str(), nowT, nullptr, STATE_ALL);
+        }
     }
 
     if (!ok) {
@@ -328,6 +350,26 @@ bool Engine::MirrorSimAdoptPreset(MirrorSimContext& c)
         // will not import is re-attempted on every sim step forever.
         c.loadedOwnPath = own ? c.ownPresetPath : std::wstring();
         return c.pState != nullptr;
+    }
+
+    // WHICH KIND this surface now holds (#373). Derived from the path and set
+    // HERE, past the failure return, so that:
+    //
+    //   * every branch above is covered. Setting it inside the .milk3 arm left
+    //     a surface going .milk3 -> .milk2 with the flag still raised, since a
+    //     .milk2 takes the other branch entirely and would then have rendered
+    //     a classic state through the Shadertoy pipeline;
+    //   * a file that failed to parse cannot leave the surface claiming a mode
+    //     it has no compiled shaders for -- on failure the previous preset is
+    //     kept, and so is the flag that describes it.
+    //
+    // It is set BEFORE the compile below, which reads it to pick the comp
+    // template's `ret` type.
+    {
+        const size_t d = b.path.find_last_of(L'.');
+        c.isMilk3.store(d != std::wstring::npos &&
+                            _wcsicmp(b.path.c_str() + d, L".milk3") == 0,
+                        std::memory_order_relaxed);
     }
 
     // Compile THIS context's own shaders and pipeline objects (#184).
@@ -355,13 +397,21 @@ bool Engine::MirrorSimAdoptPreset(MirrorSimContext& c)
     PresetPsoOwned stagedPsos;
     {
         std::lock_guard<std::mutex> lk(m_presetLoadMutex);
-        // Errors here belong to the preset being adopted, on this thread.
-        t_shaderCompilePreset = b.path.empty() ? nullptr : b.path.c_str();
+        // Errors here belong to the preset being adopted, on this thread -- and
+        // so does its KIND (#373). The comp template injects `float4 ret` for a
+        // Shadertoy preset and `float3` for a classic one, and it used to read a
+        // global: a classic preset adopted while the ENGINE was on a .milk3 got
+        // the Shadertoy prelude and failed to compile with X3017.
+        //
+        // A scope rather than two bare assignments, so an early return or a
+        // throw inside LoadShaders cannot leave this thread claiming to be
+        // compiling something it is not.
+        ShaderCompileScope scope(b.path.empty() ? nullptr : b.path.c_str(),
+                                 c.isMilk3.load(std::memory_order_relaxed));
         LoadShaders(&stagedNew, newState, false, false);
         if (newOld)
             LoadShaders(&stagedOld, newOld, false, false);
         CreateDX12PresetPSOs(stagedNew, stagedOld, stagedPsos);
-        t_shaderCompilePreset = nullptr;
     }
 
     // Rotate states. The mirror thread is the only user of these objects and

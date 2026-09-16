@@ -217,7 +217,7 @@ A display holding its own preset advances on its own timer, independently of the
 | `SET_DISPLAY_WATERMARK=<N>,<0\|1>` | Watermark mode for **one** display. `N` is the device-name index throughout, and naming the display the render window is on addresses *this* instance — the primary is an ordinary row, not a special index. A child is relayed `SET_WATERMARK=`, since it owns its window outright and the style pass cannot reach it; an in-process display records the intent and the style pass applies it |
 | `GET_DISPLAY_WATERMARK[=<N>]` | `DISPLAY_WATERMARK\|<N>=<0\|1>,device=…,ownProcess=…` per monitor, then `\|END` |
 | `SET_DISPLAY_ENABLED=<N>,<0\|1>` | Turn display N on or off. Starts or stops its child if it owns one |
-| `SET_DISPLAY_PRESET=<N>,<path>` | Show a preset on display N **now**. Transient — it does not become that display's startup preset |
+| `SET_DISPLAY_PRESET=<N>,<path>` | Show a preset on display N **now**. Transient — it does not become that display's startup preset, and does not re-point the folder it cycles through. `.milk`, `.milk2` and `.milk3` are all accepted: since v3.2 a display parses and renders a `.milk3` with its own Image and Buffer A–D passes, independently of what the main window is on. Shares one code path with the Displays window's preset picker, so the two cannot answer differently |
 | `SET_DISPLAY_STARTUP_PRESET=<N>,<path>` | The preset display N returns to when its instance restarts |
 | `SET_DISPLAY_PRESET_DIR=<N>,<path>` | The folder display N cycles through; empty inherits the parent's |
 | `SET_DISPLAY_ORDER=<N>,<0\|1>` | Random (0) or sequential (1) order on display N |
@@ -606,7 +606,9 @@ compared side by side. Two files ship for this:
 | `resources/scripts/compare_milkwave.py` | the helper it launches |
 
 Edit the two paths at the top of the `.txt` — your Python, and your Milkwave —
-then run it from the Script window or over IPC with `SCRIPT=compare-milkwave`.
+then run it from the Script window, or over IPC with
+`SCRIPT_LOAD=resources\scripts\compare-milkwave.txt` followed by `SCRIPT_PLAY`
+(the path is taken literally, relative to the working directory).
 
 The helper plays the same preset in both engines, photographs each window,
 scores how far apart they look and writes `comparison/report.txt` ranked worst
@@ -885,12 +887,13 @@ Signal commands use the `SIGNAL|` prefix and are processed directly by the pipe 
 
 | Command | Response | Description |
 |---------|----------|-------------|
-| `DIAG_MIRRORS` | `MIRRORS\|…` | Rich mirror dump. Global: `main=WxH,mainPort,needSrv,canSample,anyOpp,anyIndepMilk3,shadertoy,compPso,slots,frame,skipFrames,allocHr,listHr,auxUsed,orient=WxH,orientReady,orientFrames,orientFb`. Per `monN`: enabled/opacity/clickthru/independent/skipped/portrait, swapsize/bufs, layered/visible, **path** (`orient`/`stretchMain`/`letterbox`/`copy`/`black`/`orientFail`), drawFI/presFI/presHr, ok/fail/skip/draws, mustBlock/oppIndep/wipe/paintMask, bb0/bb1/bb2 states. Use when debugging portrait landscape ghost / every-other-frame. |
+| `DIAG_MIRRORS` | `MIRRORS\|…` | Rich mirror dump. Global: `main=WxH,mainPort,needSrv,canSample,anyOpp,anyIndepMilk3,shadertoy,compPso,slots,frame,skipFrames,allocHr,listHr,auxUsed,orient=WxH,orientReady,orientFrames,orientFb`. Per `monN`: enabled/opacity/clickthru/independent/skipped/portrait, swapsize/bufs, layered/visible, **path** (`orient`/`stretchMain`/`letterbox`/`copy`/`black`/`orientFail`), drawFI/presFI/presHr, ok/fail/skip/draws, mustBlock/oppIndep/wipe/paintMask, bb0/bb1/bb2 states. Use when debugging portrait landscape ghost / every-other-frame. Per `surf=` (one row per surface that renders for itself — an own-preset display or an independent mirror): `own` (does it hold a preset of its own), `preset` (that preset's filename), **`renders`** (`classic` or `milk3` — the pipeline that ACTUALLY ran), `size`, `ready`, `frames`, `pf`/`ovr` (its own per-frame clock), `simFps`, `simTime`, `bindBase`, `workUs`, `sub`/`done` (its own fence), `prims`/`psInv`/`overdraw`, `gpuUs`. **`preset` and `renders` answer different questions and you usually want both**: `preset` is what the display is configured to play, `renders` is which renderer drew the frame. Before v3.2 only the first existed, and a display drawing the main window's Shadertoy went on reporting its own preset the whole time — the one diagnostic for that fault asserted nothing was wrong. |
 | `DIAG_WINDOW=<title>` | `WINDOW_CTRLS\|…`, one `WINDOW_CTRL\|…` per control, `WINDOW_CTRLS_END` | Every control on one of our own tool windows: `class`, `id`, `x`/`y`/`w`/`h` (client coords), `vis`, `enab`, `clip` (1 when the client edge cuts the control's RECTANGLE off), `tw` (the width the CONTROL would need to hold its text on one line, its own chrome included, so `textfits` is 0 exactly when `tw` > `w`), `textfits` (0 when the text does not fit the control it is in, 1 when it does, -1 where the question is not asked — an edit or a combo holds the user's data and scrolls it), `u=` the text's CODEPOINTS, and `text=` the text itself (`\|` escaped as `\|`, backslash as `\\`, CR/LF as `\r`/`\n`; decode left to right in ONE pass — the pipe is deliberately **not** `\p`, because almost every string here is a Windows path and a two-pass decoder turns `C:\resources\presets\` into `C:\resources\|resets\`, which looks exactly like a truncated buffer). Title matched case-insensitively, whole title before prefix. `WINDOW_CTRLS=NOTFOUND` if no visible window matches. **The codepoints are the point:** a glyph button whose escape was mangled into the system codepage still prints as something, and only `u=` shows `U+E8E5` arriving as `00C3 00A8 0045 0035`. `clip` and `textfits` are different failures and neither implies the other: a button in the right place can still be drawn as `Ou` instead of `Out`. `textfits` is measured against this app's OWN drawing code — every button, check box and radio here is `BS_OWNERDRAW`, so the check-glyph reserve comes from `DrawOwnerCheckbox`, not from a system metric — which is one more reason it can only be answered in-process. |
 | `CAPTURE_WINDOW=<title>` | `WINDOW_CAPTURE_PATH=<png>` | A PNG of one tool window, written under `capture\`. Taken INSIDE the process with `PW_RENDERFULLCONTENT` — from another process `PrintWindow` does not render owner-drawn buttons at all, so the pin, the refresh and every glyph button come back as flat background and a broken one looks exactly like a working one. Use `CAPTURE` for the render output; this is for the windows. |
 | `DIAG_MESSAGES` | `DIAG_MESSAGES\|…` | Every term of the autoplay guard — `enabled`, `testing`, `autoplay`, `count`, `nextAt`, `now`, `interval`, `jitter`, `maxOnScreen`, `sequential`, `nextSeq`, `animProfiles` — then one `stN=` block per live supertext (`start`, `dur`, `fadeOut`, `burn`, `redraw`, `song`, `text`); free slots are omitted. Use when messages do not appear: `nextAt` far ahead of `now` means the clock moved backwards, and a `stN` with `start` in the future is a leaked slot. |
 | `DIAG_MIRRORPACE=<0\|1>` | `MIRRORPACE=<0\|1>,skipped=<n>` | The closed-loop mirror pacer (#230), which holds mirror GPU work below the TDR watchdog by dropping frames when the measured cost climbs. **Off exists only to demonstrate the device removal it prevents** — turn it off to show the failure is still reachable, then back on. `skipped=` is the running count of frames it dropped. |
 | `DIAG_BALANCE[=<0\|1>]` | `BALANCE=<0\|1>\|state=\|main=\|slowest=\|displays=\|ratio=\|cap=\|userCap=\|baseline=` | Adaptive frame-rate balancing (#261), which replaced the automatic isolation gate `DIAG_GPURISK` switched. When the main render exceeds **1.25×** the slowest independent display, the main is capped to that ratio and the displays re-measured. If they improved the cap is kept and tracks the current slowest, so the main rises again as they do; if they did **not** improve, the cap is released and the preset is `ruledout`, because some presets are simply slow and capping the main buys nothing. `state=` is `idle`/`probing`/`holding`/`ruledout`; `userCap=` is the frame cap being held on the user's behalf (`-1` when none). The verdict resets on a preset change. The cap is never written to `settings.ini`. Children are excluded from `slowest=`: they render in another process, so capping this one frees them nothing. |
+| `DIAG_SIMULATE_TDR` | `SIMULATE_TDR\|ok=<0\|1>` | **Testing mode only**, and it makes the application EXIT and start a replacement — which is exactly what nobody wants arriving down a pipe by accident, hence the gate. Drives the GPU-fatal path with no GPU involved, so the whole device-loss response can be exercised without resetting the display driver for the machine: the mirror-resolution backoff (1920 → 1280 → 960 → off), the relaunch, the successor waiting for its predecessor to exit, and the three-attempt session budget. A fourth call in the same chain exits instead of relaunching. Refuses with `err=not_testing` unless `TESTING_MODE=1` is set first. The one thing it does *not* exercise is the detection ahead of it — that a real `DXGI_ERROR_DEVICE_HUNG` arrives — which needs a real TDR. |
 | `SET_MIRROR_WATERMARK=<0\|1>` | `MIRROR_WATERMARK=<0\|1>` | Watermark mode for **every** mirror at once — absolute, not a toggle. Per-display is `SET_DISPLAY_WATERMARK=<N>,<0\|1>`; the primary's own is `SET_WATERMARK=<0\|1>` / `GET_WATERMARK`. |
 | `SET_MIRROR_WIPE` | `MIRROR_WIPE=1` | Re-arm full flip-chain wipe (clears paint masks). `SET_MIRROR_WIPE=reinit` also force-recreates mirror swap chains. |
 | `SET_MIRROR_OPACITY=<1-100>` | `MIRROR_OPACITY=<N>` | Set opacity for all monitor mirrors (or `N,val` for DISPLAY N) |
@@ -972,7 +975,7 @@ groups, profiles and the view model — is in [`mixer.md`](mixer.md).
 
 `GET_VERSION` answers with the build's identity:
 
-    VERSION=3.1.0|build=…|config=Release|arch=x64|protocol=10|pid=…|child=0
+    VERSION=3.2.0|build=…|config=Release|arch=x64|protocol=11|pid=…|child=0
     |commands=292|script=56|signals=21|features=mixerview,mixerrev,mixerpush,…,idleconfig
 
 **Gate on `protocol` and `features`, never on the version string.** A version is
@@ -982,7 +985,7 @@ what a client actually needs to know.
 `protocol` is a monotonic integer and moves for **any** change a client can
 depend on — a new command or an added field counts, not only a breaking one. It
 stood at 1 through the whole of the v3 work under the old "only when an existing
-command's contract changes" rule, which is why the rule changed (forgejo#74).
+command's contract changes" rule, which is why the rule changed (#74).
 
     1   the original surface, through the v2.11.0 release
     2   the mixer view, the arrangement token, and both fader fields
@@ -994,6 +997,7 @@ command's contract changes" rule, which is why the rule changed (forgejo#74).
     8   SET_VSYNC=/GET_VSYNC
     9   SET_MIRROR_WATERMARK= — the absolute form, alongside the toggles
     10  the idle timer is configurable and resettable from a remote
+    11  SET_TEXCAP=/GET_TEXCAP — the longest edge a texture loaded from disk keeps
 
 `features` names capabilities individually, because a client usually degrades
 per feature rather than per build — MilkDrop Remote has a separate fallback for
@@ -1018,6 +1022,7 @@ three of the four.
 | `displaywatermark` | `SET_DISPLAY_WATERMARK=` addresses **one** display, and `GET_DISPLAY_WATERMARK` reads it back |
 | `displaytiers` | `SET_DISPLAY_MODE=<N>,preset` — a display holds its own preset **in this process**, the middle tier between mirror and child |
 | `idleconfig` | The idle timer is configurable from a remote, not just switchable: `SET_IDLE_TIMEOUT=`, `SET_IDLE_ACTION=`, `SET_IDLE_PROFILE=`, `SET_IDLE_FULL_OPACITY=`, `RESET_IDLE_TIMER`, and two more fields on `IDLE_TIMER=` |
+| `texcap` | `SET_TEXCAP=` / `GET_TEXCAP` — the longest edge a texture loaded from disk keeps, so a client can offer the control and show the current value |
 
 Three rules the list follows, so that it can be trusted:
 
@@ -1459,7 +1464,7 @@ leaked slot.
 | Command | Description |
 |---------|-------------|
 | `SHUTDOWN` | Clean shutdown: saves settings, stops the render thread, exits |
-| `RESTART_DEVICE` | Recreate the D3D12 device — the same path a TDR recovery takes |
+| `RESTART_DEVICE` | Recreate the D3D12 device **in place** — the path a driver update, a device reset or an adapter change takes. A real TDR does **not** come this way: since v3.2 a `DXGI_ERROR_DEVICE_HUNG` relaunches the process instead, because the adapter refuses the process that hung it for about two minutes afterwards. `PerformDeviceRecovery` routes a hang away before any rebuild is attempted. To exercise *that* path, see `DIAG_SIMULATE_TDR` |
 | `TESTING_MODE[=<0\|1>]` | Freeze automatic preset changes and the idle timer, and ignore the keyboard. Bare form queries. **Never persisted** |
 | `SET_LOGLEVEL=<0-4>` / `GET_LOGLEVEL` | 0 Off, 1 Error, 2 Warn, 3 Info, 4 Verbose. The getter also reports the log directory |
 | `CLEAR_LOGS` | Delete everything under `log/` and reopen `debug.log` |
@@ -1483,6 +1488,16 @@ is exactly where a stray write gets in.
 White is the multiplicative identity, which is why it is the safe default: a
 missing texture that falls back to black turns whatever it multiplies into a
 black screen, and that reads as a broken preset rather than a missing file.
+
+#### Texture size cap
+
+| Command | Description |
+|---------|-------------|
+| `SET_TEXCAP=<0\|64-16384>` | Longest edge a texture loaded from disk keeps; `0` removes the cap. Default 1024. Reply `TEXCAP=<n>`. Applies to the **next** load, not to textures already resident — step a preset, or let the cache evict. Persisted as `MaxTextureDim` |
+| `GET_TEXCAP` | Read the cap back. Reply `TEXCAP=<n>` |
+
+A value between 1 and 63 is raised to 64 and anything above 16384 is clamped;
+the reply carries the value actually in force.
 
 ### Preset Lists and Directory (IPC)
 
@@ -1522,7 +1537,7 @@ running or not.
 |---------|-------------|
 | `SET_PRESET_RATING=<0-5>` / `SET_PRESET_RATING_FOR=<hash>,<0-5>` | Rate a preset. `0` clears the rating |
 | `SET_PRESET_FLAG=<name>,<0\|1>` / `SET_PRESET_FLAG_FOR=<hash>,…` | Set or clear one flag: `favorite`, `error`, `skip`, `broken`, `canvas` |
-| `SET_PRESET_TAG=<name>,<0\|1>` / `SET_PRESET_TAG_FOR=<hash>,…` | Add or remove a tag |
+| `SET_PRESET_TAG_FOR=<hash>,<name>,<0\|1>` | Add or remove a tag. **Hash-addressed only** — there is no plain `SET_PRESET_TAG=` form |
 | `SET_PRESET_NOTE=<text>` / `SET_PRESET_NOTE_FOR=<hash>,<text>` | Set the note |
 | `GET_PRESET_NOTE` / `GET_PRESET_NOTE_FOR=<hash>` | Read the note; empty if it has none |
 | `GET_PRESET_TAGS` | Every tag in use, with counts |
@@ -1617,6 +1632,7 @@ specific wrong belief cost a debugging session.
 | `DIAG_LADDER[=<0\|1>]` | The distress ladder and its rung: 1 adaptive frame rate, 2 cheapest copy mirrors. Reports whether the frame is GPU-bound and the rate rung 1 is tracking |
 | `DIAG_GPU` | This process's GPU and VRAM cost, keyed by pid. Asking turns the sampler on for about 8s, and because the counter is a rate the **first** reply after a quiet period carries `gpu3d=-1` — poll twice about a second apart and read the second |
 | `DIAG_GPUTIME=<0\|1>[,<ms>]` | Per-stage GPU timing; logs frames where a stage exceeds `<ms>` (default 50). Averages over a frame hide the single draw that kills a device |
+| `DIAG_VRAMMARK=<0\|1>` | Local VRAM at each allocating checkpoint plus the delta since the previous mark, so a jump can be attributed to the call that caused it. The trail goes to `log/debug.log` as `VMARK` lines, not down the pipe; the reply is only `VRAMMARK=<0\|1>`. Off by default — `QueryVideoMemoryInfo` is a real call and some marks sit in per-surface paths. Enabling re-baselines, so the first mark of a run reports a level rather than a delta |
 | `DIAG_CONFIG[=flush]` | Settings-layer counters; `=flush` writes the cache out first |
 | `DIAG_UI_MODE` | Which full-frame overlay is up (regular / menu / load / settings …) and the settings cursor |
 | `DIAG_MESSAGES` | Every term of the autoplay message guard — see [Messages](#messages-ipc) |
@@ -1649,10 +1665,23 @@ silently changed the other:
 | `DIAG_BATTERY` | HUD headset battery: toggle, percent, and which device it came from |
 | `DIAG_BATTERY_SIM=<0-100\|off>` | Force the HUD battery figure so its colour bands can be seen. In memory only |
 
-> `DIAG_SIMULATE_DEVICE_REMOVED` forces `DXGI_ERROR_DEVICE_REMOVED` to exercise
-> TDR handling. It **destroys the device** — the recovery path is what is under
-> test. A TDR is machine-wide, so it also takes down any other visualizer
-> running at the time.
+> **Two device-loss simulations, and they exercise different paths.**
+>
+> `DIAG_SIMULATE_DEVICE_REMOVED` calls `ID3D12Device5::RemoveDevice`, which
+> raises `DXGI_ERROR_DEVICE_REMOVED` — the **in-place** recovery: the device is
+> destroyed and rebuilt without the application exiting, the same path a driver
+> update or an adapter change takes. It removes only **this process's** device
+> object, so nothing else on the machine is affected.
+>
+> `DIAG_SIMULATE_TDR` drives the other path — the one a `DEVICE_HUNG` takes,
+> where the process relaunches itself. Testing mode only.
+>
+> Neither is a real TDR, and that is the point of having them. **A real TDR is
+> machine-wide**: it resets the display driver and takes down every other
+> visualizer, game and GPU-accelerated window running at the time, so inducing
+> one is expensive and is not the way to iterate on the recovery logic. This
+> warning used to sit on `DIAG_SIMULATE_DEVICE_REMOVED`, which is not
+> machine-wide and does not produce a TDR; it belongs here.
 
 ### Recipes
 

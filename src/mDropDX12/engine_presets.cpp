@@ -3012,38 +3012,33 @@ namespace mdrop {
 // Async: parses JSON on the calling thread (fast), then launches a background thread
 // for shader compilation.  LoadPresetTick() picks up the result on the render thread.
 // Thread cancellation for stale async loads is handled by LoadPreset before calling this.
-void Engine::LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime) {
-  // #184: see LoadPreset. The scope here covers a synchronous compile on this
-  // thread; the load thread below opens its own, because the flag is
-  // thread_local and does not travel to it.
-  ShaderCompileScope _shaderScope(szPresetFilename);
+// Parse a .milk3 into a CState, and nothing else (#373).
+//
+// Everything a .milk3 contributes is ORDINARY CSTATE: the Image pass becomes
+// m_szCompShadersText, each Buffer A-D becomes m_szBuffer*ShadersText, every
+// one at MD2_PS_5_0, plus the neutralised warp defaults that keep the mesh out
+// of the way. No engine member is involved, which is what makes it shareable.
+//
+// Split out of LoadMilk3Preset so an own-preset DISPLAY can fill ITS OWN state
+// the same way. That surface already compiles its own shaders and builds its
+// own PSOs -- including bufferA-D and compFloat, which PresetPsoOwned has
+// carried all along -- so this parse was the only piece it was missing.
+//
+// Returns false when the file is not a usable .milk3; the caller decides what
+// that means. LoadMilk3Preset treats it as a failed load; a surface keeps the
+// preset it already had.
+bool Engine::ParseMilk3IntoState(const wchar_t* szPresetFilename, CState* out) {
+  if (!out || !szPresetFilename || !*szPresetFilename)
+    return false;
+
   JsonValue root = JsonLoadFile(szPresetFilename);
-  if (!root.isObject()) {
-    wchar_t buf[MAX_PATH + 64];
-    FormatTo(buf, L"LoadMilk3Preset: failed to parse %s", szPresetFilename);
-    DebugLogW(buf, LOG_WARN);
-    {
-      char line[1024];
-      FormatToA(line, "FAIL parse milk3: %ls\n", szPresetFilename);
-      DebugLogDiagAppend(L"diag_preset_load.txt", line);
-    }
-    m_nLoadingPreset = 0;
-    return;
-  }
+  if (!root.isObject())
+    return false;
+  if (root[L"version"].asInt(0) < 1)
+    return false;
 
-  int version = root[L"version"].asInt(0);
-  if (version < 1) {
-    DebugLogA("LoadMilk3Preset: unsupported version", LOG_WARN);
-    {
-      char line[256];
-      FormatToA(line, "FAIL milk3 unsupported version=%d path=%ls\n", version, szPresetFilename);
-      DebugLogDiagAppend(L"diag_preset_load.txt", line);
-    }
-    m_nLoadingPreset = 0;
-    return;
-  }
-
-  // Convert wide strings to narrow for shader text storage
+  // Shader text is stored narrow. Newlines become LINEFEED_CONTROL_CHAR, which
+  // is how every other preset path carries multi-line shader source.
   auto wideToNarrow = [](const std::wstring& ws) -> std::string {
     std::string s;
     s.reserve(ws.size());
@@ -3058,80 +3053,88 @@ void Engine::LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime) 
     return s;
   };
 
-  // Fill m_pNewState (NOT m_pState — that's live on the render thread).
-  // LoadPresetTick will swap pointers on the render thread when compilation finishes.
-  m_pNewState->Default(0xFFFFFFFF);
+  out->Default(0xFFFFFFFF);
 
   // Neutralize milk warp defaults (zoom=0.9, dx=0.04) so unused mesh UVs stay
   // in-range if anything still samples them. Shadertoy does not draw the mesh,
   // but RENDER_DIAG still showed mesh_tl UVs outside [0,1] from these defaults.
-  m_pNewState->m_fZoom = 1.0f;
-  m_pNewState->m_fZoomExponent = 1.0f;
-  m_pNewState->m_fRot = 0.0f;
-  m_pNewState->m_fWarpAmount = 0.0f;
-  m_pNewState->m_fXPush = 0.0f;
-  m_pNewState->m_fYPush = 0.0f;
-  m_pNewState->m_fStretchX = 1.0f;
-  m_pNewState->m_fStretchY = 1.0f;
-  m_pNewState->m_fWarpAnimSpeed = 0.0f;
-  m_pNewState->m_fWarpScale = 1.0f;
-  m_pNewState->m_fDecay = 1.0f;
+  out->m_fZoom = 1.0f;
+  out->m_fZoomExponent = 1.0f;
+  out->m_fRot = 0.0f;
+  out->m_fWarpAmount = 0.0f;
+  out->m_fXPush = 0.0f;
+  out->m_fYPush = 0.0f;
+  out->m_fStretchX = 1.0f;
+  out->m_fStretchY = 1.0f;
+  out->m_fWarpAnimSpeed = 0.0f;
+  out->m_fWarpScale = 1.0f;
+  out->m_fDecay = 1.0f;
 
-  // Set preset description from filename
   {
     const wchar_t* p = wcsrchr(szPresetFilename, L'\\');
     if (!p) p = szPresetFilename; else p++;
-    wcsncpy_s(m_pNewState->m_szDesc, p, MAX_PATH - 1);
-    wchar_t* dot = wcsrchr(m_pNewState->m_szDesc, L'.');
+    wcsncpy_s(out->m_szDesc, p, MAX_PATH - 1);
+    wchar_t* dot = wcsrchr(out->m_szDesc, L'.');
     if (dot) *dot = L'\0';
   }
 
-  // Extract shader text from JSON. Both key spellings are accepted; see
-  // milk3_format.h for why the names changed and why nothing needs migrating.
-  std::wstring imageW   = Milk3String(root, kMilk3KeyMain, kMilk3LegacyKeyMain);
-  std::wstring bufferAW = Milk3String(root, Milk3PassKey(0), Milk3LegacyPassKey(0));
-  std::wstring bufferBW = Milk3String(root, Milk3PassKey(1), Milk3LegacyPassKey(1));
-  std::wstring bufferCW = Milk3String(root, Milk3PassKey(2), Milk3LegacyPassKey(2));
-  std::wstring bufferDW = Milk3String(root, Milk3PassKey(3), Milk3LegacyPassKey(3));
+  // Both key spellings are accepted; see milk3_format.h for why the names
+  // changed and why nothing needs migrating.
+  const std::wstring imageW   = Milk3String(root, kMilk3KeyMain, kMilk3LegacyKeyMain);
+  const std::wstring bufferAW = Milk3String(root, Milk3PassKey(0), Milk3LegacyPassKey(0));
+  const std::wstring bufferBW = Milk3String(root, Milk3PassKey(1), Milk3LegacyPassKey(1));
+  const std::wstring bufferCW = Milk3String(root, Milk3PassKey(2), Milk3LegacyPassKey(2));
+  const std::wstring bufferDW = Milk3String(root, Milk3PassKey(3), Milk3LegacyPassKey(3));
 
-  // Store Image/comp shader
-  if (!imageW.empty()) {
-    std::string imageA = wideToNarrow(imageW);
-    strncpy_s(m_pNewState->m_szCompShadersText, MAX_SHADER_TEXT_LEN, imageA.c_str(), _TRUNCATE);
-    m_pNewState->m_nCompPSVersion = MD2_PS_5_0;
+  struct { const std::wstring& src; char* dst; int* ver; } kPasses[] = {
+    { imageW,   out->m_szCompShadersText,    &out->m_nCompPSVersion    },
+    { bufferAW, out->m_szBufferAShadersText, &out->m_nBufferAPSVersion },
+    { bufferBW, out->m_szBufferBShadersText, &out->m_nBufferBPSVersion },
+    { bufferCW, out->m_szBufferCShadersText, &out->m_nBufferCPSVersion },
+    { bufferDW, out->m_szBufferDShadersText, &out->m_nBufferDPSVersion },
+  };
+  for (auto& p : kPasses) {
+    if (p.src.empty())
+      continue;
+    const std::string narrow = wideToNarrow(p.src);
+    strncpy_s(p.dst, MAX_SHADER_TEXT_LEN, narrow.c_str(), _TRUNCATE);
+    *p.ver = MD2_PS_5_0;
   }
 
-  // Store Buffer A shader
-  if (!bufferAW.empty()) {
-    std::string bufferAA = wideToNarrow(bufferAW);
-    strncpy_s(m_pNewState->m_szBufferAShadersText, MAX_SHADER_TEXT_LEN, bufferAA.c_str(), _TRUNCATE);
-    m_pNewState->m_nBufferAPSVersion = MD2_PS_5_0;
-  }
+  // No warp shader in Shadertoy mode.
+  out->m_nWarpPSVersion = 0;
+  out->m_nMaxPSVersion = MD2_PS_5_0;
 
-  // Store Buffer B shader
-  if (!bufferBW.empty()) {
-    std::string bufferBA = wideToNarrow(bufferBW);
-    strncpy_s(m_pNewState->m_szBufferBShadersText, MAX_SHADER_TEXT_LEN, bufferBA.c_str(), _TRUNCATE);
-    m_pNewState->m_nBufferBPSVersion = MD2_PS_5_0;
-  }
+  // An Image pass is the minimum. Without it there is nothing to draw, and
+  // saying so here is what stops a surface adopting an empty state -- the
+  // silent failure #373 was filed for.
+  return !imageW.empty();
+}
 
-  // Store Buffer C shader
-  if (!bufferCW.empty()) {
-    std::string bufferCA = wideToNarrow(bufferCW);
-    strncpy_s(m_pNewState->m_szBufferCShadersText, MAX_SHADER_TEXT_LEN, bufferCA.c_str(), _TRUNCATE);
-    m_pNewState->m_nBufferCPSVersion = MD2_PS_5_0;
+void Engine::LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime) {
+  // #184: see LoadPreset. The scope here covers a synchronous compile on this
+  // thread; the load thread below opens its own, because the flag is
+  // thread_local and does not travel to it.
+  // shadertoy=true: this loader only ever compiles .milk3, and saying so here
+  // means the comp template's `float4 ret` comes from the compile in hand
+  // rather than from a global that another thread may be compiling against
+  // (#373).
+  ShaderCompileScope _shaderScope(szPresetFilename, kCompileKindShadertoy);
+  // The parse lives in ParseMilk3IntoState so an own-preset display can use
+  // the same one on its own CState (#373). Nothing about reading a .milk3 is
+  // specific to the primary; only the async compile below is.
+  if (!ParseMilk3IntoState(szPresetFilename, m_pNewState)) {
+    wchar_t buf[MAX_PATH + 64];
+    FormatTo(buf, L"LoadMilk3Preset: failed to parse %s", szPresetFilename);
+    DebugLogW(buf, LOG_WARN);
+    {
+      char line[1024];
+      FormatToA(line, "FAIL parse milk3: %ls\n", szPresetFilename);
+      DebugLogDiagAppend(L"diag_preset_load.txt", line);
+    }
+    m_nLoadingPreset = 0;
+    return;
   }
-
-  // Store Buffer D shader
-  if (!bufferDW.empty()) {
-    std::string bufferDA = wideToNarrow(bufferDW);
-    strncpy_s(m_pNewState->m_szBufferDShadersText, MAX_SHADER_TEXT_LEN, bufferDA.c_str(), _TRUNCATE);
-    m_pNewState->m_nBufferDPSVersion = MD2_PS_5_0;
-  }
-
-  // No warp shader in Shadertoy mode
-  m_pNewState->m_nWarpPSVersion = 0;
-  m_pNewState->m_nMaxPSVersion = MD2_PS_5_0;
 
   // Launch background thread for shader compilation (D3DCompile is the expensive part).
   // LoadPresetTick on the render thread will swap state + shaders when done.
@@ -3175,7 +3178,13 @@ void Engine::LoadMilk3Preset(const wchar_t* szPresetFilename, float fBlendTime) 
     // same function (C2712). Nothing to restore anyway -- the thread ends
     // here, and the flag is thread_local, so it dies with it.
     t_shaderCompilePreset = loadingName.c_str();
-    // Locked (forgejo#20): unlike the sibling .milk (~2737) and .milk2
+    // And the KIND, on this thread, for the same reason (#373). This is the
+    // thread that actually compiles the primary's .milk3, so it is the one that
+    // has to declare it — otherwise the template falls back to the global and
+    // the correctness of a surface's concurrent compile depends on what the
+    // engine happens to be doing.
+    t_shaderCompileKind = kCompileKindShadertoy;
+    // Locked (#20): unlike the sibling .milk (~2737) and .milk2
     // (~2648) load threads, this one ran with no synchronization at all. A
     // load superseded within LoadPreset's 2000ms DETACH window keeps running
     // here -- reading m_pNewState's shader-text buffers and writing
@@ -3236,7 +3245,10 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
   // threads open their own, because the flag is thread_local and does not
   // travel.
   const std::wstring loadingName(szPresetFilename ? szPresetFilename : L"");
-  ShaderCompileScope _shaderScope(loadingName.c_str());
+  // Classic, said out loud (#373). LoadPreset handles .milk and .milk2 only —
+  // .milk3 goes to LoadMilk3Preset — and saying so keeps a surface's concurrent
+  // compile from being decided by whatever the engine is mid-load on.
+  ShaderCompileScope _shaderScope(loadingName.c_str(), kCompileKindClassic);
   // clear old error/notification msgs...
   if (m_nFramesSinceResize > 4) {
     ClearErrors(ERR_PRESET);
@@ -3294,7 +3306,7 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
       }
       m_presetLoadThread.detach();
       // The detached thread may still be mid-write into m_NewShaders/m_pNewState
-      // (forgejo#20) -- no raw nulling here. m_presetLoadMutex-guarded Clear()
+      // (#20) -- no raw nulling here. m_presetLoadMutex-guarded Clear()
       // below (not raw assignment: it SafeRelease()s each COM pointer first)
       // waits for the detached thread to finish before touching these fields,
       // which is what actually makes this safe.
@@ -3385,7 +3397,7 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
     }
   }
 
-  // Locked (forgejo#20): a detached-but-still-running compile thread from a
+  // Locked (#20): a detached-but-still-running compile thread from a
   // superseded load (see DETACH above) holds this same mutex for the
   // duration of its own LoadShaders call, so this blocks until it is
   // actually done touching m_NewShaders before releasing/nulling it --
@@ -3512,6 +3524,7 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
     // same function (C2712). Nothing to restore anyway -- the thread ends
     // here, and the flag is thread_local, so it dies with it.
     t_shaderCompilePreset = loadingName.c_str();
+    t_shaderCompileKind = kCompileKindClassic;  // .milk2 — #373
       m_presetLoadMutex.lock();  // shared m_pNewState / m_NewShaders across load threads
       __try {
         // Import preset 1 (blend-from) into m_pMilk2OldState
@@ -3616,6 +3629,7 @@ void Engine::LoadPreset(const wchar_t* szPresetFilename, float fBlendTime) {
     // same function (C2712). Nothing to restore anyway -- the thread ends
     // here, and the flag is thread_local, so it dies with it.
     t_shaderCompilePreset = loadingName.c_str();
+    t_shaderCompileKind = kCompileKindClassic;  // .milk — #373
     m_presetLoadMutex.lock();  // shared m_pNewState / m_NewShaders across load threads
     __try {
       // Import preset (parses .milk file, compiles NSEEL expressions)

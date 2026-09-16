@@ -1,6 +1,7 @@
 # Past release notes
 
-The long-form notes for each release, as published with it.
+The long-form notes written for each release, corrected since where they were
+wrong.
 
 `RELEASE_NOTES.md` in the repository root is always the **current** release.
 When a new one is written, the outgoing file moves here as `v<version>.md`.
@@ -16,5 +17,6 @@ record.
 
 | release | notes |
 |---|---|
+| v3.1.0 | [v3.1.0.md](v3.1.0.md) |
 | v3.0.0 | [v3.0.0.md](v3.0.0.md) |
 | v2.11.0 | [v2.11.0.md](v2.11.0.md) |

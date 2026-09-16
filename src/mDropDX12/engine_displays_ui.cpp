@@ -460,8 +460,10 @@ void DisplaysWindow::BuildOutputsPage(int x, int y, int rw, int lineH, int gap) 
     // Own-process settings: preset directory, startup preset, cycle.
     {
       int lw = LabelW(hw, hFont, L"Preset dir:");
-      int slw = LabelW(hw, hFont, L"Startup:");
-      if (slw > lw) lw = slw;
+      for (const wchar_t* t : { L"Startup:", L"Playing:" }) {
+        const int w = LabelW(hw, hFont, t);
+        if (w > lw) lw = w;
+      }
       int brW = MulDiv(30, lineH, 26);
 
       PAGE_TC(0, CreateLabel(hw, L"Preset dir:", gx, gy, lw, lineH, hFont));
@@ -478,6 +480,22 @@ void DisplaysWindow::BuildOutputsPage(int x, int y, int rw, int lineH, int gap) 
                            gx + gw - brW, gy, brW, lineH, hFont));
       gy += row;
 
+      // What this display is showing right now, and a file dialog to change it
+      // (#364). Startup: is what it comes up on; Playing: is what is on it, and
+      // before this the two were indistinguishable from the window -- a display
+      // could only be moved with < Prev / Next >, so reaching one particular
+      // preset meant stepping the directory until it arrived.
+      //
+      // A read-only FIELD rather than an edit: the path is worth selecting and
+      // copying, and it must not look like somewhere to type one, because
+      // typing a path here could not load it.
+      PAGE_TC(0, CreateLabel(hw, L"Playing:", gx, gy, lw, lineH, hFont));
+      PAGE_TC(0, CreateReadonlyField(hw, L"", IDC_MW_DISP_NOW_PRESET,
+                                     gx + lw + 4, gy, gw - lw - 8 - brW, lineH, hFont));
+      PAGE_TC(0, CreateBtn(hw, L"...", IDC_MW_DISP_NOW_BROWSE,
+                           gx + gw - brW, gy, brW, lineH, hFont));
+      gy += row;
+
       int cw = LabelW(hw, hFont, L"Cycle every");
       int sw = LabelW(hw, hFont, L"seconds");
       int edW = MulDiv(50, lineH, 26);
@@ -488,25 +506,18 @@ void DisplaysWindow::BuildOutputsPage(int x, int y, int rw, int lineH, int gap) 
                             ex, gy, edW, lineH, hFont, ES_NUMBER | ES_RIGHT));
       PAGE_TC(0, CreateLabel(hw, L"seconds", ex + edW + 4, gy, sw, lineH, hFont));
 
+      // One checkbox, not a Random/Sequential radio pair: the setting is a
+      // boolean, and spelling it as two mutually exclusive buttons cost a
+      // whole row to say what a tick says. Unticked is random, which is the
+      // default and needs no label of its own.
       int ox = gx + gw / 2 + MulDiv(20, lineH, 26);
-      HWND hRnd = CreateWindowExW(0, L"BUTTON", L"Random",
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP | BS_AUTORADIOBUTTON,
-        ox, gy, MulDiv(90, lineH, 26), lineH, hw,
-        (HMENU)(INT_PTR)IDC_MW_DISP_ORDER_RANDOM, GetModuleHandle(NULL), NULL);
-      HWND hSeq = CreateWindowExW(0, L"BUTTON", L"Sequential",
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTORADIOBUTTON,
-        ox, gy + row, MulDiv(110, lineH, 26), lineH, hw,
-        (HMENU)(INT_PTR)IDC_MW_DISP_ORDER_SEQ, GetModuleHandle(NULL), NULL);
-      if (hRnd && hFont) SendMessage(hRnd, WM_SETFONT, (WPARAM)hFont, TRUE);
-      if (hSeq && hFont) SendMessage(hSeq, WM_SETFONT, (WPARAM)hFont, TRUE);
-      PAGE_TC(0, hRnd);
-      PAGE_TC(0, hSeq);
-      gy += row * 2;
+      PAGE_TC(0, CreateCheck(hw, L"Sequential", IDC_MW_DISP_ORDER_SEQ,
+                             ox, gy, MulDiv(110, lineH, 26), lineH, hFont, false));
+      gy += row;
 
       // Preset lock, three-valued. The main window's lock is global and every
       // display follows it; these pin an answer for this display instead.
-      // WS_GROUP on the first starts a new radio group, so these do not join
-      // the Random/Sequential pair above.
+      // WS_GROUP on the first starts a new radio group.
       {
         int lw2 = LabelW(hw, hFont, L"Preset lock");
         PAGE_TC(0, CreateLabel(hw, L"Preset lock", gx, gy, lw2, lineH, hFont));
@@ -924,6 +935,12 @@ LRESULT DisplaysWindow::DoMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
             m_pEngine->RefreshDisplaysTab();
             m_layoutPanel.Invalidate();
         }
+        // Outside that guard: the signature describes which children exist, not
+        // what they are showing, so a display quietly cycling its own presets
+        // changes the Playing field without changing the signature at all. The
+        // call is one SetTextIfChanged and repaints nothing when the text is
+        // the same (#364).
+        m_pEngine->RefreshDisplayNowPlaying();
         return 0;
     }
     return -1;
@@ -2075,6 +2092,63 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
       return 0;
     }
 
+    if (code == BN_CLICKED && id == IDC_MW_DISP_NOW_BROWSE) {
+      if (haveSel) {
+        // Show a preset on this display NOW. Deliberately transient: unlike
+        // the Startup browse above it writes nothing, neither the startup
+        // preset nor the preset directory (#330's one-selection-does-both
+        // applies to pinning, not to looking). Picking something to watch for
+        // a minute must not quietly re-point what the display cycles through.
+        //
+        // Locals copied out first under a lock scoped to just the copy, and
+        // no reference into m_displayOutputs held across the dialog, which can
+        // stay open indefinitely while the render thread reallocates the
+        // vector. Same discipline as the Startup browse. #27.
+        std::wstring initDir;
+        wchar_t file[MAX_PATH] = {};
+        {
+          std::lock_guard<std::recursive_mutex> lkDisp(p->m_displayOutputsMutex);
+          if (sel >= (int)p->m_displayOutputs.size()) return 0;
+          auto& cfg = p->m_displayOutputs[sel].config;
+          // Open where the eye already is: the folder holding what this
+          // display is showing, falling back to the folder it cycles through.
+          const std::wstring now = p->DisplayCurrentPresetPath(cfg);
+          const size_t slash = now.find_last_of(L"\\/");
+          if (slash != std::wstring::npos)
+            initDir = now.substr(0, slash);
+          if (initDir.empty()) {
+            initDir = IsRenderHostDisplay(p, sel) ? p->m_szPresetDir
+                                                  : p->ResolveDisplayPresetDir(cfg);
+          }
+        }
+        OPENFILENAMEW o = {};
+        o.lStructSize = sizeof(o);
+        o.hwndOwner = hWnd;
+        o.lpstrFilter = L"Presets\0*.milk;*.milk2;*.milk3\0All Files\0*.*\0";
+        o.lpstrFile = file;
+        o.nMaxFile = MAX_PATH;
+        o.lpstrInitialDir = initDir.c_str();
+        o.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER | OFN_NOCHANGEDIR;
+        if (GetOpenFileNameW(&o)) {
+          std::lock_guard<std::recursive_mutex> lkDisp(p->m_displayOutputsMutex);
+          if (sel < (int)p->m_displayOutputs.size()) {
+            auto& cfg = p->m_displayOutputs[sel].config;
+            const wchar_t* why = nullptr;
+            if (!p->ShowPresetOnDisplay(cfg, file, &why)) {
+              const wchar_t* msg = L"That display mirrors the main window";
+              if (wcscmp(why, L"no_surface") == 0)
+                msg = L"That display has no render surface yet";
+              else if (wcscmp(why, L"milk3_needs_primary") == 0)
+                msg = L"A .milk3 only plays on the main render window";
+              p->AddNotification((wchar_t*)msg);
+            }
+          }
+        }
+        p->UpdateDisplaysTabSelection(sel);
+      }
+      return 0;
+    }
+
     if (code == BN_CLICKED && id == IDC_MW_DISP_CYCLE_ON) {
       if (haveSel) {
         // m_displayOutputsMutex: #27.
@@ -2151,13 +2225,15 @@ LRESULT DisplaysWindow::DoCommand(HWND hWnd, int id, int code, LPARAM lParam) {
     // condition, so with nothing selected it did not match at all and the
     // message fell THROUGH to the handlers below instead of being consumed --
     // and it matched on the id alone, whatever the notification code.
-    if (code == BN_CLICKED &&
-        (id == IDC_MW_DISP_ORDER_RANDOM || id == IDC_MW_DISP_ORDER_SEQ)) {
+    if (code == BN_CLICKED && id == IDC_MW_DISP_ORDER_SEQ) {
       if (haveSel) {
         // m_displayOutputsMutex: #27.
         std::lock_guard<std::recursive_mutex> lkDisp(p->m_displayOutputsMutex);
         auto& cfg = p->m_displayOutputs[sel].config;
-        const bool seq = (id == IDC_MW_DISP_ORDER_SEQ);
+        // A checkbox now, so the state comes from the control rather than
+        // from which of a radio pair was clicked. bChecked from the switch
+        // above is out of scope here; ask directly, as the cycle box does.
+        const bool seq = IsChecked(id);
         if (IsRenderHostDisplay(p, sel)) {
           p->SetMainRenderOrder(seq);
           p->UpdateDisplaysTabSelection(sel);

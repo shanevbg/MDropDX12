@@ -1123,48 +1123,78 @@ void mdrop::Engine::RenderFrame(int bRedraw) {
 } // end RenderFrame
 
 
-void mdrop::Engine::DX12_DrawMotionVectors() {
-  // DX12 port of DrawMotionVectors() — draws motion vector lines into VS[0]
-  // before the warp pass so they enter the feedback loop.
-  if ((float)*m_pState->var_pf_mv_a < 0.001f)
+void mdrop::Engine::DX12_DrawMotionVectors(CState* pStateOverride,
+                                           RenderContext* pCtx,
+                                           DX12Texture* pTarget) {
+  // DX12 port of DrawMotionVectors() — draws motion vector lines into the face
+  // the warp pass is about to read, so they enter the feedback loop.
+  //
+  // Everything the draw needs now comes from the caller's context rather than
+  // from engine members (#366). While the primary was the only caller the two
+  // were the same thing; for an own-preset display they are four different
+  // things — its preset, its canvas, its warp mesh and its command list — and
+  // reading any of them off the engine would draw the PRIMARY's motion field
+  // onto another display, which is the failure #186 fixed for the wave and
+  // border stage.
+  CState* pState = pStateOverride ? pStateOverride : m_pState;
+  if (!pState)
     return;
-  if (!m_lpDX || !m_lpDX->m_commandList)
+  if ((float)*pState->var_pf_mv_a < 0.001f)
+    return;
+  if (!m_lpDX)
     return;
 
-  int nX = (int)(*m_pState->var_pf_mv_x);
-  int nY = (int)(*m_pState->var_pf_mv_y);
-  float dx = (float)*m_pState->var_pf_mv_x - nX;
-  float dy = (float)*m_pState->var_pf_mv_y - nY;
+  auto* cmdList = (pCtx && pCtx->cmdList) ? pCtx->cmdList
+                                          : m_lpDX->m_commandList.Get();
+  if (!cmdList)
+    return;
+
+  int nX = (int)(*pState->var_pf_mv_x);
+  int nY = (int)(*pState->var_pf_mv_y);
+  float dx = (float)*pState->var_pf_mv_x - nX;
+  float dy = (float)*pState->var_pf_mv_y - nY;
   if (nX > 64) { nX = 64; dx = 0; }
   if (nY > 48) { nY = 48; dy = 0; }
   if (nX <= 0 || nY <= 0)
     return;
 
-  float dx2 = (float)(*m_pState->var_pf_mv_dx);
-  float dy2 = (float)(*m_pState->var_pf_mv_dy);
-  float len_mult = (float)*m_pState->var_pf_mv_l;
+  // This surface's canvas and mesh, not the engine's.
+  const int texW = (pCtx && pCtx->canvasW > 0) ? pCtx->canvasW : m_nTexSizeX;
+  const int texH = (pCtx && pCtx->canvasH > 0) ? pCtx->canvasH : m_nTexSizeY;
+  const MYVERTEX* meshVerts = (pCtx && pCtx->verts) ? pCtx->verts : m_verts;
+  if (texW <= 0 || texH <= 0 || !meshVerts)
+    return;
+
+  float dx2 = (float)(*pState->var_pf_mv_dx);
+  float dy2 = (float)(*pState->var_pf_mv_dy);
+  float len_mult = (float)*pState->var_pf_mv_l;
   if (dx < 0) dx = 0;
   if (dy < 0) dy = 0;
   if (dx > 1) dx = 1;
   if (dy > 1) dy = 1;
-  float inv_texsize = 1.0f / (float)m_nTexSizeX;
+  float inv_texsize = 1.0f / (float)texW;
   float min_len = 1.0f * inv_texsize;
 
   WFVERTEX v[(64 + 1) * 2];
   ZeroMemory(v, sizeof(WFVERTEX) * (64 + 1) * 2);
   v[0].Diffuse = D3DCOLOR_RGBA_01(
-    (float)*m_pState->var_pf_mv_r, (float)*m_pState->var_pf_mv_g,
-    (float)*m_pState->var_pf_mv_b, (float)*m_pState->var_pf_mv_a);
+    (float)*pState->var_pf_mv_r, (float)*pState->var_pf_mv_g,
+    (float)*pState->var_pf_mv_b, (float)*pState->var_pf_mv_a);
   for (int x = 1; x < (nX + 1) * 2; x++)
     v[x].Diffuse = v[0].Diffuse;
 
-  auto* cmdList = m_lpDX->m_commandList.Get();
-
-  // Set up VS[0] as render target for motion vector drawing
-  m_lpDX->TransitionResource(m_dx12VS[0], D3D12_RESOURCE_STATE_RENDER_TARGET);
-  D3D12_CPU_DESCRIPTOR_HANDLE rtv = m_lpDX->GetRtvCpuHandle(m_dx12VS[0]);
+  // The face the warp will read. The primary's is VS[0]; an own-preset
+  // display's is whichever half of its own ping-pong is current this frame.
+  DX12Texture& target = pTarget ? *pTarget : m_dx12VS[0];
+  // Null for the primary, deliberately: TransitionResource resolves a null list
+  // through the thread/context overrides, and handing it an explicit one
+  // bypasses that. The primary must keep resolving exactly as it did before
+  // this function took a context at all.
+  m_lpDX->TransitionResource(target, D3D12_RESOURCE_STATE_RENDER_TARGET,
+                             pCtx ? cmdList : nullptr);
+  D3D12_CPU_DESCRIPTOR_HANDLE rtv = m_lpDX->GetRtvCpuHandle(target);
   cmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
-  SetViewportAndScissor(cmdList, m_nTexSizeX, m_nTexSizeY);
+  SetViewportAndScissor(cmdList, texW, texH);
 
   // Root signature + PSO for alpha-blended line drawing
   ID3D12DescriptorHeap* heaps[] = { m_lpDX->m_srvHeap.Get() };
@@ -1184,7 +1214,7 @@ void mdrop::Engine::DX12_DrawMotionVectors() {
 
         if (fx > 0.0001f && fx < 0.9999f) {
           float fx2, fy2;
-          ReversePropagatePoint(fx, fy, &fx2, &fy2);
+          ReversePropagatePoint(fx, fy, &fx2, &fy2, meshVerts);
 
           // Enforce minimum trail lengths
           {
@@ -1345,7 +1375,15 @@ void mdrop::Engine::UpdateSongInfo()
         }
         */
 
-bool mdrop::Engine::ReversePropagatePoint(float fx, float fy, float* fx2, float* fy2) {
+bool mdrop::Engine::ReversePropagatePoint(float fx, float fy, float* fx2, float* fy2,
+                                          const MYVERTEX* verts) {
+  // The mesh to trace back through. An own-preset display warps by ITS preset,
+  // so tracing the engine's mesh would draw the primary's motion field on it
+  // (#366). The grid DIMENSIONS are still engine-wide -- a surface's mesh is
+  // sized (m_nGridX+1)*(m_nGridY+1) and RenderClassicOrientPipeline rejects a
+  // context whose verts disagree (milkdropfs.cpp:2205).
+  if (!verts) verts = m_verts;
+  if (!verts) return false;
   //float fy = y/(float)nMotionVectorsY;
   int   y0 = (int)(fy * m_nGridY);
   float dy = fy * m_nGridY - y0;
@@ -1367,14 +1405,14 @@ bool mdrop::Engine::ReversePropagatePoint(float fx, float fy, float* fx2, float*
   if (y1 > m_nGridY) return false;
 
   float tu, tv;
-  tu = m_verts[y0 * (m_nGridX + 1) + x0].tu * (1 - dx) * (1 - dy);
-  tv = m_verts[y0 * (m_nGridX + 1) + x0].tv * (1 - dx) * (1 - dy);
-  tu += m_verts[y0 * (m_nGridX + 1) + x1].tu * (dx) * (1 - dy);
-  tv += m_verts[y0 * (m_nGridX + 1) + x1].tv * (dx) * (1 - dy);
-  tu += m_verts[y1 * (m_nGridX + 1) + x0].tu * (1 - dx) * (dy);
-  tv += m_verts[y1 * (m_nGridX + 1) + x0].tv * (1 - dx) * (dy);
-  tu += m_verts[y1 * (m_nGridX + 1) + x1].tu * (dx) * (dy);
-  tv += m_verts[y1 * (m_nGridX + 1) + x1].tv * (dx) * (dy);
+  tu = verts[y0 * (m_nGridX + 1) + x0].tu * (1 - dx) * (1 - dy);
+  tv = verts[y0 * (m_nGridX + 1) + x0].tv * (1 - dx) * (1 - dy);
+  tu += verts[y0 * (m_nGridX + 1) + x1].tu * (dx) * (1 - dy);
+  tv += verts[y0 * (m_nGridX + 1) + x1].tv * (dx) * (1 - dy);
+  tu += verts[y1 * (m_nGridX + 1) + x0].tu * (1 - dx) * (dy);
+  tv += verts[y1 * (m_nGridX + 1) + x0].tv * (1 - dx) * (dy);
+  tu += verts[y1 * (m_nGridX + 1) + x1].tu * (dx) * (dy);
+  tv += verts[y1 * (m_nGridX + 1) + x1].tv * (dx) * (dy);
 
   *fx2 = tu;
   *fy2 = 1.0f - tv;
@@ -1523,6 +1561,21 @@ void mdrop::Engine::ClampOrientCanvas(const MirrorSurface& surf, int& w, int& h)
   int maxDim = 1920;
   if (surf.canvasLimit > 0 && surf.canvasLimit < maxDim)
     maxDim = surf.canvasLimit;
+
+  // TDR BACKOFF (#230). Lowered a step by each successful device recovery.
+  //
+  // The GPU cost that kills this app arrives with no ramp -- measured over and
+  // over: milliseconds to 2900 ms in ONE frame -- so nothing can see it coming
+  // and every mitigation that measures-then-reacts is too late by construction.
+  // Three were tried and all three failed that way.
+  //
+  // The TDR is therefore the only honest signal there is, and this is what
+  // listens to it: having actually died once, render the mirrors smaller so the
+  // retry is not a rerun of the death. Mirrors are softened only on a machine
+  // that has proven it cannot cope, rather than everywhere pre-emptively.
+  const int tdrCeil = m_nTdrMirrorCeiling.load(std::memory_order_relaxed);
+  if (tdrCeil > 0 && tdrCeil < maxDim)
+    maxDim = tdrCeil;
   if (w > maxDim || h > maxDim) {
     const float s = (float)maxDim / (float)((w > h) ? w : h);
     w = max(1, (int)(w * s + 0.5f));
@@ -1550,12 +1603,21 @@ bool mdrop::Engine::OrientPipeReadyForMode(const MirrorSurface& surf) const
   // preset that wants Buffer B on a pipe built without one would bind the VS
   // fallback and render quietly wrong, forever, because nothing asked for a
   // rebuild.
+  // THIS surface's buffer set, not the engine's (#373). A display holding its
+  // own .milk3 declares its own Buffer A-D, and asking the primary's flags here
+  // would call its pipe ready for a buffer list belonging to another preset.
+  bool sA = false, sB = false, sC = false, sD = false;
+  SurfaceBufferFlags(surf, sA, sB, sC, sD);
   const bool milk3Ok = imgOk &&
       surf.pipe.fbA[0].IsValid() && surf.pipe.fbA[1].IsValid() &&
-      (!m_bHasBufferB || surf.pipe.fbB[0].IsValid()) &&
-      (!m_bHasBufferC || surf.pipe.fbC[0].IsValid()) &&
-      (!m_bHasBufferD || surf.pipe.fbD[0].IsValid());
-  return dispOk && (m_bShadertoyMode ? milk3Ok : imgOk);
+      (!sB || surf.pipe.fbB[0].IsValid()) &&
+      (!sC || surf.pipe.fbC[0].IsValid()) &&
+      (!sD || surf.pipe.fbD[0].IsValid());
+  // THIS surface's mode (#351). Asking the global made a classic own-preset
+  // surface demand the full A-D milk3 buffer set the moment the PRIMARY loaded
+  // a .milk3 -- so its pipe read "not ready" and was rebuilt for a mode it was
+  // never going to render in.
+  return dispOk && (SurfaceUsesMilk3(surf) ? milk3Ok : imgOk);
 }
 
 bool mdrop::Engine::EnsureOrientPipeline(MirrorSurface& surf, int w, int h)
@@ -1815,8 +1877,12 @@ bool mdrop::Engine::EnsureOrientPipeline(MirrorSurface& surf, int w, int h)
     return makePairFmt(pair, name, DXGI_FORMAT_R8G8B8A8_UNORM, clearAlpha);
   };
 
-  const bool forMilk3 = m_bShadertoyMode;
-  const bool forClassic = !m_bShadertoyMode;
+  // Built for THIS surface's mode (#351). With the global here, a display
+  // holding a classic preset of its own was given the .milk3 texture set --
+  // eight FLOAT32 targets it could never use -- whenever the primary happened
+  // to be on a .milk3, and had its pipe rebuilt again on the way back.
+  const bool forMilk3 = SurfaceUsesMilk3(surf);
+  const bool forClassic = !forMilk3;
 
   if (forMilk3) {
     const DXGI_FORMAT kFb = DXGI_FORMAT_R32G32B32A32_FLOAT; // Buffer A–D PSO format
@@ -1839,9 +1905,15 @@ bool mdrop::Engine::EnsureOrientPipeline(MirrorSurface& surf, int w, int h)
     // until the allocator rewinds and the new RTVs alias live ones. That is the
     // deterministic TDR (0x887A0006) recorded at ClampOrientCanvas. Monotonic
     // growth bounds it at three extra rebuilds for the whole session.
-    const bool wantB = m_bHasBufferB || surf.pipe.fbB[0].IsValid();
-    const bool wantC = m_bHasBufferC || surf.pipe.fbC[0].IsValid();
-    const bool wantD = m_bHasBufferD || surf.pipe.fbD[0].IsValid();
+    // THIS surface's declared buffers (#373), matching the readiness test at
+    // OrientPipeReadyForMode. Those two must agree about the buffer list or the
+    // builder and the rebuild test disagree, which is the shape that froze
+    // every mirror on 2026-08-23 -- hence one helper feeding both.
+    bool bA = false, bB = false, bC = false, bD = false;
+    SurfaceBufferFlags(surf, bA, bB, bC, bD);
+    const bool wantB = bB || surf.pipe.fbB[0].IsValid();
+    const bool wantC = bC || surf.pipe.fbC[0].IsValid();
+    const bool wantD = bD || surf.pipe.fbD[0].IsValid();
     if (!makePairFmt(surf.pipe.fbA, "fbA", kFb, 0.f) ||
         (wantB && !makePairFmt(surf.pipe.fbB, "fbB", kFb, 0.f)) ||
         (wantC && !makePairFmt(surf.pipe.fbC, "fbC", kFb, 0.f)) ||
@@ -1951,8 +2023,43 @@ bool mdrop::Engine::EnsureOrientPipeline(MirrorSurface& surf, int w, int h)
 bool mdrop::Engine::RenderMilk3OrientPipeline(MirrorSurface& surf,
                                               ID3D12GraphicsCommandList* cmdList, int outW, int outH)
 {
-  if (!cmdList || !m_lpDX || !m_bShadertoyMode || !m_dx12CompPSO)
+  // SurfaceUsesMilk3, not the global (#351): the caller now dispatches on this
+  // surface's own mode, so the entry guard has to agree with it or the two
+  // disagree and the surface renders nothing at all.
+  if (!cmdList || !m_lpDX || !SurfaceUsesMilk3(surf))
     return false;
+
+  // THIS surface's compiled set, exactly as RenderClassicOrientPipeline picks
+  // one at milkdropfs.cpp:2269 (#373). A surface holding its OWN .milk3 has its
+  // own Image and Buffer A-D shaders and its own PSOs -- PresetPsoOwned has
+  // carried bufferA-D and compFloat all along, and the surface's adopt path has
+  // been building them for every preset it takes. Reading the ENGINE's set here
+  // is what made a display unable to hold a .milk3: it would have bound the
+  // primary's Shadertoy shaders against its own buffers.
+  //
+  // A surface with no preset of its own is rendering the primary's, so for that
+  // one the engine's set IS the right set.
+  MirrorSimContext& c = surf.sim;
+  const bool ctxOwnSet = c.HasOwnPipeline();
+  PShaderSet& sh = ctxOwnSet ? c.shaders : m_shaders;
+  ID3D12PipelineState* psoComp    = ctxOwnSet ? c.psos.comp.Get()    : m_dx12CompPSO.Get();
+  ID3D12PipelineState* psoBufferA = ctxOwnSet ? c.psos.bufferA.Get() : m_dx12BufferAPSO.Get();
+  ID3D12PipelineState* psoBufferB = ctxOwnSet ? c.psos.bufferB.Get() : m_dx12BufferBPSO.Get();
+  ID3D12PipelineState* psoBufferC = ctxOwnSet ? c.psos.bufferC.Get() : m_dx12BufferCPSO.Get();
+  ID3D12PipelineState* psoBufferD = ctxOwnSet ? c.psos.bufferD.Get() : m_dx12BufferDPSO.Get();
+  if (!psoComp)
+    return false;
+
+  // Which buffers exist is a property of the SET, not of the engine. The
+  // primary derives its own flags the same way at engine_presets.cpp:4030
+  // (`m_bHasBufferA = (m_shaders.bufferA.bytecodeBlob != NULL)`), so deriving
+  // them here cannot drift from the shaders actually compiled.
+  const bool hasA = (sh.bufferA.bytecodeBlob != nullptr) && psoBufferA;
+  const bool hasB = (sh.bufferB.bytecodeBlob != nullptr) && psoBufferB;
+  const bool hasC = (sh.bufferC.bytecodeBlob != nullptr) && psoBufferC;
+  const bool hasD = (sh.bufferD.bytecodeBlob != nullptr) && psoBufferD;
+  CState* pPresetState = ctxOwnSet && c.pState ? c.pState : m_pState;
+
   if (!EnsureOrientPipeline(surf, outW, outH) || !surf.pipe.ready)
     return false;
 
@@ -1970,11 +2077,25 @@ bool mdrop::Engine::RenderMilk3OrientPipeline(MirrorSurface& surf,
   // shapes to ellipses one frame in ~250, the reported intermittent flicker --
   // and it is why a record could never run beside a primary frame.
   //
-  // The frame is deliberately -1, "ask the engine": the milk3 record never had
-  // a frame override, so this keeps it reading the engine's count exactly as
-  // before. Only the canvas and the mouse were ever overridden here.
+  // THE SURFACE'S OWN CLOCK when it holds its own preset (#373).
+  //
+  // The frame used to be -1 unconditionally -- "ask the engine" -- and the note
+  // here said the milk3 record never had a frame override. That was correct
+  // while this record could only ever draw the PRIMARY's .milk3: the engine's
+  // frame and time WERE this surface's, because it was rendering the engine's
+  // preset.
+  //
+  // A display holding its own .milk3 has its own iTime and iFrame, and reading
+  // the engine's froze it. Measured: frame-to-frame image change 0.01 against
+  // 2.4 for the same surface on a classic preset, while its own pf counter went
+  // on advancing -- so the clock was running and the picture was not.
+  //
+  // A surface with no preset of its own still asks the engine, because it is
+  // still rendering the engine's preset.
   RenderContext ic;
-  FillCanvasInputs(ic, W, H, -1);
+  if (ctxOwnSet)
+    FillAnimInputs(ic, c);
+  FillCanvasInputs(ic, W, H, ctxOwnSet ? c.nFrame : -1);
   FillMouseInputs(ic, W, H);
   // This IS a mirror orient record, and the context has to say so (#208).
   //
@@ -2025,7 +2146,7 @@ bool mdrop::Engine::RenderMilk3OrientPipeline(MirrorSurface& surf,
 
   const DX12Texture& vsTex = m_lpDX->m_nullTexture;
   const DX12Texture* imgFbRead = &P.imgFb[fbRead];
-  const bool hasAnyBuffer = m_bHasBufferA || m_bHasBufferB || m_bHasBufferC || m_bHasBufferD;
+  const bool hasAnyBuffer = hasA || hasB || hasC || hasD;
   const bool kStrict = true; // never fall back to primary feedback
 
   UINT slotsA[32], slotsB[32], slotsC[32], slotsD[32], slotsComp[32];
@@ -2035,23 +2156,23 @@ bool mdrop::Engine::RenderMilk3OrientPipeline(MirrorSurface& surf,
   memset(slotsD, 0xFF, sizeof(slotsD));
   memset(slotsComp, 0xFF, sizeof(slotsComp));
 
-  if (m_bHasBufferA)
-    BuildBindingSlots(&m_shaders.bufferA.params, vsTex, slotsA,
+  if (hasA)
+    BuildBindingSlots(&sh.bufferA.params, vsTex, slotsA,
                       &P.fbA[fbRead], imgFbRead, &P.fbB[fbRead], &P.fbC[fbRead], &P.fbD[fbRead], kStrict);
-  if (m_bHasBufferB)
-    BuildBindingSlots(&m_shaders.bufferB.params, vsTex, slotsB,
+  if (hasB)
+    BuildBindingSlots(&sh.bufferB.params, vsTex, slotsB,
                       &P.fbA[fbWrite], imgFbRead, &P.fbB[fbRead], &P.fbC[fbRead], &P.fbD[fbRead], kStrict);
-  if (m_bHasBufferC)
-    BuildBindingSlots(&m_shaders.bufferC.params, vsTex, slotsC,
+  if (hasC)
+    BuildBindingSlots(&sh.bufferC.params, vsTex, slotsC,
                       &P.fbA[fbWrite], imgFbRead, &P.fbB[fbWrite], &P.fbC[fbRead], &P.fbD[fbRead], kStrict);
-  if (m_bHasBufferD)
-    BuildBindingSlots(&m_shaders.bufferD.params, vsTex, slotsD,
+  if (hasD)
+    BuildBindingSlots(&sh.bufferD.params, vsTex, slotsD,
                       &P.fbA[fbWrite], imgFbRead, &P.fbB[fbWrite], &P.fbC[fbWrite], &P.fbD[fbRead], kStrict);
   if (hasAnyBuffer)
-    BuildBindingSlots(&m_shaders.comp.params, vsTex, slotsComp,
+    BuildBindingSlots(&sh.comp.params, vsTex, slotsComp,
                       &P.fbA[fbWrite], imgFbRead, &P.fbB[fbWrite], &P.fbC[fbWrite], &P.fbD[fbWrite], kStrict);
   else
-    BuildBindingSlots(&m_shaders.comp.params, vsTex, slotsComp,
+    BuildBindingSlots(&sh.comp.params, vsTex, slotsComp,
                       &P.fbA[fbRead], imgFbRead, &P.fbB[fbRead], &P.fbC[fbRead], &P.fbD[fbRead], kStrict);
 
   const UINT b0 = P.bindBase;
@@ -2074,7 +2195,7 @@ bool mdrop::Engine::RenderMilk3OrientPipeline(MirrorSurface& surf,
     SetViewportAndScissor(cmdList, (UINT)W, (UINT)H);
     cmdList->SetPipelineState(pso);
     if (si->CT) {
-      ApplyShaderParams(&si->params, si->CT, m_pState, &ic);
+      ApplyShaderParams(&si->params, si->CT, pPresetState, &ic);
       DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(si->CT);
       if (ct->GetShadowSize() > 0) {
         D3D12_GPU_VIRTUAL_ADDRESS cb =
@@ -2089,10 +2210,10 @@ bool mdrop::Engine::RenderMilk3OrientPipeline(MirrorSurface& surf,
     m_lpDX->TransitionResource(writeTex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, cmdList);
   };
 
-  drawBufferPass(m_bHasBufferA, m_dx12BufferAPSO.Get(), P.fbA[fbWrite], &m_shaders.bufferA, 0 * bs);
-  drawBufferPass(m_bHasBufferB, m_dx12BufferBPSO.Get(), P.fbB[fbWrite], &m_shaders.bufferB, 1 * bs);
-  drawBufferPass(m_bHasBufferC, m_dx12BufferCPSO.Get(), P.fbC[fbWrite], &m_shaders.bufferC, 2 * bs);
-  drawBufferPass(m_bHasBufferD, m_dx12BufferDPSO.Get(), P.fbD[fbWrite], &m_shaders.bufferD, 3 * bs);
+  drawBufferPass(hasA, psoBufferA, P.fbA[fbWrite], &sh.bufferA, 0 * bs);
+  drawBufferPass(hasB, psoBufferB, P.fbB[fbWrite], &sh.bufferB, 1 * bs);
+  drawBufferPass(hasC, psoBufferC, P.fbC[fbWrite], &sh.bufferC, 2 * bs);
+  drawBufferPass(hasD, psoBufferD, P.fbD[fbWrite], &sh.bufferD, 3 * bs);
 
   // Image → internal imgFb only. Callers blit to every mirror SC face (leader + peers)
   // via BlitOrientOutputToMirror — never multi-pass into a flip-model back buffer and
@@ -2108,10 +2229,10 @@ bool mdrop::Engine::RenderMilk3OrientPipeline(MirrorSurface& surf,
     cmdList->ClearRenderTargetView(imgRtv, black, 0, nullptr);
   }
   SetViewportAndScissor(cmdList, (UINT)W, (UINT)H);
-  cmdList->SetPipelineState(m_dx12CompPSO.Get());
-  PShaderInfo* compSI = &m_shaders.comp;
+  cmdList->SetPipelineState(psoComp);
+  PShaderInfo* compSI = &sh.comp;
   if (compSI->CT) {
-    ApplyShaderParams(&compSI->params, compSI->CT, m_pState, &ic);
+    ApplyShaderParams(&compSI->params, compSI->CT, pPresetState, &ic);
     DX12ConstantTable* ct = static_cast<DX12ConstantTable*>(compSI->CT);
     if (ct->GetShadowSize() > 0) {
       D3D12_GPU_VIRTUAL_ADDRESS cb =
@@ -2155,7 +2276,10 @@ bool mdrop::Engine::RenderClassicOrientPipeline(MirrorSurface& surf,
   // slot to that face (noise/disk/blur all wrong) — looked nothing like primary.
   if (!cmdList || !m_lpDX || outW <= 0 || outH <= 0)
     return false;
-  if (m_bShadertoyMode)
+  // The mirror of the guard in RenderMilk3OrientPipeline (#351). This one is
+  // why an own-preset display went dark rather than merely stale when the
+  // primary loaded a .milk3: the dispatcher sent it here and this refused.
+  if (SurfaceUsesMilk3(surf))
     return false;
   if (!EnsureOrientPipeline(surf, outW, outH) || !surf.pipe.ready)
     return false;
@@ -2473,6 +2597,34 @@ bool mdrop::Engine::RenderClassicOrientPipeline(MirrorSurface& surf,
   auto drawWarpMesh = [&](D3DCOLOR cDecay, bool bCullTiles, bool bFlipCulling) {
     DrawWarpMeshIndexed(c.verts.data(), cDecay, bCullTiles, bFlipCulling, cmdList);
   };
+
+  // ── Motion vectors: into vsRead BEFORE warp (enters feedback loop) ──
+  //
+  // The primary does this at milkdropfs.cpp:3303, drawing into VS[0] before the
+  // warp reads it. This path did not do it at all (#366): every other injector
+  // — shapes, waves, sprites, and the wave/border/darken-centre stage — was
+  // given a state override by #186 and wired into the injection block below,
+  // and DX12_DrawMotionVectors had no override to give it, so it was left out.
+  //
+  // Invisible for most presets, because most have something else that draws.
+  // For a preset whose ONLY light source is motion vectors the display stayed
+  // black forever while the same file rendered correctly on the primary.
+  //
+  // Before the warp and not in the block below, because these belong IN the
+  // feedback: drawn after the warp they would be a foreground overlay that the
+  // next frame never carries forward, which is a different effect.
+  {
+    RenderContext mv;
+    FillAnimInputs(mv, c);
+    FillCanvasInputs(mv, P.w, P.h, c.nFrame);
+    mv.cmdList  = cmdList;
+    mv.pState   = c.pState;
+    mv.verts    = c.verts.data();
+    mv.isMirror = true;
+    m_lpDX->SetThreadCmdListOverride(cmdList);
+    DX12_DrawMotionVectors(c.pState, &mv, &vsRead);
+    m_lpDX->SetThreadCmdListOverride(nullptr);
+  }
 
   // ── Warp: vsRead → vsWrite (two-pass when blending / .milk2) ──
   m_lpDX->TransitionResource(vsRead, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, cmdList);

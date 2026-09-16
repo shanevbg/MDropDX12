@@ -413,6 +413,19 @@ struct MirrorSimContext {
   PShaderSet     oldShaders;
   PresetPsoOwned psos;
 
+  // Is the preset THIS surface adopted a .milk3 (#373)?
+  //
+  // Set by MirrorSimAdoptPreset when it parses one, and the only thing that
+  // makes SurfaceUsesMilk3 true for a display holding its own preset. Before
+  // this a surface could not hold a .milk3 at all: the adopt path ran it
+  // through CState::Import, which has no .milk3 branch and returns SUCCESS on
+  // a default state, so the display rendered an empty preset and reported the
+  // .milk3 as playing.
+  //
+  // Atomic because DIAG_MIRRORS reads it from the IPC thread to report which
+  // pipeline a surface ran, while the worker writes it at adoption.
+  std::atomic<bool> isMilk3{false};
+
   // This context's own per-frame randomness, advanced once per sim step
   // alongside nFrame. The engine's m_rand_frame advances once per PRIMARY
   // frame, so sharing it stepped a mirror's noise at the primary's rate

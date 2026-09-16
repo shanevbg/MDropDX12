@@ -538,6 +538,153 @@ std::atomic<bool> g_bRenderReady{false};
 // TDR / DEVICE_HUNG: skip WaitForGpu and quit instead of retrying recovery.
 std::atomic<bool> g_bGpuHung{false};
 
+// TDR relaunch budget (#230, #368). A g_bTdrRecoverArmed flag used to sit
+// beside this, arming an in-process recovery from a hung device. That recovery
+// was measured, found to be blocked outside this program, and removed -- see
+// the note where it used to live, further down.
+static std::atomic<int>  g_nTdrRecoveries{0};
+
+// Restart the render thread outright rather than recover in place (#230).
+//
+// Shane's suggestion, and a better one than what I was doing. Releasing the
+// device in place means finding EVERY reference, and I lost that game
+// repeatedly: the globals and the DXContext were null, the mirror objects were
+// released, Spout was never even running -- and the adapter still refused a new
+// device for over 60 seconds while a WARP device came up instantly. Ending the
+// thread releases whatever it holds without anyone having to enumerate it.
+static std::atomic<bool> g_bRenderThreadRestart{false};
+
+// ── Relaunch the PROCESS after a TDR (#368) ────────────────────────────────
+//
+// Restarting the render thread was not enough, and the reason is not in this
+// codebase. After DXGI_ERROR_DEVICE_HUNG the adapter refuses THIS PROCESS --
+// measured at 120 seconds of `InitD3d: adapter 0 rejected hr=0x887A0006` while
+// the process held nothing at all -- and a FRESH process gets a working device
+// in about 22 seconds, every time. Releasing everything does not clear it;
+// only exiting does.
+//
+// So the recovery is a relaunch. That still honours the standing principle
+// that a device loss is recovered from rather than died on: the visualiser
+// comes back by itself, which is what the principle is for. It is not a defeat
+// dressed as a design -- in-process recovery was implemented, measured, and
+// found to be blocked outside this program.
+//
+// Three things must cross the gap or the new process simply repeats the death:
+//
+//   the OLD PID      so the new process waits for this one to exit before it
+//                    asks for the adapter, rather than racing a corpse for it;
+//   the ATTEMPT      so the budget is a session budget and not a fresh three
+//                    every time, which would be an unbounded restart loop;
+//   the CEILING      the mirror backoff step, because the relaunched process
+//                    otherwise restores the same arrangement that just killed
+//                    the GPU.
+//
+// Carried on the command line rather than in settings.ini: a crash-recovery
+// hint has no business surviving in the user's configuration, and a file
+// written during a GPU fault is a file that can be half-written.
+static std::atomic<int>  g_nTdrRelaunchAttempt{0};   // from -tdrrelaunch=
+static DWORD             g_dwTdrWaitForPid = 0;      // ditto; 0 = nothing to wait for
+
+// At most this many relaunches before the app gives up and exits (#368). The
+// budget is a SESSION budget carried across relaunches on the command line, so
+// three is three in total, not three per process -- otherwise every successor
+// would start with a fresh allowance and the "bound" would be an infinite loop
+// with extra steps.
+static const int kMaxTdrRelaunches = 3;
+
+// ...but a budget that only ever counts down turns a machine that TDRs once a
+// month into one that stops recovering on the fourth month. What is being
+// bounded is a LOOP -- deaths in quick succession, each one restoring the
+// arrangement that caused the last. An instance that has run healthily for a
+// good while and then hits a TDR is a new event, not a loop, so it gets the
+// full allowance again.
+static const ULONGLONG kTdrBudgetResetMs = 5 * 60 * 1000;   // 5 minutes
+static ULONGLONG g_tickAppStart = 0;                        // set in WinMain
+
+static bool RelaunchForTdr(int attempt, int ceiling) {
+  wchar_t exe[MAX_PATH] = {};
+  if (!GetModuleFileNameW(nullptr, exe, MAX_PATH))
+    return false;
+
+  // Everything we were started with, minus any previous -tdrrelaunch=, so a
+  // second relaunch does not accumulate them. Each argument is requoted; the
+  // originals arrive already unquoted from CommandLineToArgvW.
+  std::wstring cmd = L"\"";
+  cmd += exe;
+  cmd += L"\"";
+  int argc = 0;
+  if (LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc)) {
+    for (int i = 1; i < argc; i++) {
+      if (_wcsnicmp(argv[i], L"-tdrrelaunch=", 13) == 0 ||
+          _wcsnicmp(argv[i], L"--tdrrelaunch=", 14) == 0)
+        continue;
+      cmd += L" \"";
+      cmd += argv[i];
+      cmd += L"\"";
+    }
+    LocalFree(argv);
+  }
+  wchar_t tail[96];
+  swprintf(tail, 96, L" -tdrrelaunch=%lu,%d,%d",
+           GetCurrentProcessId(), attempt, ceiling);
+  cmd += tail;
+
+  wchar_t dir[MAX_PATH] = {};
+  wcsncpy_s(dir, exe, _TRUNCATE);
+  if (wchar_t* slash = wcsrchr(dir, L'\\'))
+    *slash = 0;
+
+  // CreateProcessW wants a WRITABLE command line.
+  std::vector<wchar_t> mutableCmd(cmd.begin(), cmd.end());
+  mutableCmd.push_back(0);
+
+  STARTUPINFOW si = { sizeof(si) };
+  PROCESS_INFORMATION pi = {};
+  const BOOL ok = CreateProcessW(exe, mutableCmd.data(), nullptr, nullptr, FALSE,
+                                 0, nullptr, dir[0] ? dir : nullptr, &si, &pi);
+  if (ok) {
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+  }
+  {
+    char buf[512];
+    sprintf(buf, "GPU fatal: relaunch attempt %d (ceiling %d) %s\n",
+            attempt, ceiling, ok ? "started" : "FAILED");
+    DebugLogA(buf, LOG_ERROR);
+  }
+  return ok != FALSE;
+}
+
+// The other half: the relaunched process waits for the dying one to go before
+// it asks for a device. Without this the two race, and the new process spends
+// its first attempts being refused by an adapter the old one has not released.
+static void WaitForTdrPredecessor() {
+  if (!g_dwTdrWaitForPid)
+    return;
+  HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, g_dwTdrWaitForPid);
+  if (!h) {
+    DebugLogA("TDR relaunch: predecessor already gone\n", LOG_ERROR);
+    return;
+  }
+  // Bounded. A predecessor that will not die is not a reason to never start:
+  // better a device-creation retry than a visualiser that never comes back.
+  const DWORD r = WaitForSingleObject(h, 30000);
+  CloseHandle(h);
+  DebugLogA(r == WAIT_OBJECT_0
+                ? "TDR relaunch: predecessor exited; starting\n"
+                : "TDR relaunch: predecessor outlived the wait; starting anyway\n",
+            LOG_ERROR);
+}
+
+// Both are defined near the bottom of this file; the WM_MW_GPU_FATAL handler
+// needs them to respawn the thread and sits well above them.
+struct RenderThreadParams {
+  HWND hwnd;
+  unsigned int backbufferWidth;
+  unsigned int backbufferHeight;
+};
+unsigned __stdcall RenderThreadProc(void* data);
+
 // --- Power suspend / resume (WM_POWERBROADCAST + RegisterSuspendResumeNotification) ---
 // When suspended: render thread idles and WaitForGpu/Present skip so we don't touch a
 // powered-down device. On resume: full device recovery (same as TDR path) + FPS timing resync
@@ -647,7 +794,18 @@ void InitD3d(HWND hwnd, int width, int height) {
     adapter->GetDesc1(&desc);
     if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
       continue;
-    if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, _uuidof(ID3D12Device), nullptr))) {
+    // Per-adapter result. "adapter=NONE" alone cannot distinguish "DXGI
+    // enumerated nothing" from "every adapter refused a device", and those
+    // point at completely different causes during TDR recovery (#230).
+    const HRESULT hrTest = D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0,
+                                             _uuidof(ID3D12Device), nullptr);
+    if (FAILED(hrTest)) {
+      char abuf[192];
+      sprintf(abuf, "InitD3d: adapter %u '%ls' rejected hr=0x%08X",
+              i, desc.Description, (unsigned)hrTest);
+      DebugLogA(abuf, LOG_ERROR);
+    }
+    if (SUCCEEDED(hrTest)) {
       if (hardwareAdapter == nullptr || i == wantedIdx) {
         hardwareAdapter = adapter;
         if (i == wantedIdx) break;
@@ -657,7 +815,17 @@ void InitD3d(HWND hwnd, int width, int height) {
 
   hr = D3D12CreateDevice(hardwareAdapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&pD3DDevice));
   if (FAILED(hr)) {
-    mdropdx12.LogInfo(L"InitD3d: D3D12CreateDevice failed");
+    // The HRESULT, and whether an adapter was even found. Without these the
+    // TDR-recovery failure reads as "D3D12CreateDevice failed" six times over
+    // and says nothing about why -- which is exactly where #230's recovery
+    // attempt stalled. It fails INSTANTLY after a TDR, so it is not the
+    // driver-still-resetting case the retry loop was built for.
+    char buf[192];
+    sprintf(buf, "InitD3d: D3D12CreateDevice failed hr=0x%08X adapter=%s "
+                 "(wanted idx %u)",
+            (unsigned)hr, hardwareAdapter ? "found" : "NONE",
+            (unsigned)wantedIdx);
+    DebugLogA(buf, LOG_ERROR);
     return;
   }
 
@@ -2612,6 +2780,96 @@ LRESULT CALLBACK StaticWndProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
     // turned a GPU reset into a permanently live blank window. The reason is
     // in debug.log; keeping the process alive to announce it is not worth
     // stranding the user's session.
+    // Restart the render thread instead of closing, when asked (#230).
+    //
+    // This runs on the MAIN thread -- CreateWindowAndRun's message pump -- and
+    // that is exactly why it can do this at all: the render thread is the thing
+    // being replaced, so it cannot replace itself. My earlier attempt tried to
+    // and spent the whole recovery inside the very loop it had torn down.
+    //
+    // The join is bounded. A render thread that will not come back is a worse
+    // problem than a lost device, and hanging the message pump here would take
+    // the window with it.
+    if (g_bRenderThreadRestart.load()) {
+      DebugLogA("GPU fatal: joining the render thread for restart (#230)\n",
+                LOG_ERROR);
+      g_bRenderReady.store(false);
+      if (g_hDX12RenderThread) {
+        if (WaitForSingleObject(g_hDX12RenderThread, 15000) != WAIT_OBJECT_0) {
+          // Still relaunch (#368). This used to close with no successor, which
+          // gets the recovery exactly backwards: a render thread wedged on a
+          // dead GPU is the SIGNATURE of the failure being recovered from, not
+          // a reason to abandon the recovery. The successor waits for this
+          // process to exit before it asks for an adapter, so a thread that is
+          // still flailing here delays it rather than breaking it.
+          DebugLogA("GPU fatal: render thread did not exit in 15 s — "
+                    "relaunching anyway\n", LOG_ERROR);
+          g_bRenderThreadRestart.store(false);
+          const int attemptStuck = g_nTdrRecoveries.load();
+          const int ceilStuck = (attemptStuck <= 1) ? 1280
+                              : (attemptStuck == 2) ? 960
+                                                    : 0;
+          g_engine.m_nTdrMirrorCeiling.store(ceilStuck);
+          RelaunchForTdr(attemptStuck, ceilStuck);
+          g_bQuitRequested.store(true);
+          PostMessage(hWnd, WM_CLOSE, 0, 0);
+          return 0;
+        }
+        CloseHandle(g_hDX12RenderThread);
+        g_hDX12RenderThread = nullptr;
+      }
+
+      // Back the mirrors off a step before the successor comes up, so the
+      // relaunch is not a rerun of the death: 1920 -> 1280 -> 960 -> off.
+      //
+      // Derived from the ATTEMPT, not from the previous ceiling. 0 is an
+      // overloaded value -- it means both "no ceiling set" and "mirrors off" --
+      // so stepping down from the previous value read "off" as "unset" and
+      // handed the fourth attempt a 1280 ceiling, reversing the backoff at
+      // exactly the point the evidence says to stop shedding and give up.
+      const int attemptNow = g_nTdrRecoveries.load();
+      const int nextCeil = (attemptNow <= 1) ? 1280
+                         : (attemptNow == 2) ? 960
+                                             : 0;      // 0 == mirrors off
+      const int prevCeil = g_engine.m_nTdrMirrorCeiling.load();
+      g_engine.m_nTdrMirrorCeiling.store(nextCeil);
+      if (nextCeil == 0) {
+        g_engine.m_bMirrorsActive = false;
+        g_engine.m_nDeferMirrorActivate.store(0);
+      }
+      {
+        char buf[160];
+        sprintf(buf, "GPU fatal: mirror ceiling %d -> %s\n",
+                prevCeil ? prevCeil : 1920,
+                nextCeil ? (nextCeil == 1280 ? "1280" : "960") : "off");
+        DebugLogA(buf, LOG_ERROR);
+      }
+
+      g_bRenderThreadRestart.store(false);
+
+      // Relaunch the PROCESS, do not respawn the thread (#368).
+      //
+      // Respawning it here was correct in shape and failed in fact: the new
+      // thread was refused a device for 120 seconds because the adapter stays
+      // poisoned for THIS PROCESS after DEVICE_HUNG, while a fresh process gets
+      // one in ~22 s. The thread join above still earns its keep -- it is what
+      // stops the dying render thread touching the device while we leave.
+      //
+      // g_bGpuHung is deliberately NOT cleared: nothing in this process is
+      // going to render again, and clearing it would let the frame loop and
+      // WaitForGpu believe otherwise on the way out.
+      const int attempt = g_nTdrRecoveries.load();
+      if (RelaunchForTdr(attempt, nextCeil)) {
+        DebugLogA("GPU fatal: successor started — closing this instance\n",
+                  LOG_ERROR);
+      } else {
+        DebugLogA("GPU fatal: relaunch FAILED — closing anyway\n", LOG_ERROR);
+      }
+      g_bQuitRequested.store(true);
+      PostMessage(hWnd, WM_CLOSE, 0, 0);
+      return 0;
+    }
+
     DebugLogA("GPU fatal: closing window (TDR, no recovery)\n", LOG_ERROR);
     PostMessage(hWnd, WM_CLOSE, 0, 0);
     return 0;
@@ -3294,9 +3552,49 @@ static DWORD WINAPI GpuFatalWatchdogProc(LPVOID) {
 // thread: a live, permanently blank window (observed 2026-08-23, PID 34992,
 // 25 threads, Responding=True, nothing drawing).
 static void RequestGpuFatalExit() {
+  // Try to RECOVER before giving up (#230). Recovering from a device loss is a
+  // standing design principle here, and each recovery also backs the mirrors
+  // off a step so the retry is not a rerun of the death.
+  //
+  // Bounded: three recoveries per session, after which this exits exactly as
+  // it did before. By the third the mirrors are already disabled, so a fourth
+  // TDR is telling us the primary alone cannot cope and there is nothing left
+  // to shed.
+  //
+  // Deliberately BEFORE g_bGpuHung is raised: that flag makes
+  // IsDeviceHungOrRemoved answer true and WaitForGpu return early, which would
+  // sabotage the recovery being asked for.
+  // A TDR after a long healthy run is not part of a loop, so it does not spend
+  // the loop budget. Evaluated HERE rather than on a timer because this is the
+  // only moment the answer is used, and it keeps the render loop untouched.
+  if (g_nTdrRecoveries.load() > 0 && g_tickAppStart &&
+      (GetTickCount64() - g_tickAppStart) >= kTdrBudgetResetMs) {
+    char buf[160];
+    sprintf(buf, "GPU fatal: %llu min of healthy running since launch — "
+                 "TDR relaunch budget reset\n",
+            (unsigned long long)((GetTickCount64() - g_tickAppStart) / 60000));
+    DebugLogA(buf, LOG_ERROR);
+    g_nTdrRecoveries.store(0);
+    g_engine.m_nTdrMirrorCeiling.store(0);   // and give the mirrors back
+  }
+
+  if (g_nTdrRecoveries.load() < kMaxTdrRelaunches) {
+    g_nTdrRecoveries.fetch_add(1);
+    // Ask the render thread to END, and let the MAIN thread start a new one.
+    // Recovering in place was tried first and could not get the adapter back;
+    // see g_bRenderThreadRestart.
+    g_bRenderThreadRestart.store(true);
+    DebugLogA("GPU hung/removed — restarting the render thread (#230)\n",
+              LOG_ERROR);
+    HWND hw = g_engine.GetPluginWindow();
+    if (hw)
+      PostMessage(hw, WM_MW_GPU_FATAL, 0, 0);
+    return;
+  }
+
   if (g_bGpuHung.exchange(true))
     return;
-  DebugLogA("GPU hung/removed — posting exit, no recovery retry\n", LOG_ERROR);
+  DebugLogA("GPU hung/removed — recovery exhausted, exiting\n", LOG_ERROR);
   g_engine.m_bDeviceRecoveryPending = false;
   g_bQuitRequested.store(true);
 
@@ -3312,7 +3610,51 @@ static void RequestGpuFatalExit() {
     PostMessage(hwnd, WM_MW_GPU_FATAL, 0, 0);
 }
 
-// User-triggered restart and post-sleep resume. TDR/hung exits instead (see above).
+// Drive the TDR response without a GPU (#368). Reached only by
+// DIAG_SIMULATE_TDR, which refuses unless testing mode is on.
+//
+// Everything downstream of the detection is the new code -- the mirror backoff,
+// the relaunch, the successor's wait for its predecessor, the session budget
+// and its reset. A real TDR is the one way to exercise the DETECTION above it,
+// and a real TDR resets the display driver for the whole machine and kills
+// whatever else is rendering, so it is not the way to iterate on the parts that
+// have nothing to do with the GPU.
+void MDropSimulateGpuFatal() {
+  DebugLogA("DIAG_SIMULATE_TDR: driving the GPU-fatal path (no GPU involved)\n",
+            LOG_ERROR);
+  RequestGpuFatalExit();
+}
+
+// In-process recovery from a hung device USED TO LIVE HERE, and was removed
+// with #368 rather than left as a dead alternative.
+//
+// The version removed here was UNREACHABLE: its arming flag was declared, read
+// and cleared, and never once written true in any commit. So it had never run,
+// and nothing measured about it was measured about IT.
+//
+// What WAS measured, on the render-thread-restart path: after
+// DXGI_ERROR_DEVICE_HUNG the adapter refuses this process for ~120 s while a
+// fresh process gets a device in ~22 s.
+//
+// An earlier note here explained that by saying the process "holds nothing".
+// That is FALSE and worth stating plainly, because it is the kind of claim that
+// stops the next person looking. ReleaseGpuResources (engine.cpp) has exactly
+// one caller -- WinMain exit -- and its own survivor counter prints
+// "20 sampled resource(s) had survived every other teardown path" on every run.
+// D3D12CreateDevice is a per-process, per-adapter singleton, and live device
+// children keep a removed device alive, which fits the signature exactly:
+// instant failure, same HRESULT, real adapter only, cured by relaunch.
+//
+// So "DEVICE_HUNG is not recoverable in process" is NOT established. Relaunch
+// is still the right answer, for a different and better reason: a fresh process
+// is the only teardown that is provably complete, and it stays complete as the
+// code grows, without anyone maintaining a release list. This tree has already
+// shipped three places that silently held a device child.
+//
+// If anyone does revisit in-process recovery, the work is to release those
+// children first -- not to re-run the old measurement and conclude the adapter
+// is cursed.
+
 static void PerformDeviceRecovery() {
   HWND hwnd = g_engine.GetPluginWindow();
   if (!hwnd) {
@@ -3324,9 +3666,17 @@ static void PerformDeviceRecovery() {
   // recoverable ones -- a driver update above all -- exited with the same
   // finality as a poisoned adapter, and the recovery machinery below never ran
   // for the cases it was written for.
+  //
+  // A HANG goes to RequestGpuFatalExit, which relaunches the process (#368).
+  // There is no in-process arm above this any more: recovering a hung device
+  // in place was implemented, measured and removed, because the adapter stays
+  // poisoned for THIS process for ~120 s, while
+  // a fresh process gets a device in ~22 s. What remains below serves the
+  // REMOVED-but-not-hung cases -- a driver update, a reset, an adapter change
+  // -- which genuinely are recoverable here.
   if (g_bGpuHung.load() || DeviceLossIsHung()) {
     DebugLogA("Device Recovery: DEVICE_HUNG — not recoverable in process, "
-              "exiting\n", LOG_ERROR);
+              "relaunching\n", LOG_ERROR);
     RequestGpuFatalExit();
     return;
   }
@@ -3352,6 +3702,17 @@ static void PerformDeviceRecovery() {
     DebugLogA("Device Recovery: teardown (keep window size)\n", LOG_INFO);
 
     g_engine.DestroyAllDisplayOutputs();
+    // Each mirror surface keeps its own fence, command list and allocator, and
+    // every one of those holds the device -- StopMirrorThread does not release
+    // them. This is the only caller (#368): the function was written for the
+    // in-process TDR recovery, whose arming flag was never set, so it had never
+    // once executed. Deleting that recovery left it with no callers at all,
+    // which is how a genuinely useful release becomes an orphan.
+    //
+    // It belongs HERE, on the path that really does rebuild the device in
+    // place -- a driver update, a reset, an adapter change. A hung device
+    // relaunches instead and process exit releases everything by construction.
+    g_engine.ReleaseAllMirrorGpuObjects();
     g_engine.ReleaseAllOrientPipelines();
     g_engine.m_mirrorSrcTex.Reset();
     g_engine.FlushPresetUsage();   // bank the last preset's seconds before exit
@@ -3744,12 +4105,6 @@ void RenderFrame() {
 // --- Render thread entry point (Phase 3) ---
 // Owns all DX12 state: init, render loop, cleanup.
 // Runs on a dedicated thread; message pump runs on the caller thread.
-struct RenderThreadParams {
-  HWND hwnd;
-  unsigned int backbufferWidth;
-  unsigned int backbufferHeight;
-};
-
 unsigned __stdcall RenderThreadProc(void* data) {
   RenderThreadParams* params = (RenderThreadParams*)data;
   HWND hwnd = params->hwnd;
@@ -3760,6 +4115,31 @@ unsigned __stdcall RenderThreadProc(void* data) {
   try {
     mdropdx12.LogInfo(L"RenderThread: InitD3d");
     InitD3d(hwnd, BackbufferWidth, BackbufferHeight);
+
+    // After a TDR the adapter stays hung for a while -- measured at over 60
+    // seconds on this machine, while a WARP device came up instantly -- so a
+    // restarted thread has to be patient (#230). Blocking HERE is free: the
+    // message pump is on the main thread, so the window keeps responding.
+    if (!pD3DDevice && g_nTdrRecoveries.load() > 0) {
+      for (int sec = 1; sec <= 120 && !g_bQuitRequested.load(); sec++) {
+        Sleep(1000);
+        DeinitD3d();                 // never retry onto a half-built device
+        InitD3d(hwnd, BackbufferWidth, BackbufferHeight);
+        if (pD3DDevice) {
+          char buf[128];
+          sprintf(buf, "RenderThread: device back after %d s (#230)\n", sec);
+          DebugLogA(buf, LOG_ERROR);
+          break;
+        }
+      }
+      if (!pD3DDevice) {
+        DebugLogA("RenderThread: adapter never returned — giving up\n", LOG_ERROR);
+        g_bQuitRequested.store(true);
+        if (HWND hq = g_engine.GetPluginWindow())
+          PostMessage(hq, WM_CLOSE, 0, 0);
+        return 0;
+      }
+    }
 
     mdropdx12.LogInfo(L"RenderThread: PluginInitialize");
     g_engine.PluginInitialize(
@@ -3798,7 +4178,12 @@ unsigned __stdcall RenderThreadProc(void* data) {
     int presetsSkippedForExceptions = 0; // total presets skipped this session
     bool safeMode = false;               // true = black screen, stop loading presets
 
-    while (!g_bQuitRequested.load()) {
+    // g_bRenderThreadRestart ends the LOOP without ending the APP (#230).
+    // Falling out of here runs the PluginQuit + DeinitD3d below and returns, so
+    // the thread releases everything it owns -- including anything thread-local
+    // or on its stack that a reference hunt would never find. The main thread
+    // then spawns a fresh one, which is a genuine cold start.
+    while (!g_bQuitRequested.load() && !g_bRenderThreadRestart.load()) {
       // Pump messages for windows owned by the render thread (mirror windows).
       // Without this, cross-thread SendMessage from the message pump thread
       // (e.g., during SetWindowPos z-order changes) deadlocks because
@@ -4624,6 +5009,15 @@ unsigned __stdcall CreateWindowAndRun(void* data) {
   g_bQuitRequested.store(false);
   g_bRenderReady.store(false);
 
+  // If this process is the successor of one the GPU killed, let that one finish
+  // dying before the render thread asks for an adapter (#368). No-op in the
+  // ordinary case: g_dwTdrWaitForPid is zero unless -tdrrelaunch= set it.
+  //
+  // Here rather than inside RenderThreadProc so the window already exists and
+  // the message pump is about to run -- the wait is bounded at 30 s and a
+  // windowless wait that long would look like a hang.
+  WaitForTdrPredecessor();
+
   RenderThreadParams* rtParams = new RenderThreadParams();
   rtParams->hwnd = hwnd;
   rtParams->backbufferWidth = BackbufferWidth;
@@ -5172,6 +5566,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
   g_iCmdShow = iCmdShow;
   g_engine.m_bQuietLaunch = (iCmdShow == SW_SHOWNOACTIVATE);
 
+  // How long this instance has been up, for the TDR relaunch budget (#368).
+  // First statement that touches it, so a relaunch loop is measured from the
+  // successor's own launch rather than from anything it inherited.
+  g_tickAppStart = GetTickCount64();
+
   std::set_terminate(MDropDX12TerminateHandler);
   api_orig_hinstance = hInstance;
 
@@ -5312,6 +5711,35 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
           g_pipeServer.SetNameBase(g_szCmdLinePipeBase);   // refusal reported below
           continue;
         }
+        // -tdrrelaunch=<oldpid>,<attempt>,<ceiling> : this process is the
+        // successor of one the GPU killed (#368). Set by RelaunchForTdr and by
+        // nothing else -- it is not a user-facing switch.
+        //
+        // All three matter. The pid is waited on before a device is asked for,
+        // so the successor does not race its predecessor for a poisoned
+        // adapter. The attempt continues the SESSION's budget of three rather
+        // than restarting it, which is the difference between a bounded
+        // recovery and a restart loop. The ceiling re-applies the mirror
+        // backoff, without which the successor restores the same arrangement
+        // that just killed the GPU and dies the same way.
+        if (_wcsnicmp(argv[i], L"-tdrrelaunch=", 13) == 0 ||
+            _wcsnicmp(argv[i], L"--tdrrelaunch=", 14) == 0) {
+          const wchar_t* v = wcschr(argv[i], L'=') + 1;
+          unsigned long pid = 0; int attempt = 0, ceiling = 0;
+          if (swscanf_s(v, L"%lu,%d,%d", &pid, &attempt, &ceiling) == 3) {
+            g_dwTdrWaitForPid = (DWORD)pid;
+            g_nTdrRelaunchAttempt.store(attempt);
+            g_nTdrRecoveries.store(attempt);
+            g_engine.m_nTdrMirrorCeiling.store(ceiling);
+            if (ceiling == 0)
+              g_engine.m_bMirrorsActive = false;
+            // Reported after DebugLogInit, not here. This runs ~430 lines
+            // before the log file exists, so a DebugLogA here is a no-op --
+            // which is exactly how the first test of this flag read as "the
+            // flag never parsed" when it had parsed correctly.
+          }
+          continue;
+        }
         // -spoutout : Spout OUTPUT on for this run.
         // -spoutin[=<sender>] : Spout INPUT on for this run, optionally from
         // a named sender.
@@ -5355,8 +5783,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
         if ((len >= 6 && _wcsicmp(argv[i] + len - 6, L".milk3") == 0) ||
             (len >= 6 && _wcsicmp(argv[i] + len - 6, L".milk2") == 0) ||
             (len >= 5 && _wcsicmp(argv[i] + len - 5, L".milk") == 0)) {
-          CopyTo(g_szCmdLinePreset, argv[i]);
-          break;
+          // `continue`, not `break` (#368). This used to leave the loop on the
+          // first preset path, and RelaunchForTdr appends -tdrrelaunch= at the
+          // END of the command line -- so a session started by double-clicking
+          // a preset never reached that parse. Nothing waited for the
+          // predecessor, the ceiling stayed at full, and worst of all the
+          // attempt count stayed 0, which turns the three-relaunch bound into
+          // an UNBOUNDED loop: every successor believes it is the first.
+          //
+          // The guard keeps the old "first path wins" behaviour; only the exit
+          // from the loop changes.
+          if (!g_szCmdLinePreset[0])
+            CopyTo(g_szCmdLinePreset, argv[i]);
+          continue;
         }
       }
       LocalFree(argv);
@@ -5369,7 +5808,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
   // handing its preset to whichever instance answers first and exiting would
   // defeat the entire point -- the parent would have asked for a display and
   // got nothing.
-  if (g_szCmdLinePreset[0] != L'\0' && !g_engine.m_bChildMode) {
+  // Never as a TDR successor either (#368). The predecessor is still alive and
+  // still serving its pipe when we start -- WM_CLOSE is posted AFTER the
+  // relaunch, deliberately, so the successor has something to wait on. Without
+  // this guard the successor hands its preset to the process that is dying and
+  // exits, and the visualiser never comes back: the one outcome the whole
+  // relaunch exists to prevent.
+  if (g_szCmdLinePreset[0] != L'\0' && !g_engine.m_bChildMode &&
+      !g_dwTdrWaitForPid) {
     std::wstring msg = L"PRESET=";
     msg += g_szCmdLinePreset;
     if (PipeSendToExistingInstance(msg.c_str())) {
@@ -5587,6 +6033,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
       DebugLogInit(g_engine.m_szBaseDir, logSubdir[0] ? logSubdir : nullptr);
     }
     DebugLogSetLevel(g_engine.m_LogLevel); // apply INI log level immediately
+
+    // Now that there IS a log, say whether this process is a TDR successor
+    // (#368). The flag is parsed far above, before this file exists.
+    if (g_dwTdrWaitForPid) {
+      char buf[192];
+      sprintf(buf, "TDR relaunch: successor of pid %lu, attempt %d, "
+                   "mirror ceiling %d\n",
+              (unsigned long)g_dwTdrWaitForPid, g_nTdrRelaunchAttempt.load(),
+              g_engine.m_nTdrMirrorCeiling.load());
+      DebugLogA(buf, LOG_ERROR);
+    }
 
     if (found) {
       DebugLogW(L"BaseDir resolved (resources found)");

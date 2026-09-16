@@ -705,7 +705,7 @@ static_assert(IDC_MW_HOTKEYS_AVAIL != IDC_MW_HOTKEYS_DELETE &&
 #define IDC_MW_DISP_SPOUT_FIXED 7009   // Checkbox: Spout fixed size
 #define IDC_MW_DISP_ACTIVATE    7010   // Button: activate/deactivate mirrors
 #define IDC_MW_DISP_CLICKTHRU   7011   // Checkbox: mirror click-through
-#define IDC_MW_DISP_ONTOP       7135   // Checkbox: keep THIS display on top
+#define IDC_MW_DISP_ONTOP       7141   // Checkbox: keep THIS display on top
 #define IDC_MW_DISP_OPACITY     7012   // Edit: mirror opacity (1-100)
 #define IDC_MW_DISP_OPACITY_SPIN 7013  // Up-down (spin) buddy for opacity
 #define IDC_MW_DISP_MIRROR_ALTS 7014   // Combo: what ALT-S does (stretch/mirror/profile)
@@ -737,8 +737,10 @@ static_assert(IDC_MW_HOTKEYS_AVAIL != IDC_MW_HOTKEYS_DELETE &&
 #define IDC_MW_DISP_STARTUP_BR    7115 // Button: browse for the startup preset
 #define IDC_MW_DISP_CYCLE_ON      7116 // Checkbox: cycle presets on this display
 #define IDC_MW_DISP_CYCLE_SECS    7117 // Edit: seconds between changes
-#define IDC_MW_DISP_ORDER_RANDOM  7118 // Radio: random order
-#define IDC_MW_DISP_ORDER_SEQ     7119 // Radio: sequential order
+// 7118 was IDC_MW_DISP_ORDER_RANDOM, the other half of a radio pair that spent
+// two rows on one boolean (#364). Not reused: an id that used to mean something
+// else in the same window is how stale INI and layout state comes back wrong.
+#define IDC_MW_DISP_ORDER_SEQ     7119 // Checkbox: sequential order (else random)
 // Displays-window controls added later, at 7130+ because 7120-7128 were all
 // TAKEN -- by IDC_MW_DISP_PROFILE_*, the three IDC_MW_DISP_GRP_*, MAXFPS,
 // HUD_DISABLE and RESET, which are declared further up this file and are easy
@@ -761,6 +763,12 @@ static_assert(IDC_MW_HOTKEYS_AVAIL != IDC_MW_HOTKEYS_DELETE &&
 #define IDC_MW_DISP_VIEW_DETAILS  7136 // Radio: show displays as a detail list
 #define IDC_MW_DISP_PANEL         7137 // The arrangement panel itself
 #define IDC_MW_DISP_BRING_FRONT   7139 // Button: raise every display's window
+// What this display is showing RIGHT NOW, and a file dialog to change it.
+// Until #364 the only way to move a non-primary display's preset from the UI
+// was < Prev / Next >, so reaching a particular preset meant stepping the
+// directory until it came up. Next free Displays id: 7146.
+#define IDC_MW_DISP_NOW_PRESET    7144 // Read-only: the preset now on this display
+#define IDC_MW_DISP_NOW_BROWSE    7145 // Button: pick a preset to show on it now
 // Profile controls
 #define IDC_MW_DISP_PROFILE_AUTOSTART 7129 // Checkbox: a profile starts every
                                           // display it names
@@ -769,8 +777,14 @@ static_assert(IDC_MW_HOTKEYS_AVAIL != IDC_MW_HOTKEYS_DELETE &&
 // a mode combo plus a Save that writes through (#278). The checkbox could only
 // say on/off, so "use whatever the displays are set to right now" had no way
 // to be expressed and the stored name was the only possible answer.
-#define IDC_MW_DISP_PROFILE_MODE    7136 // Combo: None / Current / <file>
-#define IDC_MW_DISP_PROFILE_MODESAVE 7137 // Button: write the choice through
+// 7142/7143, not 7136/7137. Those two were already IDC_MW_DISP_VIEW_DETAILS
+// and IDC_MW_DISP_PANEL, declared thirty lines below this and easy to miss --
+// exactly the mistake the block comment above warns about, made again. All
+// three controls are children of the SAME window, so GetDlgItem could only
+// ever return one of each pair and the startup-profile combo was read through
+// a handle to the "Details" radio button.
+#define IDC_MW_DISP_PROFILE_MODE    7142 // Combo: None / Current / <file>
+#define IDC_MW_DISP_PROFILE_MODESAVE 7143 // Button: write the choice through
 #define IDC_MW_DISP_PROFILE_PATH    7121 // Edit (read-only): the startup profile
 // Group boxes — no messages, but they need tracking for the dark theme
 #define IDC_MW_DISP_GRP_SELECTED  7122

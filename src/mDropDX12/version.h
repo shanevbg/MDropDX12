@@ -4,7 +4,7 @@
 #define MDROP_VERSION_H
 
 #define MDROP_VERSION_MAJOR  3
-#define MDROP_VERSION_MINOR  1
+#define MDROP_VERSION_MINOR  2
 #define MDROP_VERSION_PATCH  0
 
 // The strings are BUILT from the numbers above, so bumping a version means

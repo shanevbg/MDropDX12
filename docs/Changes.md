@@ -1,5 +1,220 @@
 # MDropDX12 Changelog
 
+## v3.2.0 (2026-09-16)
+
+The correctness release for per-display presets. v3.0 made every screen able to
+hold its own preset and v3.1 made that survive a long run; putting it through a
+week of ordinary use on a real library found four ways it did not hold up, three
+of which put a black or wrong picture on a screen. A fifth — also a wrong
+picture — turned up while measuring the memory cost of the `.milk3` work below.
+That is why this follows v3.1 so closely — see `RELEASE_NOTES.md`.
+
+### A display keeps its own preset while the main window is on a `.milk3`
+
+`m_bShadertoyMode` describes the PRIMARY's preset and was read at **seven**
+surface-serving sites, so the primary loading any `.milk3` made every own-preset
+display stop simulating its own preset and render the primary's Shadertoy
+instead, recovering only when the primary returned to a `.milk`.
+
+Measured with one display left on `01 - Martin - blue haze.milk` for the whole
+run while only the primary changed: mean brightness 31.9 → **52.6** → 26.3, the
+middle phase showing the primary's `BlueRedShiney.milk3`.
+
+Two things hid it. The surface never stalled — its frame counter advanced
+identically in all three phases — and `DIAG_MIRRORS` went on reporting the
+display's own preset throughout.
+
+All seven sites now take a per-surface predicate: the sim guard
+(`engine_displays.cpp`), the render dispatch, `OrientPipeReadyForMode`, the pipe
+builder's texture selection, and both per-surface render entry guards. A surface
+with no preset of its own still follows the primary, which is what a mirror is.
+
+* `DIAG_MIRRORS`' `surf=` row gains **`renders=`** (`classic` | `milk3`), read
+  from the same predicate the worker dispatches on so it cannot drift from what
+  is drawn. `preset=` still names the surface's own preset.
+* A follow-up fixed a self-latching predicate: it tested `sim.ownPresetPath`,
+  which is assigned only inside the block the predicate gates, so a display that
+  became own-preset *while* the primary was on a `.milk3` could never adopt and
+  stayed on the wrong pipeline permanently. It now reads a config-derived flag
+  the worker cannot starve.
+
+### A display can hold and render a `.milk3` of its own
+
+`CState::Import` has no `.milk3` branch: the JSON opened, matched no keys and
+returned **success** on a default state. So a display handed a `.milk3` went
+black, cached the path so it never retried, and reported the `.milk3` over IPC
+as what was playing — with nothing logged.
+
+Reachable without doing anything unusual: `PickDisplayPreset` offered `.milk3`
+and they share folders with `.milk` files, so a cycling display reached one by
+itself.
+
+Most of the machinery already existed unused — `MirrorSimContext` has owned its
+`shaders`/`psos` since v3.0 and `PresetPsoOwned` has carried `bufferA-D` and
+`compFloat` all along, so every surface adoption was already building Shadertoy
+pipeline objects it never used. Four pieces were missing:
+
+* `Engine::ParseMilk3IntoState(path, CState*)`, split out of `LoadMilk3Preset`
+  so both the primary's loader and a surface fill a state the same way;
+* `MirrorSimAdoptPreset` routing `.milk3` to it instead of `CState::Import`;
+* `SurfaceUsesMilk3` consulting the surface's own preset;
+* `RenderMilk3OrientPipeline` reading the **context's** shaders, PSOs, buffer
+  flags and state rather than the engine's — it would otherwise have bound the
+  primary's Shadertoy shaders against the surface's own buffers.
+
+Buffer flags are derived from the compiled bytecode the way the primary derives
+its own, so the two cannot drift, and one helper feeds both the pipe builder and
+the readiness test — a disagreement between those froze every mirror once.
+
+No descriptor free path was needed. A surface's mode now follows its own preset,
+so the classic↔milk3 rebuild the primary used to force on every display is gone;
+this **reduces** pipe rebuilds rather than adding them.
+
+Two defects found while testing it, both of which would have shipped:
+
+* the sim guard was self-latching — a surface in milk3 mode skipped the only
+  code that could take it back out, so giving it a `.milk` left it stuck. The
+  grid, drain and adopt are now unconditional. `MirrorSimEnsureGrid` being inside
+  that guard also meant a stale grid aspect: lit content filled 100%×66% of the
+  panel instead of 100%×93% — a visibly squashed picture.
+* the milk3 record never called `FillAnimInputs` and passed frame `-1`, so a
+  surface rendering its own Shadertoy preset was **frozen** while its clock
+  advanced: frame-to-frame image change 0.01 against 2.4 for the same surface on
+  a classic preset. Now 40–58.
+
+Measured on a 2160×3840 primary with two 1440p secondaries, going from three
+classic presets to three Shadertoy ones costs **+382 MB of video memory, two
+thirds of it the primary alone** — about **65 MB** per extra display, because
+the FLOAT32 feedback pairs are allocated only for the buffers a preset declares.
+An upper bound: every figure scales with canvas area.
+
+### A surface compiles shaders against its own preset kind
+
+Four sites in `LoadShaderFromMemory` shape the generated HLSL by preset kind —
+the Shadertoy texture declarations, the `#undef q1..q32` block, the `ret` type,
+and the closing `_return_value` wrapper — and all four read the **global**
+`m_bLoadingShadertoyMode`, which describes what the ENGINE is loading. Correct
+while the render thread was the only thing that ever compiled a preset; a race
+once a surface compiled its own on its own thread.
+
+Both directions broke:
+
+```
+classic surface + .milk3 engine load  ->  error X3004: undeclared identifier 'q10'
+                                          error X3017: float3 to float4
+.milk3 surface  + classic engine load ->  Shadertoy texture decls blanked
+```
+
+The surface fell back to the default shader, and the failure was attributed to
+the file the engine was loading rather than the preset that failed — which sent
+the first investigation into the wrong file.
+
+`t_shaderCompileKind` is thread-local and set by `ShaderCompileScope` around
+every compile, the same mechanism `t_shaderCompilePreset` already uses for error
+attribution. It is a **tri-state** (`Unset`/`Classic`/`Shadertoy`), not a bool:
+a bool ORed with the global cannot distinguish "no scope open" from "scope open,
+saying classic", so it leaves the reported failure in place. `Unset` has to be
+its own value for an open scope to say classic and win. The global is consulted
+only when no scope is open — the Preset Editor Apply path and the engine's own
+synchronous compiles. The decision is made once at the top of the function so
+the four sites cannot drift apart again.
+
+Measured by forcing the overlap rather than waiting for it: 12–14 rounds of
+concurrent loads staggered 0.35 s, **8 `RecompilePShader FAILED` before, 0
+after**, both directions. Three *sequential* scenarios came back clean against
+the broken build — sequential switching does not reproduce this, and reading
+that as "fixed" is exactly the wrong conclusion.
+
+### Motion vectors are drawn on own-preset displays
+
+`DX12_DrawMotionVectors` had exactly one call site, inside the primary's
+`DX12_RenderWarpAndComposite`. `RenderClassicOrientPipeline` never called it.
+
+The reason is legible in the signatures: v3.0 gave every injector a state
+override so an own-preset display could inject *its* preset, and wired each into
+the orient pipeline — shapes, waves, sprites, and the wave/border/darken-centre
+stage. `DX12_DrawMotionVectors` took no parameters, so it was left off that list.
+
+For a preset whose only light source is motion vectors the display was black
+while the same file rendered correctly on the primary. Across a 7,678-preset
+library: **4 presets fully black**, **545 more degraded** — about 7% rendering
+differently depending on the screen.
+
+It now takes the same shape as its siblings and is called before the warp pass so
+the vectors enter the feedback loop. Four things come from the context, the mesh
+most importantly: `ReversePropagatePoint` traces the warp field, so the engine's
+mesh would paint the *primary's* motion field onto another display.
+
+Verified by primitive count rather than brightness alone — two copies of one
+preset differing only in `mv_a` gave 55671 against 55302 primitives, and 55302
+was exactly the pre-fix count.
+
+### TDR recovery is a process relaunch, bounded at three
+
+Recovering from a device loss rather than exiting is a standing design
+principle, and it had regressed to exiting.
+
+Measured after `DEVICE_HUNG`: the adapter refuses **this process** for ~120 s
+while a fresh process gets a device in ~22 s. So a hang relaunches the
+application. That is not a proof that a hung device cannot be recovered in
+place — the process still holds device objects at that point — but a fresh
+process is the only teardown that is provably complete, and it stays complete
+as the code grows.
+
+Three things cross on the command line as
+`-tdrrelaunch=<oldpid>,<attempt>,<ceiling>`, because a relaunch that carries
+nothing repeats the death: the old pid (the successor waits for it to exit
+rather than racing it for the adapter), the attempt (a **session** budget of
+three, not three per process, which would be an unbounded loop), and the mirror
+ceiling (1920 → 1280 → 960 → off). The budget resets after five minutes of
+healthy running — what is bounded is a loop, not a rare event.
+
+Device losses that are **not** hangs are still recovered in place.
+
+* `DIAG_SIMULATE_TDR` drives the path without a GPU so the chain can be tested
+  without resetting the display driver. **Testing mode only** — it makes the
+  application exit and start a replacement.
+* Two defects fixed in the relaunch itself: the argv loop `break`ed on the first
+  preset path, so a session started by double-clicking a `.milk` never parsed the
+  relaunch flag — the attempt stayed 0 and the bound became an **unbounded
+  loop**; and the successor forwarded its preset to the still-running predecessor
+  and exited, so the visualiser never came back at all.
+* ~190 lines of unreachable in-process recovery deleted. Its arming flag was
+  declared, read and cleared, and never once written `true`.
+
+### Pick a preset for a display other than the main render
+
+A display holding its own preset could only be moved with **< Prev** / **Next >**,
+so reaching a particular preset meant stepping the folder until it arrived.
+
+The **Selected display** group gained a **Playing:** row — a read-only field
+naming what that display is rendering, refreshed on the window's existing 1 s
+timer, and a **...** button opening a file dialog that shows a chosen preset on
+that display at once.
+
+Deliberately transient: unlike the Startup browse it writes neither the startup
+preset nor the preset directory. Picking something to watch for a minute must not
+re-point what the display cycles through.
+
+**Random / Sequential** became a single **Sequential** checkbox — one boolean
+spending two rows — which is the row **Playing:** occupies.
+
+`Engine::ShowPresetOnDisplay` is now shared by the dialog and the
+`SET_DISPLAY_PRESET=` verb, which previously spelled the same three-way out
+inline. Written twice, these drift: when a display gained the ability to hold
+its own preset without its own process, the script verbs were widened to that
+tier and the Displays window's **< Prev** / **Next >** buttons were not — so
+those buttons told a display holding its own preset that it was a mirror, and
+did nothing.
+
+### Also
+
+* **Three control-ID collisions in the Displays window.** `IDC_MW_DISP_ONTOP`,
+  `_PROFILE_MODE` and `_PROFILE_MODESAVE` were 7135/7136/7137 — already
+  `_VIEW_LAYOUT`, `_VIEW_DETAILS` and `_PANEL`. All six are children of one
+  window, so `GetDlgItem` could only ever return one of each pair: the
+  startup-profile combo was being read through a handle to the "Details" radio.
+
 ## v3.1.0 (2026-09-16)
 
 **Video memory stopped growing without bound.** A long unattended session used
