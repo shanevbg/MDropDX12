@@ -57,7 +57,7 @@ This is identical to MilkDrop3. **Do not inject gamma_adj or B/D/S/I into the co
 
 ---
 
-## Shader Wrapping (plugin.cpp ~line 4585)
+## Shader Wrapping (`LoadShaderFromMemory`, engine_shaders.cpp)
 
 MDropDX12 assembles shader text by combining include.fx + defines + the preset shader body + wrapping code.
 

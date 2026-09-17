@@ -1,8 +1,14 @@
-// engine_hotkeys.cpp — Configurable hotkey load/save/register/dispatch
-//
-// Part of the MDropDX12 configurable hotkeys system.
-// Supports local (render-window-focus) and global (system-wide) bindings.
-// ~84 reassignable bindings; F1/F2/Ctrl+F2/Escape remain hardcoded.
+/*
+  Plugin module: Configurable Hotkeys
+  Load/save/register/dispatch for ~84 reassignable bindings.
+  Contains: Defaults + JSON persistence (SaveHotkeysJson, migration from
+            INI), help category order, global hotkey registration + scan
+            (RegisterGlobalHotkeys, ScanGlobalHotkeyAvailability,
+            conflict description), the action dispatch switch
+            (DispatchHotkeyAction), LaunchOrFocusApp, dynamic user
+            hotkeys (Script/Launch entries), idle timer settings,
+            hotkey display + help text generation, HandleHotkeyDiagIPC
+*/
 
 #include "engine.h"
 #include "json_utils.h"

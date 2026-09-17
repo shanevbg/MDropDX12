@@ -1,6 +1,15 @@
-// engine_shader_import_ui.cpp — Shader Import ToolWindow implementation.
-//
-// Provides paste GLSL → auto-convert to HLSL → live preview → save as .milk preset.
+/*
+  Plugin module: Shader Import ToolWindow
+  Paste GLSL -> auto-convert to HLSL -> live preview -> save as preset.
+  Contains: WelcomeWindow, ShaderEditorWindow (GLSL/HLSL/notes panes),
+            ShaderImportWindow controls + pass list + channel combos,
+            ApplyShader + AnalyzeChannels, the GLSL->HLSL converter
+            (ConvertGLSLtoHLSL, FixMatrixMultiplication, FixAtan,
+            FixFloatNumberOfArguments, BasicFormatShaderCode),
+            SaveAsPreset/SavePresetToFile, import project save/load,
+            headless imports (ImportFromFile, ImportFromGLSL)
+*/
+
 // GLSL→HLSL conversion ported from Milkwave Remote ShaderHelper.cs.
 
 #include "tool_window.h"

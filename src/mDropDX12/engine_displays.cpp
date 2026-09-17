@@ -1,7 +1,15 @@
-// engine_displays.cpp — Display output management (monitor mirrors + Spout senders)
-//
-// Part of the MDropDX12 unified display output system.
-// Manages enumeration, INI persistence, init/destroy, and per-frame send.
+/*
+  Plugin module: Display Output Management
+  Monitor mirrors + Spout senders — the unified display output system.
+  Contains: Mirror swap-chain caps & VRAM share, frame-rate balancer and
+            distress ladder, monitor enumeration + MirrorWndProc, display
+            config load/save/migrate, init/destroy of outputs, the mirror
+            worker thread (StartMirrorThread, MirrorThreadDrawAndPresent),
+            per-frame send (SendToDisplayOutputs, BlitMainToMirror),
+            independent-render toggle, mirror layout/window styles, idle
+            timer opacity/z-order banking, Displays tab refresh, display
+            profiles (save/load/step/IPC), Spout sender (OpenSender)
+*/
 
 #include "engine.h"
 #include "tool_window.h"

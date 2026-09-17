@@ -56,15 +56,17 @@ The original MilkDrop2 used ns-eel2 in x86 mode. MilkDrop3 still ships as x86. M
 
 ### No 4 GB Memory Limit
 
-The x86 process memory limit (~2 GB user space on Windows, ~4 GB with LAA) is gone. This gives headroom for shader caches, texture atlases, audio buffers, and the GDI overlay — all running simultaneously without pressure.
+The x86 process memory limit (~2 GB user space on Windows, ~4 GB with LAA) is gone. This gives headroom for shader caches, texture atlases, audio buffers, and per-display render surfaces — all running simultaneously without pressure.
 
 ## D3D11On12 Interop
 
-MDropDX12 uses Microsoft's D3D11On12 interop layer for two purposes:
-
-1. **Spout texture sharing**: The Spout2 SDK's `spoutDX12` class wraps DX12 backbuffers as D3D11 resources via `CreateWrappedResource`, enabling zero-copy texture output to OBS, Resolume, and other Spout receivers. No intermediate copies are required.
-
-2. **Direct2D text rendering** (if needed): D3D11On12 can also bridge Direct2D/DirectWrite onto DX12 surfaces, though MDropDX12 currently uses a GDI overlay for text.
+MDropDX12 uses Microsoft's D3D11On12 interop layer for Spout texture sharing
+only, in both directions: the Spout2 SDK's `spoutDX12` class wraps DX12
+backbuffers as D3D11 resources via `CreateWrappedResource` for sending to OBS,
+Resolume and other receivers, and the Spout input path bridges received
+textures in the same way. No intermediate copies are required. It was formerly
+also the path for Direct2D/DirectWrite text, which the font atlas renderer
+below replaced.
 
 The interop layer adds minimal overhead — it shares the same GPU command queue and operates on already-rendered frames.
 
@@ -115,17 +117,24 @@ the entire machine.
 This matters for a visualizer that runs for hours executing arbitrary
 user-authored shaders.
 
-## GDI Overlay HUD
+## Font Atlas HUD Text
 
-Text rendering in DX12 typically requires either Direct2D interop or a custom text atlas renderer. MDropDX12 takes a different approach: a transparent layered window (GDI) sits on top of the DX12 render window.
+HUD text — preset name, FPS, menus, playlist, tooltips, notifications — is
+rendered by `CTextManager` (`textmgr.cpp`) as DX12 sprite quads sampled from
+font atlas textures, drawn into the back buffer within the normal frame. Each
+font's glyphs are rasterized once with GDI into an offscreen DIB and uploaded
+as a permanent atlas texture; per-frame drawing is a queue of text entries
+flushed by `DrawNow()` into the render thread's command list, which is why
+screenshots and mirror panels include the HUD.
 
-Benefits:
+Message and song-title supertexts follow the same pattern at a larger grain:
+GDI rasterizes the string into a DIB that is uploaded to a title texture,
+which the engine draws warped.
 
-- **Decoupled from the render pipeline**: Text updates don't interfere with DX12 command list recording or GPU timing.
-- **Standard GDI text**: Full access to Windows font rendering, anti-aliasing, and Unicode support without managing font atlas textures in the descriptor heap.
-- **Independent refresh**: The overlay can update at its own cadence (e.g., FPS counter every 500ms) without forcing a DX12 frame.
-
-The overlay runs on its own thread and communicates with the render thread via atomic flags.
+There is no overlay window and no separate text thread. This replaced an
+earlier D3D11On12 + Direct2D/DirectWrite pipeline; GDI survives only as an
+offline glyph rasterizer feeding DX12 textures, and as ordinary Win32 painting
+inside the tool windows.
 
 ## Future Opportunities
 

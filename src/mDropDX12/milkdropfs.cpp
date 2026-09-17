@@ -1,4 +1,18 @@
 /*
+  Plugin module: Core Per-Frame Render Path
+  The MilkDrop frame loop, ported from DX9 to DX12.
+  Contains: RenderFrame + RenderFrameShadertoy, per-frame equation eval
+            (RunPerFrameEquations, LoadPerFrameEvallibVars), warp/blur/comp
+            passes (DX12_RenderWarpAndComposite, RenderWarpPass,
+            RenderBlurPasses, RenderCompPass), wave/shape/sprite drawing
+            (DX12_DrawWave, DX12_DrawCustomWaves, DX12_DrawCustomShapes,
+            DX12_DrawSprites, DrawUserSprites), mirror orient pipelines
+            (EnsureOrientPipeline, RenderMilk3/ClassicOrientPipeline),
+            per-vertex worker pool, grid alpha, song title texture,
+            shader constant fill (FillPresetPipeline, FillAnimInputs)
+*/
+
+/*
   LICENSE
   -------
 Copyright 2005-2013 Nullsoft, Inc.

@@ -439,7 +439,7 @@ Font atlas SRV slots must be allocated **before** `m_srvSlotBaseline` is set. `R
 - Use `std::atomic` for cross-thread flags (e.g., `m_bScreenshotRequested`, `m_bMirrorStylesDirty`)
 - **Render thread** owns DX12 resources and all HUD text rendering (CTextManager)
 - **Message pump thread** owns HWNDs
-- **IPC thread** runs a hidden 1x1 window for `WM_COPYDATA` from Milkwave Remote
+- **IPC thread** runs the named-pipe server (`\\.\pipe\Milkwave_<PID>`) for Milkwave Remote and scripts — no hidden window
 - Use the `RenderCommand` queue (`EnqueueRenderCmd`) for cross-thread communication
 - ToolWindows run on **their own threads** — don't access DX12 from ToolWindow code
 

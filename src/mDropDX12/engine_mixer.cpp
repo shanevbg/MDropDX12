@@ -1,5 +1,15 @@
-// engine_mixer.cpp — the only place the engine and the mixer module meet.
-//
+/*
+  Plugin module: Engine <-> Mixer Bridge
+  The only place the engine and the audio mixer module meet.
+  Contains: Failover route rules (SaveRule/LoadRule), mixer lifecycle
+            (MixerInit, MixerShutdown, MixerSetEnabled), the state facade
+            (MixerStateLines), mixer profiles (save/load/delete), view
+            rows + fader ordering, fader groups (nudge, mute, hotkey),
+            the IPC verb switch (MixerHandleCommand, MixerHandleAndReply),
+            the confirm flow (MixerConfirmBegin/Answer/Tick), failover
+            config + headset battery tracking
+*/
+
 // Everything project-specific lives here: ConfigStore, the child-mode gate,
 // the IPC verbs and the broadcast. audio_mixer.* and the providers stay free
 // of engine types, so hosting them elsewhere later is a change of owner rather

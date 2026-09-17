@@ -1,7 +1,12 @@
-// engine_presets_ui.cpp — Presets ToolWindow implementation.
-//
-// Standalone window for preset browsing, navigation, and settings.
-// Extracted from Settings page 0 (General tab).
+/*
+  Plugin module: Presets ToolWindow
+  Standalone preset browser, navigation and settings window.
+  Contains: RefreshPresetList + current-preset/directory display sync,
+            DoBuildControls + icon buttons, resize layout,
+            DoCommand (navigation, filters, rating, lock),
+            DoMessage/DoContextMenu, the note dialog (ShowNoteDialog),
+            preset directory navigation (up / into subfolder)
+*/
 
 #include "engine.h"
 #include "engine_helpers.h"

@@ -1,3 +1,13 @@
+/*
+  Plugin module: Audio Mixer ToolWindow
+  Drives the mixer solely through MixerStateLines()/MixerHandleCommand().
+  Contains: State-line parsing helpers (ParseRecords, allow-list row
+            cells, SortAllowRowsForDisplay), MixerWindow open/close,
+            DoBuildControls (fader strips + failover allowlist ListView),
+            RefreshValues, DoCommand/DoNotify/DoHScroll/DoContextMenu,
+            active-state tracking (LooksActive, SetActive)
+*/
+
 // engine_mixer_ui.cpp — the Audio Mixer ToolWindow.
 //
 // Deliberately talks to the mixer only through the string facade that

@@ -1,4 +1,18 @@
 /*
+  Plugin module: Engine Core — Init, Config & Lifecycle
+  What remains of the original engine.cpp after the module split-outs.
+  Contains: Embedded shader/file reading (ReadFileToString), preset code
+            edit callbacks + ApplyPresetCodeSection, preset export/save
+            (SaveMilk2ToPath, SavePresetToPath), config read/write
+            (MyPreInitialize, MyReadConfig, MyWriteConfig), resource
+            alloc/cleanup (AllocateMyDX9Stuff, CleanUpMyDX9Stuff,
+            ReleaseGpuResources), canvas limit + feedback damp, testing
+            mode (SetTestingMode, IsTestInstance), MyRenderFn, the Win32
+            control factory + owner-draw helpers (CreateEdit, CreateCheck,
+            DrawOwnerButton...), audio texture create/update
+*/
+
+/*
   LICENSE
   -------
 Copyright 2005-2013 Nullsoft, Inc.

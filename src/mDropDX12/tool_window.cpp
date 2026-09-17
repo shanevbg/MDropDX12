@@ -1,7 +1,15 @@
 /*
-  ToolWindow — base class implementation for standalone tool windows on their own threads.
-  Handles: thread lifecycle, message pump, dark theme painting, pin button,
-  font +/- with cross-window sync, window size persistence, owner-draw controls.
+  Plugin module: ToolWindow Base Class
+  Base implementation for the 20+ standalone tool windows on own threads.
+  Contains: Window lifecycle (Open/Close/CreateOnThread + message pump),
+            position/open-state persistence (LoadWindowPosition,
+            SaveWindowPosition, EnsureOnRenderMonitor), font sync +
+            rebuild, dark theme painting (HandleDarkCtlColor,
+            HandleDarkDrawItem, DarkTabSubclassProc), ModalDialog, base
+            controls + tab pages + layout (BuildBaseControls, ShowPage,
+            FitToContents), anchors + rebuild state capture/restore,
+            BaseWndProc with SEH context, shared dialogs (PromptForName,
+            ShowActionEditDialog, ShowShaderErrorDialog)
 */
 
 #include "tool_window.h"

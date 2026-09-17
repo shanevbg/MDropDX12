@@ -142,6 +142,7 @@ node_modules/
 # repo root during display/preset testing. Ignored rather than deleted -- they
 # are working files, just not repository content.
 .grok/
+.xgrok/
 .kilo/
 .vscode/launch.json
 /d1_*.png

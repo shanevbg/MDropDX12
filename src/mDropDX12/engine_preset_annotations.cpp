@@ -1,8 +1,15 @@
-// engine_preset_annotations.cpp — Preset annotation system (presets.json).
-//
-// Persistent per-preset metadata: ratings, flags (favorite/error/skip/broken),
-// notes, and auto-captured shader error text. Augments the existing fRating
-// system stored in .milk files.
+/*
+  Plugin module: Preset Annotation System
+  presets.json — persistent per-preset metadata, hash-keyed identity.
+  Contains: Ignore-dir/testing-mode write gates, presets.json load/save/
+            parse, content-hash + path resolution (ResolveLocked,
+            MergeAnnotations, RepairAnnotationPaths), duplicate scan,
+            per-preset override slots (shader/audio/VFX/replacement),
+            MDX ratings (AverageRating, EffectiveRating), usage stats
+            (BeginPresetUsage, TickPresetUsage, FlushPresetUsage),
+            flags/notes + auto shader-error capture, tags + MWR import,
+            preset lists (EnumPresetLists, Save/LoadPresetList)
+*/
 
 #include "engine.h"
 #include "pipe_server.h"   // g_pipeServer, for the browse/annotate IPC below

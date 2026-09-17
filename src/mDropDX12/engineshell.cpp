@@ -1,4 +1,18 @@
 /*
+  Plugin module: Engine Shell
+  The plugin-shell layer under the engine: timing, init chain, procs.
+  Contains: Shell getters (GetFrame/GetTime/GetFps/GetWidth...), frame
+            timing (ReinitOsFrameTimers, EnforceMaxFPS, DoTime), the
+            init/cleanup chain (InitDirectX, PluginPreInitialize,
+            PluginInitialize, fonts, VJ stuff), shell config read/write,
+            PluginRender + DrawAndDisplay, audio analysis
+            (AnalyzeNewSound, AlignWaves), help/playlist overlays,
+            window procs (PluginShellWindowProc, DesktopWndProc,
+            VJModeWndProc), backbuffer/quality management, the render
+            command queue (EnqueueRenderCmd, ProcessPendingCommands)
+*/
+
+/*
   LICENSE
   -------
 Copyright 2005-2013 Nullsoft, Inc.

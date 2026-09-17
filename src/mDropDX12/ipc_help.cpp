@@ -1,4 +1,12 @@
-// ipc_help.cpp — the IPC command index and the app's self-report. See ipc_help.h.
+/*
+  Plugin module: IPC Command Index
+  The self-documenting HELP/IDENTIFY surface of the named pipe.
+  Contains: The IpcCommandDoc tables (Commands, ScriptCommands,
+            SignalCommands), the feature list + identity self-report,
+            index/detail/JSON reply builders (BuildIndex, BuildDetail,
+            BuildJson), the Handle entry point, string helpers
+            (EqualsNoCase, NameMatches, JsonEscape)
+*/
 
 #include "ipc_help.h"
 #include "version.h"

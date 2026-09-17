@@ -30,6 +30,45 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef MDROP_ENGINE_H
 #define MDROP_ENGINE_H 1
 
+/*
+  SECTION INDEX — this header is ~5,600 lines and one class. The groups below
+  appear in this order; search for the quoted anchor rather than scrolling.
+  (Anchors, not line numbers, because line numbers rot. The old ====
+  separators are unreliable: the hotkey and idle blocks sit INSIDE the pair
+  that nominally delimits DISPLAY OUTPUTS.)
+
+    Pre-class types ..............  "struct ScriptState", "class CShaderParams",
+                                    "struct PresetAnnotation"
+    class Engine begins ..........  "class Engine : public EngineShell"
+    Spout sender members .........  "// SPOUT variables"
+    Display outputs ..............  "// DISPLAY OUTPUTS" — m_displayOutputs,
+                                    balancer + distress ladder ("struct BalanceState"),
+                                    "struct MirrorSurface", "struct Milk3OrientPipeline"
+    Configurable hotkeys .........  "m_hotkeys"
+    Idle timer / screensaver .....  "struct IdleOpacitySnap"
+    Config panel settings ........  "CONFIG PANEL SETTINGS"
+    Track info sources ...........  "enum class TrackInfoSource"
+    Pixel shaders ................  "// PIXEL SHADERS" — ShaderCompileKind,
+                                    ShaderCompileScope
+    Runtime settings .............  "RUNTIME SETTINGS"
+    Primary display profile ......  "struct PrimaryProfileCfg"
+    Testing mode + async load ....  "struct restraint"
+    Milk2 sprites / preset list ..  "struct Milk2SpriteDesc"
+    Annotations store ............  "struct AnnotStore"
+    Override resolution ..........  "enum class OverrideSource"
+    Preset history ...............  "// PRESET HISTORY"
+    Mixer facade .................  "struct MixerViewRow"
+    IPC handler split-outs .......  "HandlePresetCycleIPC"
+    Video input ..................  "enum class VideoInputSource"
+    Tool-window pointers + MIDI ..  "VideoEffects"
+    Render pipeline methods ......  "2. methods added" — RenderFrame, DX12_* passes
+    IPC entry + window registry ..  "LaunchMessage", "OpenToolWindow"
+    Sprites ......................  "struct SpriteEntry"
+    Theme ........................  "enum class ThemeMode"
+    Resource viewer ..............  "struct ResourceRow"
+    Virtual functions ............  "3. virtual functions"
+*/
+
 // =========================================================
 // SPOUT & DISPLAY OUTPUTS
 #include "spout_bridge.h" // our own Spout interface; see forgejo#4

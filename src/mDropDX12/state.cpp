@@ -1,4 +1,16 @@
 /*
+  Plugin module: Preset State (CState)
+  Per-preset state: variables, code, import/export, blending.
+  Contains: Fast INI line parsing (GetFastInt/Float/String), CState
+            construction + per-vertex eval workers, built-in variable
+            registration, Default + StartBlendFrom, preset import/export
+            (CState/CWave/CShape), owned-resource handoff for async
+            loads, default warp/comp shader generation, expression
+            recompilation (RecompileExpressions, comment stripping),
+            preset var randomization, CBlendableFloat
+*/
+
+/*
   LICENSE
   -------
 Copyright 2005-2013 Nullsoft, Inc.

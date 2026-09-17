@@ -1,4 +1,19 @@
 /*
+  Plugin module: DX12 Device Context
+  Device, swap chains, descriptors, uploads and texture creation.
+  Contains: Device/swap-chain init + cleanup (Internal_Init,
+            StartOrRestartDevice, ResizeSwapChain), the frame loop
+            (BeginFrame, EndFrame, WaitForGpu, MoveToNextFrame),
+            descriptor allocation (RTV/SRV heaps, mirror RTV blocks),
+            retired-object collection + texture recycling, GPU timing
+            and timestamps, DRED dump, root signature + upload rings,
+            draw + constant upload (DrawVertices, UploadConstantBuffer),
+            texture creation/loading (CreateTextureFromPixels, volume
+            textures, LoadTextureFromFile, DDS/TGA decode, fallback/null
+            textures), SRV binding blocks + per-frame bindings
+*/
+
+/*
 LICENSE
 -------
 Copyright 2005-2013 Nullsoft, Inc.

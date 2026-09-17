@@ -1,8 +1,13 @@
-// engine_annotations_ui.cpp — Annotations ToolWindow implementation.
-//
-// Standalone window for viewing/editing preset annotations (ratings, flags, notes,
-// shader error text). Provides a filtered ListView of all annotated presets,
-// plus Import (from presets.json) and Scan (from .milk fRating values).
+/*
+  Plugin module: Annotations ToolWindow
+  Sortable ListView over presets.json with search, scan and details.
+  Contains: ListView helpers + formatters (stars, durations, flags),
+            RefreshList with live search/filter, row context menu,
+            details dialog (identity, copies, aliases, override slots),
+            import/scan dialogs, duplicate finder (DoFindCopies),
+            geometry + layout (ComputeAnnotGeom, DoBuildControls,
+            AutoSizeListColumns), override combos, DoCommand/DoNotify
+*/
 
 #include "engine.h"
 #include "engine_helpers.h"

@@ -1,3 +1,17 @@
+/*
+  Plugin module: Application Host & Threads
+  Win32 shell around the engine: windows, threads, device lifetime.
+  Contains: Startup + TDR relaunch (RelaunchForTdr), D3D init/deinit +
+            VRAM budget watchdog, window mode toggles (fullscreen,
+            borderless, stretch, clickthrough), audio device dialog,
+            StaticWndProc, device-loss detection and recovery
+            (PerformDeviceRecovery, GpuFatalWatchdog), window-title
+            polling for track info, RenderFrame/RenderThreadProc/
+            CreateWindowAndRun, thread startup (StartThreads, DoSetup,
+            audio capture, parent watchdog), shader precompilation,
+            WinMain + terminate/SEH handlers
+*/
+
 //
 // =================================================================
 //

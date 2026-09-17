@@ -1,4 +1,16 @@
-// child_instances.cpp — spawning, configuring and retiring per-display children.
+/*
+  Plugin module: Child Instance Management
+  Spawning, configuring and retiring per-display child processes.
+  Contains: Pipe send/request helpers + kill-on-close job object, the
+            child worker thread (StartChildWorker, ChildWorkerLoop),
+            spawn/configure/kill/poll (ChildSpawnNow, ChildConfigureNow,
+            ChildKillNow, ChildPollAll), preset dir/startup resolution,
+            the command queue (PushChildCommand, RequestChildSpawn/Kill/
+            Reconfigure), relays to children (preset lock, HUD state,
+            broadcast, key forwarding), placement (ChildPlaceNow,
+            TestChildRect) and per-child bookkeeping (fps, preset, info)
+*/
+
 // See child_instances.h for the overview. Everything below runs on the child
 // worker thread unless the comment says otherwise.
 

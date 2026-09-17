@@ -1,7 +1,11 @@
 /*
-  DisplaysWindow — Spout / Displays window (ToolWindow subclass).
-  Two tabs: Display Outputs (Spout sender management, mirrors) and Video Input.
-  Launched from "Spout / Displays..." button on the Settings General tab.
+  Plugin module: Displays ToolWindow
+  Two tabs: Display Outputs (mirrors + Spout) and Video Input.
+  Contains: Control factory helpers (CreateModeCombo, section headings),
+            DoBuildControls + BuildOutputsPage (per-display mode/size/
+            opacity controls), BuildVideoInputPage (webcam/video/Spout
+            mixing), ApplyDisplayViewMode + OnPageShown,
+            DoMessage/DoHScroll/DoNotify/DoCommand
 */
 
 #include "tool_window.h"
